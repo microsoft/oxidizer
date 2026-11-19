@@ -193,6 +193,153 @@ fn fixture() -> Snapshot {
 }
 
 #[test]
+fn gamma_survivor_codec_rejects_invalid_borrowed_inventory_before_writing() {
+    let snapshot = Snapshot {
+        owner_count: 1,
+        owners_complete: true,
+        ..Snapshot::default()
+    };
+    let owners = [Owner::default()];
+    let mut output = [0xa5; 32];
+    let error = encode_with_owners(&snapshot, &owners, &mut output).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::DuplicateOwner);
+    assert_eq!(output, [0xa5; 32]);
+}
+
+#[test]
+fn gamma_survivor_codec_display_propagates_formatter_failure() {
+    use std::fmt::Write as _;
+    struct Reject;
+    impl std::fmt::Write for Reject {
+        fn write_str(&mut self, _: &str) -> std::fmt::Result {
+            Err(std::fmt::Error)
+        }
+    }
+    let error = decode(&[0; 12]).unwrap_err();
+    assert!(write!(&mut Reject, "{error}").is_err());
+}
+
+#[test]
+fn gamma_survivor_codec_overwrites_poison_and_preserves_borrowed_fields() {
+    let snapshot = fixture();
+    let length = encoded_len(&snapshot).unwrap();
+    assert_eq!(length, 12122);
+    let mut output = vec![0xa5; length];
+    assert_eq!(encode(&snapshot, &mut output).unwrap(), length);
+    assert_eq!(decode(&output).unwrap(), snapshot);
+    assert_eq!(&output[..12], b"RALLOCV4\x05\0\x01\0");
+    let metadata = Snapshot {
+        owners: Vec::new(),
+        ..snapshot
+    };
+    let mut borrowed = vec![0x5a; length];
+    encode_with_owners(&metadata, &snapshot.owners, &mut borrowed).unwrap();
+    assert_eq!(borrowed, output);
+    for size in [length - 1, length + 1] {
+        assert_eq!(encode(&snapshot, &mut vec![0; size]).unwrap_err().kind(), ErrorKind::LengthMismatch);
+    }
+    let single = bytes(&Snapshot {
+        owners: vec![snapshot.owners[0]],
+        ..snapshot
+    });
+    for end in 0..single.len() {
+        assert_eq!(decode(&single[..end]).unwrap_err().kind(), ErrorKind::Truncated, "prefix {end}");
+    }
+}
+
+#[test]
+fn gamma_survivor_duplicate_validation_crosses_stack_chunk_boundary() {
+    let mut snapshot = Snapshot {
+        owner_count: 1025,
+        owners_complete: true,
+        owners: (1..=1025).map(|id| Owner { id, ..Owner::default() }).collect(),
+        ..Snapshot::default()
+    };
+    encoded_len(&snapshot).unwrap();
+    snapshot.owners[1024].id = 1023;
+    let error = encoded_len(&snapshot).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::DuplicateOwner);
+    assert_eq!(
+        error.to_string(),
+        "native allocator payload: owner identifiers must be nonzero and unique"
+    );
+    snapshot.owners[1024].id = 1025;
+    snapshot.owners[1].id = 1;
+    assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::DuplicateOwner);
+    snapshot.owners = vec![Owner { id: 1, ..Owner::default() }; 2];
+    snapshot.owner_count = 2;
+    assert_eq!(encoded_len(&snapshot).unwrap_err().kind(), ErrorKind::DuplicateOwner);
+}
+
+#[test]
+fn gamma_survivor_codec_errors_have_exact_context() {
+    let good = bytes(&fixture());
+    for (kind, message) in [
+        (ErrorKind::InvalidMagic, "the magic bytes are invalid"),
+        (ErrorKind::UnsupportedSchema(9), "schema 9 is unsupported by this decoder"),
+        (ErrorKind::Truncated, "the payload ended before all fields were available"),
+        (ErrorKind::LengthMismatch, "the buffer length does not match the encoded payload"),
+        (
+            ErrorKind::LengthOverflow,
+            "the inventory count or payload length exceeds the supported limit",
+        ),
+        (ErrorKind::Malformed, "a field or inventory invariant is invalid"),
+    ] {
+        let mut invalid = good.clone();
+        match kind {
+            ErrorKind::InvalidMagic => invalid[0] = 0,
+            ErrorKind::UnsupportedSchema(_) => invalid[8..10].copy_from_slice(&9_u16.to_le_bytes()),
+            ErrorKind::Truncated => invalid.truncate(11),
+            ErrorKind::LengthMismatch => invalid.push(0),
+            ErrorKind::LengthOverflow => invalid[46..50].copy_from_slice(&65537_u32.to_le_bytes()),
+            ErrorKind::Malformed => invalid[11] = 1,
+            ErrorKind::DuplicateOwner | ErrorKind::UnsupportedBackend(_) => unreachable!(),
+        }
+        let error = decode(&invalid).unwrap_err();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.to_string(), format!("native allocator payload: {message}"));
+    }
+}
+
+#[test]
+fn gamma_survivor_freshness_compares_zero_and_historical_sessions() {
+    let mut snapshot = Snapshot {
+        session_id: 0,
+        round: 11,
+        captured_nanos: 13,
+        ..Snapshot::default()
+    };
+    let mut owner = Owner {
+        id: 1,
+        generation: 9,
+        source: ObservationSource::Published,
+        observation: Some(Observation {
+            generation: 9,
+            round: 11,
+            captured_nanos: 13,
+            ..Observation::EMPTY
+        }),
+        ..Owner::default()
+    };
+    for (observed_session, capture_session, expected) in [
+        (0, 0, Freshness::Current),
+        (0, 10, Freshness::PreviousSession),
+        (10, 0, Freshness::PreviousSession),
+        (10, 10, Freshness::Current),
+        (10, 11, Freshness::PreviousSession),
+        (11, 10, Freshness::PreviousSession),
+    ] {
+        owner.observation.as_mut().unwrap().session_id = observed_session;
+        snapshot.session_id = capture_session;
+        assert_eq!(
+            owner.freshness(&snapshot),
+            expected,
+            "observation session {observed_session}, capture session {capture_session}"
+        );
+    }
+}
+
+#[test]
 fn unavailable_owner_round_trips_without_inventing_observation() {
     let snapshot = Snapshot {
         owner_count: 1,
@@ -217,6 +364,41 @@ fn bytes(snapshot: &Snapshot) -> Vec<u8> {
 fn all_native_fields_round_trip() {
     let snapshot = fixture();
     assert_eq!(decode(&bytes(&snapshot)).unwrap(), snapshot);
+}
+
+#[test]
+fn recording_independent_publication_uses_round_and_lease_freshness() {
+    let snapshot = Snapshot {
+        captured_nanos: 20,
+        round: 7,
+        ..Snapshot::default()
+    };
+    let owner = Owner {
+        id: 1,
+        generation: 3,
+        leased: true,
+        source: ObservationSource::Published,
+        observation: Some(Observation {
+            generation: 3,
+            round: 7,
+            captured_nanos: 10,
+            ..Observation::EMPTY
+        }),
+    };
+
+    assert_eq!(
+        (owner.freshness(&snapshot), owner.freshness(&Snapshot { round: 8, ..snapshot })),
+        (Freshness::Current, Freshness::PreviousRound)
+    );
+}
+
+#[test]
+fn previous_native_schemas_are_rejected() {
+    let mut encoded = bytes(&fixture());
+    for version in 0..seismograph_rallocator::source::SCHEMA_VERSION {
+        encoded[8..10].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::UnsupportedSchema(version));
+    }
 }
 
 #[test]
@@ -327,7 +509,7 @@ fn strict_flags_schema_reserved_and_source_tags() {
     for (offset, value, expected) in [
         (0, 0, ErrorKind::InvalidMagic),
         (8, 1, ErrorKind::UnsupportedSchema(1)),
-        (10, 1, ErrorKind::Malformed),
+        (10, 0, ErrorKind::Malformed),
         (44, 2, ErrorKind::Malformed),
         (45, 2, ErrorKind::Malformed),
         (595 + 16, 2, ErrorKind::Malformed),
@@ -357,10 +539,7 @@ fn malformed_payload_diagnostics_explain_the_rejection() {
     zero_owner[595..603].fill(0);
     let cases = [
         (decode(&invalid_magic).unwrap_err(), "the magic bytes are invalid"),
-        (
-            decode(&unsupported_schema).unwrap_err(),
-            "schema 7 is unsupported; expected schema 3",
-        ),
+        (decode(&unsupported_schema).unwrap_err(), "schema 7 is unsupported by this decoder"),
         (decode(&[]).unwrap_err(), "the payload ended before all fields were available"),
         (
             encode(&fixture(), &mut []).unwrap_err(),

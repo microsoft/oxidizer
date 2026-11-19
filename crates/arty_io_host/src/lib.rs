@@ -7,19 +7,18 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
-//! Unstable I/O driver hosting utilities for the Arty runtime.
+//! Hosts I/O drivers for the unstable Arty runtime.
 //!
-//! This crate is implementation infrastructure for [`arty`](https://docs.rs/arty).
-//! Applications and libraries should use `arty` instead of depending on this
-//! crate directly.
+//! This crate supports [`arty`](https://docs.rs/arty). For applications and
+//! libraries, use `arty` instead of depending on this crate directly.
 //!
-//! The items are public because Arty consumes them across a crate boundary.
-//! They do not form a standalone stability or compatibility promise.
+//! Arty uses these public items across a crate boundary. The items do not form
+//! a standalone stable API.
 //!
 //! # Quick start
 //!
-//! Clone the runtime-wide registry for each worker, then create its driver host
-//! with that worker's thread coordinate:
+//! Create one [`IoRuntime`] for the runtime. Clone it for each worker, then
+//! create a [`DriverHost`] with the worker's thread coordinate:
 //!
 //! ```
 //! # use std::task::Waker;
@@ -28,15 +27,14 @@
 //! # use observed::Sink;
 //! # use thread_aware::ThreadBuilder;
 //! # fn main() -> Result<(), arty_io_core::DriverError> {
-//! // One runtime-wide value owns the shared context registry and telemetry sink.
+//! // One value owns the shared context registry and telemetry sink.
 //! let runtime = IoRuntime::new(Sink::noop());
 //! let worker = ThreadBuilder::default().build(std::thread::current().id());
 //!
-//! // Each worker receives a clone and constructs its host on the thread named
-//! // by the worker coordinate.
+//! // Each worker creates its host on the thread that its coordinate identifies.
 //! let host = runtime.clone().driver_host(worker, Waker::noop().clone())?;
 //!
-//! // The runtime calls this from its worker loop with the available wait time.
+//! // The worker loop supplies the available wait time.
 //! host.execute_cycle(Duration::ZERO)?;
 //! # Ok(())
 //! # }

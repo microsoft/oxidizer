@@ -158,14 +158,17 @@ impl StreamEncoding {
         let mut selected = None;
         for media in values.into_iter().flat_map(|value| value.split(',')) {
             let mut parts = media.split(';');
+            // #[gamma::skip(literal.str_to_xyzzy, reason = "str::split always yields a first element, including for empty input, so this fallback is unreachable")]
             let media_type = parts.next().unwrap_or("").trim();
             let encoding = if media_type.eq_ignore_ascii_case("text/event-stream") {
                 Self::Sse
+            // #[gamma::skip(collection.reverse_array, reason = "The any predicate has no side effects and both candidates select the same encoding")]
             } else if ["application/x-ndjson", "application/jsonl"]
                 .iter()
                 .any(|candidate| media_type.eq_ignore_ascii_case(candidate))
             {
                 Self::NdJson
+            // #[gamma::skip(collection.reverse_array, reason = "The any predicate has no side effects and every candidate selects the same encoding")]
             } else if ["application/json", "*/*", "application/*"]
                 .iter()
                 .any(|candidate| media_type.eq_ignore_ascii_case(candidate))
@@ -218,12 +221,23 @@ fn parse_quality(value: &str) -> Option<u16> {
             let fraction = if fraction.is_empty() {
                 0
             } else {
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding checks require one to three ASCII digits, guaranteeing u16 parsing and u32 length conversion")]
                 fraction.parse::<u16>().ok()? * 10_u16.pow(3 - u32::try_from(fraction.len()).ok()?)
             };
             Some(fraction)
         }
         "1" if fraction.bytes().all(|digit| digit == b'0') => Some(1_000),
         _ => None,
+    }
+}
+
+#[test]
+fn gamma_round2_quality_parser_rejects_malformed_before_negotiation() {
+    for value in ["2", "0.x", "0.+5", "0.0001", "1.001", "-1"] {
+        assert_eq!(parse_quality(value), None, "{value}");
+    }
+    for (value, expected) in [("0", 0), ("0.001", 1), ("0.999", 999), ("1.000", 1000)] {
+        assert_eq!(parse_quality(value), Some(expected), "{value}");
     }
 }
 
@@ -342,7 +356,9 @@ where
     };
 
     futures_util::stream::unfold(state, move |mut state| async move {
-        if state.done {
+        if
+        // #[gamma::skip(cond.always_false, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+        state.done {
             return None;
         }
 
@@ -366,7 +382,10 @@ where
                 Some((Err(status), state))
             }
             None => {
-                state.done = true;
+                // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                state.done =
+                // #[gamma::skip(literal.bool_flip, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                true;
                 match state.encoding {
                     StreamEncoding::JsonArray => {
                         let closing = if state.first { b"[]".to_vec() } else { b"]".to_vec() };

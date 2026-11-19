@@ -89,7 +89,7 @@ impl IoContext for MioContext {
     type ContextOptions = MioOptions;
     type Driver = MioDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self {
             state: Arc::new(ContextState::new(options.into_sink())),
             worker: None,

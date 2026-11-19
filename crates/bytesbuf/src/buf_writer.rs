@@ -78,7 +78,6 @@ impl<M: Memory> Write for BytesBufWriter<M> {
         Ok(buf.len())
     }
 
-    #[cfg_attr(test, mutants::skip)] // No-op, nothing to test.
     #[inline]
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())

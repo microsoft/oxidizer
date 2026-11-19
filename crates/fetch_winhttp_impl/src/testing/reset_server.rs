@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
-use std::thread::{self, JoinHandle};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+
+use super::startup::{Startup, StartupListener, bind_listener, launch_worker};
 
 /// A loopback TCP server that resets every connection it accepts.
 ///
@@ -25,21 +27,32 @@ pub struct ResetServer {
 impl ResetServer {
     /// Starts the fixture on an arbitrary free port of the IPv4 loopback.
     pub fn start() -> Self {
-        let listener = StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let address = listener.local_addr().unwrap();
+        let startup = Self::start_with(
+            |address| StdTcpListener::bind(address).unwrap(),
+            run,
+            |name, work| launch_worker(name, tokio::runtime::Builder::new_current_thread, work),
+        );
+        Self {
+            address: startup.address,
+            shutdown: startup.shutdown,
+            thread: startup.thread,
+        }
+    }
+
+    fn start_with<L: StartupListener, W, F: Future<Output = ()>>(
+        bind_tcp: impl FnOnce(SocketAddr) -> L,
+        serve: impl FnOnce(L, oneshot::Receiver<()>) -> F,
+        launch: impl FnOnce(String, F) -> W,
+    ) -> Startup<(), W> {
+        let (listener, address) = bind_listener(IpAddr::V4(Ipv4Addr::LOCALHOST), bind_tcp);
         let (shutdown, shutdown_rx) = oneshot::channel();
 
-        let thread = thread::Builder::new()
-            .name("fetch-winhttp-reset-server".to_owned())
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-                runtime.block_on(run(listener, shutdown_rx));
-            })
-            .unwrap();
+        let work = serve(listener, shutdown_rx);
+        let thread = launch("fetch-winhttp-reset-server".to_owned(), work);
 
-        Self {
+        Startup {
             address,
+            state: (),
             shutdown: Some(shutdown),
             thread: Some(thread),
         }
@@ -66,6 +79,7 @@ impl Drop for ResetServer {
     }
 }
 
+// #[gamma::skip(fn_value.unit, reason = "this adapter accepts native TCP sockets and sets SO_LINGER to send a reset; startup and shutdown ownership are tested without opening a listener")]
 async fn run(listener: StdTcpListener, mut shutdown: oneshot::Receiver<()>) {
     let listener = TcpListener::from_std(listener).unwrap();
 
@@ -92,5 +106,82 @@ async fn run(listener: StdTcpListener, mut shutdown: oneshot::Receiver<()>) {
                 drop(stream);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use std::cell::{Cell, RefCell};
+    use std::thread;
+
+    use super::super::startup::gamma_round2::{GammaListener, GammaRuntime};
+    use super::super::startup::run_worker;
+    use super::*;
+
+    #[test]
+    fn gamma_round2_reset_startup_retains_named_worker_and_shutdown() {
+        let address: SocketAddr = "127.0.0.1:4123".parse().unwrap();
+        let shutdown_receiver = RefCell::new(None);
+        let served = Cell::new(0);
+        let mut startup = ResetServer::start_with(
+            |bind| {
+                assert_eq!(bind, "127.0.0.1:0".parse().unwrap());
+                GammaListener {
+                    address,
+                    nonblocking: Cell::new(None),
+                }
+            },
+            |listener, receiver| {
+                assert_eq!(listener.address, address);
+                assert_eq!(listener.nonblocking.get(), Some(true));
+                *shutdown_receiver.borrow_mut() = Some(receiver);
+                async {
+                    served.set(served.get() + 1);
+                }
+            },
+            |name, work| {
+                assert_eq!(name, "fetch-winhttp-reset-server");
+                run_worker(&GammaRuntime, work);
+                61
+            },
+        );
+        assert_eq!(served.get(), 1);
+        assert_eq!(startup.address, address);
+        assert_eq!(startup.thread.take(), Some(61));
+        startup.shutdown.take().unwrap().send(()).unwrap();
+        assert_eq!(shutdown_receiver.borrow_mut().as_mut().unwrap().try_recv(), Ok(()));
+    }
+
+    #[test]
+    fn gamma_round2_reset_stop_propagates_a_worker_panic() {
+        let mut server = ResetServer {
+            address: SocketAddr::from(([127, 0, 0, 1], 8123)),
+            shutdown: None,
+            thread: Some(thread::spawn(|| panic!("gamma_round2_worker"))),
+        };
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.stop())).is_err());
+        assert!(server.thread.is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_stopped_reset_url_and_shutdown_sender_are_exact() {
+        let (sender, mut receiver) = oneshot::channel();
+        let mut server = ResetServer {
+            address: SocketAddr::from(([127, 0, 0, 1], 8123)),
+            shutdown: Some(sender),
+            thread: None,
+        };
+        assert_eq!(server.url("/reset?q=1"), "http://127.0.0.1:8123/reset?q=1");
+        server.stop();
+        assert!(server.shutdown.is_none());
+        assert_eq!(receiver.try_recv(), Ok(()));
+        server.stop();
+        let (sender, mut receiver) = oneshot::channel();
+        drop(ResetServer {
+            address: SocketAddr::from(([127, 0, 0, 1], 8123)),
+            shutdown: Some(sender),
+            thread: None,
+        });
+        assert_eq!(receiver.try_recv(), Ok(()));
     }
 }

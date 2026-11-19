@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Platform native TLS backend configuration and builder integration.
+//! Configuration for the platform native TLS backend.
 
 use std::collections::HashMap;
 
@@ -13,7 +13,12 @@ use crate::alpn::map_to_alpn;
 use crate::backend::{BackendError, server_name_override_key};
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
-/// Platform native TLS backend.
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "native_tls_calls.rs"]
+mod calls;
+
+/// Configuration for the platform native TLS backend.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct NativeTlsOptions {
@@ -31,17 +36,21 @@ impl std::fmt::Debug for NativeTlsOptions {
 }
 
 impl NativeTlsOptions {
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Self::default() and inferred Default::default() call the same NativeTlsOptions implementation")]
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Materializes this configuration into a [`native_tls::TlsConnector`].
+    /// Builds a [`native_tls::TlsConnector`] from this configuration.
     pub(crate) fn build(
         self,
         defaults: &TlsBackendBuilder,
         shared: &SharedOptions,
     ) -> Result<(TlsConnector, HashMap<String, String>), BackendError> {
+        #[cfg(not(test))]
         let mut builder = native_tls::TlsConnector::builder();
+        #[cfg(test)]
+        let mut builder = calls::Builder::new();
         builder
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
@@ -73,18 +82,16 @@ impl TlsOptions {
         }
     }
 
-    /// Creates [`TlsOptions`] for the platform native TLS backend using
-    /// default settings.
+    /// Creates [`TlsOptions`] with default native TLS values.
     ///
-    /// Equivalent to `TlsOptions::builder_native_tls().build()`. Use
-    /// [`TlsOptions::builder_native_tls`] when you need to customize the
-    /// configuration before building.
+    /// This is equivalent to `TlsOptions::builder_native_tls().build()`.
+    /// Use [`TlsOptions::builder_native_tls`] to set custom values.
     pub fn new_native_tls() -> Self {
         Self::builder_native_tls().build()
     }
 }
 
-/// Wraps a pre-built [`native_tls::TlsConnector`] as [`TlsOptions`].
+/// Converts a pre-built [`native_tls::TlsConnector`] to [`TlsOptions`].
 impl From<TlsConnector> for TlsOptions {
     fn from(connector: TlsConnector) -> Self {
         Self {
@@ -101,19 +108,18 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
         self
     }
 
-    /// Overrides the server name used for native TLS certificate validation
-    /// and Server Name Indication (`SNI`) when connecting to `endpoint`.
+    /// Sets the server name for certificate validation and Server Name
+    /// Indication (`SNI`) when the client connects to `endpoint`.
     ///
-    /// `SNI` is the server name sent to the peer during the TLS handshake.
+    /// `SNI` is the server name that the client sends during the TLS handshake.
     ///
-    /// The HTTP request, connection destination, `Host` header, and connection
-    /// pool key continue to use the real endpoint. Only the name passed to
+    /// The request, destination, `Host` header, and connection pool key still
+    /// use the real endpoint. Only the name passed to
     /// [`native_tls::TlsConnector::connect`] is replaced.
     ///
-    /// The endpoint is matched against the request URI authority. An endpoint
-    /// with a port (for example, `localhost:8443`) applies only to that exact
-    /// authority. A host-only endpoint (for example, `localhost`) applies to
-    /// every port unless an exact authority override is also configured.
+    /// The endpoint matches the request URI authority. An endpoint with a port,
+    /// such as `localhost:8443`, matches only that authority. A host-only
+    /// endpoint matches every port unless an exact authority also matches.
     ///
     /// ```
     /// # use fetch_tls::TlsOptions;
@@ -124,9 +130,8 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
     ///
     /// # Panics
     ///
-    /// Panics if `endpoint` is not a valid URI authority, if an explicit port
-    /// cannot be represented as a `u16`, or if `server_name` is empty or
-    /// contains a NUL character.
+    /// Panics if `endpoint` is not a valid URI authority. It also panics if a
+    /// port does not fit in `u16`, or `server_name` is empty or contains NUL.
     pub fn server_name_override<E>(mut self, endpoint: E, server_name: impl Into<String>) -> Self
     where
         E: TryInto<Authority>,
@@ -179,6 +184,37 @@ mod tests {
     use crate::client_identity::ClientIdentity;
 
     #[test]
+    #[cfg_attr(miri, ignore = "native tests cover certificate parsing and platform TLS FFI")]
+    fn november4_native_roots_are_applied_to_the_materialized_connector() {
+        let certificate = native_tls::Certificate::from_pem(TEST_CERT_PEM).unwrap();
+        let expected = certificate.to_der().unwrap();
+        let options = NativeTlsOptions {
+            root_certificates: vec![certificate.clone(), certificate],
+            server_name_overrides: HashMap::new(),
+        };
+        let (result, observed) = calls::record(false, || options.build(&TlsBackendBuilder::new(), &SharedOptions::default()));
+        result.unwrap();
+        assert_eq!(observed.roots, vec![expected.clone(), expected]);
+        assert_eq!(observed.build_calls, 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native tests cover connector construction and platform TLS FFI")]
+    fn november4_native_connector_build_failure_is_returned_without_panicking() {
+        let (result, observed) = calls::record(true, || {
+            NativeTlsOptions::new().build(&TlsBackendBuilder::new(), &SharedOptions::default())
+        });
+        let error = result.unwrap_err();
+        assert_eq!(observed.build_calls, 1);
+        assert_eq!(observed.roots, Vec::<Vec<u8>>::new());
+        assert!(
+            error
+                .to_string()
+                .contains(&native_tls::Certificate::from_der(&[]).err().unwrap().to_string())
+        );
+    }
+
+    #[test]
     fn builder_native_tls_starts_empty() {
         let builder = TlsOptions::builder_native_tls();
         assert!(builder.shared.client_identity.is_none());
@@ -200,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn tls_options_from_tls_connector_wraps_as_preconfigured() {
         let connector = native_tls::TlsConnector::builder().build().expect("builds");
         let tls = TlsOptions::from(connector);
@@ -227,11 +263,8 @@ mod tests {
         assert!(overrides.is_empty());
     }
 
-    // Self-signed RSA-2048 certificate and matching `PKCS#8` private key,
-    // generated with `openssl req -x509 -newkey rsa:2048 -nodes` and then
-    // `openssl pkcs8 -topk8 -nocrypt`. Used solely to exercise the
-    // `builder.identity(...)` success branch with material that platform
-    // native TLS implementations accept.
+    // This self-signed RSA-2048 certificate has a matching `PKCS#8` key.
+    // The test data exercises the successful `builder.identity(...)` path.
     const TEST_CERT_PEM: &[u8] = b"\
 -----BEGIN CERTIFICATE-----\n\
 MIIDATCCAemgAwIBAgIUeToZ/lJRIo2oAgWVrhsrXAfKhgMwDQYJKoZIhvcNAQEL\n\
@@ -284,16 +317,63 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
 -----END PRIVATE KEY-----\n";
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn november4_native_identity_reencodes_each_certificate_with_its_required_label() {
+        let mut certificates = TEST_CERT_PEM.to_vec();
+        certificates.extend_from_slice(TEST_CERT_PEM);
+        let identity = ClientIdentity::from_pem(&certificates, TEST_KEY_PEM).unwrap();
+        assert_eq!(identity.cert_chain().len(), 2);
+        let cloned = identity.clone();
+        drop(identity);
+        cloned.build_native_identity().unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_native_identity_accepts_the_existing_certificate_and_key_fixture() {
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).unwrap();
+        identity.build_native_identity().unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_windows_connector_retains_protocol_alpn_and_identity() {
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).unwrap();
+        let tls = TlsOptions::builder_native_tls()
+            .client_identity(identity)
+            .supported_http_versions(&[http::Version::HTTP_11])
+            .build();
+        let backend = crate::TlsBackendBuilder::new().build_backend(tls).unwrap();
+        let crate::TlsBackend::NativeTls(backend) = backend else {
+            panic!("explicit native options must produce a native connector");
+        };
+        let state = format!("{:?}", backend.connector());
+        assert!(state.contains("min_protocol: Some(Tlsv12)"), "{state}");
+        assert!(state.contains("cert: Some("), "{state}");
+        assert!(state.contains("alpn: [\"http/1.1\"]"), "{state}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_root_certificate_setter_retains_the_exact_certificate() {
+        let certificate = native_tls::Certificate::from_pem(TEST_CERT_PEM).unwrap();
+        let expected = certificate.to_der().unwrap();
+        let builder = TlsOptions::builder_native_tls().root_certificate(certificate);
+        assert_eq!(builder.backend.root_certificates.len(), 1);
+        assert_eq!(builder.backend.root_certificates[0].to_der().unwrap(), expected);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn build_applies_valid_client_identity() {
-        // Exercises the `builder.identity(i)` success branch: a valid
-        // certificate/key pair must round-trip through `build_native_identity`
-        // and be installed on the `TlsConnector` builder without error.
-        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).expect("valid PEM should parse");
+        // A valid certificate and key must pass through `build_native_identity`
+        // and install on the `TlsConnector` builder.
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).expect("valid PEM parses");
         let tls = TlsOptions::builder_native_tls().client_identity(identity).build();
         crate::TlsBackendBuilder::new()
             .build_backend(tls)
-            .expect("build_backend should succeed for a valid client identity");
+            .expect("build_backend succeeds for a valid client identity");
     }
 
     #[test]

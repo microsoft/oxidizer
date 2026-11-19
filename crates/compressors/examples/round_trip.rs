@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compressing and decompressing a whole buffer.
+//! Compresses and decompresses a complete buffer.
 
 use bytesbuf::mem::GlobalPool;
 use compressors::format::Format;
 use compressors::{Resources, Result, gzip};
 
 fn main() -> Result<()> {
-    // Held once and handed to every operation, so input views and output buffers both come from
-    // this provider and every engine returns to the same pool when its compressor drops.
+    // Input views and output buffers use this provider. Reusable engines return to its pool.
     let resources = Resources::new(GlobalPool::new());
     let original = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
 
@@ -19,7 +18,7 @@ fn main() -> Result<()> {
     assert_eq!(decompressed.to_vec(), original);
     println!("gzip: {} -> {} bytes", original.len(), compressed.len());
 
-    // The same payload through a format chosen at run time.
+    // Process the same payload with a format selected at run time.
     for &format in Format::ALL {
         let compressed = compressors::format::compress(format, &*original, &resources)?;
         let decompressed = compressors::format::decompress(format, compressed.clone(), &resources)?;

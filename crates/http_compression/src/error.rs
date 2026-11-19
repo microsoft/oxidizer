@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Error labels and translation for HTTP body compression and decompression.
+//! Defines errors for HTTP body compression and decompression.
 
 use http_extensions::HttpError;
 use ohno::ErrorLabel;
@@ -38,10 +38,10 @@ pub(crate) const LABEL_COMPRESSION_INVALID: ErrorLabel = ErrorLabel::from_static
 /// The body declares a compression format that is not enabled.
 pub(crate) const LABEL_COMPRESSION_UNSUPPORTED: ErrorLabel = ErrorLabel::from_static("compression_unsupported");
 
-/// Decompressing the body would have exceeded the configured limits.
+/// The body exceeds a decompression or content-coding limit.
 pub(crate) const LABEL_COMPRESSION_LIMIT_EXCEEDED: ErrorLabel = ErrorLabel::from_static("compression_limit_exceeded");
 
-/// Builds a `compression_unsupported` failure for `token`.
+/// Creates a `compression_unsupported` failure for `token`.
 pub(crate) fn unsupported(token: &str) -> HttpError {
     HttpError::other(
         format!("body uses the '{token}' compression format, which is not enabled here"),
@@ -50,12 +50,12 @@ pub(crate) fn unsupported(token: &str) -> HttpError {
     )
 }
 
-/// Builds a `compression_invalid` failure from `cause`.
+/// Creates a `compression_invalid` failure from `cause`.
 pub(crate) fn invalid(cause: impl std::error::Error + Send + Sync + 'static) -> HttpError {
     HttpError::other(cause, RecoveryInfo::never(), LABEL_COMPRESSION_INVALID)
 }
 
-/// Builds a `compression_limit_exceeded` failure for an excessive coding stack.
+/// Creates a `compression_limit_exceeded` failure for too many content codings.
 pub(crate) fn too_many_content_codings(max_layers: usize) -> HttpError {
     HttpError::other(
         format!("body uses more than {max_layers} content-coding layers"),

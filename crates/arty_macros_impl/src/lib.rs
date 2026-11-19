@@ -4,15 +4,15 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Token expansion for Arty's entry-point attributes.
+//! Expands Arty's runtime entry-point attributes.
 //!
-//! This companion crate provides the expansion functions used by
-//! [`arty_macros`](https://docs.rs/arty_macros). Application code should enable
-//! Arty's `macros` feature and use its `main` and `test` attributes instead.
+//! This crate implements the attributes from
+//! [`arty_macros`](https://docs.rs/arty_macros). Application code uses Arty's
+//! `macros` feature and its `main` and `test` attributes.
 //!
-//! [`main()`] expands an async entry point; [`test()`] additionally registers
-//! the function with Rust's test harness. Invalid input produces compiler
-//! diagnostic tokens rather than a runtime error.
+//! [`main()`] turns an async function into a synchronous entry point. [`test()`]
+//! also registers the function with Rust's test harness. Invalid input produces
+//! compiler diagnostic tokens.
 
 use darling::FromMeta;
 use darling::ast::NestedMeta;
@@ -85,8 +85,8 @@ fn invalid_panic_setting(expr: &Expr) -> darling::Error {
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        let monitor = self.monitor.or_else(|| test.then_some(MonitorSetting::Disabled));
+    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+        let monitor = self.monitor;
         if self.workers.is_none() && clock.is_none() && monitor.is_none() && self.panic.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
@@ -97,10 +97,8 @@ impl Args {
             MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => {
-                quote!(.panic(#runtime_path::runtime::PanicPolicy::shutdown()))
-            }
-            PanicSetting::Ignore => quote!(.panic(#runtime_path::runtime::PanicPolicy::ignore())),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::SHUTDOWN)),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::IGNORE)),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
@@ -108,7 +106,45 @@ impl Args {
 }
 
 fn arty_path() -> TokenStream {
-    arty_path_for(crate_name("arty").ok())
+    arty_path_with(|name| crate_name(name).ok())
+}
+
+fn arty_path_with(resolve: impl FnOnce(&str) -> Option<FoundCrate>) -> TokenStream {
+    arty_path_for(resolve("arty"))
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_runtime_lookup_uses_the_package_name_before_resolving_an_alias() {
+        let tokens = arty_path_with(|name| {
+            assert_eq!(name, "arty");
+            Some(FoundCrate::Name("renamed_runtime".to_owned()))
+        });
+        assert_eq!(tokens.to_string(), quote!(::renamed_runtime).to_string());
+    }
+
+    #[test]
+    fn gamma_round2_clock_alone_requires_runtime_builder() {
+        let args = Args {
+            monitor: None,
+            panic: None,
+            workers: None,
+        };
+        let clock = parse_quote!(clock);
+        let output = args.runtime(&quote!(::arty), Some(&clock)).unwrap();
+        assert_eq!(
+            output.to_string(),
+            quote!(
+                ::arty::runtime::Runtime::builder()
+                    .clock(::core::clone::Clone::clone(&clock))
+                    .build()
+            )
+            .to_string()
+        );
+    }
 }
 
 fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
@@ -126,6 +162,7 @@ fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
 
 fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<TokenStream> {
     while let Expr::Group(group) = value {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         value = &group.expr;
     }
     if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
@@ -145,15 +182,15 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
     ))
 }
 
-/// Expands an async entry-point function into synchronous runtime setup.
+/// Expands an async function into a synchronous Arty entry point.
 ///
-/// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated async function. The returned tokens define the entry point
-/// or report invalid syntax with compiler diagnostics.
+/// `args` contains the attribute configuration. `item` contains the annotated
+/// async function. Valid input returns tokens for the entry point. Invalid input
+/// returns compiler diagnostic tokens.
 ///
-/// This is the implementation hook for `arty_macros::main`, not an application
-/// entry point. See [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html)
-/// for the supported configuration and generated function's behavior.
+/// This function implements `arty_macros::main`. Application code uses
+/// [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html), which
+/// documents the configuration and the generated function.
 ///
 /// # Examples
 ///
@@ -163,7 +200,7 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
 /// let expanded = arty_macros_impl::main(
 ///     quote!(),
 ///     quote!(
-///         async fn main(cx: arty::task::Builtins) {}
+///         async fn main(cx: arty::task::Context) {}
 ///     ),
 /// );
 /// assert!(!expanded.is_empty());
@@ -173,15 +210,15 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, false)
 }
 
-/// Expands an async function into a runtime-backed synchronous test.
+/// Expands an async function into a synchronous Arty test.
 ///
-/// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated async function. The returned tokens register a test with
-/// Rust's test harness or report invalid syntax with compiler diagnostics.
+/// `args` contains the attribute configuration. `item` contains the annotated
+/// async function. Valid input returns tokens that register the test with Rust's
+/// test harness. Invalid input returns compiler diagnostic tokens.
 ///
-/// This is the implementation hook for `arty_macros::test`. See
-/// [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html) for application
-/// examples and the optional controlled-time argument.
+/// This function implements `arty_macros::test`. Application code uses
+/// [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html), which
+/// documents examples and the optional controlled-time argument.
 ///
 /// # Examples
 ///
@@ -191,7 +228,7 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
 /// let expanded = arty_macros_impl::test(
 ///     quote!(),
 ///     quote!(
-///         async fn checks_answer(cx: arty::task::Builtins) {
+///         async fn checks_answer(cx: arty::task::Context) {
 ///             assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 ///         }
 ///     ),
@@ -227,7 +264,10 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         return fail(syn::Error::new_spanned(sig.fn_token, "function must be async to use the attribute"));
     }
     let Some(syn::FnArg::Typed(state)) = inputs.next() else {
-        return fail(syn::Error::new_spanned(sig.fn_token, "function must take a Builtins argument"));
+        return fail(syn::Error::new_spanned(
+            sig.fn_token,
+            "function must take an Arty task context argument, such as cx: arty::task::Context",
+        ));
     };
     let syn::Pat::Ident(state_ident) = state.pat.as_ref() else {
         return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
@@ -235,7 +275,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let syn::Type::Path(state_type) = state.ty.as_ref() else {
         return fail(syn::Error::new_spanned(
             &state.ty,
-            "the first parameter must take Builtins by value, such as cx: arty::task::Builtins",
+            "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
         ));
     };
     let state_ident = state_ident.clone();
@@ -261,7 +301,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -310,6 +350,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_worker_policy_unwraps_nested_invisible_groups() {
+        let literal: Expr = parse_quote!(3usize);
+        let grouped = Expr::Group(syn::ExprGroup {
+            attrs: Vec::new(),
+            group_token: syn::token::Group::default(),
+            expr: Box::new(Expr::Group(syn::ExprGroup {
+                attrs: Vec::new(),
+                group_token: syn::token::Group::default(),
+                expr: Box::new(literal),
+            })),
+        });
+        assert_eq!(
+            worker_policy(&grouped, &quote!(::arty)).unwrap().to_string(),
+            quote!(::arty::runtime::WorkersPolicy::exactly(3usize)).to_string()
+        );
+    }
+
+    #[test]
     fn arty_path_uses_a_renamed_dependency() {
         assert_eq!(
             arty_path_for(Some(FoundCrate::Name("renamed-arty".to_owned()))).to_string(),
@@ -329,7 +387,7 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote! {
-                pub async fn main(cx: arty::task::Builtins) -> Result<(), Error> {
+                pub async fn main(cx: arty::task::Context) -> Result<(), Error> {
                     run(cx).await
                 }
             },
@@ -340,7 +398,7 @@ mod tests {
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
-                .block_on(async move |cx: arty::task::Builtins| { run(cx).await });
+                .block_on(async move |cx: arty::task::Context| { run(cx).await });
             let __arty_shutdown = __arty_runtime.stop();
             __arty_result
                 .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -355,7 +413,7 @@ mod tests {
             TokenStream::new(),
             quote! {
                 #[should_panic(expected = "original payload")]
-                async fn fails(mut cx: arty::task::Builtins) {
+                async fn fails(mut cx: arty::task::Context) {
                     fail(&mut cx).await;
                 }
             },
@@ -364,13 +422,11 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
-                .build()
+            let __arty_runtime = ::arty::runtime::Runtime::new()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
-                .block_on(async move |mut cx: arty::task::Builtins| {
+                .block_on(async move |mut cx: arty::task::Context| {
                     fail(&mut cx).await;
                 });
             let __arty_shutdown = __arty_runtime.stop();
@@ -413,7 +469,7 @@ mod tests {
     #[test]
     fn all_workers_selects_all_available_processors() {
         let input = quote! {
-            async fn run(cx: Builtins) {}
+            async fn run(cx: Context) {}
         };
         let main_expansion = main(quote!(workers = all), input.clone());
         let expected_main = quote! {
@@ -424,7 +480,7 @@ mod tests {
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {});
+                    .block_on(async move |cx: Context| {});
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -439,12 +495,11 @@ mod tests {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {});
+                    .block_on(async move |cx: Context| {});
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -459,7 +514,7 @@ mod tests {
         let expansion = test(
             quote!(workers = all),
             quote! {
-                async fn run(cx: Builtins, time: ClockControl) {}
+                async fn run(cx: Context, time: ClockControl) {}
             },
         );
         let expected = quote! {
@@ -468,13 +523,12 @@ mod tests {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {
+                    .block_on(async move |cx: Context| {
                         let time: ClockControl = __arty_clock_control;
                         {}
                     });
@@ -533,7 +587,7 @@ mod tests {
         let expansion = test(
             TokenStream::new(),
             quote! {
-                async fn run(cx: Builtins, time: ClockControl) {
+                async fn run(cx: Context, time: ClockControl) {
                     run(cx, time).await;
                 }
             },
@@ -543,13 +597,12 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {
+                    .block_on(async move |cx: Context| {
                         let time: ClockControl = __arty_clock_control;
                         {
                             run(cx, time).await;
@@ -571,7 +624,7 @@ mod tests {
             let expansion = main(
                 quote!(monitor = #setting),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -582,7 +635,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -600,7 +653,7 @@ mod tests {
             let expansion = test(
                 quote!(monitor = #setting),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -612,7 +665,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -626,22 +679,22 @@ mod tests {
 
     #[test]
     fn main_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = main(
                 quote!(panic = #policy),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -655,24 +708,23 @@ mod tests {
 
     #[test]
     fn test_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = test(
                 quote!(panic = #policy),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
                 #[::core::prelude::v1::test]
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .monitor(::arty::runtime::MonitorPolicy::disabled())
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -688,7 +740,7 @@ mod tests {
     fn monitor_composes_independently_of_argument_order() {
         for expand in [main, test] {
             let input = quote! {
-                async fn run(cx: Builtins) {}
+                async fn run(cx: Context) {}
             };
             let workers_first = expand(quote!(workers = 2, monitor = disabled), input.clone());
             let monitor_first = expand(quote!(monitor = disabled, workers = 2), input);
@@ -701,7 +753,7 @@ mod tests {
     fn panic_composes_with_other_settings_independently_of_argument_order() {
         for expand in [main, test] {
             let input = quote! {
-                async fn run(cx: Builtins) {}
+                async fn run(cx: Context) {}
             };
             let panic_last = expand(quote!(workers = 2, monitor = disabled, panic = ignore), input.clone());
             let panic_first = expand(quote!(panic = ignore, monitor = disabled, workers = 2), input);
@@ -724,7 +776,7 @@ mod tests {
             let expansion = main(
                 quote!(workers = #workers),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             assert!(!expansion.to_string().contains("compile_error"));
@@ -777,7 +829,7 @@ mod tests {
                 let expansion = expand(
                     quote!(workers = #workers),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -803,7 +855,7 @@ mod tests {
                 let expansion = expand(
                     quote!(monitor = #monitor),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -820,7 +872,7 @@ mod tests {
             let expansion = expand(
                 quote!(monitor = enabled, monitor = disabled),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             )
             .to_string();
@@ -839,14 +891,14 @@ mod tests {
             quote!("ignore"),
             quote!(continue),
             quote!(abort),
-            quote!(PanicPolicy::shutdown()),
+            quote!(Panic::shutdown()),
             quote!(::shutdown),
         ] {
             for expand in [main, test] {
                 let expansion = expand(
                     quote!(panic = #panic),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -863,7 +915,7 @@ mod tests {
             let expansion = expand(
                 quote!(panic = shutdown, panic = ignore),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             )
             .to_string();
@@ -879,7 +931,7 @@ mod tests {
                 let expansion = expand(
                     args.clone(),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -893,19 +945,19 @@ mod tests {
     fn injected_clock_requires_a_named_owned_second_test_parameter() {
         for input in [
             quote!(
-                async fn run(cx: Builtins, _: ClockControl) {}
+                async fn run(cx: Context, _: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, control: &ClockControl) {}
+                async fn run(cx: Context, control: &ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, control: ClockControl, extra: ClockControl) {}
+                async fn run(cx: Context, control: ClockControl, extra: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, cx: ClockControl) {}
+                async fn run(cx: Context, cx: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, r#cx: ClockControl) {}
+                async fn run(cx: Context, r#cx: ClockControl) {}
             ),
         ] {
             for expand in [main, test] {
@@ -917,7 +969,7 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote!(
-                async fn run(cx: Builtins, control: ClockControl) {}
+                async fn run(cx: Context, control: ClockControl) {}
             ),
         )
         .to_string();
@@ -929,7 +981,7 @@ mod tests {
         let cases = [
             (
                 quote!(
-                    fn run(cx: Builtins) {}
+                    fn run(cx: Context) {}
                 ),
                 "function must be async",
             ),
@@ -937,23 +989,23 @@ mod tests {
                 quote!(
                     async fn run() {}
                 ),
-                "function must take a Builtins argument",
+                "function must take an Arty task context argument",
             ),
             (
                 quote!(
-                    async fn run(_: Builtins) {}
+                    async fn run(_: Context) {}
                 ),
                 "argument must have an identifier",
             ),
             (
                 quote!(
-                    async fn run(cx: &Builtins) {}
+                    async fn run(cx: &Context) {}
                 ),
-                "the first parameter must take Builtins by value",
+                "arty::task::Context by value",
             ),
             (
                 quote!(
-                    async fn run(cx: Builtins, extra: ()) {}
+                    async fn run(cx: Context, extra: ()) {}
                 ),
                 "unexpected arguments",
             ),
@@ -975,19 +1027,19 @@ mod tests {
             (
                 quote!(@),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
             (
                 quote!(unknown = 1),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
             (
                 quote!(workers = 1, workers = 2),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
         ] {

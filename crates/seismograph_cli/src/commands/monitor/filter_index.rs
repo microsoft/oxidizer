@@ -104,10 +104,10 @@ pub(super) struct FilterIndex {
     allocations: Vec<IndexedAllocation>,
     retained_allocation_events: u64,
     deallocated: HashSet<(u64, u64)>,
+    allocation_identities: Option<crate::allocation_identities::Identities>,
     runtime: Option<RuntimeSource>,
     runtime_windows: BTreeMap<u64, TimeWindow>,
     task_stacks: HashMap<(u64, u64), StackId>,
-    source_task_stacks: HashMap<(u64, u64), StackId>,
     io_stacks: HashMap<u64, StackId>,
     task_events: super::task_events::TaskEventsSnapshot,
 }
@@ -121,17 +121,24 @@ impl FilterIndex {
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
     ) -> Self {
-        let task_events = super::task_events::TaskEventsSnapshot::from_events(&decoded.events, &addresses, runtime.as_ref());
-        Self::with_task_events(decoded, allocator, runtime, addresses, deallocated, task_events)
+        let identities = crate::allocation_identities::for_capture(&decoded.events);
+        let task_events = super::task_events::TaskEventsSnapshot::from_events_with_identities(
+            &decoded.events,
+            &addresses,
+            runtime.as_ref(),
+            identities.as_ref(),
+        );
+        Self::with_task_events(decoded, allocator, runtime, addresses, deallocated, task_events, identities)
     }
 
     pub(super) fn with_task_events(
         mut decoded: DecodedSnapshot,
         mut allocator: Option<AllocatorSource>,
-        mut runtime: Option<RuntimeSource>,
+        runtime: Option<RuntimeSource>,
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
         task_events: super::task_events::TaskEventsSnapshot,
+        allocation_identities: Option<crate::allocation_identities::Identities>,
     ) -> Self {
         let runtime_windows = super::runtime::display_windows(&decoded.events, runtime.as_ref());
         let lookups = addresses
@@ -155,13 +162,10 @@ impl FilterIndex {
         // Stack zero represents missing provenance for partial lifecycle records.
         intern(Vec::new());
         let mut task_stacks = HashMap::new();
-        let mut source_task_stacks = HashMap::new();
-        if let Some(source) = &mut runtime {
-            for runtime in &mut source.runtimes {
-                for task in &mut runtime.tasks {
-                    let stack = intern(std::mem::take(&mut task.spawn_backtrace).into_iter().map(Address::get).collect());
-                    task_stacks.insert((runtime.id.get(), task.id.get()), stack);
-                    source_task_stacks.insert((runtime.id.get(), task.id.get()), stack);
+        if let Some(source) = &runtime {
+            for runtime in &source.runtimes {
+                for task in &runtime.tasks {
+                    task_stacks.entry((runtime.id.get(), task.id.get())).or_default();
                 }
                 for worker in &runtime.workers {
                     if let Some(task) = worker.current_task {
@@ -227,10 +231,10 @@ impl FilterIndex {
             allocations,
             retained_allocation_events,
             deallocated,
+            allocation_identities,
             runtime,
             runtime_windows,
             task_stacks,
-            source_task_stacks,
             io_stacks,
             task_events,
         }
@@ -269,6 +273,7 @@ impl FilterIndex {
             capture_duration_nanos: self.header.capture_duration_nanos,
             events: self.header.events.clone(),
             sources: Vec::new(),
+            symbols: Vec::new(),
         };
         decoded.events.events = self
             .events
@@ -303,8 +308,14 @@ impl FilterIndex {
             decoded.events.threads.retain(|thread| visible_threads.contains(&thread.thread_id));
         }
         let source = self.runtime_source(filter, &visible_tasks, &decoded.events.events);
-        let mut runtime =
-            RuntimeSnapshot::from_events_with_attribution(&decoded, &self.addresses, source.as_ref(), task_events, &mut |_| {});
+        let mut runtime = RuntimeSnapshot::from_events_with_attribution(
+            &decoded,
+            &self.addresses,
+            source.as_ref(),
+            task_events,
+            self.allocation_identities.as_ref(),
+            &mut |_| {},
+        );
         self.retain_inferred_task_rows(&mut runtime);
         runtime.runtime.set_windows(&self.runtime_windows);
         super::snapshot::release_stacks(&mut decoded.events.events, |event| drop(std::mem::take(&mut event.call_stack)));
@@ -327,6 +338,7 @@ impl FilterIndex {
         super::snapshot::release_stacks(&mut allocation_events, |event| drop(std::mem::take(&mut event.call_stack)));
         Box::new(CapturedSnapshot {
             native: self.allocator.as_ref().and_then(|source| source.native.clone()),
+            mimalloc: self.allocator.as_ref().and_then(|source| source.mimalloc.clone()),
             memory,
             allocations,
             heap_error: super::snapshot::heap_error(self.allocator.as_ref()),
@@ -454,14 +466,6 @@ impl FilterIndex {
                     .workers
                     .retain(|worker| worker.current_task.is_some() || visible_workers.contains(&(runtime.id.get(), worker.id.get())));
             }
-            for task in &mut runtime.tasks {
-                let stack = self
-                    .source_task_stacks
-                    .get(&(runtime.id.get(), task.id.get()))
-                    .copied()
-                    .unwrap_or_default();
-                task.spawn_backtrace = self.stacks[stack.0].addresses.iter().copied().map(Address::new).collect();
-            }
         }
         Some(source)
     }
@@ -472,11 +476,10 @@ mod tests {
     use seismograph::recorder::event::{EventClock, Events, ObjectId};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
     use seismograph::recorder::thread::ThreadLog;
-    use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+    use seismograph::recorder::{Policies, Policy};
     use seismograph_rallocator::callers::{AddressLookupFields, Callers};
 
     use super::*;
-    use crate::allocator_view::Version;
 
     fn lookup(address: u64, symbol: &str) -> AddressLookup {
         AddressLookup::from_fields(AddressLookupFields {
@@ -550,6 +553,51 @@ mod tests {
     }
 
     #[test]
+    fn hidden_resize_records_do_not_restore_the_original_retained_size() {
+        let mut allocation = AllocationEvent::default();
+        allocation.allocation_recorded = true;
+        allocation.allocation_id = 1;
+        allocation.thread_log_id = 1;
+        allocation.size = 64;
+        allocation.resized_size = Some(4096);
+        allocation.call_stack = vec![1];
+        let mut resize = allocation.clone();
+        resize.kind = AllocationEventKind::Reallocated;
+        resize.size = 4096;
+        resize.reallocation = Some(seismograph_rallocator::callers::Resize {
+            old_address: 0x1000,
+            old_size: 64,
+        });
+        resize.call_stack = vec![2];
+        let mut source = AllocatorSource::new();
+        let mut callers = Callers::default();
+        callers.events = vec![allocation, resize];
+        source.callers = Some(callers);
+        let addresses = vec![lookup(1, "app::allocate"), lookup(2, "noise::resize")];
+        let index = Arc::new(FilterIndex::new(
+            DecodedSnapshot::default(),
+            Some(source),
+            None,
+            addresses,
+            HashSet::new(),
+        ));
+
+        let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
+        let allocations = filtered.allocations.unwrap();
+
+        assert_eq!(allocations.records.len(), 1);
+        assert_eq!(
+            (
+                allocations.hotspots[0].allocations,
+                allocations.hotspots[0].allocated_bytes,
+                allocations.hotspots[0].live_bytes
+            ),
+            (1, 64, 4096)
+        );
+        assert_eq!(index.render(&FilterSpec::default()).allocations.unwrap().records.len(), 2);
+    }
+
+    #[test]
     fn allocation_lifetimes_are_correlated_before_excluding_free_stacks() {
         let allocation = |id, size, kind, stack| {
             let mut event = AllocationEvent::default();
@@ -561,7 +609,7 @@ mod tests {
             event.call_stack = vec![stack];
             event
         };
-        let mut source = AllocatorSource::new(Version::new(0, 1, 0));
+        let mut source = AllocatorSource::new();
         source.stats.live_bytes = 777;
         let mut callers = Callers::default();
         callers.events = vec![
@@ -694,6 +742,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(1),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: [Some(TaskId::from_raw(1).unwrap()), None]
                     .into_iter()
                     .enumerate()
@@ -704,6 +753,7 @@ mod tests {
                         processor_index: None,
                         thread_id: None,
                         current_task,
+                        task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                     })
                     .collect(),
                 tasks: vec![Task {
@@ -711,11 +761,11 @@ mod tests {
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
-                    spawned_at: EventTimestamp::from_ticks(1),
+                    spawned_at: Some(EventTimestamp::from_ticks(1)),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     last_worker_id: None,
                     activity: None,
                     metrics: TaskMetrics::default(),
-                    spawn_backtrace: Vec::new(),
                 }],
             }],
             addresses: Vec::new(),
@@ -778,10 +828,10 @@ mod tests {
         let events = Events {
             clock: EventClock::ProcessMonotonic,
             total_events: 3,
-            recording: RecordingPolicies {
-                runtime_tasks: RecordingPolicy::all(true),
-                general_events: RecordingPolicy::all(true),
-                ..RecordingPolicies::default()
+            recording: Policies {
+                runtime_tasks: Policy::all(true),
+                general_events: Policy::all(true),
+                ..Policies::default()
             },
             threads: vec![ThreadLog {
                 thread_id: ThreadId::new(1),
@@ -878,6 +928,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(0),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: vec![Worker {
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
@@ -885,6 +936,7 @@ mod tests {
                     processor_index: None,
                     thread_id: Some(ThreadId::new(1)),
                     current_task: Some(TaskId::from_raw(1).unwrap()),
+                    task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                 }],
                 tasks: [1, 2]
                     .into_iter()
@@ -893,7 +945,8 @@ mod tests {
                         parent: None,
                         type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                         future_size_bytes: None,
-                        spawned_at: EventTimestamp::from_ticks(1),
+                        spawned_at: Some(EventTimestamp::from_ticks(1)),
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
                         activity: (id == 2).then_some(TaskActivity {
                             poll_worker_id: Some(WorkerId::from_raw(1).unwrap()),
@@ -907,7 +960,6 @@ mod tests {
                             poll_count: 7,
                             ..TaskMetrics::default()
                         },
-                        spawn_backtrace: vec![Address::new(id)],
                     })
                     .collect(),
             }],
@@ -926,8 +978,35 @@ mod tests {
         });
         let decoded = DecodedSnapshot {
             events: Events {
-                total_events: 2,
-                events: vec![event(1, Some(1)), runtime_without_worker],
+                total_events: 4,
+                events: vec![
+                    Event {
+                        kind: EventKind::TaskSpawned,
+                        payload: EventPayload::Runtime(RuntimeEvent {
+                            runtime_id: RuntimeId::from_raw(1).unwrap(),
+                            worker_id: None,
+                            subject_id: 1,
+                            related_id: 0,
+                            value_0: 1,
+                            value_1: 0,
+                        }),
+                        ..event(3, Some(1))
+                    },
+                    Event {
+                        kind: EventKind::TaskSpawned,
+                        payload: EventPayload::Runtime(RuntimeEvent {
+                            runtime_id: RuntimeId::from_raw(1).unwrap(),
+                            worker_id: None,
+                            subject_id: 2,
+                            related_id: 0,
+                            value_0: 1,
+                            value_1: 0,
+                        }),
+                        ..event(4, Some(2))
+                    },
+                    event(1, Some(1)),
+                    runtime_without_worker,
+                ],
                 ..Events::default()
             },
             ..DecodedSnapshot::default()

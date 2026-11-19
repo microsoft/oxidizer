@@ -6,7 +6,7 @@
 /// A decompressor's exposure depends on this and on nothing else it can see: handing every chunk
 /// straight on keeps nothing, so a stream of any length is safe, while accumulating means what the
 /// engine produces is what the caller holds. Telling the engine which it is doing is what lets it
-/// bound its own output against its own counter -- and stop producing at the bound, rather than
+/// bound its output against its counter. It can stop at the bound instead of
 /// producing freely and leaving each caller to notice afterwards.
 ///
 /// `pub` only to keep it off

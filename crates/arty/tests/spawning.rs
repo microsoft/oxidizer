@@ -7,10 +7,12 @@
 
 mod support;
 
+use std::future::poll_fn;
 use std::marker::PhantomPinned;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
+use std::task::Poll;
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
@@ -18,7 +20,7 @@ use arty::runtime::Runtime;
 #[cfg(not(miri))]
 use arty::runtime::WorkersPolicy;
 #[cfg(feature = "macros")]
-use arty::task::Builtins;
+use arty::task::Context;
 use arty::task::Scheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
@@ -32,10 +34,37 @@ fn assert_send_sync() {
     static_assertions::assert_impl_all!(Scheduler: Send, Sync);
 }
 
+#[test]
+fn spawned_future_preserves_mutable_self_borrows_across_polls() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let task = scheduler.spawn(|_| async {
+        let mut polls = 0;
+        // Keep a mutable borrow of the outer future's local across suspension.
+        poll_fn(|cx| {
+            polls += 1;
+            if polls == 1 {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+        polls
+    });
+
+    assert_eq!(task.join().unwrap(), 2);
+    runtime.stop().unwrap();
+}
+
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
-async fn spawn_some_tasks(cx: Builtins) {
-    let async_task = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Builtins| async move {
+async fn spawn_some_tasks(cx: Context) {
+    let async_task = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Context| async move {
         YieldFuture::default().await;
         let child1 = cx.scheduler().spawn(async |_| 1111);
         let child2 = cx.scheduler().spawn_anywhere((), |()| async { 2222 });
@@ -44,7 +73,7 @@ async fn spawn_some_tasks(cx: Builtins) {
         assert_eq!((results.0.unwrap(), results.1.unwrap(), results.2.unwrap()), (1111, 2222, 5555));
     });
 
-    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |_: Builtins| async move {
+    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |_: Context| async move {
         let canary = Rc::new("I am a little bird who only lives on one thread".to_owned());
         YieldFuture::default().await;
         let length = canary.len();
@@ -52,7 +81,7 @@ async fn spawn_some_tasks(cx: Builtins) {
     });
 
     cx.scheduler()
-        .spawn_anywhere(cx.clone(), |cx: Builtins| async move {
+        .spawn_anywhere(cx.clone(), |cx: Context| async move {
             YieldFuture::default().await;
             cx.scheduler()
                 .spawn(async |_| {
@@ -74,6 +103,115 @@ async fn spawn_some_tasks(cx: Builtins) {
         )
         .await
         .unwrap();
+}
+
+#[test]
+fn local_factory_runs_once_and_preserves_future_borrows() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let factory_calls = Arc::clone(&calls);
+            let owner = cx.thread().id();
+            let child = cx.scheduler().spawn(move |child| {
+                assert_eq!(factory_calls.fetch_add(1, Ordering::Relaxed), 0);
+                assert_eq!(child.thread().id(), owner);
+                async move {
+                    let value = Rc::new(42);
+                    let mut polls = 0;
+                    poll_fn(|cx| {
+                        polls += 1;
+                        if polls == 1 {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
+                    })
+                    .await;
+                    (*value, polls, thread::current().id())
+                }
+            });
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+            assert_eq!(child.await.unwrap(), (42, 2, owner));
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
+    struct Probe {
+        relocations: Arc<AtomicUsize>,
+        factories: Arc<AtomicUsize>,
+        owner: thread::ThreadId,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            assert_eq!(source.unwrap().id(), self.owner);
+            assert_eq!(destination.id(), self.owner);
+            assert_eq!(thread::current().id(), self.owner);
+            assert_eq!(self.relocations.fetch_add(1, Ordering::Relaxed), 0);
+        }
+    }
+
+    let create = |probe: Probe| {
+        assert_eq!(probe.relocations.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.factories.fetch_add(1, Ordering::Relaxed), 0);
+        let owner = Rc::new(thread::current().id());
+        async move {
+            let mut polls = 0;
+            poll_fn(|cx| {
+                polls += 1;
+                if polls == 1 {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            drop(probe);
+            (polls, *owner)
+        }
+    };
+
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            for specific in [false, true] {
+                let relocations = Arc::new(AtomicUsize::new(0));
+                let factories = Arc::new(AtomicUsize::new(0));
+                let owner = cx.thread().id();
+                let probe = Probe {
+                    relocations: Arc::clone(&relocations),
+                    factories: Arc::clone(&factories),
+                    owner,
+                };
+                let child = if specific {
+                    cx.scheduler().spawn_at(cx.thread(), probe, create)
+                } else {
+                    cx.scheduler().spawn_anywhere(probe, create)
+                };
+                assert_eq!(relocations.load(Ordering::Relaxed), 0);
+                assert_eq!(factories.load(Ordering::Relaxed), 0);
+                assert_eq!(child.await.unwrap(), (2, owner));
+                assert_eq!(relocations.load(Ordering::Relaxed), 1);
+                assert_eq!(factories.load(Ordering::Relaxed), 1);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
 }
 
 #[test]
@@ -104,10 +242,10 @@ fn test_worker_affinity() {
 
 #[test]
 fn remote_factories_create_non_send_futures_on_the_worker() {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (created, polled, associated) = runtime
         .scheduler()
-        .spawn_anywhere((), |cx: arty::task::Builtins, ()| {
+        .spawn_anywhere((), |cx: arty::task::Context, ()| {
             let value = Rc::new(thread::current().id());
             let associated = cx.thread().id();
             async move {
@@ -191,7 +329,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
         }
     }
 
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (source, destination, worker, executed_on) = runtime
         .scheduler()
         .spawn_anywhere(
@@ -210,7 +348,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
 
 #[cfg(feature = "macros")]
 #[arty::test]
-async fn worker_bound_spawn_results_do_not_require_thread_awareness(cx: Builtins) {
+async fn worker_bound_spawn_results_do_not_require_thread_awareness(cx: Context) {
     struct ResultValue(u32);
 
     static_assertions::assert_not_impl_any!(ResultValue: thread_aware::ThreadAware);
@@ -253,7 +391,7 @@ impl ThreadAware for DestinationProbe {
 
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
-async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Builtins) {
+async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Context) {
     let expected_workers = 2;
     let home = cx.thread().id();
     let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();
@@ -371,6 +509,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert!(error.is_invalid_destination());
     assert!(!error.is_panic());
     assert!(!error.is_shutdown());
+    assert_eq!(error.shutdown_cause(), None);
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));

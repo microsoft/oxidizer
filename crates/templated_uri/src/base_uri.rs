@@ -579,6 +579,7 @@ impl TryFrom<&http::Uri> for BaseUri {
         };
 
         // Use only the path component - query and fragment are not part of a base URI.
+        // #[gamma::skip(match_arm.never_matches, tag = "equivalent", reason = "The sole non-wildcard arm handles root paths; absolute http::Uri normalizes an absent path to slash, whose BasePath conversion equals Default")]
         let path = match uri.path() {
             "" | "/" => BasePath::default(),
             p => BasePath::try_from(p)?,

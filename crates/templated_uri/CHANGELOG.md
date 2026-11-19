@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1] - 2026-11-02
+
+- Update privacy, error, and benchmark requirements. Use version 0.7.1 for all Templated URI
+  packages. URI expansion behavior does not change.
+- Update the requirement for local package `data_privacy` from `0.13.1` to `0.13.2`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `templated_uri_macros` from `=0.7.0` to `=0.7.1`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
 ## [0.7.0] - 2026-10-20
 
 - Rename the public `_documentation` module to `documentation`.

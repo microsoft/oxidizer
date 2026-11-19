@@ -36,7 +36,6 @@ syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full",
 
 [dev-dependencies]
 insta = { workspace = true }
-mutants = { workspace = true }
 syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing", "clone-impls"] }
 testing_aids = { path = "../testing_aids" }
 

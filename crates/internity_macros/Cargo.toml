@@ -3,7 +3,7 @@
 
 [package]
 name = "internity_macros"
-version = "0.3.0"
+version = "0.3.1"
 description = "Procedural macros for the internity crate."
 readme = "README.md"
 keywords = ["intern", "interner", "serde", "macro", "derive"]
@@ -40,9 +40,6 @@ proc-macro = true
 [dependencies]
 internity_macros_impl = { workspace = true }
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
-
-[dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

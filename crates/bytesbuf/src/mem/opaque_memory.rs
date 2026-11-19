@@ -17,6 +17,8 @@ use crate::mem::{Memory, MemoryShared};
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
+///
+/// With the `std` feature, `GlobalPool` converts into this adapter through [`Into::into`].
 #[derive(Debug, ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,
@@ -62,7 +64,6 @@ impl Clone for OpaqueMemory {
 }
 
 impl Memory for OpaqueMemory {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }

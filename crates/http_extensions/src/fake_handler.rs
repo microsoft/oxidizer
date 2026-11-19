@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::collections::VecDeque;
-use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
@@ -342,9 +341,13 @@ impl Default for FakeHandler {
     }
 }
 
+#[derive(derive_more::Debug)]
 enum Inner {
+    #[debug("StatusCode({_0})")]
     StatusCode(StatusCode, HttpBodyBuilder),
+    #[debug("Multiple")]
     Multiple(Mutex<VecDeque<HttpResponse>>),
+    #[debug("Custom")]
     Custom(Box<dyn Fn(HttpRequest) -> PinnedFuture + Send + Sync + 'static>),
     NeverCompletes,
 }
@@ -360,17 +363,6 @@ impl Inner {
             Self::Custom(handler) => handler(request).await,
             Self::NeverCompletes => std::future::pending().await,
             Self::StatusCode(code, builder) => Ok(Response::builder().status(code).body(builder.empty()).expect("works")),
-        }
-    }
-}
-
-impl Debug for Inner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::StatusCode(code, _) => write!(f, "StatusCode({code})"),
-            Self::Multiple(_) => write!(f, "Multiple"),
-            Self::Custom(_) => write!(f, "Custom"),
-            Self::NeverCompletes => write!(f, "NeverCompletes"),
         }
     }
 }

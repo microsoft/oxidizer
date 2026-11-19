@@ -84,7 +84,7 @@ fn deregistration_failure_reports_the_source_and_driver_boundaries() {
 #[test]
 fn unattached_context_failure_is_reported_once() {
     let (sink, processor) = test_emitter(TEST_ID);
-    let io = MioContext::context(MioOptions::default().sink(sink));
+    let io = MioContext::new(MioOptions::default().sink(sink));
 
     for _ in 0..2 {
         let error = io.register(FailingRegisterSource, Interest::READABLE).err().unwrap();
@@ -116,7 +116,7 @@ fn successful_registration_and_readiness_emit_no_events() {
 }
 
 fn driver(options: MioOptions, role: DriverRole) -> (MioContext, MioDriver) {
-    let mut io = MioContext::context(options);
+    let mut io = MioContext::new(options);
     let worker = ThreadBuilder::default().build(std::thread::current().id());
     io.relocate(None, &worker);
     let driver = io.driver(DriverOptions::new(worker, Waker::noop().clone(), role)).unwrap();

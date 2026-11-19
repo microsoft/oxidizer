@@ -20,6 +20,9 @@ use tick::Clock;
 /// [`Runtime::new`], then convert it into an `Arc<dyn AsyncRuntime>` via
 /// [`From`] / [`Into`] and install it with
 /// [`azure_core::async_runtime::set_async_runtime`].
+///
+/// A spawned task reports runtime failures as an [`anyspawn::JoinError`] in
+/// the returned task's boxed error. Joining does not restart a task panic.
 #[derive(Debug, Clone)]
 pub struct Runtime {
     spawner: Spawner,
@@ -124,7 +127,9 @@ impl Future for RuntimeTask {
     type Output = Result<(), Box<dyn std::error::Error + Send>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().handle).poll(cx).map(Ok)
+        Pin::new(&mut self.get_mut().handle)
+            .poll(cx)
+            .map(|result| result.map_err(|error| -> Box<dyn std::error::Error + Send> { Box::new(error) }))
     }
 }
 
@@ -151,5 +156,6 @@ impl azure_identity::Executor for Runtime {
         self.spawner
             .spawn_blocking(move || std::process::Command::new(&program).args(&args).output())
             .await
+            .map_err(std::io::Error::other)?
     }
 }

@@ -24,7 +24,6 @@ pub(crate) const CHUNK_ALIGN: usize = MAX_CHUNK_BYTES;
 /// to lie strictly inside the first [`CHUNK_ALIGN`] bytes of their
 /// chunk, which would break the header-recovery mask used by
 /// `Drop` / `deallocate`.
-#[cfg_attr(test, mutants::skip)] // `/ → *` lets over-aligned requests spin → OOM
 #[inline]
 pub(crate) const fn max_smart_ptr_align() -> usize {
     CHUNK_ALIGN / 2
@@ -40,7 +39,6 @@ pub(crate) const fn max_smart_ptr_align() -> usize {
 /// over-aligned values are rejected by the smart-pointer allocation path.
 /// This is a pure `const` predicate so the gate compiles away.
 #[inline]
-#[cfg_attr(test, mutants::skip)] // equivalent mutants: the only types these reclassify (ZSTs / over-aligned) are gated out by `has_freeze_prefix()` or rejected by the smart-pointer alignment cap, so freeze behavior is unchanged
 pub(crate) const fn buffer_freezable<T>() -> bool {
     mem::size_of::<T>() != 0 && mem::align_of::<T>() < max_smart_ptr_align()
 }
@@ -125,7 +123,6 @@ impl SizeClass {
 #[cold]
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // unreachable: refcount overflow requires usize::MAX live refs
 #[cfg_attr(
     not(feature = "std"),
     allow(

@@ -108,11 +108,16 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the body options for every response from this client.
+    /// Sets the default options for response bodies built by this client's transports.
     ///
     /// [`HttpBodyOptions`] sets the buffer limit for
     /// [`HttpBody::into_buffered`](crate::HttpBody::into_buffered) and the idle timeout between
     /// body frames.
+    /// Bundled transports use these options through their configured
+    /// [`HttpBodyBuilder`](http_extensions::HttpBodyBuilder).
+    /// A custom transport receives the configured builder in
+    /// [`CustomContext::body_builder`](crate::custom::CustomContext::body_builder).
+    /// A response body built independently keeps its own options.
     ///
     /// By default, [`HttpBodyOptions::default()`] is used.
     ///
@@ -291,7 +296,6 @@ impl HttpClientBuilder {
     /// global provider.
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
-    #[cfg_attr(test, mutants::skip)] // Mutants remove fields that the public behavior cannot distinguish.
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
         // Use the provider for both resilience and HTTP metrics.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
@@ -516,10 +520,23 @@ impl Aware {
 mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
+    use opentelemetry::metrics::NoopMeterProvider;
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
     use crate::{HttpClient, HttpClientBuilder};
+
+    #[test]
+    fn gamma_round2_name_and_meter_are_forwarded_to_resilience_context() {
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("gamma_round2_pipeline");
+        let before = format!("{:?}", builder.resilience_context);
+        assert!(before.contains("name: \"gamma_round2_pipeline\""), "{before}");
+        assert!(before.contains("meter: None"), "{before}");
+        let builder = builder.meter_provider(NoopMeterProvider::new());
+        let after = format!("{:?}", builder.resilience_context);
+        assert!(after.contains("meter: Some("), "{after}");
+        assert!(after.contains("name: \"gamma_round2_pipeline\""), "{after}");
+    }
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
 

@@ -19,6 +19,7 @@ pub(super) struct FakeableArgs {
     /// Whether to generate mockall fake (for impl blocks only).
     pub(super) generate_mockall_fake: Option<bool>,
     /// The module where mockall fake should be generated (for impl blocks only).
+    #[cfg(feature = "mockall")]
     pub(super) mockall_fake_module: Option<String>,
     /// Effective visibility of the generated mock container (for impl blocks only).
     pub(super) mockall_fake_visibility: Option<syn::Visibility>,
@@ -99,6 +100,7 @@ impl Parse for FakeableArgs {
             fake_impl,
             fake_constructor,
             generate_mockall_fake,
+            #[cfg(feature = "mockall")]
             mockall_fake_module,
             mockall_fake_visibility,
         })
@@ -138,6 +140,7 @@ impl Parse for FakeableArg {
                 // Only accept boolean true
                 let lookahead = input.lookahead1();
                 if lookahead.peek(syn::LitBool) {
+                    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding lookahead proves the next token is the same LitBool that is parsed here.")]
                     let value: syn::LitBool = input.parse()?;
                     if value.value {
                         Ok(Self::GenerateMockallFake(value))

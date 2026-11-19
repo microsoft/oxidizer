@@ -82,14 +82,13 @@ Once a crate documents a `no_std` configuration as supported, that configuration
 
 ### `no_std`-only code is exempt from coverage and mutation testing
 
-Code selected by the *absence* of `std` — `#[cfg(not(feature = "std"))]` and equivalents — is excluded from the coverage gate and from mutation testing. Neither harness is guaranteed to build a `no_std` configuration: mutation testing runs with default features, and in the coverage run's `--no-default-features` leg Cargo feature unification across the selected dependency graph can re-enable `std` anyway. Such code is therefore often absent from the measured build entirely, and holding it to a coverage or mutation obligation measures the harness rather than the code.
+Code selected by the *absence* of `std` — `#[cfg(not(feature = "std"))]` and equivalents — is excluded from the coverage gate and from mutation testing. Neither harness guarantees a `no_std` configuration. Gamma runs with all features enabled. Cargo feature unification can also re-enable `std` in the coverage run's `--no-default-features` leg. Such code can be absent from the measured build entirely.
 
-Mark it with both exclusions:
+Mark the coverage exclusion:
 
 ```rust
 #[cfg(not(feature = "std"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // no_std-only path (AGENTS.md, "no_std Support").
-#[cfg_attr(test, mutants::skip)] // no_std-only path (AGENTS.md, "no_std Support").
 fn capture() -> Self {
     Self::Disabled
 }
@@ -97,22 +96,42 @@ fn capture() -> Self {
 
 `coverage(off)` needs `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` in the crate root.
 
-Attach the exclusions to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
+Attach the exclusion to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
+
+## Mutation testing
+
+Gamma evaluates conditional compilation during discovery.
+Do not add mutation suppressions in advance.
+Run Gamma first and review its actual findings.
+If a finding needs suppression, add a narrow directive beside the source and explain the reason.
+Use Gamma's dependency-free comment form in published code.
+Run Gamma to validate comment-form directives.
+Do not suppress a whole function or file to silence one finding.
 
 ## GitHub Actions Pinning
 
-Pin GitHub Actions to full-length commit SHAs with a version comment unless
-the exact release is verified as a GitHub immutable release. For immutable
-releases, use the exact version tag instead; never use moving major/minor aliases.
+Pin every external GitHub Action to a full-length commit SHA with a version
+comment, including actions with immutable releases. Tags are not a pinning
+exception. References to local actions and reusable workflows remain local paths.
 
-Verify each new release with
-`gh api repos/OWNER/REPO/releases/tags/TAG --jq .immutable`; only `true` qualifies
-for the tag exception.
+Make sure that each SHA matches the stated release. Resolve annotated tags to
+their target commits. Keep all `github/codeql-action/*` steps on the same SHA.
+Replace obsolete tag-pinning explanations with accurate version comments.
 
-Preserve pinning-rationale comments when updating dependencies or addressing
-review feedback, and update their versioned links and references. Do not delete
-the rationale merely because Dependabot proposes a SHA pin: retain the exact
-version tag when the new release is still immutable.
+Anvil owns pins in its generated workflows. Update the upstream templates and
+adopt a release that contains the required pins. Do not edit generated workflows
+to maintain a separate pinning policy.
+
+## Upgrading Anvil
+
+Follow the upgrade procedure in [docs/design/README.md](docs/design/README.md#upgrading-anvil).
+Run generation after installing the selected release. A newer `tool_version` in
+`.anvil.lock` does not prove that every generated file matches that release.
+
+Review every preserved customization and proposed file against the new template.
+Do not silently retain old action pins or carry an entire workflow override
+through an upgrade. Keep only explicitly justified overrides that the current
+Anvil configuration cannot express.
 
 ## Required CI Checks
 

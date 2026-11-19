@@ -13,7 +13,7 @@ use performables::sync::barrier::Barrier;
 use performables::sync::channel::{bounded, oneshot, watch};
 use performables::sync::condition::Condvar;
 use seismograph::recorder::event::{Event, EventKind, ObjectId};
-use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 use testing_aids::is_mutation_testing;
 
@@ -25,7 +25,7 @@ fn events() -> Vec<Event> {
 }
 
 fn ready_events() {
-    let thread_id = seismograph::recorder::current_thread_id();
+    let thread_id = seismograph::recorder::thread_id();
     let native = Box::new(Barrier::<mode::Sync>::new(1));
     let asynchronous = Box::new(Barrier::<mode::Async>::new(1));
     let condition = Box::new(Condvar::<mode::Sync>::new());
@@ -94,7 +94,7 @@ fn blocking_send_contention() {
     let (started_tx, started_rx) = mpsc::channel();
     let (finished_tx, finished_rx) = mpsc::channel();
     let worker = std::thread::spawn(move || {
-        started_tx.send(seismograph::recorder::current_thread_id()).unwrap();
+        started_tx.send(seismograph::recorder::thread_id()).unwrap();
         finished_tx.send(sender.send(11)).unwrap();
     });
     let thread_id = if is_mutation_testing() {
@@ -137,8 +137,8 @@ fn blocking_send_contention() {
 #[test]
 fn ready_operations_and_blocking_handoffs_preserve_events() {
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
-        event_capacity_per_thread: EventBufferCapacity::new(256).unwrap(),
+        general_events: Policy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(256),
         ..Default::default()
     });
     ready_events();

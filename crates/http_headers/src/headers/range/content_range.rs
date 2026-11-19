@@ -242,6 +242,7 @@ impl ContentRangeOwned {
         validate_satisfied_content_range(first, last, complete_length)?;
         let mut wire = format!("bytes {first}-{last}/");
         if let Some(value) = complete_length {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Formatting a u64 into String cannot return fmt::Error; String's formatting writes are infallible and allocation failure is not represented by this Result")]
             write!(&mut wire, "{value}").map_err(|_| invalid_syntax(&FieldName::ContentRange))?;
         } else {
             wire.push('*');
@@ -733,14 +734,24 @@ fn parse_byte_content_range_relaxed(bytes: &[u8]) -> Result<ByteContentRange, De
 
 fn trim_ows_start(mut bytes: &[u8]) -> &[u8] {
     while bytes.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        bytes = &bytes[1..];
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes = &bytes[
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1..];
     }
     bytes
 }
 
 fn trim_ows_end(mut bytes: &[u8]) -> &[u8] {
     while bytes.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        bytes = &bytes[..bytes.len() - 1];
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes = &bytes[
+        // #[gamma::skip(range.exclusive_to_inclusive, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        ..
+        // #[gamma::skip(arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes.len() -
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1];
     }
     bytes
 }

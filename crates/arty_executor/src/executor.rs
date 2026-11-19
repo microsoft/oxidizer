@@ -1,8 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "inspection")]
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
+#[cfg(feature = "inspection")]
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::pin::Pin;
 use std::task;
 use std::thread::ThreadId;
 use std::time::Instant;
@@ -11,62 +18,62 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
 use tick::SimpleClock;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context};
+use crate::{
+    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, TypeErasedTask, executor_context,
+};
+#[cfg(feature = "inspection")]
+use crate::{InspectionError, InspectionStatus, PollObserver, TaskPtr, TaskState, discard_task_panic_payload};
 
-/// The async task executor for a single thread.
+/// An async task executor that runs on one thread.
 ///
-/// Its purpose is to continuously poll tasks to ensure the tasks make progress, as well as to
-/// provide highly efficient task wake-up services for when tasks are unblocked by the asynchronous
-/// operations they are waiting on.
+/// The executor polls tasks and processes wake notifications so that ready tasks
+/// can make progress.
 ///
-/// The executor is single-threaded and does not own or manage threads - it is up to the caller to
-/// decide what thread to run it on and what else to do on that thread. This caller is intended to
-/// be the Arty Runtime, which combines async task execution, I/O and other fundamental
-/// capabilities into a single package of features offered to each thread in an Arty-based
-/// application.
+/// The executor does not create or manage threads. The caller selects the owner
+/// thread and decides what other work runs on that thread. The Arty Runtime uses
+/// this executor with I/O and other per-thread services.
 ///
-/// At most one executor may be alive on a thread. Dropping it releases that thread registration,
-/// after which a replacement executor may be created.
+/// Only one executor can be alive on a thread. Dropping it releases the thread
+/// registration, so the caller can create a replacement.
 ///
 /// # Reentrancy and mutability
 ///
-/// Owner operations take exclusive access to the executor. Futures may still submit tasks through
-/// a [`TaskSet`], whose narrowly scoped internal mutability is released around external callbacks.
+/// Owner operations need exclusive access to the executor. A future can submit
+/// tasks through a [`TaskSet`]. The task set does not hold an internal exclusive
+/// borrow while it calls external code.
 ///
-/// Not every method can be called in a reentrant manner - see API documentation of individual
-/// methods for details.
+/// Some methods do not support reentrant calls. Each method documents its
+/// reentrancy requirements.
 ///
 /// # Integration
 ///
-/// The executor is designed to be exclusively owned and operated by the runtime that it services.
-/// Instances of [`TaskSet`] obtained from [`tasks()`][Self::tasks] may be shared to user code
-/// to facilitate registering additional tasks with the executor. This may be done even from
-/// within the futures of existing tasks running on the same executor.
+/// The runtime owns and operates the executor. It can give a [`TaskSet`] from
+/// [`tasks()`][Self::tasks] to user code. User code can then register tasks,
+/// including from a future that runs on the same executor.
 ///
-/// The runtime that owns the executor is expected to call [`execute_cycle()`][Self::execute_cycle]
-/// as part of its main event loop. When exactly the next call should take place is determined by
-/// the [`CycleOutcome`] returned from each call.
+/// The runtime calls [`execute_cycle()`][Self::execute_cycle] from its main event
+/// loop. The returned [`CycleOutcome`] indicates when another cycle is useful.
 ///
-/// The owner may, at any point (regardless of what any registered tasks are doing), initiate the
-/// shutdown process. Any active tasks are aborted and their futures dropped when shutdown starts.
-/// Submissions through remaining [`TaskSet`]s resolve to [`JoinError`](crate::JoinError).
+/// The owner can start shutdown at any time. Shutdown cancels active tasks and
+/// drops their futures. A later submission through a remaining [`TaskSet`]
+/// reports cancellation to its completion target.
 ///
 /// # Shutdown process
 ///
-/// Graceful shutdown lets the owner observe when cancellation is complete:
+/// Use this sequence for graceful shutdown:
 ///
-/// 1. Call [`begin_shutdown()`][Self::begin_shutdown] to start the shutdown process.
+/// 1. Call [`shutdown()`][Self::shutdown] and trigger the returned handle.
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor when convenient.
 ///
-/// Dropping the executor without this sequence is also safe and synchronously cancels remaining
-/// tasks. Retained join handles keep pooled result slots alive and report shutdown. Retained task
-/// wakers keep emptied task allocations alive and become inert.
+/// You can also drop the executor without this sequence. The drop operation
+/// cancels remaining tasks before it returns. Retained task wakers keep empty
+/// task allocations alive, but the wakers do nothing.
 ///
 /// # Process termination
 ///
-/// Plain executor tasks terminate the process if their futures panic. Runtime integrations can
-/// register a remote result target that receives captured panics without unwinding the worker.
+/// The executor contains task panics. [`ExecutorBuilder::panic_policy`] selects
+/// whether a task panic starts shutdown.
 #[derive(Debug)]
 pub struct Executor {
     shared: ExecutorShared,
@@ -76,18 +83,62 @@ pub struct Executor {
     last_cycle_ended: Option<Instant>,
 }
 
+/// Selects ordinary or observed polling at monomorphization, not inside the poll loop.
+trait ObservePoll: Copy {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()>;
+}
+
+impl ObservePoll for () {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        task.poll(shared)
+    }
+}
+
+#[cfg(feature = "inspection")]
+impl ObservePoll for &dyn PollObserver {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        let mut observed = false;
+        let mut in_callback = false;
+        let description = catch_unwind(AssertUnwindSafe(|| {
+            task.inspect(TaskState::Running, &mut |description| {
+                in_callback = true;
+                self.poll_started(description);
+                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
+                in_callback = false;
+                observed = true;
+            });
+        }));
+        match description {
+            Ok(()) => {}
+            Err(panic) if in_callback => resume_unwind(panic),
+            Err(panic) => {
+                // Observer failures propagate; inspector and description-drop failures
+                // cancel the observation before the task itself is polled.
+                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
+                observed = false;
+                discard_task_panic_payload(panic);
+                self.inspection_failed(InspectionError::Panicked);
+            }
+        }
+        let outcome = task.poll(shared);
+        if observed {
+            self.poll_finished(outcome.is_ready());
+        }
+        outcome
+    }
+}
+
 impl Executor {
     /// Starts building a new instance of [`Executor`].
-    #[cfg_attr(test, mutants::skip)] // Gets mutated into equivalent.
     pub fn builder() -> ExecutorBuilder {
         ExecutorBuilder::new()
     }
 
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId) -> Self {
-        let shared = ExecutorShared::new(owner_waker, sink, thread_id);
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
+        let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
         let clock = SimpleClock::new_system().with_fast_instant(true);
-        // Register before creating an executor whose Drop would unregister this thread.
+        // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
         Self {
             shared,
@@ -98,17 +149,22 @@ impl Executor {
         }
     }
 
-    /// Creates a new handle to the set of tasks registered with the executor. You can use
-    /// this to register additional tasks.
+    /// Returns a handle that can register tasks with this executor.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
         TaskSet::new(&self.shared)
     }
 
+    /// Returns a handle that can request executor shutdown.
+    #[must_use]
+    pub fn shutdown(&self) -> Shutdown {
+        self.shared.shutdown().clone()
+    }
+
     /// Returns whether the executor still owns any registered tasks.
     ///
-    /// Completed tasks stop counting during the cycle that observes their completion. Join handles
-    /// and retained wakers do not count as tasks and may remain alive after this returns `false`.
+    /// Completed tasks stop counting during the cycle that observes their completion. Retained
+    /// wakers do not count as tasks and can remain alive after this returns `false`.
     #[must_use]
     pub fn has_tasks(&self) -> bool {
         self.shared.has_tasks()
@@ -116,52 +172,119 @@ impl Executor {
 
     /// Executes one processing cycle to progress registered tasks.
     ///
-    /// More work may remain after a cycle completes. The return value will indicate whether the
-    /// executor believes it has more work to do, in which case it should be called again as soon as
-    /// possible.
+    /// More work can remain after the cycle. The return value indicates whether
+    /// the executor can do more work now.
     ///
-    /// This function is not safe to call in a reentrant manner - only the owner may
-    /// call it in an exclusive context.
+    /// Only the owner can call this method with exclusive access. Do not call it
+    /// reentrantly.
     ///
     /// # Panics
     ///
-    /// Panics if called in a reentrant manner (e.g. from external code called
-    /// from within `execute_cycle()`).
+    /// Panics if called reentrantly, such as from external code that
+    /// `execute_cycle()` calls.
     ///
-    /// Panics from cleanup and notification hooks may also propagate. Continued operation
-    /// after such a panic is not guaranteed.
+    /// A panic from a cleanup or notification hook can also propagate. Do not
+    /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
+        self.execute_cycle_with(())
+    }
+
+    /// Executes one cycle with runtime-owned poll observation.
+    ///
+    /// Select this entry point only when diagnostics are requested. The ordinary
+    /// [`execute_cycle`](Self::execute_cycle) path does not check or call an observer.
+    ///
+    /// # Panics
+    ///
+    /// Observer panics propagate. An inspector panic is reported through
+    /// [`PollObserver::inspection_failed`](crate::PollObserver::inspection_failed)
+    /// and does not prevent the affected task from running.
+    #[cfg(feature = "inspection")]
+    #[must_use]
+    pub fn execute_cycle_observed(&mut self, observer: &dyn PollObserver) -> CycleOutcome {
+        self.execute_cycle_with(observer)
+    }
+
+    fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         let cycle_started = self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
-        self.poll_active_tasks();
+        self.poll_active_tasks(observer);
         self.cancel_if_shutting_down();
         let outcome = self.cycle_outcome();
         self.finish_cycle(cycle_started);
         outcome
     }
 
-    /// Starts the executor shutdown process.
+    /// Visits at most `limit` native live tasks between execution cycles.
     ///
-    /// The next [`execute_cycle()`][1] returns [`CycleOutcome::Shutdown`] after releasing cancelled
-    /// task storage. Retained join handles resolve independently and do not delay shutdown.
+    /// Tasks without a matching description still count toward the work limit.
+    /// Inspection does not consume wakes or move futures. The visitor must not
+    /// submit tasks or recursively enter this executor.
     ///
-    /// This function is not safe to call in a reentrant manner - only the owner may
-    /// call it in an exclusive context.
+    /// # Errors
     ///
-    /// # Panics
-    ///
-    /// Panics if called in a reentrant manner (e.g. from external code called
-    /// from within [`execute_cycle()`][1]).
-    ///
-    /// [1]: Self::execute_cycle
-    #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
-    pub fn begin_shutdown(&mut self, cause: ShutdownCause) {
-        let cause = self.shared.begin_shutdown(cause);
-        let aborted_count = self.prepare_task_abort();
-        self.abort_prepared_tasks(aborted_count, true, &cause);
+    /// Returns an error for a zero limit, borrowed submission storage, or a panic
+    /// from a task inspector or the visitor.
+    #[cfg(feature = "inspection")]
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "exclusive owner access prevents inspection from overlapping a poll"
+    )]
+    pub fn inspect<D: 'static>(&mut self, limit: usize, mut visitor: impl FnMut(&D)) -> Result<InspectionStatus, InspectionError> {
+        if limit == 0 {
+            return Err(InspectionError::InvalidLimit);
+        }
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
+        let inspected = catch_unwind(AssertUnwindSafe(|| {
+            let mut count = 0;
+            let mut visited = HashSet::new();
+            let truncated = std::cell::Cell::new(false);
+            let mut inspect = |pointer: TaskPtr, state| {
+                // An unwinding observer can leave a runnable task linked in pending.
+                if !visited.insert(pointer) {
+                    return ControlFlow::Continue(());
+                }
+                if count == limit {
+                    truncated.set(true);
+                    return ControlFlow::Break(());
+                }
+                count += 1;
+                // SAFETY: Each queue retains the task throughout this owner-only visit.
+                let task = unsafe { pointer.as_task() };
+                let state = if task.is_notified() { TaskState::Ready } else { state };
+                task.inspect(state, &mut |description| {
+                    if let Some(description) = description.downcast_ref::<D>() {
+                        visitor(description);
+                    }
+                });
+                ControlFlow::Continue(())
+            };
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The owner-only submission queue has no mutable borrow at entry: all queue mutations release their borrows before callbacks, and inspection has not invoked a callback yet.")]
+            self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
+            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
+            if !truncated.get() {
+                let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
+            }
+            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
+            if !truncated.get() {
+                self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
+            }
+            Ok(if truncated.get() {
+                InspectionStatus::Truncated
+            } else {
+                InspectionStatus::Complete
+            })
+        }));
+        match inspected {
+            Ok(result) => result,
+            Err(panic) => {
+                discard_task_panic_payload(panic);
+                Err(InspectionError::Panicked)
+            }
+        }
     }
 
     fn start_cycle(&self) -> Instant {
@@ -191,8 +314,8 @@ impl Executor {
     }
 
     fn cancel_if_shutting_down(&mut self) {
-        if self.shared.is_shutting_down() {
-            let cause = self.shared.shutdown_cause();
+        if self.shared.shutdown().is_triggered() {
+            let cause = self.shared.shutdown().cause();
             let aborted_count = self.prepare_task_abort();
             self.abort_prepared_tasks(aborted_count, true, &cause);
         }
@@ -200,7 +323,7 @@ impl Executor {
 
     fn cycle_outcome(&self) -> CycleOutcome {
         if self.evaluate_shutdown_completion() {
-            CycleOutcome::Shutdown
+            CycleOutcome::Shutdown(self.shared.shutdown().cause())
         } else if self.has_work_to_do() {
             CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
             CycleOutcome::Continue
@@ -222,23 +345,23 @@ impl Executor {
         }
     }
 
-    fn poll_active_tasks(&mut self) {
+    fn poll_active_tasks(&mut self, observer: impl ObservePoll) {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
         // Keep the scheduling owner queued until polling and context restoration both return.
-        // Otherwise an unwind could leave a remote waker owning a live non-Send payload.
+        // Otherwise an unwind can leave a remote waker that owns a live non-Send payload.
         while let Some(task_handle) = self.active.front() {
-            // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
+            // SAFETY: The runnable owner keeps the pinned task alive. Only this executor polls
             // and retires its payload on the task's owner thread.
             let task = unsafe { task_handle.as_task() };
             let pointer = task_handle.as_ptr();
             let linked = task.links().linked.get();
 
-            if self.shared.is_shutting_down() {
-                task.abort(self.shared.shutdown_cause());
+            if self.shared.shutdown().is_triggered() {
+                task.abort(self.shared.shutdown().cause());
                 self.shared.decrement_task_count(1);
-                // SAFETY: The active owner keeps `pointer` live; a linked active task belongs to
+                // SAFETY: The active owner keeps `pointer` live. A linked active task belongs to
                 // this executor's pending list, and this code runs on the task owner thread.
                 drop(unsafe { self.pending.remove(pointer) });
                 completed_count = completed_count.saturating_add(1);
@@ -246,10 +369,11 @@ impl Executor {
                 continue;
             }
 
-            let outcome = task.poll();
+            let outcome = observer.poll(task, &self.shared);
             let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
             match outcome {
                 task::Poll::Ready(()) => {
+                    // #[gamma::skip(cond.always_true, reason = "TaskList::remove returns None without modifying the list when the task is not linked.")]
                     if linked {
                         // SAFETY: `linked` was read from the live active task, whose list ownership
                         // belongs to this executor and is accessed on the task owner thread.
@@ -269,12 +393,12 @@ impl Executor {
             }
         }
 
+        // #[gamma::skip(call_result.default, reason = "The metrics function returns unit and default_after still executes it.")]
         record_poll_metrics(pending_count, completed_count);
     }
 
-    /// Whether an immediately performed cycle would do useful work.
+    /// Returns whether an immediate cycle can do useful work.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
     fn has_work_to_do(&self) -> bool {
         debug_assert!(self.active.is_empty(), "active tasks are drained before deciding the next cycle");
         self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
@@ -284,7 +408,7 @@ impl Executor {
         self.shared.close_remote_wakes();
         executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_handle in &self.active {
-            // SAFETY: Each active owner keeps its task live; any linked task belongs to this
+            // SAFETY: Each active owner keeps its task live. Any linked task belongs to this
             // executor's pending list, and shutdown preparation runs on the owner thread.
             drop(unsafe { self.pending.remove(task_handle.as_ptr()) });
         }
@@ -297,7 +421,7 @@ impl Executor {
         match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
             Ok(Ok(())) => {}
             Ok(Err(_access_error)) | Err(_access_error) => {
-                // Metrics TLS may already be destroyed when an executor itself lives in TLS.
+                // Metrics TLS can already be destroyed when an executor itself lives in TLS.
             }
         }
 
@@ -314,16 +438,25 @@ impl Executor {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
     fn evaluate_shutdown_completion(&self) -> bool {
-        if !self.shared.is_shutting_down() {
+        if !self.shared.shutdown().is_triggered() {
             return false;
         }
         debug_assert!(self.active.is_empty());
         debug_assert!(self.pending.is_empty());
 
         self.shared.shutdown_complete()
+    }
+
+    fn finish_drop(&mut self, panicking: bool) {
+        if panicking {
+            // Retire remaining payloads on their owner if cancellation unwinds.
+            let cause = self.shared.shutdown().cause();
+            let aborted_count = self.prepare_task_abort();
+            self.abort_prepared_tasks(aborted_count, false, &cause);
+        }
+        executor_context::unregister(self.shared.wake().thread_id());
     }
 }
 
@@ -334,28 +467,23 @@ impl Drop for Executor {
         impl Drop for FinishDrop<'_> {
             #[cfg_attr(coverage_nightly, coverage(off))] // A second panic during unwinding aborts before a test can observe this safety fallback.
             fn drop(&mut self) {
-                if std::thread::panicking() {
-                    // Retire remaining payloads on their owner if cancellation unwinds.
-                    let cause = self.0.shared.shutdown_cause();
-                    let aborted_count = self.0.prepare_task_abort();
-                    self.0.abort_prepared_tasks(aborted_count, false, &cause);
-                }
-                executor_context::unregister(self.0.shared.wake().thread_id());
+                self.0.finish_drop(std::thread::panicking());
             }
         }
 
-        let cause = self.shared.request_shutdown(ShutdownCause::default());
+        _ = self.shared.shutdown().publish(ShutdownCause::default());
+        let cause = self.shared.shutdown().cause();
         let guard = FinishDrop(self);
         let aborted_count = guard.0.prepare_task_abort();
         guard.0.abort_prepared_tasks(aborted_count, false, &cause);
+        // #[gamma::skip(cond.negate, result.is_err_to_is_ok, reason = "The branch body is empty; either predicate still executes the same try_with call.")]
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
-            // Executor cleanup must remain safe after metrics TLS has been destroyed.
+            // Executor cleanup must remain safe after destruction of metrics TLS.
         }
         debug_assert!(guard.0.shared.shutdown_complete());
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
 fn record_poll_metrics(pending_count: usize, completed_count: usize) {
     if pending_count != 0 {
         TASKS_INACTIVATED.with(|event| event.observe(pending_count));
@@ -369,6 +497,356 @@ fn record_poll_metrics(pending_count: usize, completed_count: usize) {
 const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];
 const TASKS_TOUCHED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
 const TASKS_MANAGED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::task::Poll;
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn nov4_finish_drop_cancels_only_during_unwinding_without_recording_drop_metrics() {
+        #[derive(Debug)]
+        struct CountCancellation(Rc<std::cell::Cell<usize>>);
+        impl crate::TaskCompletion<()> for CountCancellation {
+            fn completed(self, (): ()) {
+                panic!("pending task cannot complete");
+            }
+            fn panicked(self, _: crate::TaskPanicPayload, _: Option<ShutdownCause>) {
+                panic!("pending task cannot panic");
+            }
+            fn cancelled(self, _: ShutdownCause) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        for panicking in [false, true] {
+            let cancelled = Rc::new(std::cell::Cell::new(0));
+            let mut executor = Executor::builder().build();
+            executor
+                .tasks()
+                .task(std::future::pending())
+                .register(CountCancellation(Rc::clone(&cancelled)));
+            let dropped_before = metric(&TASKS_DROPPED);
+            executor.finish_drop(panicking);
+            executor_context::register(executor.shared.wake().thread_id());
+            let observed_cancellations = cancelled.get();
+            let observed_drop_metric = metric(&TASKS_DROPPED);
+            if !executor.active.is_empty() {
+                let cause = executor.shared.shutdown().cause();
+                executor.abort_prepared_tasks(0, false, &cause);
+            }
+            drop(executor);
+            assert_eq!(observed_cancellations, usize::from(panicking));
+            assert_eq!(observed_drop_metric, dropped_before);
+            assert_eq!(cancelled.get(), 1);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_new_executor_selects_the_fast_system_instant_source() {
+        let executor = Executor::builder().build();
+        assert_eq!(format!("{:?}", executor.clock), "SimpleClock(SystemFast)");
+    }
+
+    #[test]
+    fn gamma_round2_empty_accept_preserves_the_active_queue_allocation() {
+        let executor = Executor::builder().build();
+        let mut active = VecDeque::with_capacity(23);
+        assert_eq!(executor.shared.accept_new_tasks(&mut active), 0);
+        assert_eq!(active.capacity(), 23);
+    }
+
+    // Inspect owner-thread observations, not process-wide reports that parallel tests also update.
+    fn metric(event: &'static std::thread::LocalKey<Event<Push>>) -> (u64, i64) {
+        event.with(|event| {
+            let debug = format!("{event:?}");
+            let count = debug
+                .split_once("count: Cell { value: ")
+                .unwrap()
+                .1
+                .split_once('}')
+                .unwrap()
+                .0
+                .trim()
+                .parse()
+                .unwrap();
+            let sum = debug
+                .split_once("sum: Cell { value: ")
+                .unwrap()
+                .1
+                .split_once('}')
+                .unwrap()
+                .0
+                .trim()
+                .parse()
+                .unwrap();
+            (count, sum)
+        })
+    }
+
+    fn assert_delta(event: &'static std::thread::LocalKey<Event<Push>>, before: (u64, i64), count: u64, sum: i64) {
+        assert_eq!(metric(event), (before.0 + count, before.1 + sum));
+    }
+
+    fn assert_all_observations_pushed() {
+        EXECUTOR_PUSHER.with(|pusher| {
+            let debug = format!("{pusher:?}");
+            let mut pairs = 0;
+            for pair in debug.split("LocalGlobalPair {").skip(1) {
+                let count = pair
+                    .split_once("count: Cell { value: ")
+                    .unwrap()
+                    .1
+                    .split_once('}')
+                    .unwrap()
+                    .0
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap();
+                let pushed = pair
+                    .split_once("last_pushed_count: Cell { value: ")
+                    .unwrap()
+                    .1
+                    .split_once('}')
+                    .unwrap()
+                    .0
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap();
+                assert_eq!(pushed, count, "{pair}");
+                pairs += 1;
+            }
+            assert!(pairs > 0);
+        });
+    }
+
+    #[derive(Debug)]
+    struct Completion;
+
+    impl crate::TaskCompletion<()> for Completion {
+        fn completed(self, (): ()) {}
+
+        fn panicked(self, _: crate::TaskPanicPayload, _: Option<ShutdownCause>) {
+            panic!("the controlled pending task must not panic");
+        }
+
+        fn cancelled(self, _: ShutdownCause) {}
+    }
+
+    #[test]
+    fn gamma_round2_poll_metric_counts_and_magnitudes_are_exact_including_zero() {
+        for (pending, completed) in [(0, 0), (1, 0), (0, 1), (3, 2)] {
+            let inactive_before = metric(&TASKS_INACTIVATED);
+            let completed_before = metric(&TASKS_COMPLETED);
+            let dropped_before = metric(&TASKS_DROPPED);
+            record_poll_metrics(pending, completed);
+            assert_delta(
+                &TASKS_INACTIVATED,
+                inactive_before,
+                u64::from(pending != 0),
+                i64::try_from(pending).unwrap(),
+            );
+            assert_delta(
+                &TASKS_COMPLETED,
+                completed_before,
+                u64::from(completed != 0),
+                i64::try_from(completed).unwrap(),
+            );
+            assert_delta(
+                &TASKS_DROPPED,
+                dropped_before,
+                u64::from(completed != 0),
+                i64::try_from(completed).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_accept_poll_reactivate_and_abort_each_report_exact_task_totals() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor
+            .tasks()
+            .task(std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }))
+            .register(Completion);
+        executor.tasks().task(std::future::pending()).register(Completion);
+        executor.tasks().task(std::future::ready(())).register(Completion);
+        let accepted = metric(&TASKS_ACCEPTED);
+        let inactive = metric(&TASKS_INACTIVATED);
+        let completed = metric(&TASKS_COMPLETED);
+        let dropped = metric(&TASKS_DROPPED);
+        let suspended = metric(&CYCLE_OUTCOME_SUSPEND);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_delta(&TASKS_ACCEPTED, accepted, 1, 3);
+        assert_delta(&TASKS_INACTIVATED, inactive, 1, 2);
+        assert_delta(&TASKS_COMPLETED, completed, 1, 1);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 1);
+        assert_delta(&CYCLE_OUTCOME_SUSPEND, suspended, 1, 1);
+        let activated = metric(&TASKS_ACTIVATED_VIA_AWAKENED_SET);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_delta(&TASKS_ACTIVATED_VIA_AWAKENED_SET, activated, 1, 1);
+        let continued = metric(&CYCLE_OUTCOME_CONTINUE);
+        executor.tasks().task(std::future::pending()).register(Completion);
+        assert!(matches!(executor.cycle_outcome(), CycleOutcome::Continue));
+        assert_delta(&CYCLE_OUTCOME_CONTINUE, continued, 1, 1);
+        let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
+        let prepared = executor.prepare_task_abort();
+        let dropped = metric(&TASKS_DROPPED);
+        executor.abort_prepared_tasks(prepared, true, &ShutdownCause::default());
+        assert_eq!(prepared, 3);
+        assert_delta(&TASKS_ABORTED_ON_SHUTDOWN, aborted, 3, 3);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 3);
+        assert!(executor.active.is_empty());
+        assert!(executor.pending.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_shutdown_during_poll_counts_and_cancels_every_remaining_task() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let shutdown = executor.shutdown();
+        executor
+            .tasks()
+            .task(async move { shutdown.trigger(ShutdownCause::default()) })
+            .register(Completion);
+        let polled = Rc::new(std::cell::Cell::new(0));
+        for _ in 0..2 {
+            let polled = Rc::clone(&polled);
+            executor
+                .tasks()
+                .task(async move { polled.set(polled.get() + 1) })
+                .register(Completion);
+        }
+        executor.accept_new_tasks();
+        let completed = metric(&TASKS_COMPLETED);
+        let dropped = metric(&TASKS_DROPPED);
+        executor.poll_active_tasks(());
+        assert_eq!(polled.get(), 0);
+        assert!(executor.active.is_empty());
+        assert!(executor.pending.is_empty());
+        assert_delta(&TASKS_COMPLETED, completed, 1, 3);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 3);
+    }
+
+    #[test]
+    fn gamma_round2_executor_drop_flushes_abort_metrics_without_counting_them_as_normal_drops() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.tasks().task(std::future::pending()).register(Completion);
+        executor.tasks().task(std::future::pending()).register(Completion);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
+        let dropped = metric(&TASKS_DROPPED);
+        drop(executor);
+        assert_delta(&TASKS_ABORTED_ON_SHUTDOWN, aborted, 2, 2);
+        assert_delta(&TASKS_DROPPED, dropped, 0, 0);
+        assert_all_observations_pushed();
+    }
+
+    #[test]
+    fn gamma_round2_finish_cycle_records_the_exact_frozen_end_instant() {
+        let control = tick::ClockControl::new_at(SystemTime::UNIX_EPOCH);
+        let mut executor = Executor::builder().build();
+        executor.clock = control.to_simple_clock();
+        let duration = metric(&CYCLE_DURATION_MILLIS);
+        let gap = metric(&CYCLE_GAP_MILLIS);
+        assert!(executor.last_cycle_ended.is_none());
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_eq!(executor.last_cycle_ended, Some(control.to_simple_clock().instant()));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 0);
+        assert_delta(&CYCLE_GAP_MILLIS, gap, 0, 0);
+        assert_all_observations_pushed();
+        control.advance(Duration::from_millis(7));
+        let expected = control.to_simple_clock().instant();
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_eq!(executor.last_cycle_ended, Some(expected));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 0);
+        assert_delta(&CYCLE_GAP_MILLIS, gap, 1, 7);
+        assert_all_observations_pushed();
+    }
+
+    #[test]
+    fn gamma_round2_abort_preparation_clears_queued_wakes_before_task_retirement() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor
+            .tasks()
+            .task(std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }))
+            .register(Completion);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(executor_context::has_wakes(std::thread::current().id()));
+        let aborted = executor.prepare_task_abort();
+        assert_eq!(aborted, 1);
+        assert!(!executor_context::has_wakes(std::thread::current().id()));
+        assert_eq!(executor.active.len(), 1);
+        assert!(executor.pending.is_empty());
+        let owner = std::thread::current().id();
+        executor_context::unregister(owner);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        let remote_wake_pending = executor.shared.wake().has_remote_wakes();
+        executor_context::register(owner);
+        assert!(!remote_wake_pending);
+        executor.abort_prepared_tasks(aborted, false, &ShutdownCause::default());
+        assert!(executor.active.is_empty());
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(!executor_context::has_wakes(std::thread::current().id()));
+    }
+
+    #[test]
+    fn gamma_round2_shutdown_cancellation_reports_its_normal_drop_metric() {
+        let mut executor = Executor::builder().build();
+        executor.tasks().task(std::future::pending()).register(Completion);
+        executor.tasks().task(std::future::pending()).register(Completion);
+        executor.shutdown().trigger(ShutdownCause::default());
+        let dropped = metric(&TASKS_DROPPED);
+        executor.cancel_if_shutting_down();
+        let still_queued = executor.shared.has_new_tasks();
+        drop(executor);
+        assert!(!still_queued);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 2);
+    }
+
+    #[test]
+    fn gamma_round2_remote_only_wakes_keep_the_executor_runnable() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor
+            .tasks()
+            .task(std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }))
+            .register(Completion);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        let owner = std::thread::current().id();
+        executor_context::unregister(owner);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        executor_context::register(owner);
+        let remote_only = executor.shared.wake().has_remote_wakes() && !executor_context::has_wakes(owner);
+        let runnable = executor.has_work_to_do();
+        drop(executor);
+        assert!(remote_only);
+        assert!(runnable);
+    }
+}
 
 thread_local! {
     static EXECUTOR_PUSHER: MetricsPusher = MetricsPusher::new();
@@ -428,816 +906,4 @@ thread_local! {
         .name("ae_cycle_outcome_suspend")
         .pusher_local(&EXECUTOR_PUSHER)
         .build();
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::future::{Ready, poll_fn, ready};
-    use std::pin::Pin;
-    use std::rc::Rc;
-    use std::sync::{Arc, atomic};
-    use std::task::{Context, Poll, Waker};
-
-    use static_assertions::assert_not_impl_any;
-    use testing_aids::YieldFuture;
-
-    use super::*;
-    use crate::executor_context::AWAKENED_CAPACITY;
-    use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};
-    use crate::{JoinHandle, TaskOptions};
-
-    trait TestTaskSetExt {
-        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
-        where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static;
-    }
-
-    impl TestTaskSetExt for TaskSet {
-        fn add_test<F, R>(&self, future: F) -> JoinHandle<R>
-        where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static,
-        {
-            self.add(future, TaskOptions::default())
-        }
-    }
-
-    struct DropOwnerDuringConversion {
-        owner: Rc<RefCell<Option<Executor>>>,
-        tasks: TaskSet,
-        existing_dropped: Rc<Cell<bool>>,
-        nested_rejected: Rc<Cell<bool>>,
-    }
-
-    struct DropSignalFuture(Rc<Cell<bool>>);
-
-    impl Future for DropSignalFuture {
-        type Output = ();
-
-        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-            Poll::Pending
-        }
-    }
-
-    impl Drop for DropSignalFuture {
-        fn drop(&mut self) {
-            self.0.set(true);
-        }
-    }
-
-    impl IntoFuture for DropOwnerDuringConversion {
-        type Output = usize;
-        type IntoFuture = Ready<usize>;
-
-        fn into_future(self) -> Self::IntoFuture {
-            drop(self.owner.borrow_mut().take());
-            assert!(self.existing_dropped.get(), "owner drop must synchronously cancel existing tasks");
-            let mut nested = self.tasks.add_test(async { 42 });
-            let mut cx = Context::from_waker(Waker::noop());
-            self.nested_rejected.set(matches!(
-                Pin::new(&mut nested).poll(&mut cx),
-                Poll::Ready(Err(crate::JoinError::Shutdown(_)))
-            ));
-            ready(7)
-        }
-    }
-
-    #[test]
-    fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
-        let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
-        let tasks = owner.borrow().as_ref().unwrap().tasks();
-        let existing_dropped = Rc::new(Cell::new(false));
-        let mut existing = tasks.add_test(DropSignalFuture(Rc::clone(&existing_dropped)));
-        let nested_rejected = Rc::new(Cell::new(false));
-
-        let mut outer = tasks.add_test(DropOwnerDuringConversion {
-            owner: Rc::clone(&owner),
-            tasks: tasks.clone(),
-            existing_dropped: Rc::clone(&existing_dropped),
-            nested_rejected: Rc::clone(&nested_rejected),
-        });
-
-        assert!(owner.borrow().is_none());
-        assert!(existing_dropped.get());
-        let mut cx = Context::from_waker(Waker::noop());
-        assert!(matches!(
-            Pin::new(&mut existing).poll(&mut cx),
-            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
-        ));
-        assert!(matches!(
-            Pin::new(&mut outer).poll(&mut cx),
-            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
-        ));
-        assert!(nested_rejected.get());
-    }
-
-    #[test]
-    fn smoke_test() {
-        // Create the executor, run a task to completion, and shut the executor down - basic stuff.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let task_completed = Rc::new(Cell::new(false));
-
-        let future = {
-            let task_completed = Rc::clone(&task_completed);
-
-            async move {
-                task_completed.set(true);
-                42
-            }
-        };
-
-        let mut join_handle = tasks.add_test(future);
-
-        // This task completes immediately, so we only need one executor cycle to complete it.
-        //
-        // In principle, there is no API level guarantee on how many cycles are needed to process
-        // a task to completion. This is a white-box test suite, so we hardcode the correct number
-        // of cycles. However, it is conceptually fine if changes in implementation strategy change
-        // this value - the test simply needs to change to accommodate the new strategy.
-        let outcome = executor.execute_cycle();
-
-        // Verify the task signaled it has completed.
-        assert!(task_completed.get());
-
-        // The executor must now believe it has no more work to do.
-        assert_eq!(outcome, CycleOutcome::Suspend);
-
-        // Verify the join handle provides the result.
-        let mut cx = Context::from_waker(Waker::noop());
-        let result = Pin::new(&mut join_handle).poll(&mut cx);
-
-        assert!(matches!(result, Poll::Ready(Ok(42))));
-    }
-
-    #[test]
-    fn noop_test() {
-        // Creates an executor with no tasks, executes it for a cycle,
-        // then observes the universe still exists and goes home.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    }
-
-    #[test]
-    fn two_tasks_complete_together() {
-        // Create the executor, run a task to completion, and shut the executor down - basic stuff.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future1 = async move { 42 };
-        let future2 = async move { 43 };
-
-        let mut join_handle1 = tasks.add_test(future1);
-        let mut join_handle2 = tasks.add_test(future2);
-
-        // Both tasks complete immediately, so we only need one executor cycle to complete them.
-        //
-        // In principle, there is no API level guarantee on how many cycles are needed to process
-        // a task to completion. This is a white-box test suite, so we hardcode the correct number
-        // of cycles. However, it is conceptually fine if changes in implementation strategy change
-        // this value - the test simply needs to change to accommodate the new strategy.
-        let outcome = executor.execute_cycle();
-
-        // The executor must now believe it has no more work to do.
-        assert_eq!(outcome, CycleOutcome::Suspend);
-
-        // Verify the join handle provides the result.
-        let mut cx = Context::from_waker(Waker::noop());
-        let result1 = Pin::new(&mut join_handle1).poll(&mut cx);
-        let result2 = Pin::new(&mut join_handle2).poll(&mut cx);
-
-        assert!(matches!(result1, Poll::Ready(Ok(42))));
-        assert!(matches!(result2, Poll::Ready(Ok(43))));
-    }
-
-    #[test]
-    fn outcome_continue_on_self_awaken() {
-        // A task is polled and immediately awakens itself, causing the executor to request a new
-        // execution cycle from the caller immediately after the current cycle completes.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future = TestSubjectFuture::new();
-        let wakes_self = future.wakes_self_on_next_poll();
-
-        let _join_handle = tasks.add_test(future);
-
-        // Enable self-awakening.
-        wakes_self.set(true);
-
-        // The first cycle should cause the task to awaken itself and request continue
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
-
-        // Disable self-awakening for the next poll, so the executor will settle down.
-        wakes_self.set(false);
-
-        // The second cycle should inactivate the task (it will never complete in this test).
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    }
-
-    #[test]
-    fn outcome_continue_on_neighbor_awaken() {
-        // Two tasks are polled, both suspending immediately and the second one awakens the first
-        // one. We expect this to result in a `Continue` outcome.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future1 = TestSubjectFuture::new();
-        let future2 = TestSubjectFuture::new();
-
-        // We do not know which one gets polled first, so they just race to store their waker here.
-        let first_waker = Rc::new(Cell::new(None::<Waker>));
-
-        let on_poll = {
-            let first_waker = Rc::clone(&first_waker);
-
-            move |cx: &mut Context<'_>| match first_waker.take() {
-                // We are the first. Store ours.
-                None => first_waker.set(Some(cx.waker().clone())),
-                // We are the second. Wake the first.
-                Some(waker) => waker.wake(),
-            }
-        };
-
-        future1.on_poll(on_poll.clone());
-        future2.on_poll(on_poll);
-
-        _ = tasks.add_test(future1);
-        _ = tasks.add_test(future2);
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    }
-
-    #[test]
-    fn task_completes_after_external_awaken() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future = TestSubjectFuture::new();
-        let future_waker = future.waker();
-        let future_complete = future.completes_on_next_poll();
-
-        let mut join_handle = tasks.add_test(future);
-
-        // The future should inactivate, leading to a Suspend outcome.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        future_waker.borrow().as_ref().unwrap().wake_by_ref();
-        future_complete.set(true);
-
-        // The future should complete, leading to a Suspend outcome.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        let mut cx = Context::from_waker(Waker::noop());
-        let result = Pin::new(&mut join_handle).poll(&mut cx);
-
-        // The task must be completed.
-        assert!(matches!(result, Poll::Ready(Ok(()))));
-    }
-
-    #[test]
-    fn mass_awaken() {
-        // We awaken a huge amount of tasks, greater than the capacity of the awakened queue.
-        // We still expect them all to awaken together on the same cycle, while one additional
-        // inactive task remains suspended when the executor probes all embedded wake signals.
-        const AWAKENED_TASK_COUNT: usize = AWAKENED_CAPACITY + 1;
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let mut join_handles = Vec::with_capacity(AWAKENED_TASK_COUNT);
-        let mut future_wakers = Vec::with_capacity(AWAKENED_TASK_COUNT);
-        let mut future_completes = Vec::with_capacity(AWAKENED_TASK_COUNT);
-
-        for _ in 0..AWAKENED_TASK_COUNT {
-            let future = TestSubjectFuture::new();
-            future_wakers.push(future.waker());
-            future_completes.push(future.completes_on_next_poll());
-            join_handles.push(tasks.add_test(future));
-        }
-
-        let inactive_future = TestSubjectFuture::new();
-        let mut inactive_join_handle = tasks.add_test(inactive_future);
-
-        // The futures should all inactivate, leading to a Suspend outcome.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        for future_waker in future_wakers {
-            future_waker.borrow().as_ref().unwrap().wake_by_ref();
-        }
-
-        for future_complete in future_completes {
-            future_complete.set(true);
-        }
-
-        // The futures should all complete, leading to a Suspend outcome.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        let mut cx = Context::from_waker(Waker::noop());
-
-        // Every task should now have completed.
-        for mut join_handle in join_handles {
-            let result = Pin::new(&mut join_handle).poll(&mut cx);
-            assert!(matches!(result, Poll::Ready(Ok(()))));
-        }
-
-        assert!(matches!(Pin::new(&mut inactive_join_handle).poll(&mut cx), Poll::Pending));
-    }
-
-    #[test]
-    fn task_not_polled_when_inactive() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future = TestSubjectFuture::new();
-
-        let poll_count = Rc::new(Cell::new(0));
-
-        future.on_poll({
-            let poll_count = Rc::clone(&poll_count);
-            move |_| {
-                poll_count.set(poll_count.get() + 1);
-            }
-        });
-
-        _ = tasks.add_test(future);
-
-        // Task gets polled and then inactivates.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        assert_eq!(poll_count.get(), 1);
-
-        // Nothing to poll here, no task has awakened.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        // Note: there is no requirement to only poll a task after it has been awakened. It is fine
-        // to poll even without any signal. We rely on white-box knowledge here to establish that
-        // no poll is expected.
-        assert_eq!(poll_count.get(), 1);
-    }
-
-    #[test]
-    fn shutdown_drops_futures() {
-        // We verify that the future of a task is dropped when we initiate shutdown. This is
-        // important to ensure that any resources held by the future's state machine are released.
-
-        struct SetSignalOnDrop(Rc<Cell<bool>>);
-
-        impl Drop for SetSignalOnDrop {
-            fn drop(&mut self) {
-                self.0.set(true);
-            }
-        }
-
-        impl Future for SetSignalOnDrop {
-            type Output = ();
-
-            #[cfg_attr(coverage_nightly, coverage(off))] // The test verifies drop before the first poll.
-            fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-                Poll::Pending
-            }
-        }
-
-        let drop_signal = Rc::new(Cell::new(false));
-
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-
-        let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
-
-        tasks.add_test(signal_setter);
-
-        assert!(!drop_signal.get());
-
-        executor.begin_shutdown(ShutdownCause::default());
-
-        assert!(drop_signal.get());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    fn shutdown_without_tasks_is_immediate() {
-        let mut executor = Executor::builder().build();
-
-        executor.begin_shutdown(ShutdownCause::default());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    fn task_set_shutdown_is_applied_by_the_next_cycle() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-        let dropped = Rc::new(Cell::new(false));
-        let mut handle = tasks.add_test(DropSignalFuture(Rc::clone(&dropped)));
-
-        tasks.begin_shutdown(ShutdownCause::default());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        assert!(dropped.get());
-        assert!(matches!(
-            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
-        ));
-    }
-
-    #[test]
-    fn shutdown_requested_during_poll_cancels_the_pending_task() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-        let shutdown = tasks.clone();
-        let mut handle = tasks.add_test(poll_fn(move |_| {
-            shutdown.begin_shutdown(ShutdownCause::default());
-            Poll::Pending::<()>
-        }));
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        assert!(matches!(
-            Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(Err(crate::JoinError::Shutdown(_)))
-        ));
-    }
-
-    #[test]
-    fn finishing_a_cycle_records_its_end() {
-        let mut executor = Executor::builder().build();
-        let started = executor.start_cycle();
-
-        executor.finish_cycle(started);
-
-        assert!(executor.last_cycle_ended.is_some());
-    }
-
-    #[test]
-    fn shutdown_with_unreferenced_tasks_is_immediate() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-
-        // We add the task but do not keep any references to its join handle.
-        // This task has nothing holding on to its resources, so it can be cleaned up at any time.
-        tasks.add_test(TestSubjectFuture::new());
-
-        executor.begin_shutdown(ShutdownCause::default());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-    }
-
-    #[test]
-    fn join_handle_reports_shutdown_without_delaying_shutdown() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-
-        let mut join_handle = tasks.add_test(TestSubjectFuture::new());
-
-        executor.begin_shutdown(ShutdownCause::default());
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        let mut cx = Context::from_waker(Waker::noop());
-        let result = Pin::new(&mut join_handle).poll(&mut cx);
-
-        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
-    }
-
-    #[test]
-    fn enqueue_after_shutdown_reports_shutdown() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-
-        executor.begin_shutdown(ShutdownCause::default());
-
-        let mut handle = tasks.add_test(async { 42 });
-        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-
-        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
-    }
-
-    #[test]
-    fn direct_drop_cancels_tasks_safely() {
-        let executor = Executor::builder().build();
-        let mut handle = executor.tasks().add_test(std::future::pending::<()>());
-
-        drop(executor);
-
-        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
-    }
-
-    #[test]
-    fn direct_drop_drains_remote_wakes_while_task_set_is_retained() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-        let retained = Rc::new(RefCell::new(None));
-        tasks.add_test(poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                *retained.borrow_mut() = Some(cx.waker().clone());
-                Poll::<()>::Pending
-            }
-        }));
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        let waker = retained.borrow_mut().take().unwrap();
-        std::thread::spawn(move || waker.wake()).join().unwrap();
-        assert!(executor.shared.wake().has_remote_wakes());
-
-        drop(executor);
-
-        assert!(tasks.task_storage_is_empty());
-    }
-
-    #[test]
-    fn direct_drop_unlinks_a_woken_pending_task() {
-        let mut executor = Executor::builder().build();
-        let future = TestSubjectFuture::new();
-        let retained = future.waker();
-        let mut handle = executor.tasks().add_test(future);
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        retained.borrow().as_ref().unwrap().wake_by_ref();
-        executor.activate_awakened_tasks();
-        drop(executor);
-
-        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert!(matches!(result, Poll::Ready(Err(crate::JoinError::Shutdown(_)))));
-    }
-
-    #[test]
-    fn task_wake_also_wakes_owner() {
-        // If something (our test) triggers the waker of a task, this also causes the
-        // owner's waker to be triggered.
-        let owner_waker = Arc::new(TestWaker::new());
-
-        let mut executor = new_guarded_executor(Arc::clone(&owner_waker).into());
-        let tasks = executor.tasks();
-
-        let future = TestSubjectFuture::new();
-        let future_waker = future.waker();
-
-        tasks.add_test(future);
-
-        // It just inactivates immediately after storing the waker, so nothing else to do.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        // It should not have been triggered yet, nothing has poked a waker.
-        assert!(!owner_waker.awakened.load(atomic::Ordering::Relaxed));
-
-        future_waker.borrow().as_ref().unwrap().wake_by_ref();
-
-        // Now the owner's waker should be triggered as well.
-        assert!(owner_waker.awakened.load(atomic::Ordering::Relaxed));
-    }
-
-    #[test]
-    fn task_awaits_yield_future() {
-        // A task awaits a future that yields (Pending on first poll, then immediately completes).
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let future = async {
-            let yield_future = YieldFuture::default();
-            yield_future.await;
-        };
-
-        _ = tasks.add_test(future);
-
-        // The task is polled, which suspends due to the inner future's `Pending`.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
-
-        // The inner future triggered the waker, so the task activates again and runs to completion.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    }
-
-    #[test]
-    fn reentrant_task_addition() {
-        // We add a new task while already executing another task.
-
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-
-        let inner_task_completed = Rc::new(Cell::new(false));
-
-        let future = {
-            let inner_task_completed = Rc::clone(&inner_task_completed);
-            let tasks = tasks.clone();
-
-            async move {
-                tasks.add_test(async move {
-                    inner_task_completed.set(true);
-                });
-            }
-        };
-
-        tasks.add_test(future);
-
-        // The outer task spawns a new task and completes. We get `Continue` because
-        // the executor can see it has a new task enqueued, which it wants to process.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
-
-        assert!(!inner_task_completed.get());
-
-        // The inner task now runs to completion.
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        assert!(inner_task_completed.get());
-    }
-
-    #[test]
-    fn reentrant_tasks_wait_for_next_cycle_in_registration_order() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-        let polls = Rc::new(RefCell::new(Vec::new()));
-        let mut cycles = Vec::new();
-
-        // Recheck registration order after the active and new-task buffers have been swapped and reused.
-        for batch in 0..2 {
-            for index in 0..2 {
-                let tasks_for_child = tasks.clone();
-                let polls = Rc::clone(&polls);
-                tasks.add_test(async move {
-                    polls.borrow_mut().push(batch * 4 + index);
-                    tasks_for_child.add_test(async move {
-                        polls.borrow_mut().push(batch * 4 + index + 2);
-                    });
-                });
-            }
-
-            cycles.push((executor.execute_cycle(), polls.borrow().clone()));
-            cycles.push((executor.execute_cycle(), polls.borrow().clone()));
-        }
-
-        assert_eq!(
-            cycles,
-            [
-                (CycleOutcome::Continue, vec![0, 1]),
-                (CycleOutcome::Suspend, vec![0, 1, 2, 3]),
-                (CycleOutcome::Continue, vec![0, 1, 2, 3, 4, 5]),
-                (CycleOutcome::Suspend, vec![0, 1, 2, 3, 4, 5, 6, 7]),
-            ]
-        );
-    }
-
-    #[test]
-    fn new_tasks_precede_awakened_tasks() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let tasks = executor.tasks();
-        let polls = Rc::new(RefCell::new(Vec::new()));
-
-        let future = TestSubjectFuture::new();
-        let future_waker = future.waker();
-        let completes = future.completes_on_next_poll();
-        future.on_poll({
-            let polls = Rc::clone(&polls);
-            move |_| polls.borrow_mut().push(2)
-        });
-        tasks.add_test(future);
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        polls.borrow_mut().clear();
-
-        future_waker.borrow().as_ref().unwrap().wake_by_ref();
-        completes.set(true);
-        for index in 0..2 {
-            let polls = Rc::clone(&polls);
-            tasks.add_test(async move {
-                polls.borrow_mut().push(index);
-            });
-        }
-
-        assert_eq!(
-            (executor.execute_cycle(), polls.borrow().clone()),
-            (CycleOutcome::Suspend, vec![0, 1, 2])
-        );
-    }
-
-    #[test]
-    fn completed_task_waker_is_noop_after_executor_shutdown() {
-        let mut executor = Executor::builder().build();
-        let waker = Rc::new(RefCell::new(None));
-        let polls = Rc::new(Cell::new(0));
-        executor.tasks().add_test(poll_fn({
-            let waker = Rc::clone(&waker);
-            let polls = Rc::clone(&polls);
-            move |cx| {
-                polls.set(polls.get() + 1);
-                *waker.borrow_mut() = Some(cx.waker().clone());
-                Poll::Ready(())
-            }
-        }));
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        executor.begin_shutdown(ShutdownCause::default());
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        drop(executor);
-
-        waker.borrow().as_ref().unwrap().wake_by_ref();
-        assert_eq!(polls.get(), 1);
-    }
-
-    #[test]
-    fn duplicate_wakes_keep_first_notification_order() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let polls = Rc::new(RefCell::new(Vec::new()));
-        let mut wakers = Vec::new();
-        for index in 0..3 {
-            let future = TestSubjectFuture::new();
-            wakers.push(future.waker());
-            future.on_poll({
-                let polls = Rc::clone(&polls);
-                move |_| polls.borrow_mut().push(index)
-            });
-            executor.tasks().add_test(future);
-        }
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        // Recheck first-notification order after each cycle clears and reuses the awakened queue.
-        for _ in 0..3 {
-            polls.borrow_mut().clear();
-            for index in [2, 0, 2, 1] {
-                wakers[index].borrow().as_ref().unwrap().wake_by_ref();
-            }
-            assert_eq!(
-                (executor.execute_cycle(), polls.borrow().clone()),
-                (CycleOutcome::Suspend, vec![2, 0, 1])
-            );
-        }
-    }
-
-    #[test]
-    fn cross_thread_waker_clone_wake_and_drop() {
-        let mut executor = new_guarded_executor(Waker::noop().clone());
-        let future = TestSubjectFuture::new();
-        let future_waker = future.waker();
-        let completes = future.completes_on_next_poll();
-        let mut handle = executor.tasks().add_test(future);
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-        let waker = future_waker.borrow().as_ref().unwrap().clone();
-        std::thread::spawn(move || {
-            let clone = waker.clone();
-            drop(waker);
-            clone.wake();
-        })
-        .join()
-        .unwrap();
-        completes.set(true);
-
-        let outcome = executor.execute_cycle();
-        let result = Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()));
-        assert_eq!((outcome, result), (CycleOutcome::Suspend, Poll::Ready(Ok(()))));
-    }
-
-    #[test]
-    fn retained_waiter_does_not_delay_shutdown() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-
-        let retained_waiter = Rc::new(RefCell::new(None));
-
-        let task = tasks.add_test({
-            let retained_waiter = Rc::clone(&retained_waiter);
-
-            poll_fn(move |cx| {
-                *retained_waiter.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending::<usize>
-            })
-        });
-
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-        let retained_waiter = retained_waiter.borrow_mut().take().unwrap();
-        drop(task);
-        executor.begin_shutdown(ShutdownCause::default());
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-        drop(executor);
-
-        retained_waiter.wake_by_ref();
-        retained_waiter.wake();
-    }
-
-    #[test]
-    fn thread_safety() {
-        assert_not_impl_any!(Executor: Send, Sync);
-    }
-
-    #[test]
-    fn only_one_live_executor_is_allowed_per_thread() {
-        let executor = Executor::builder().build();
-
-        let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Executor::builder().build()));
-        duplicate.unwrap_err();
-
-        drop(executor);
-        drop(Executor::builder().build());
-    }
 }

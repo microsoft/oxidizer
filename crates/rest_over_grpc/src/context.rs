@@ -211,9 +211,8 @@ pub(crate) fn append_headers(dst: &mut HeaderMap, src: HeaderMap) {
         if name.is_some() {
             current = name;
         }
-        if let Some(name) = current.clone() {
-            dst.append(name, value);
-        }
+        let name = current.clone().expect("HeaderMap iteration supplies a name before repeated values");
+        dst.append(name, value);
     }
 }
 
@@ -258,6 +257,7 @@ pub(crate) fn strip_uncontrolled_response_headers(headers: &mut HeaderMap) {
         let _ = headers.remove(name);
     }
     // `Keep-Alive` and `Proxy-Connection` have no `http::header` constant.
+    // #[gamma::skip(collection.reverse_array, reason = "Removing these two distinct header names commutes and neither removal is observed between iterations")]
     for name in ["keep-alive", "proxy-connection"] {
         let _ = headers.remove(name);
     }

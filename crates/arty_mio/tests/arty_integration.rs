@@ -10,14 +10,14 @@ testing_aids::init_tracing!();
 use std::io;
 use std::net::UdpSocket as StdUdpSocket;
 
-use arty::task::Builtins;
+use arty::task::Context;
 use arty_mio::{MioContext, MioOptions};
 use mio::Interest;
 use mio::net::UdpSocket;
 
 #[arty::test]
-async fn builtins_context_drives_a_mio_source(builtins: Builtins) {
-    let io = builtins.io().context::<MioContext>(&MioOptions::default());
+async fn context_drives_a_mio_source(context: Context) {
+    let io = context.io().context::<MioContext>(&MioOptions::default());
     let receiver = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
     let sender = StdUdpSocket::bind("127.0.0.1:0").unwrap();
     sender.connect(receiver.local_addr().unwrap()).unwrap();

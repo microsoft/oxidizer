@@ -474,7 +474,6 @@ where
     type Error = Infallible;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Infallible>> + Send>>;
 
-    #[cfg_attr(test, mutants::skip)]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }

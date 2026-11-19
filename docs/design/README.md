@@ -8,6 +8,79 @@ Keep repository-specific automation only for capabilities outside Anvil's
 scope, such as release tooling and tests for that tooling. Generated Anvil
 files are updated with `cargo anvil`, not edited directly.
 
+## Upgrading Anvil
+
+Anvil preserves files that differ from their last generated content.
+An upgrade can therefore leave an older customized file in place.
+The version in `.anvil.lock` does not prove that all files match the new templates.
+An `.anvil-proposed` file contains proposed replacement content.
+
+1. Install the selected release with `cargo install --locked --version VERSION cargo-anvil`.
+2. Run `cargo anvil --version` to make sure that the selected release is active.
+3. Run `cargo anvil --dry-run` and review every proposed update, refusal, and preserved customization.
+4. Compare each customized file with the selected release's template. Prefer the template unless a current repository requirement needs an override.
+5. If a file must return to generated content, remove only that file after reviewing its differences. Run `cargo anvil` to recreate it.
+6. Run `cargo anvil` to apply the remaining updates.
+7. Review the generated changes and `.anvil.lock`. Run `cargo anvil --dry-run` again and explain every remaining override.
+
+Move repository requirements to supported Anvil configuration where possible.
+Do not preserve an entire generated file to retain obsolete pins or comments.
+Send general runner fixes upstream rather than maintaining permanent local copies.
+
+External GitHub Actions require full-length commit SHA pins with release-version
+comments, including actions with immutable releases.
+Local action and workflow references remain local paths.
+If an Anvil template still uses an external action tag, resolve that upstream.
+Do not claim complete SHA pinning while generated templates still contain tags.
+
+The current example-runner override builds each example before its execution
+timeout starts. This keeps compilation outside the runtime limit.
+Review this override against the selected template during each upgrade.
+The PR workflow uses the unmodified Anvil template.
+
+## Verification behavior
+
+Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
+It runs both `--all-features` and `--no-default-features` configurations.
+The local gate and CI uploads use the same filtered LCOV files, which contain
+line-coverage counts, under `target/coverage`.
+Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.
+If macros make source ownership uncertain, the filter keeps ambiguous counters.
+Keep explicit exclusions for exceptional production paths and helpers that the
+filter cannot classify.
+
+Package-isolated all-target checks run in scheduled validation, not in the
+generated PR tiers. This division follows the standard Anvil catalog.
+`anvil-check-all-targets` checks each package separately with default features
+and with default features disabled.
+PR Clippy and coverage builds select packages together.
+Cargo can combine their features, so these PR builds can miss a dependency or
+target requirement that fails in an isolated build.
+Scheduled validation detects those failures later.
+Run `just anvil-check-all-targets` before publication when a change needs this
+isolated check. The package-isolated `http_headers_simd` PR jobs described below
+remain in place to test its documented `no_std` configurations.
+
+Anvil runs examples by default. Fetch examples that send real requests use
+public endpoints such as `https://example.com`. Automated runs require public
+network access and can fail if the endpoint or network is unavailable.
+Examples that need developer credentials, manual arguments, or separately
+installed profiling tools remain build-only in
+`[package.metadata.anvil.examples].no-run`.
+Server examples use OS-assigned ports by default. Axum and Routerama stop
+after two seconds during automated runs. Fetch streaming uses an unnamed
+temporary file. Snapshot examples write their named artifacts to the current
+directory.
+
+The handwritten `repository-checks.yml` runs
+`just test-feature-regressions --package PACKAGE` for
+`compressors` with only `deflate` enabled and for `fetch` with only `tokio,native-tls`
+enabled. These package-isolated runs cover raw-deflate pool resets without `zlib`
+and automatic native TLS selection without `rustls`. Neither Anvil's all-features
+run nor its no-default-features run selects these combinations. The recipe checks
+that each required regression test is present before it runs the tests.
+Both jobs participate in `Required repository checks`.
+
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
 tests on AArch64 and x86-family Linux. The generated Anvil test groups can select the
@@ -48,39 +121,40 @@ SSSE3 or SSE4.2. Their runtime scope is Linux, not Windows or other operating
 systems. These are ordinary correctness tests, not an additional coverage or
 mutation requirement for no_std-only code.
 
-Mutation testing uses complete native cargo-mutants configurations under
-`.cargo/`. Plain `cargo mutants` discovers `mutants.toml`; the generated Anvil
-recipes select `mutants.windows.toml` or `mutants.linux.toml` when running on
-that host. Cargo-mutants replaces rather than merges configurations selected
-with `--config`, so the shared policy is intentionally duplicated across all
-three files. Selection is by operating system, not architecture, so both Linux
-runner architectures share the Linux configuration.
+Mutation testing uses Cargo Gamma through the generated Anvil recipes.
+`gamma.toml` holds the shared repository configuration.
+It enables all features, selects the `mutants` Cargo profile, and requires the lockfile.
+Gamma selects unit and integration test targets itself.
+Do not add `--tests` to `cargo-args`.
+The configuration retains intentional-abort and real-time stress filters.
+Type-system contracts remain in the native and careful suites.
+Test helpers recognize Gamma's `CARGO_GAMMA` process marker.
+They retain the legacy `MUTATION_TESTING=1` opt-in.
+Mutation runs keep watchdogs and stdout/file logging disabled.
 
-The `rallocator` and `seismograph_rallocator` crates are excluded entirely from
-mutation testing in all three configurations, on every runner architecture.
-This includes allocator termination guards, platform backends, and Seismograph
-integration rather than only individual known-hanging candidates. Ordinary tests,
-coverage, and runtime-analysis selection remain unchanged.
+The `rallocator`, `seismograph_rallocator`, `http_headers`, and `http_headers_simd`
+crates remain outside mutation-testing scope on every runner architecture.
+Shared test fixtures and terminal presentation code retain their file exclusions.
+Ordinary tests, coverage, and runtime-analysis selection remain unchanged.
+Trait exclusions cover diagnostic formatting and redacted output.
+Gamma matches the final written trait name, not a resolved trait identity.
 
-The mutation configurations retain intentional-abort test filters and known-hanging
-candidate exclusions as additional safeguards. Hosted Linux mutation jobs also
-disable crash-handler forwarding so expected aborts do not launch crash reporters.
+Gamma evaluates host and feature conditions during discovery.
+Inactive platform code no longer needs duplicated host configurations.
+Unknown conditions remain discoverable rather than becoming silent exclusions.
+The old `.cargo/mutants*.toml` files and `mutants` dependency are removed.
+Gamma does not consume those files or honor `mutants::skip`.
+Legacy function-wide skips and cargo-mutants description patterns are not translated into Gamma suppressions.
 
-The host configurations exclude known mutation candidates that are inactive on
-the active platform. Without those exclusions, cargo-mutants can mutate
-inactive source, produce an unchanged test binary, and report the surviving
-mutant as a false `MISSED` test gap. File and crate patterns cover most
-platform-specific source; function-level gates require explicit exclusions or
-source annotations because cargo-mutants does not evaluate Rust `cfg`
-expressions during candidate discovery. The Linux policy excludes the
-Windows-only `fetch_winhttp` and `fetch_winhttp_impl` crates wholesale because
-their platform gates are applied across many implementation modules. This
-temporarily also skips their small non-Windows coverage anchors rather than
-maintaining a brittle list of every Windows-only file.
-
-The `http_headers` and `http_headers_simd` crates are excluded from mutation
-testing through all three configurations. Their ordinary tests, coverage
-checks, and Miri checks remain enabled.
+Do not add mutation suppressions in advance.
+Run Gamma first and review its actual findings.
+If a finding needs suppression, add a narrow directive beside the source and explain the reason.
+Use Gamma's dependency-free comment form in published code.
+Run Gamma to validate comment-form directives.
+Do not suppress a whole function or file to silence one finding.
+Gamma bounds mutant execution with time and memory limits.
+A timeout is an undetected mutant, not a successful assertion.
+Review hangs against the actual Gamma finding before adding a suppression.
 
 Under Miri, `http_headers` samples repetitive generated inputs and byte
 substitutions while retaining fixed regressions and numeric and vector

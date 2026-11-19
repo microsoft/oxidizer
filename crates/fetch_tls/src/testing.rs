@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Test helpers used by `fetch_tls`'s own unit tests.
+//! Helpers for the unit tests in `fetch_tls`.
 //!
-//! Compiled only under `cfg(test)`. These helpers are **not** intended for
-//! production code paths — they accept any server certificate and never
-//! present a client certificate.
+//! These helpers compile only under `cfg(test)`. Do not use them in production.
+//! They accept every server certificate and never provide a client certificate.
 
 use std::sync::Arc;
 
@@ -17,8 +16,8 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 
 /// [`ServerCertVerifier`] that accepts every server certificate.
 ///
-/// Intended for tests that exercise TLS configuration plumbing without
-/// caring about certificate validity. Never use in production.
+/// Use this type only to test TLS configuration without valid certificates.
+/// Do not use it in production.
 #[derive(Debug, Default)]
 pub(crate) struct AcceptAllServerCertVerifier;
 
@@ -63,8 +62,8 @@ impl ServerCertVerifier for AcceptAllServerCertVerifier {
 
 /// [`ResolvesClientCert`] that never produces a client certificate.
 ///
-/// Useful for verifying plumbing of a `ResolvesClientCert` through
-/// [`crate::RustlsOptions`] without requiring a real key.
+/// Use this type to pass `ResolvesClientCert` through [`crate::RustlsOptions`]
+/// without a real key.
 #[derive(Debug, Default)]
 pub(crate) struct NoClientCertResolver;
 

@@ -7,12 +7,8 @@
 //! # #[cfg(feature = "gzip")] {
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
+//! let layer = Compression::client().decompress_responses(&[Format::Gzip]);
 //! # let _ = layer;
-//! # }
 //! # }
 //! ```
 
@@ -23,16 +19,14 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_compression/favicon.ico"
 )]
 
-//! [`compressors`] transforms a stream of bytes. This crate applies that to
-//! HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
-//! and replacing a body with one that compresses or decompresses as it is read.
-//! The policies and trailer fields the body already carried travel through,
-//! except stale `Content-Digest` and `Repr-Digest` values removed after a
-//! transformation.
+//! [`Compression`] transforms HTTP bodies. It compresses small buffered bodies
+//! directly. It transforms larger or streaming bodies as they are read.
+//! Decompression always returns a streaming body, including for buffered input.
+//! The layer uses `Content-Encoding` for decompression and `Accept-Encoding` for
+//! response compression. It preserves body policies and trailers. It removes
+//! stale `Content-Digest` and `Repr-Digest` values after a transformation.
 //!
-//! Everything runs through one handler, [`Compression`], because a client and
-//! a server want different parts of the same job. The role is chosen up front
-//! and decides which toggles exist:
+//! Select a client or server role when you create the layer:
 //!
 //! | Role | Configured with | Transforms |
 //! |---|---|---|
@@ -40,25 +34,31 @@
 //! | [`Server`] | [`decompress_requests`][CompressionLayer::decompress_requests] | the request coming in |
 //! | [`Server`] | [`compress_responses`][CompressionLayer::compress_responses] | the response going out |
 //!
-//! Each is off until it is configured. Because the toggles are scoped to the
-//! role, a misconfiguration is a compile error rather than a subtle one: a
-//! client cannot ask to compress a response it has just received, and a server
-//! cannot advertise `Accept-Encoding` on a request that is arriving rather than
-//! leaving. [`limits`][CompressionLayer::limits],
-//! [`resources`][CompressionLayer::resources] and
-//! [`on_unsupported`][CompressionLayer::on_unsupported] mean the same thing
-//! either way, so they are available on both.
+//! Each transformation is off until you configure it. The role limits which
+//! transformations are available. Both roles support
+//! [`limits`][CompressionLayer::limits],
+//! [`resources`][CompressionLayer::resources], and
+//! [`on_unsupported`][CompressionLayer::on_unsupported].
 //!
-//! Clients leave request bodies unchanged, and servers leave response decompression
-//! to their callers. Servers skip server-sent events, native gRPC and common
-//! already-compressed media types. A
+//! Clients do not change request bodies. Servers do not decompress response
+//! bodies. Servers skip server-sent events, native gRPC, and common compressed
+//! media types. A
 //! [`content-type allowlist`][CompressionLayer::compressible_types] can restrict
 //! response compression further.
 //!
-//! Response compression defaults to [`Level::FAST`][compressors::Level::FAST],
-//! adjustable with [`level`][CompressionLayer::level]. When a streaming body pauses,
-//! buffered compression output is flushed so the consumer can decompress the bytes
-//! already sent without waiting for the body to end.
+//! Response compression uses [`Level::FAST`][compressors::Level::FAST] by
+//! default. Use [`level`][CompressionLayer::level] to change it. If a streaming
+//! body pauses, the compressor flushes buffered output. The consumer can then
+//! decompress each sent part before the body ends.
+//!
+//! For an eligible successful response with a complete body that is not known
+//! to be empty, the server layer can return an empty `406 Not Acceptable`
+//! response. It does this if the caller rejects `identity` and the layer cannot
+//! apply an acceptable coding. A content-type exclusion can prevent that
+//! coding. The layer also returns `406 Not Acceptable` for an existing
+//! unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`, statuses that
+//! cannot carry a body, known-empty bodies, partial responses, and responses
+//! with `Content-Range` bypass this negotiation.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")] {
@@ -67,59 +67,62 @@
 //! use compressors::DecompressorLimits;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let client = Compression::client(body_builder.clone())
+//! let client = Compression::client()
 //!     .decompress_responses(&[Format::Gzip])
 //!     .limits(
 //!         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
 //!     );
 //!
-//! let server = Compression::server(body_builder)
+//! let server = Compression::server()
 //!     .decompress_requests(&[Format::Gzip])
 //!     .compress_responses(&[Format::Gzip]);
 //! # let _ = (client, server);
 //! # }
-//! # }
 //! ```
 //!
-//! Decompressed messages carry [`OriginalBody`] in their extensions. It records the
-//! original compression formats and `Content-Length` after those headers have been
-//! removed from the decompressed request or response.
+//! A decompressed message stores [`OriginalBody`] in its extensions. This value
+//! records the original compression formats. It also records the first
+//! `Content-Length` field value if it can parse that value as a `u64`.
 //!
-//! # Which formats
+//! # Formats
 //!
-//! Nothing happens until one of the three transformations is given formats, and
-//! only formats compiled in by the `gzip`, `deflate`, `brotli` and `zstd`
-//! features can be named.
+//! A transformation needs at least one format. The `gzip`, `deflate`, `brotli`,
+//! and `zstd` features enable their matching formats.
 //!
-//! HTTP `deflate` is zlib-wrapped DEFLATE, so the `deflate` feature enables
-//! [`Format::Zlib`][compressors::format::Format]. Raw RFC 1951 DEFLATE has no
-//! HTTP content-coding token and is ignored when supplied.
+//! HTTP `deflate` uses zlib-wrapped DEFLATE. The `deflate` feature therefore
+//! enables [`Format::Zlib`][compressors::format::Format]. Raw RFC 1951 DEFLATE
+//! has no HTTP content-coding token, so the crate ignores it.
 //!
 //! # Bounds
 //!
-//! Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams per
-//! decompression stage by default, including when they are streamed rather than buffered. Use
-//! [`limits`][CompressionLayer::limits] to change either bound for an application's budget. Removing
-//! them requires the explicit
+//! Each decompression stage limits output to 64 MiB and 1,024 compressed
+//! streams by default. These limits also apply to streaming bodies. Use
+//! [`limits`][CompressionLayer::limits] to change them. To remove them, use
 //! [`unbounded_output_len`][compressors::DecompressorLimits::unbounded_output_len] and
 //! [`unbounded_streams`][compressors::DecompressorLimits::unbounded_streams] methods.
+//! An encoded request or response can declare at most 16 enabled compression
+//! coding layers. This limit is fixed.
 //!
 //! # Errors
 //!
-//! Every transformation is lazy, so a malformed or oversized body fails when it
-//! is read rather than when its headers arrive. Failures carry one of three labels:
+//! Small buffered compression sets `Content-Length` to the final byte count and
+//! removes `Transfer-Encoding`. Decompression and streaming compression remove
+//! `Content-Length` because the final size is unknown.
+//!
+//! A small buffered compression error fails the handler call. Other data errors
+//! fail the body read. Errors created by this crate use one of these labels:
 //!
 //! | Label | What happened |
 //! |-------|---------------|
 //! | `compression_invalid` | The body was malformed for its declared compression format |
-//! | `compression_limit_exceeded` | Decompression would have exceeded the configured limits |
-//! | `compression_unsupported` | An unavailable format was seen under [`UnsupportedCompression::Fail`] |
+//! | `compression_limit_exceeded` | The body exceeds a decompression or content-coding limit |
+//! | `compression_unsupported` | A recognized but disabled format was seen under [`UnsupportedCompression::Fail`] |
 //!
-//! A `Content-Encoding` that cannot be parsed is not an error: the body is left
-//! exactly as it arrived.
+//! A source body error keeps its original label.
+//!
+//! An unknown or invalid `Content-Encoding` is not an error under either
+//! unsupported-format policy. The crate leaves the body and its headers
+//! unchanged.
 
 mod body;
 mod compression;

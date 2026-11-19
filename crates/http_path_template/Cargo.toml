@@ -4,7 +4,7 @@
 [package]
 name = "http_path_template"
 description = "Parser for the google.api.http path-template grammar"
-version = "0.2.2"
+version = "0.2.3"
 readme = "README.md"
 keywords = ["grpc", "rest", "path", "template", "http"]
 categories = ["parser-implementations", "web-programming"]
@@ -29,11 +29,8 @@ default = ["std"]
 # `core::error::Error` either way.
 std = []
 
-[dependencies]
-
 [dev-dependencies]
 criterion = { workspace = true }
-mutants = { workspace = true }
 
 # Callgrind instruction-count benchmarks (Valgrind is Linux-only).
 [target.'cfg(target_os = "linux")'.dev-dependencies]

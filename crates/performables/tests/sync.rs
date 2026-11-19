@@ -33,6 +33,7 @@ use serde::de::value::{Error as ValueError, U64Deserializer};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
 use serializer_support::ValueSerializer;
+use testing_aids::is_mutation_testing;
 #[cfg(feature = "seismograph")]
 use thread_aware::Relocator;
 use waker_support::clone_hook_waker;
@@ -93,32 +94,37 @@ fn waker(counter: &StdArc<WakeCounter>) -> Waker {
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
-    let deadline = Instant::now() + TEST_DEADLINE;
+    let deadline = (!is_mutation_testing()).then(|| Instant::now() + TEST_DEADLINE);
     let waker = Waker::from(StdArc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => {
-                let remaining = deadline
-                    .checked_duration_since(Instant::now())
-                    .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
-                std::thread::park_timeout(remaining);
-                assert!(
-                    Instant::now() < deadline,
-                    "future did not receive a wake before the bounded test deadline"
-                );
-            }
+            Poll::Pending => match deadline {
+                Some(deadline) => {
+                    let remaining = deadline
+                        .checked_duration_since(Instant::now())
+                        .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
+                    std::thread::park_timeout(remaining);
+                    assert!(
+                        Instant::now() < deadline,
+                        "future did not receive a wake before the bounded test deadline"
+                    );
+                }
+                None => std::thread::park(),
+            },
         }
     }
 }
 
 fn join_with_timeout<T>(thread: std::thread::JoinHandle<T>) -> T {
-    let deadline = Instant::now() + TEST_DEADLINE;
-    while !thread.is_finished() {
-        assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
-        std::thread::sleep(THREAD_POLL_INTERVAL);
+    if !is_mutation_testing() {
+        let deadline = Instant::now() + TEST_DEADLINE.max(Duration::from_secs(10));
+        while !thread.is_finished() {
+            assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
+            std::thread::sleep(THREAD_POLL_INTERVAL);
+        }
     }
     #[expect(clippy::unwrap_used, reason = "a thread panic should fail the test with its captured backtrace")]
     let result = thread.join().unwrap();
@@ -595,6 +601,8 @@ fn rw_lock_result_acquisitions_recover_without_clearing_poison() {
     assert!(lock.is_poisoned());
 
     lock.clear_poison();
+    lock.clear_poison();
+    assert!(!lock.is_poisoned());
     assert_eq!(*lock.read(), 3);
 }
 
@@ -1072,31 +1080,31 @@ fn lazy_lock_supports_debug_default_and_poisoning() {
 #[expect(clippy::too_many_lines, reason = "one scenario verifies all telemetry-enabled primitives")]
 fn ownership_and_lock_operations_emit_runtime_telemetry() {
     seismograph::recorder(Configuration {
-        general_events: seismograph::recorder::RecordingPolicy {
+        general_events: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        arc_dereferences: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096).unwrap(),
+        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096),
         ..Default::default()
     });
 
     let value = Arc::new(7_u64);
-    let arc_id = Arc::telemetry_object_id(&value);
+    let arc_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&value).cast::<()>());
     let other_thread = Arc::clone(&value);
     join_with_timeout(std::thread::spawn(move || std::hint::black_box(*other_thread)));
     std::hint::black_box(*value);
     let dropped = Arc::new(8_u64);
-    let dropped_id = Arc::telemetry_object_id(&dropped);
+    let dropped_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&dropped).cast::<()>());
     drop(dropped);
 
     let mut relocated = Arc::<u64, PerThread>::new_with(|| 13);
-    let relocated_id = Arc::telemetry_object_id(&relocated);
+    let relocated_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&relocated).cast::<()>());
     _ = Relocator::between_threads().relocate(&mut relocated);
 
     let mutex = Mutex::new(());

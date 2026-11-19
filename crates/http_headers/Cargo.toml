@@ -6,7 +6,7 @@ name = "http_headers"
 # TODO: The http_headers name is already reserved on crates.io.
 publish = false
 description = "Fast, ergonomic typed HTTP headers with borrowed views."
-version = "0.1.1"
+version = "0.1.2"
 readme = "README.md"
 edition.workspace = true
 rust-version.workspace = true
@@ -80,6 +80,8 @@ smallvec = { workspace = true, features = ["const_new"] }
 zeroize = { workspace = true, optional = true, features = ["alloc"] }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
+argh = { workspace = true }
 axum = { workspace = true, features = ["http1", "json", "tokio"] }
 base64 = { workspace = true, features = ["std"] }
 bolero = { workspace = true, features = ["std"] }
@@ -91,12 +93,11 @@ http = { workspace = true }
 httpdate = { workspace = true }
 idna = { workspace = true, features = ["compiled_data", "std"] }
 metabench = { workspace = true }
-mutants = { workspace = true }
 paste = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 sha1 = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = { workspace = true, features = ["util"] }
 zeroize = { workspace = true, features = ["alloc"] }
 

@@ -9,7 +9,7 @@ rallocator::rallocator!();
 
 fn main() {
     seismograph::recorder(seismograph::recorder::Configuration {
-        allocations: seismograph::recorder::RecordingPolicy {
+        allocations: seismograph::recorder::Policy {
             enabled: true,
             ..Default::default()
         },

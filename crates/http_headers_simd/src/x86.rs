@@ -24,19 +24,28 @@ const WIDTH_LANES: u32 = 16;
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn is_token(bytes: &[u8]) -> bool {
     if bytes.is_empty() {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
         return false;
     }
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
+        #[cfg(test)]
+        assert!(offset.checked_add(WIDTH).is_some_and(|end| end <= bytes.len()));
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         if token_mask(value) != 0xffff {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == 0 || bytes.len() - offset < 8 {
+    if
+    // #[gamma::skip(cond.always_true, logical.or_remove_right, arith.sub_to_add, arith.sub_to_div, relational.lt_to_gt, relational.lt_to_le, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Both tail paths validate every remaining token byte; a final overlapping vector only repeats already validated bytes, and offset == 0 short-circuits before division")]
+    offset == 0 || bytes.len() - offset < 8 {
         return crate::scalar::all_token_bytes(&bytes[offset..]);
     }
     let pointer = bytes.as_ptr().wrapping_add(bytes.len() - WIDTH).cast();
@@ -50,25 +59,47 @@ pub(super) unsafe fn is_token(bytes: &[u8]) -> bool {
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn is_token68_sse2(bytes: &[u8]) -> bool {
     let mut offset = 0;
-    while offset + 2 * WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The following single-vector loop and scalar tail classify both vectors when this loop stops one pair earlier")]
+    offset +
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A larger pair-loop minimum only defers data to the complete one-vector loop and scalar tail")]
+    2 * WIDTH
+        <= bytes.len()
+    {
+        #[cfg(test)]
+        assert!(offset.checked_add(2 * WIDTH).is_some_and(|end| end <= bytes.len()));
         let first_pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + 2 * WIDTH <= bytes.len()` bounds this unaligned load.
         let first = unsafe { _mm_loadu_si128(first_pointer) };
-        let second_pointer = bytes.as_ptr().wrapping_add(offset + WIDTH).cast();
+        let second_offset = offset + WIDTH;
+        #[cfg(test)]
+        assert!(second_offset.checked_add(WIDTH).is_some_and(|end| end <= bytes.len()));
+        let second_pointer = bytes.as_ptr().wrapping_add(second_offset).cast();
         // SAFETY: `offset + 2 * WIDTH <= bytes.len()` bounds this unaligned load.
         let second = unsafe { _mm_loadu_si128(second_pointer) };
-        if token68_data_mask(first) != 0xffff || token68_data_mask(second) != 0xffff {
+        if
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, literal.int_increment, tag = "equivalent", reason = "A default zero mask or comparison with 65536 declines this all-data shortcut and validates the same remaining suffix with token68_tail")]
+        token68_data_mask(first) != 0xffff || token68_data_mask(second) != 0xffff {
             return crate::scalar::token68_tail(&bytes[offset..], offset != 0);
         }
-        offset += 2 * WIDTH;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        offset +=
+        // #[gamma::skip(arith.mul_to_div, literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(arith.mul_to_add, literal.int_decrement, tag = "equivalent", reason = "Strides eighteen and sixteen are positive and smaller than this validated thirty-two-byte pair, so they overlap rather than skip bytes; the following vector loop and scalar tail finish the same suffix")]
+        2 * WIDTH;
     }
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
-        if token68_data_mask(value) != 0xffff {
+        if
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, literal.int_increment, tag = "equivalent", reason = "A default zero mask or comparison with 65536 declines the all-data shortcut and token68_tail validates the same remaining suffix")]
+        token68_data_mask(value) != 0xffff {
             return crate::scalar::token68_tail(&bytes[offset..], offset != 0);
         }
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
     crate::scalar::token68_tail(&bytes[offset..], offset != 0)
@@ -79,32 +110,56 @@ pub(super) unsafe fn is_token68_sse2(bytes: &[u8]) -> bool {
 /// The processor must support SSE4.2.
 #[target_feature(enable = "sse4.2")]
 pub(super) unsafe fn is_token68_sse42(bytes: &[u8]) -> bool {
-    if bytes.len() < WIDTH {
+    if
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, tag = "equivalent", reason = "The scalar token68 validator accepts the same byte grammar at every length, including one complete vector")]
+    bytes.len() < WIDTH {
         return crate::scalar::is_token68(bytes);
     }
     let mut offset = 0;
-    while offset + 2 * WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The following single-vector loop and overlapping tail classify both vectors when this loop stops one pair earlier")]
+    offset +
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A larger pair-loop minimum only defers data to the complete one-vector loop and scalar tail")]
+    2 * WIDTH
+        <= bytes.len()
+    {
+        #[cfg(test)]
+        assert!(offset.checked_add(2 * WIDTH).is_some_and(|end| end <= bytes.len()));
         let first_pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + 2 * WIDTH <= bytes.len()` bounds this unaligned load.
         let first = unsafe { _mm_loadu_si128(first_pointer) };
         let second_pointer = bytes.as_ptr().wrapping_add(offset + WIDTH).cast();
         // SAFETY: `offset + 2 * WIDTH <= bytes.len()` bounds this unaligned load.
         let second = unsafe { _mm_loadu_si128(second_pointer) };
-        if token68_valid_mask_sse42(first) != 0xffff || token68_valid_mask_sse42(second) != 0xffff {
+        if
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, literal.int_increment, tag = "equivalent", reason = "A default zero mask or comparison with 65536 declines the all-data shortcut and token68_tail validates the same remaining suffix")]
+        token68_valid_mask_sse42(first) != 0xffff || token68_valid_mask_sse42(second) != 0xffff {
             return crate::scalar::token68_tail(&bytes[offset..], offset != 0);
         }
-        offset += 2 * WIDTH;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        offset +=
+        // #[gamma::skip(arith.mul_to_div, literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(arith.mul_to_add, literal.int_decrement, tag = "equivalent", reason = "Strides eighteen and sixteen are positive and smaller than this validated thirty-two-byte pair, so they overlap rather than skip bytes; the following vector loop and overlapping tail finish the same suffix")]
+        2 * WIDTH;
     }
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
-        if token68_valid_mask_sse42(value) != 0xffff {
+        if
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, literal.int_increment, tag = "equivalent", reason = "A default zero mask or comparison with 65536 declines the all-data shortcut and token68_tail validates the same remaining suffix")]
+        token68_valid_mask_sse42(value) != 0xffff {
             return crate::scalar::token68_tail(&bytes[offset..], offset != 0);
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == bytes.len() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "An exact vector boundary means every byte already passed the data mask; rechecking its final full vector returns the same true result")]
+    offset == bytes.len() {
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The short-input branch returned already; offset is a positive multiple of WIDTH, so it is neither zero nor one")]
         return offset != 0;
     }
     let final_offset = bytes.len() - WIDTH;
@@ -117,11 +172,19 @@ pub(super) unsafe fn is_token68_sse42(bytes: &[u8]) -> bool {
     }
     let equals = _mm_movemask_epi8(_mm_cmpeq_epi8(value, _mm_set1_epi8(b'='.cast_signed())));
     if equals == 0 {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
         return false;
     }
     let first = equals.trailing_zeros() as usize;
-    let expected = (0xffff_i32 << first) & 0xffff;
-    valid | equals == 0xffff && equals == expected && final_offset + first != 0
+    let expected = (0xffff_i32 << first)
+        // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "The preceding complete vector passed the data mask, so padding starts after bit zero in this overlapping tail; the shifted mask already clears bit zero")]
+        & 0xffff;
+    let padding_suffix = valid | equals == 0xffff && equals == expected;
+    // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "A complete all-data vector precedes this tail, so the first padding position final_offset plus first is at least WIDTH and cannot be zero")]
+    padding_suffix
+        &&
+        // #[gamma::skip(arith.add_to_mul, literal.int_increment, tag = "equivalent", reason = "A complete all-data vector precedes this tail; final_offset and first are positive and the first padding position is at least WIDTH, so both sum and product are nonzero and the sum cannot be one")]
+        final_offset + first != 0
 }
 
 /// # Safety
@@ -130,7 +193,9 @@ pub(super) unsafe fn is_token68_sse42(bytes: &[u8]) -> bool {
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn is_field_value(bytes: &[u8]) -> bool {
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
@@ -139,11 +204,15 @@ pub(super) unsafe fn is_field_value(bytes: &[u8]) -> bool {
         let invalid_control = _mm_andnot_si128(_mm_cmpeq_epi8(value, _mm_set1_epi8(9)), control);
         let del = _mm_cmpeq_epi8(value, _mm_set1_epi8(0x7f));
         if _mm_movemask_epi8(_mm_or_si128(invalid_control, del)) != 0 {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == 0 || bytes.len() - offset == 1 {
+    if
+    // #[gamma::skip(cond.always_true, logical.or_remove_right, arith.sub_to_add, arith.sub_to_div, relational.eq_to_ne, literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "Both tail paths check the same field-value byte classes; an overlapping vector only repeats validated bytes, and offset == 0 prevents division by zero")]
+    offset == 0 || bytes.len() - offset == 1 {
         return crate::scalar::is_field_value(&bytes[offset..]);
     }
     let pointer = bytes.as_ptr().wrapping_add(bytes.len() - WIDTH).cast();
@@ -163,7 +232,9 @@ pub(super) unsafe fn is_field_value(bytes: &[u8]) -> bool {
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
     let mut offset = 0;
-    while offset + WIDTH <= left.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The scalar slice comparison after the loop compares the final full vector when this loop stops one block earlier")]
+    offset + WIDTH <= left.len() {
         let left_pointer = left.as_ptr().wrapping_add(offset).cast();
         // SAFETY: the dispatcher supplies equal-length slices and the loop bounds this load.
         let left_value = unsafe { _mm_loadu_si128(left_pointer) };
@@ -171,8 +242,10 @@ pub(super) unsafe fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
         // SAFETY: the dispatcher supplies equal-length slices and the loop bounds this load.
         let right_value = unsafe { _mm_loadu_si128(right_pointer) };
         if _mm_movemask_epi8(_mm_cmpeq_epi8(lower(left_value), lower(right_value))) != 0xffff {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
     crate::scalar::eq_ignore_ascii_case(&left[offset..], &right[offset..])
@@ -184,7 +257,9 @@ pub(super) unsafe fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn find_interesting(bytes: &[u8]) -> Option<usize> {
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
@@ -195,6 +270,7 @@ pub(super) unsafe fn find_interesting(bytes: &[u8]) -> Option<usize> {
         if found != 0 {
             return Some(offset + found.trailing_zeros() as usize);
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
     crate::scalar::find_interesting(&bytes[offset..]).map(|index| offset + index)
@@ -206,7 +282,9 @@ pub(super) unsafe fn find_interesting(bytes: &[u8]) -> Option<usize> {
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
@@ -218,6 +296,7 @@ pub(super) unsafe fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<
         if found != 0 {
             return Some(offset + found.trailing_zeros() as usize);
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
     crate::scalar::find_either(&bytes[offset..], first, second).map(|index| offset + index)
@@ -231,7 +310,9 @@ pub(super) unsafe fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<
 /// `WIDTH` because every block is loaded relative to a full vector of input.
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn is_simple_uri_tail_ssse3(bytes: &[u8]) -> bool {
-    if bytes.len() <= 2 * WIDTH {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_to_zero, tag = "equivalent", reason = "These smaller cutoffs only select the complete loop-and-overlap implementation instead of the two-vector shortcut")]
+    bytes.len() <= 2 * WIDTH {
         let head_pointer = bytes.as_ptr().cast();
         // SAFETY: the caller guarantees at least `WIDTH` bytes.
         let head = unsafe { _mm_loadu_si128(head_pointer) };
@@ -243,35 +324,47 @@ pub(super) unsafe fn is_simple_uri_tail_ssse3(bytes: &[u8]) -> bool {
         let tail_rejects = simple_uri_reject_mask_ssse3(tail);
         // Lanes shared by both blocks are rejected in `head` too, so the overlap only has to
         // be masked off once a rejected lane forces the fragment count to be exact.
-        if head_rejects | tail_rejects == 0 {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "For zero reject masks the following fragment_count calls both return Some(0), so declining this shortcut still returns true")]
+        head_rejects | tail_rejects == 0 {
             return true;
         }
         let repeated = (1_u32 << (2 * WIDTH - bytes.len())) - 1;
         let (Some(head_hashes), Some(tail_hashes)) = (fragment_count(head, head_rejects), fragment_count(tail, tail_rejects & !repeated))
         else {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         };
         return head_hashes + tail_hashes <= 1;
     }
     let mut offset = 0;
     let mut hashes = 0_u32;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         let rejects = simple_uri_reject_mask_ssse3(value);
-        if rejects != 0 {
+        if
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "Processing an all-zero reject mask adds zero fragments and cannot fail; hashes was already checked to be at most one")]
+        rejects != 0 {
             let Some(count) = fragment_count(value, rejects) else {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             };
             hashes += count;
             if hashes > 1 {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             }
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == bytes.len() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "At an exact boundary the overlap mask removes all lanes of the already validated final vector, leaving zero rejects and the same true result")]
+    offset == bytes.len() {
         return true;
     }
     let final_offset = bytes.len() - WIDTH;
@@ -280,10 +373,13 @@ pub(super) unsafe fn is_simple_uri_tail_ssse3(bytes: &[u8]) -> bool {
     let value = unsafe { _mm_loadu_si128(pointer) };
     let repeated = (1_u32 << (offset - final_offset)) - 1;
     let rejects = simple_uri_reject_mask_ssse3(value) & !repeated;
-    if rejects == 0 {
+    if
+    // #[gamma::skip(cond.always_false, literal.int_increment, tag = "equivalent", reason = "With no rejects fragment_count returns Some(0) and hashes is already at most one; bit zero is masked as overlap, so a reject mask of one is unreachable")]
+    rejects == 0 {
         return true;
     }
     let Some(count) = fragment_count(value, rejects) else {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
         return false;
     };
     hashes + count <= 1
@@ -297,7 +393,9 @@ pub(super) unsafe fn is_simple_uri_tail_ssse3(bytes: &[u8]) -> bool {
 /// because every block is loaded relative to a full vector of input.
 #[target_feature(enable = "sse4.2")]
 pub(super) unsafe fn all_base64_alphabet_sse42(bytes: &[u8]) -> bool {
-    if bytes.len() <= 2 * WIDTH {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_to_zero, tag = "equivalent", reason = "These smaller cutoffs only select the complete loop-and-overlap implementation instead of the two-vector shortcut")]
+    bytes.len() <= 2 * WIDTH {
         let head_pointer = bytes.as_ptr().cast();
         // SAFETY: the caller guarantees at least `WIDTH` bytes.
         let head = unsafe { _mm_loadu_si128(head_pointer) };
@@ -307,15 +405,20 @@ pub(super) unsafe fn all_base64_alphabet_sse42(bytes: &[u8]) -> bool {
         return base64_reject_mask_sse42(head) | base64_reject_mask_sse42(tail) == 0;
     }
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         if base64_reject_mask_sse42(value) != 0 {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "At an exact vector boundary the fallback only reloads and revalidates the final vector that the loop already accepted")]
     if offset == bytes.len() {
         return true;
     }
@@ -333,7 +436,9 @@ pub(super) unsafe fn all_base64_alphabet_sse42(bytes: &[u8]) -> bool {
 /// because every block is loaded relative to a full vector of input.
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn all_base64_alphabet_sse2(bytes: &[u8]) -> bool {
-    if bytes.len() <= 2 * WIDTH {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_to_zero, tag = "equivalent", reason = "These smaller cutoffs only select the complete loop-and-overlap implementation instead of the two-vector shortcut")]
+    bytes.len() <= 2 * WIDTH {
         let head_pointer = bytes.as_ptr().cast();
         // SAFETY: the caller guarantees at least `WIDTH` bytes.
         let head = unsafe { _mm_loadu_si128(head_pointer) };
@@ -343,15 +448,20 @@ pub(super) unsafe fn all_base64_alphabet_sse2(bytes: &[u8]) -> bool {
         return base64_reject_mask(head) | base64_reject_mask(tail) == 0;
     }
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         if base64_reject_mask(value) != 0 {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "At an exact vector boundary the fallback only reloads and revalidates the final vector that the loop already accepted")]
     if offset == bytes.len() {
         return true;
     }
@@ -369,7 +479,9 @@ pub(super) unsafe fn all_base64_alphabet_sse2(bytes: &[u8]) -> bool {
 /// because every block is loaded relative to a full vector of input.
 #[target_feature(enable = "sse4.2")]
 pub(super) unsafe fn is_simple_uri_tail_sse42(bytes: &[u8]) -> bool {
-    if bytes.len() <= 2 * WIDTH {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_to_zero, tag = "equivalent", reason = "These smaller cutoffs only select the complete loop-and-overlap implementation instead of the two-vector shortcut")]
+    bytes.len() <= 2 * WIDTH {
         let head_pointer = bytes.as_ptr().cast();
         // SAFETY: the caller guarantees at least `WIDTH` bytes.
         let head = unsafe { _mm_loadu_si128(head_pointer) };
@@ -381,35 +493,47 @@ pub(super) unsafe fn is_simple_uri_tail_sse42(bytes: &[u8]) -> bool {
         let tail_rejects = simple_uri_reject_mask_sse42(tail);
         // Lanes shared by both blocks are rejected in `head` too, so the overlap only has to
         // be masked off once a rejected lane forces the fragment count to be exact.
-        if head_rejects | tail_rejects == 0 {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "For zero reject masks the following fragment_count calls both return Some(0), so declining this shortcut still returns true")]
+        head_rejects | tail_rejects == 0 {
             return true;
         }
         let repeated = (1_u32 << (2 * WIDTH - bytes.len())) - 1;
         let (Some(head_hashes), Some(tail_hashes)) = (fragment_count(head, head_rejects), fragment_count(tail, tail_rejects & !repeated))
         else {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         };
         return head_hashes + tail_hashes <= 1;
     }
     let mut offset = 0;
     let mut hashes = 0_u32;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         let rejects = simple_uri_reject_mask_sse42(value);
-        if rejects != 0 {
+        if
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "Processing an all-zero reject mask adds zero fragments and cannot fail; hashes was already checked to be at most one")]
+        rejects != 0 {
             let Some(count) = fragment_count(value, rejects) else {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             };
             hashes += count;
             if hashes > 1 {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             }
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == bytes.len() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "At an exact boundary the overlap mask removes all lanes of the already validated final vector, leaving zero rejects and the same true result")]
+    offset == bytes.len() {
         return true;
     }
     let final_offset = bytes.len() - WIDTH;
@@ -418,10 +542,13 @@ pub(super) unsafe fn is_simple_uri_tail_sse42(bytes: &[u8]) -> bool {
     let value = unsafe { _mm_loadu_si128(pointer) };
     let repeated = (1_u32 << (offset - final_offset)) - 1;
     let rejects = simple_uri_reject_mask_sse42(value) & !repeated;
-    if rejects == 0 {
+    if
+    // #[gamma::skip(cond.always_false, literal.int_increment, tag = "equivalent", reason = "With no rejects fragment_count returns Some(0) and hashes is already at most one; bit zero is masked as overlap, so a reject mask of one is unreachable")]
+    rejects == 0 {
         return true;
     }
     let Some(count) = fragment_count(value, rejects) else {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
         return false;
     };
     hashes + count <= 1
@@ -435,7 +562,9 @@ pub(super) unsafe fn is_simple_uri_tail_sse42(bytes: &[u8]) -> bool {
 /// because every block is loaded relative to a full vector of input.
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn is_simple_uri_tail_sse2(bytes: &[u8]) -> bool {
-    if bytes.len() <= 2 * WIDTH {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_to_zero, tag = "equivalent", reason = "These smaller cutoffs only select the complete loop-and-overlap implementation instead of the two-vector shortcut")]
+    bytes.len() <= 2 * WIDTH {
         let head_pointer = bytes.as_ptr().cast();
         // SAFETY: the caller guarantees at least `WIDTH` bytes.
         let head = unsafe { _mm_loadu_si128(head_pointer) };
@@ -447,35 +576,47 @@ pub(super) unsafe fn is_simple_uri_tail_sse2(bytes: &[u8]) -> bool {
         let tail_rejects = simple_uri_reject_mask(tail);
         // Lanes shared by both blocks are rejected in `head` too, so the overlap only has to
         // be masked off once a rejected lane forces the fragment count to be exact.
-        if head_rejects | tail_rejects == 0 {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "For zero reject masks the following fragment_count calls both return Some(0), so declining this shortcut still returns true")]
+        head_rejects | tail_rejects == 0 {
             return true;
         }
         let repeated = (1_u32 << (2 * WIDTH - bytes.len())) - 1;
         let (Some(head_hashes), Some(tail_hashes)) = (fragment_count(head, head_rejects), fragment_count(tail, tail_rejects & !repeated))
         else {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
             return false;
         };
         return head_hashes + tail_hashes <= 1;
     }
     let mut offset = 0;
     let mut hashes = 0_u32;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
         let rejects = simple_uri_reject_mask(value);
-        if rejects != 0 {
+        if
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "Processing an all-zero reject mask adds zero fragments and cannot fail; hashes was already checked to be at most one")]
+        rejects != 0 {
             let Some(count) = fragment_count(value, rejects) else {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             };
             hashes += count;
             if hashes > 1 {
+                // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
                 return false;
             }
         }
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         offset += WIDTH;
     }
-    if offset == bytes.len() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "At an exact boundary the overlap mask removes all lanes of the already validated final vector, leaving zero rejects and the same true result")]
+    offset == bytes.len() {
         return true;
     }
     let final_offset = bytes.len() - WIDTH;
@@ -484,10 +625,13 @@ pub(super) unsafe fn is_simple_uri_tail_sse2(bytes: &[u8]) -> bool {
     let value = unsafe { _mm_loadu_si128(pointer) };
     let repeated = (1_u32 << (offset - final_offset)) - 1;
     let rejects = simple_uri_reject_mask(value) & !repeated;
-    if rejects == 0 {
+    if
+    // #[gamma::skip(cond.always_false, literal.int_increment, tag = "equivalent", reason = "With no rejects fragment_count returns Some(0) and hashes is already at most one; bit zero is masked as overlap, so a reject mask of one is unreachable")]
+    rejects == 0 {
         return true;
     }
     let Some(count) = fragment_count(value, rejects) else {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "This return value is already false, exactly bool::default()")]
         return false;
     };
     hashes + count <= 1
@@ -503,7 +647,9 @@ pub(super) unsafe fn is_simple_uri_tail_sse2(bytes: &[u8]) -> bool {
 pub(super) unsafe fn scan_token_list_sse42(bytes: &[u8], empty: EmptyMembers) -> TokenListScan {
     let mut state = ListScan::new();
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
@@ -545,7 +691,9 @@ pub(super) unsafe fn scan_short_token_list_sse42(bytes: &[u8], empty: EmptyMembe
     // SAFETY: the caller guarantees at least `WIDTH` bytes from either end.
     let (first, final_value) = unsafe { short_windows(bytes, last) };
     let mut state = ListScan::new();
-    let folded = if two {
+    let folded = if
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "two can be false only for a WIDTH-byte input; then last is zero, the duplicate high mask is shifted away entirely, and push_line folds exactly the same WIDTH lanes as push_block")]
+    two {
         let shift = WIDTH_LANES - lanes_of(last);
         state.push_line(
             list::join_lanes(token_mask_sse42(first), token_mask_sse42(final_value), shift),
@@ -556,7 +704,9 @@ pub(super) unsafe fn scan_short_token_list_sse42(bytes: &[u8], empty: EmptyMembe
     } else {
         state.push_block(token_mask_sse42(first), ows_mask(first), comma_mask(first))
     };
-    if !folded {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A failed fold sets ListScan to STATE_REJECTED; finish independently returns Rejected for that absorbing state")]
+    !folded {
         return TokenListScan::Rejected;
     }
     state.finish(&[], empty)
@@ -576,7 +726,9 @@ pub(super) unsafe fn scan_short_token_list_sse2(bytes: &[u8], empty: EmptyMember
     // SAFETY: the caller guarantees at least `WIDTH` bytes from either end.
     let (first, final_value) = unsafe { short_windows(bytes, last) };
     let mut state = ListScan::new();
-    let folded = if two {
+    let folded = if
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "two can be false only for a WIDTH-byte input; then last is zero, the duplicate high mask is shifted away entirely, and push_line folds exactly the same WIDTH lanes as push_block")]
+    two {
         let shift = WIDTH_LANES - lanes_of(last);
         state.push_line(
             list::join_lanes(token_mask(first).cast_unsigned(), token_mask(final_value).cast_unsigned(), shift),
@@ -587,7 +739,9 @@ pub(super) unsafe fn scan_short_token_list_sse2(bytes: &[u8], empty: EmptyMember
     } else {
         state.push_block(token_mask(first).cast_unsigned(), ows_mask(first), comma_mask(first))
     };
-    if !folded {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A failed fold sets ListScan to STATE_REJECTED; finish independently returns Rejected for that absorbing state")]
+    !folded {
         return TokenListScan::Rejected;
     }
     state.finish(&[], empty)
@@ -634,7 +788,9 @@ fn shift_of(offset: usize, final_offset: usize) -> u32 {
 pub(super) unsafe fn scan_token_list_sse2(bytes: &[u8], empty: EmptyMembers) -> TokenListScan {
     let mut state = ListScan::new();
     let mut offset = 0;
-    while offset + WIDTH <= bytes.len() {
+    while
+    // #[gamma::skip(relational.le_to_lt, tag = "equivalent", reason = "The existing scalar or overlapping-window tail path classifies the final full vector if this loop stops one block earlier")]
+    offset + WIDTH <= bytes.len() {
         let pointer = bytes.as_ptr().wrapping_add(offset).cast();
         // SAFETY: `offset + WIDTH <= bytes.len()` permits this unaligned 16-byte load.
         let value = unsafe { _mm_loadu_si128(pointer) };
@@ -829,7 +985,11 @@ fn simple_uri_reject_mask_sse42(value: __m128i) -> u32 {
 #[target_feature(enable = "ssse3")]
 fn simple_uri_reject_mask_ssse3(value: __m128i) -> u32 {
     let low_nibble = _mm_set_epi64x(0x7cd4_5c54_5cfc_fcfc, 0xfcfc_f8fc_f8f8_fcb8_u64.cast_signed());
-    let high_nibble = _mm_set_epi64x(0, 0x8040_2010_0804_0201_u64.cast_signed());
+    let high_nibble = _mm_set_epi64x(
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Changing this zero to one sets only bit zero of lookup entry eight; every low_nibble table byte has bit zero clear, so the subsequent AND still rejects these lanes")]
+        0,
+        0x8040_2010_0804_0201_u64.cast_signed(),
+    );
     let low = _mm_and_si128(value, _mm_set1_epi8(0x0f));
     let high = _mm_and_si128(_mm_srli_epi16::<4>(value), _mm_set1_epi8(0x0f));
     let accepted = _mm_and_si128(_mm_shuffle_epi8(low_nibble, low), _mm_shuffle_epi8(high_nibble, high));
@@ -878,6 +1038,266 @@ fn in_range(value: __m128i, start: u8, end: u8) -> __m128i {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_nov6_sse2_short_token68_tail_stays_inside_its_slice() {
+        #[cfg(target_arch = "x86")]
+        if !std::arch::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        // SAFETY: SSE2 is mandatory on x86_64 and detected above on x86.
+        assert!(unsafe { super::is_token68_sse2(b"a") });
+        // SAFETY: SSE2 is mandatory on x86_64 and detected above on x86.
+        assert!(!unsafe { super::is_token68_sse2(b"") });
+    }
+
+    #[test]
+    fn gamma_round2_token68_rejects_entire_invalid_vectors() {
+        if !std::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        for len in [32, 48, 64, 80] {
+            for block in 0..len / 16 {
+                for bad in [b'!', b'=', 0, 0x80, 0xff] {
+                    let mut bytes = vec![b'a'; len];
+                    bytes[block * 16..(block + 1) * 16].fill(bad);
+                    let expected = bad == b'=' && block != 0 && (block + 1) * 16 == len;
+                    // SAFETY: SSE2 was detected above.
+                    assert_eq!(unsafe { super::is_token68_sse2(&bytes) }, expected, "{len}/{block}/{bad}");
+                    if std::is_x86_feature_detected!("sse4.2") {
+                        // SAFETY: SSE4.2 was detected immediately above.
+                        assert_eq!(unsafe { super::is_token68_sse42(&bytes) }, expected, "{len}/{block}/{bad}");
+                    }
+                    if bad == b'!' {
+                        bytes[block * 16] = b'a';
+                        // SAFETY: SSE2 was detected above.
+                        assert!(!unsafe { super::is_token68_sse2(&bytes) }, "{len}/{block}/single-data-lane");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_token68_padding_and_second_vectors() {
+        if !std::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        let packed = std::is_x86_feature_detected!("sse4.2");
+        for len in [16, 17, 18, 31, 32, 33, 47, 48, 49, 63, 64, 65, 79, 80, 81] {
+            for first_padding in 0..=len {
+                let mut bytes = vec![b'a'; len];
+                bytes[first_padding..].fill(b'=');
+                let expected = first_padding != 0;
+                // SAFETY: detection above establishes SSE2; these scanners accept every length.
+                assert_eq!(unsafe { super::is_token68_sse2(&bytes) }, expected, "{len}/{first_padding}");
+                if packed {
+                    // SAFETY: `packed` establishes SSE4.2.
+                    assert_eq!(unsafe { super::is_token68_sse42(&bytes) }, expected, "{len}/{first_padding}");
+                }
+                for lane in 0..len {
+                    let old = bytes[lane];
+                    bytes[lane] = b'!';
+                    // SAFETY: SSE2 was detected above.
+                    assert!(!unsafe { super::is_token68_sse2(&bytes) }, "{len}/{first_padding}/{lane}");
+                    if packed {
+                        // SAFETY: `packed` establishes SSE4.2.
+                        assert!(!unsafe { super::is_token68_sse42(&bytes) }, "{len}/{first_padding}/{lane}");
+                    }
+                    bytes[lane] = old;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_uri_fragment_overlap_and_exact_vectors() {
+        let mut scanners: Vec<unsafe fn(&[u8]) -> bool> = Vec::new();
+        if std::is_x86_feature_detected!("sse2") {
+            scanners.push(super::is_simple_uri_tail_sse2);
+        }
+        if std::is_x86_feature_detected!("ssse3") {
+            scanners.push(super::is_simple_uri_tail_ssse3);
+        }
+        if std::is_x86_feature_detected!("sse4.2") {
+            scanners.push(super::is_simple_uri_tail_sse42);
+        }
+        for scan in scanners {
+            for len in [16, 17, 18, 19, 31, 32, 33, 47, 48, 49, 63, 64, 65, 79, 80, 81] {
+                let mut bytes = vec![b'a'; len];
+                bytes[0] = b'/';
+                // SAFETY: each scanner was feature-detected and every input has at least 16 bytes.
+                assert!(unsafe { scan(&bytes) });
+                for first in 1..len {
+                    bytes[first] = b'#';
+                    // SAFETY: as above; changing bytes preserves length.
+                    assert!(unsafe { scan(&bytes) }, "{len}/{first}");
+                    for second in first + 1..len {
+                        bytes[second] = b'#';
+                        // SAFETY: as above.
+                        assert!(!unsafe { scan(&bytes) }, "{len}/{first}/{second}");
+                        bytes[second] = b'a';
+                    }
+                    bytes[first] = b'a';
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_search_first_match_after_multiple_vectors() {
+        if !std::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        for len in [0, 1, 15, 16, 17, 31, 32, 33, 48, 49, 64, 65] {
+            let mut bytes = vec![b'a'; len];
+            // SAFETY: SSE2 was detected and these scanners accept arbitrary slice lengths.
+            assert_eq!(unsafe { super::find_either(&bytes, b'x', b'y') }, None);
+            // SAFETY: SSE2 was detected and the scanner accepts arbitrary slice lengths.
+            assert_eq!(unsafe { super::find_interesting(&bytes) }, None);
+            for lane in 0..len {
+                bytes[lane] = b',';
+                // SAFETY: SSE2 was detected.
+                assert_eq!(unsafe { super::find_either(&bytes, b',', b';') }, Some(lane));
+                // SAFETY: SSE2 was detected.
+                assert_eq!(unsafe { super::find_interesting(&bytes) }, Some(lane));
+                bytes[lane] = b'a';
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_token68_masks_are_exact_classifications() {
+        if !std::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        let sse42 = std::is_x86_feature_detected!("sse4.2");
+        for byte in 0..=u8::MAX {
+            let bytes = [byte; 16];
+            let expected = if byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte) {
+                0xffff
+            } else {
+                0
+            };
+            // SAFETY: SSE2 was detected and the load covers the sixteen-byte array.
+            let value = unsafe { _mm_loadu_si128(bytes.as_ptr().cast()) };
+            // SAFETY: SSE2 was detected above.
+            assert_eq!(unsafe { token68_data_mask(value) }, expected, "{byte}");
+            let mut folded = [0; 16];
+            // SAFETY: SSE2 was detected above.
+            let lowered = unsafe { lower(value) };
+            // SAFETY: SSE2 was detected and the store covers the sixteen-byte array.
+            unsafe { _mm_storeu_si128(folded.as_mut_ptr().cast(), lowered) };
+            assert_eq!(folded, [byte.to_ascii_lowercase(); 16], "{byte}");
+            if sse42 {
+                // SAFETY: SSE4.2 was detected above.
+                assert_eq!(unsafe { token68_valid_mask_sse42(value) }, expected, "{byte}");
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_lower_tiers_classify_every_tail_lane() {
+        if !std::is_x86_feature_detected!("sse2") {
+            return;
+        }
+        let sse42 = std::is_x86_feature_detected!("sse4.2");
+        let ssse3 = std::is_x86_feature_detected!("ssse3");
+        for length in [16, 17, 31, 32, 33, 47, 48, 49, 65] {
+            for padding_start in [0, 1, 15, 16, 32, length - 1].into_iter().filter(|start| *start < length) {
+                let mut input = vec![b'a'; length];
+                input[padding_start..].fill(b'=');
+                // SAFETY: SSE2 was detected and the input contains a full vector.
+                assert_eq!(unsafe { is_token68_sse2(&input) }, padding_start != 0);
+                if sse42 {
+                    // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { is_token68_sse42(&input) }, padding_start != 0);
+                }
+                let mut invalid_padding = vec![b'='; length];
+                invalid_padding[0] = b'!';
+                invalid_padding[1] = b'a';
+                // SAFETY: SSE2 was detected and the input contains a full vector.
+                assert!(!unsafe { is_token68_sse2(&invalid_padding) });
+                if sse42 {
+                    // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                    assert!(!unsafe { is_token68_sse42(&invalid_padding) });
+                }
+            }
+            let mut hashes = vec![b'a'; length];
+            hashes[0] = b'#';
+            hashes[length - 1] = b'#';
+            // SAFETY: SSE2 was detected and the input contains a full vector.
+            assert!(!unsafe { is_simple_uri_tail_sse2(&hashes) });
+            if sse42 {
+                // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                assert!(!unsafe { is_simple_uri_tail_sse42(&hashes) });
+            }
+            if ssse3 {
+                // SAFETY: SSSE3 was detected and the input contains a full vector.
+                assert!(!unsafe { is_simple_uri_tail_ssse3(&hashes) });
+            }
+            for lane in 0..length {
+                for byte in [
+                    0, 8, 9, 10, 31, 32, 33, 34, 43, 44, 47, 48, 57, 58, 59, 61, 64, 65, 90, 91, 92, 96, 97, 122, 123, 126, 127, 128, 255,
+                ] {
+                    let mut input = vec![b'a'; length];
+                    input[lane] = byte;
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { is_token(&input) }, crate::scalar::is_token(&input));
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { is_token68_sse2(&input) }, crate::scalar::is_token68(&input));
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { is_field_value(&input) }, crate::scalar::is_field_value(&input));
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { find_interesting(&input) }, crate::scalar::find_interesting(&input));
+                    assert_eq!(
+                        // SAFETY: SSE2 was detected and the input contains a full vector.
+                        unsafe { find_either(&input, byte, b'z') },
+                        crate::scalar::find_either(&input, byte, b'z')
+                    );
+                    assert_eq!(
+                        // SAFETY: SSE2 was detected and the input contains a full vector.
+                        unsafe { all_base64_alphabet_sse2(&input) },
+                        crate::base64::all_base64_alphabet(&input)
+                    );
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { is_simple_uri_tail_sse2(&input) }, crate::uri::simple_uri_tail(&input, 0));
+                    for policy in [EmptyMembers::Skip, EmptyMembers::Reject] {
+                        let expected = crate::list::scan_token_list(&input, policy);
+                        // SAFETY: SSE2 was detected and the input contains a full vector.
+                        assert_eq!(unsafe { scan_token_list_sse2(&input, policy) }, expected);
+                        if length <= 32 {
+                            // SAFETY: SSE2 was detected and the input spans sixteen to thirty-two bytes.
+                            assert_eq!(unsafe { scan_short_token_list_sse2(&input, policy, length != 16) }, expected);
+                        }
+                        if sse42 {
+                            // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                            assert_eq!(unsafe { scan_token_list_sse42(&input, policy) }, expected);
+                            if length <= 32 {
+                                // SAFETY: SSE4.2 was detected and the input spans sixteen to thirty-two bytes.
+                                assert_eq!(unsafe { scan_short_token_list_sse42(&input, policy, length != 16) }, expected);
+                            }
+                        }
+                    }
+                    if sse42 {
+                        // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                        assert_eq!(unsafe { is_token68_sse42(&input) }, crate::scalar::is_token68(&input));
+                        assert_eq!(
+                            // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                            unsafe { all_base64_alphabet_sse42(&input) },
+                            crate::base64::all_base64_alphabet(&input)
+                        );
+                        // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                        assert_eq!(unsafe { is_simple_uri_tail_sse42(&input) }, crate::uri::simple_uri_tail(&input, 0));
+                    }
+                    if ssse3 {
+                        // SAFETY: SSSE3 was detected and the input contains a full vector.
+                        assert_eq!(unsafe { is_simple_uri_tail_ssse3(&input) }, crate::uri::simple_uri_tail(&input, 0));
+                    }
+                }
+            }
+        }
+    }
+
     use std::arch;
     use std::time::Duration;
     #[cfg(not(feature = "std"))]

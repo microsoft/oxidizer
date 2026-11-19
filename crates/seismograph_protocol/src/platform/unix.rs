@@ -81,7 +81,6 @@ pub(crate) fn create_directory(path: &Path, owner: &MonitorOwner) -> io::Result<
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Failing fchown/chmod on our own live directory requires external privilege or filesystem changes.
-#[cfg_attr(test, mutants::skip)] // Native permission tests exercise the result; kernel error injection is unavailable.
 fn secure_directory(file: &File, uid: u32) -> io::Result<()> {
     // SAFETY: file owns a valid directory descriptor; -1 leaves the group unchanged.
     if unsafe { libc::fchown(file.as_raw_fd(), uid, !0) } != 0 {
@@ -176,7 +175,6 @@ impl Listener {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // Foreign users are normally rejected by directory/socket permissions before accept can inspect credentials.
-    #[cfg_attr(test, mutants::skip)] // Native cross-user tests retain access checks; owner/root peer policy is tested independently.
     pub(crate) fn accept(&self) -> io::Result<Connection> {
         let (stream, _) = self.socket.accept()?;
         stream.set_nonblocking(false)?;
@@ -190,7 +188,6 @@ impl Listener {
 
 impl Drop for Listener {
     #[cfg_attr(coverage_nightly, coverage(off))] // Cleanup errors and pathname replacement require external filesystem races.
-    #[cfg_attr(test, mutants::skip)] // Native lifecycle tests verify socket cleanup; racing filesystem failures are not deterministic.
     fn drop(&mut self) {
         match fs::symlink_metadata(&self.path) {
             Ok(metadata) if (metadata.dev(), metadata.ino()) == self.identity => {
@@ -280,7 +277,6 @@ impl Connection {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // recv/poll interruption, failure, and deadline races cannot be forced reliably on live sockets.
-    #[cfg_attr(test, mutants::skip)] // Native read, peek, timeout, and cancellation tests retain kernel-I/O coverage.
     fn receive(&self, buf: &mut [u8], flags: libc::c_int) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -356,7 +352,6 @@ impl Write for Connection {
         self.stream.write(buf)
     }
 
-    #[cfg_attr(test, mutants::skip)] // UnixStream is unbuffered; its flush is equivalent to returning Ok(()).
     fn flush(&mut self) -> io::Result<()> {
         self.stream.flush()
     }
@@ -364,7 +359,6 @@ impl Write for Connection {
 
 #[cfg(target_os = "linux")]
 #[cfg_attr(coverage_nightly, coverage(off))] // SO_PEERCRED failures and invalid kernel credentials cannot be injected on a valid connected socket.
-#[cfg_attr(test, mutants::skip)] // Native cross-user tests verify authorization using actual kernel credentials.
 fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     // SAFETY: ucred is a C POD initialized before use by getsockopt.
     let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
@@ -395,7 +389,6 @@ fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     target_os = "dragonfly"
 ))]
 #[cfg_attr(coverage_nightly, coverage(off))] // getpeereid failures cannot be injected on a valid connected socket.
-#[cfg_attr(test, mutants::skip)] // Native authorization tests retain the peer-identity boundary.
 fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     let mut uid = 0;
     let mut gid = 0;
@@ -416,7 +409,6 @@ fn peer_identity(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     target_os = "dragonfly"
 )))]
 #[cfg_attr(coverage_nightly, coverage(off))] // This fallback is compiled out on every supported native IPC target.
-#[cfg_attr(test, mutants::skip)] // Supported-target suites cannot exercise an unsupported-platform definition.
 fn peer_identity(_stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -456,7 +448,6 @@ fn connect_timeout_with(path: &Path, timeout: Duration, mut wait: impl FnMut(Dur
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Pending-connect and signal-interruption outcomes depend on kernel scheduling.
-#[cfg_attr(test, mutants::skip)] // Native connection and saturated-backlog tests retain timeout/backoff assertions.
 fn connect_socket(
     fd: &OwnedFd,
     address: &libc::sockaddr_un,
@@ -486,7 +477,6 @@ fn connect_socket(
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Socket/fcntl failures require exhausting or invalidating process-owned descriptors.
-#[cfg_attr(test, mutants::skip)] // Native tests assert the resulting close-on-exec and nonblocking flags.
 fn connecting_socket() -> io::Result<OwnedFd> {
     // SAFETY: creating a stream socket has no pointer preconditions. Supported
     // kernels install close-on-exec atomically, before another thread can fork.
@@ -511,7 +501,6 @@ fn connecting_socket() -> io::Result<OwnedFd> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Unix-domain connects normally complete immediately; pending-connect poll/error paths are kernel-dependent.
-#[cfg_attr(test, mutants::skip)] // Native deadline tests exercise connection behavior without fabricating kernel outcomes.
 fn wait_connected(fd: &OwnedFd, deadline: Instant) -> io::Result<()> {
     loop {
         let remaining = deadline
@@ -593,6 +582,13 @@ mod tests {
             io::ErrorKind::InvalidInput
         );
         assert_eq!(read_descriptor(Path::new("/")).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        let directory_file = directory_file(directory.path()).unwrap();
+        for path in [Path::new("/"), Path::new("bad\0descriptor")] {
+            assert_eq!(
+                open_relative(&directory_file, path, libc::O_RDONLY).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
         let mut unsupported = descriptor.clone();
         unsupported.endpoint = MonitorEndpoint::NamedPipe("unsupported".into());
         assert_eq!(Listener::bind(&unsupported).unwrap_err().kind(), io::ErrorKind::Unsupported);

@@ -132,12 +132,11 @@
 //! - Human time uses calendars, local clock time, and time zones. These values
 //!   can be ambiguous.
 //!
-//! This crate focuses on machine time. Use [jiff], [chrono], or [time] for
+//! This crate focuses on machine time. Use [jiff] or [time] for
 //! human time. `tick` values can convert to types from these crates. See the
 //! `interop_*` examples.
 //!
 //! [jiff]: https://crates.io/crates/jiff
-//! [chrono]: https://crates.io/crates/chrono
 //! [time]: https://crates.io/crates/time
 //!
 //! # Thread-aware relocation

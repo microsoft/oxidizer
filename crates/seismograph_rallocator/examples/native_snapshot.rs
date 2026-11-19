@@ -7,7 +7,6 @@
 //!
 //! `cargo +1.95.0 run -p seismograph_rallocator --example native_snapshot`
 //! `cargo +1.95.0 run -p seismograph_cli -- view native-demo.seismograph`
-//! `cargo +1.95.0 run -p seismograph_cli -- snapshot html native-demo.seismograph`
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
 use seismograph::recorder::event::{Address, EventClass, Record};
@@ -26,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_or_else(|| std::path::PathBuf::from("native-demo.seismograph"), std::path::PathBuf::from);
     seismograph::snapshot::register_source(&SOURCE);
     seismograph::recorder(seismograph::recorder::Configuration {
-        allocations: seismograph::recorder::RecordingPolicy {
+        allocations: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
@@ -76,7 +75,7 @@ fn operation(key: u64, free: bool) {
     reason = "Six fixed demo rows avoid invoking the application allocator during capture"
 )]
 fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
-    let session_id = context.recording_observation().map_or(0, |observation| observation.session.get());
+    let session_id = 0;
     let round = native::observation_round();
     let mut observation = Observation {
         generation: 1,

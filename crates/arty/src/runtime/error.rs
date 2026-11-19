@@ -4,25 +4,25 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
-use arty_executor::ShutdownError;
+use arty_executor::{ShutdownCause, ShutdownError};
 use arty_io_core::DriverError;
 use performables::arc::Arc;
 
 use crate::runtime::shutdown::Shutdown;
 
-/// An error constructing or operating a runtime.
+/// An error while creating, running, or stopping a runtime.
 ///
-/// You may receive this error when building a runtime with an invalid worker
-/// count or blocking-pool limit, waiting from an async worker, or stopping a
-/// runtime whose worker or I/O driver failed.
+/// This error can report invalid runtime configuration, a rejected `block_on`
+/// call, or a worker or I/O driver failure. I/O driver failures come from
+/// startup or normal operation. Driver shutdown failures are not returned.
 ///
 /// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 /// fails because a task panicked or was cancelled, its source is a
 /// [`JoinError`](crate::task::JoinError).
 ///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
-/// diagnostics. Do not depend on specific messages or source types to classify
-/// construction failures. Task joins report `JoinError` directly.
+/// details. Do not depend on specific messages or source types to identify
+/// failures while creating a runtime. Awaiting a task reports `JoinError` directly.
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,
@@ -37,20 +37,16 @@ impl Error {
         Self::new(RuntimeValidation::InvalidWorkerCount)
     }
 
+    pub(crate) fn invalid_name() -> Self {
+        Self::new(RuntimeValidation::InvalidName)
+    }
+
     pub(crate) fn invalid_blocking_pool_limit() -> Self {
         Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
     }
 
     pub(crate) fn block_on_from_worker() -> Self {
         Self::new(RuntimeValidation::BlockOnFromWorker)
-    }
-
-    pub(crate) fn shutdown_wait_from_worker() -> Self {
-        Self::new(RuntimeValidation::ShutdownWaitFromWorker)
-    }
-
-    pub(crate) fn shutdown_wait_from_blocking_callback() -> Self {
-        Self::new(RuntimeValidation::ShutdownWaitFromBlockingCallback)
     }
 
     pub(crate) fn io_outside_worker() -> Self {
@@ -83,6 +79,10 @@ impl Error {
     pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
         self.source
     }
+
+    pub(crate) fn into_shutdown_cause(self) -> ShutdownCause {
+        ShutdownError::new(self).into()
+    }
 }
 
 impl Display for Error {
@@ -99,21 +99,19 @@ impl StdError for Error {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeValidation {
+    InvalidName,
     InvalidWorkerCount,
     InvalidBlockingPoolLimit,
     BlockOnFromWorker,
-    ShutdownWaitFromWorker,
-    ShutdownWaitFromBlockingCallback,
 }
 
 impl Display for RuntimeValidation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::InvalidName => "runtime name must not contain a null character",
             Self::InvalidWorkerCount => "worker count must be greater than zero",
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
-            Self::BlockOnFromWorker => "block_on cannot be called from an async Arty worker",
-            Self::ShutdownWaitFromWorker => "an async Arty worker cannot wait for runtime shutdown",
-            Self::ShutdownWaitFromBlockingCallback => "a runtime blocking callback cannot wait for its own shutdown",
+            Self::BlockOnFromWorker => "block_on cannot be called from an Arty worker",
         })
     }
 }
@@ -155,6 +153,7 @@ impl StdError for SharedDriverError {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public errors cannot construct or downcast the private source-wrapper types checked here.
 mod tests {
     use std::io;
 
@@ -189,6 +188,11 @@ mod tests {
     fn validation_failures_preserve_private_identity_and_display_context() {
         let cases = [
             (
+                Error::invalid_name(),
+                RuntimeValidation::InvalidName,
+                "runtime name must not contain a null character",
+            ),
+            (
                 Error::invalid_worker_count(),
                 RuntimeValidation::InvalidWorkerCount,
                 "worker count must be greater than zero",
@@ -201,17 +205,7 @@ mod tests {
             (
                 Error::block_on_from_worker(),
                 RuntimeValidation::BlockOnFromWorker,
-                "block_on cannot be called from an async Arty worker",
-            ),
-            (
-                Error::shutdown_wait_from_worker(),
-                RuntimeValidation::ShutdownWaitFromWorker,
-                "an async Arty worker cannot wait for runtime shutdown",
-            ),
-            (
-                Error::shutdown_wait_from_blocking_callback(),
-                RuntimeValidation::ShutdownWaitFromBlockingCallback,
-                "a runtime blocking callback cannot wait for its own shutdown",
+                "block_on cannot be called from an Arty worker",
             ),
         ];
 

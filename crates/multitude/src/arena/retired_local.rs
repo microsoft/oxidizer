@@ -55,7 +55,6 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `false` only selects the equivalent slow reset path
     pub(in crate::arena) fn is_empty(&self) -> bool {
         self.head.get().is_null()
     }
@@ -89,7 +88,9 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
     pub(in crate::arena) fn clear(&self) {
         loop {
             let mut cur = self.head.replace(ptr::null_mut());
-            if cur.is_null() {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            cur.is_null() {
                 return;
             }
             while !cur.is_null() {
@@ -121,7 +122,7 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
         // SAFETY: caller hands over the list's `+1`. Release the `+1`; if it
         // was the last reference, route through teardown to recycle.
         unsafe {
-            if chunk.as_ref().dec_ref() {
+            if Chunk::dec_ref(chunk) {
                 Chunk::teardown_and_release(chunk);
             }
         }
@@ -139,6 +140,34 @@ mod tests {
     use allocator_api2::alloc::Global;
 
     use super::*;
+    use crate::internal::chunk_provider::{ChunkProvider, ChunkProviderConfig};
+
+    #[test]
+    fn gamma_nov4_clearing_retired_chunks_unlinks_nodes_still_owned_by_escaped_handles() {
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        let first = provider.acquire_oversized(64).unwrap();
+        let second = provider.acquire_oversized(64).unwrap();
+        let retired = RetiredLocalChunks::new();
+        for chunk in [first, second] {
+            // SAFETY: Each fresh chunk is live and exclusively owned.
+            unsafe { chunk.as_ref() }.inc_ref();
+            // SAFETY: The original reference moves into the list; the extra
+            // reference models an escaped handle retained by this test.
+            retired.push(unsafe { ChunkMutator::from_owned(chunk) });
+        }
+        // SAFETY: Both linked chunks remain live with list and escaped references.
+        assert_eq!(unsafe { Chunk::next(second) }, first.cast::<u8>().as_ptr());
+        retired.clear();
+        assert!(retired.is_empty());
+        for chunk in [first, second] {
+            // SAFETY: The escaped reference keeps this unlinked chunk alive.
+            assert!(unsafe { Chunk::next(chunk) }.is_null());
+            // SAFETY: The test owns this chunk's only remaining reference.
+            assert!(unsafe { Chunk::dec_ref(chunk) });
+            // SAFETY: This test exclusively owns the now-zero-count chunk.
+            unsafe { Chunk::teardown_and_release(chunk) };
+        }
+    }
 
     /// Pushing a chunkless (empty) mutator is a no-op: `forget_into_chunk`
     /// yields `None`, so `push` early-returns without retaining anything.

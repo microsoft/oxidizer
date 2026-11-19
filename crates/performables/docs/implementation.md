@@ -99,5 +99,6 @@ Progress deadlines are test scaffolding, not behavioral timeout contracts.
 They are disabled with `testing_aids::is_mutation_testing`; test-only clock setup
 inside a production adapter belongs in a `cfg(test)` helper rather than in its
 mutation-selected body. The mutation runner still fails on non-termination.
-Reproduced progress-breaking variants are excluded by exact mutation identity,
-not reported as caught because a test-local clock panicked.
+Review progress-breaking variants from actual Gamma findings before adding narrow
+source suppressions with a reason. Do not report a hang as caught because a
+test-local clock panicked.

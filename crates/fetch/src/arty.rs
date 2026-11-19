@@ -3,7 +3,7 @@
 
 //! Arty runtime integration for [`HttpClient`].
 //!
-//! Create [`ArtyDeps`] from one [`Builtins`] value and a memory pool. This keeps
+//! Create [`ArtyDeps`] from one [`Context`] value and a memory pool. This keeps
 //! the scheduler, clock, and I/O route on the same Arty worker.
 //!
 //! Enable the `arty` feature and one TLS feature. Use `rustls` for the default
@@ -11,7 +11,7 @@
 
 use anyspawn::Spawner;
 use arty::io::Io;
-use arty::task::{Builtins, Scheduler};
+use arty::task::{Context, Scheduler};
 use arty_mio::{MioContext, MioOptions};
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_hyper::HyperTransportBuilder;
@@ -25,7 +25,7 @@ use crate::{HttpClient, HttpClientBuilder};
 
 /// Dependencies for an Arty HTTP client.
 ///
-/// Use [`from_builtins`](Self::from_builtins) to extract the runtime services
+/// Use [`from_context`](Self::from_context) to extract the runtime services
 /// from one Arty worker. You can also construct this type from explicit
 /// services when a dependency container already provides them.
 #[derive(Debug, Clone, ThreadAware)]
@@ -44,19 +44,19 @@ impl ArtyDeps {
     /// Extracts dependencies from one Arty worker and uses the supplied memory
     /// pool.
     #[must_use]
-    pub fn from_builtins(builtins: &Builtins, global_pool: GlobalPool) -> Self {
+    pub fn from_context(context: &Context, global_pool: GlobalPool) -> Self {
         Self {
-            clock: builtins.clock().clone(),
-            scheduler: builtins.scheduler().clone(),
-            io: builtins.io().clone(),
+            clock: context.clock().clone(),
+            scheduler: context.scheduler().clone(),
+            io: context.io().clone(),
             global_pool,
         }
     }
 }
 
-impl From<&Builtins> for ArtyDeps {
-    fn from(builtins: &Builtins) -> Self {
-        Self::from_builtins(builtins, GlobalPool::new())
+impl From<&Context> for ArtyDeps {
+    fn from(context: &Context) -> Self {
+        Self::from_context(context, GlobalPool::new())
     }
 }
 

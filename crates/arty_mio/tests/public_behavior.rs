@@ -221,7 +221,7 @@ fn context_clone_registers_on_the_calling_thread_and_relocation_selects_destinat
 
 #[test]
 fn unattached_context_rejects_registration_and_releases_the_source() {
-    let io = MioContext::context(MioOptions::default());
+    let io = MioContext::new(MioOptions::default());
     let (token_tx, _token_rx) = mpsc::channel();
     let (drop_tx, drop_rx) = mpsc::channel();
 
@@ -441,7 +441,7 @@ fn shutdown_reports_accumulated_readiness_before_closure() {
 }
 
 fn driver(role: DriverRole, owner_waker: Waker) -> (MioContext, MioDriver) {
-    let mut io = MioContext::context(MioOptions::default());
+    let mut io = MioContext::new(MioOptions::default());
     let worker = ThreadBuilder::default().build(std::thread::current().id());
     io.relocate(None, &worker);
     let driver = io.driver(DriverOptions::new(worker, owner_waker, role)).unwrap();

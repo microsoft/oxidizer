@@ -48,7 +48,7 @@ const FAIL_CASES: &[(&str, &str)] = &[
 ];
 
 fn compile_case(name: &str, fixture: &CompileFixture) -> Output {
-    Command::new(env!("CARGO"))
+    Command::new(option_env!("CARGO").unwrap_or("cargo"))
         .args(["check", "--offline", "--quiet", "--jobs", "2", "--manifest-path"])
         .arg(&fixture.manifest)
         .args(["--bin", name])

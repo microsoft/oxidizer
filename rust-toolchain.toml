@@ -1,0 +1,7 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[toolchain]
+channel = "1.97"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

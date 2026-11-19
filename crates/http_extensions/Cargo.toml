@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.13.0"
+version = "0.15.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -64,6 +64,7 @@ test-util = ["tick/test-util"]
 [dependencies]
 bytes = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
+derive_more = { workspace = true, features = ["debug"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -80,6 +81,7 @@ tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+argh = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
@@ -87,7 +89,6 @@ futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 layered = { path = "../layered", features = ["intercept", "dynamic-service"] }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 serde = { workspace = true, features = ["derive"] }
 serde_core = { workspace = true }

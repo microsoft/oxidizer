@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rallocator::Rallocator;
-use seismograph::recorder::{Configuration, RecordingPolicy, SuppressionGuard};
+use GLOBAL as Rallocator;
+use seismograph::recorder::{Configuration, Policy, without_recording};
 use seismograph_rallocator::native::{ObservationSource, Snapshot};
 
 rallocator::rallocator!();
@@ -36,17 +36,23 @@ fn run_with_fresh_inventory(name: &str) -> bool {
     true
 }
 
+#[expect(clippy::unwrap_used, clippy::panic, reason = "The test fixture requires readable snmalloc state")]
 fn capture() -> Snapshot {
     let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).expect("capture native snapshot");
-    let _suppression = SuppressionGuard::enter();
-    let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).expect("decode Seismograph snapshot");
-    let source = decoded
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_rallocator::source::ID)
-        .expect("native allocator source is registered");
-    assert_eq!(source.schema_version, 3);
-    seismograph_rallocator::decode(&source.data).expect("decode native allocator source")
+    without_recording(|| {
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).expect("decode Seismograph snapshot");
+        let source = decoded
+            .sources
+            .iter()
+            .find(|source| source.id == seismograph_rallocator::source::ID)
+            .expect("native allocator source is registered");
+        assert_eq!(source.schema_version, seismograph_rallocator::snapshot::SCHEMA_VERSION);
+        let snapshot = seismograph_rallocator::snapshot::decode(&source.data).unwrap();
+        let seismograph_rallocator::snapshot::BackendState::Snmalloc(state) = snapshot.backend else {
+            panic!("snmalloc must publish snmalloc state")
+        };
+        (snapshot.header, state).into()
+    })
 }
 
 fn wait_for(progress: &AtomicU8, value: u8) {
@@ -84,7 +90,7 @@ fn warmed_snapshot_capture_does_not_grow_backend_reservations() {
     }
     let _recording = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(false),
+        allocations: Policy::all(false),
         ..Configuration::default()
     });
     let retained = vec![0x5a; 8192];
@@ -150,7 +156,7 @@ fn owners_created_off_remain_visible_and_only_participants_publish() {
     assert!(before.owners.iter().any(|owner| owner.leased && owner.observation.is_none()));
 
     seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(false),
+        allocations: Policy::all(false),
         ..Configuration::default()
     });
     let quiet = capture();
@@ -215,7 +221,7 @@ fn concurrent_collection_reads_published_copies_not_mutating_cores() {
     let _recording = RECORDING.lock().unwrap();
     seismograph_rallocator::native::set_publication_enabled(true);
     seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(false),
+        allocations: Policy::all(false),
         ..Configuration::default()
     });
     let stop = Arc::new(AtomicU8::new(0));

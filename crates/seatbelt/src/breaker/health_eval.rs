@@ -60,6 +60,7 @@ impl HealthEvaluator {
 
 #[expect(clippy::cast_possible_truncation, reason = "Acceptable")]
 fn evaluate_threshold(failures: u32, total: u32, min_throughput: u32, failure_threshold: f32) -> HealthStatus {
+    // #[gamma::skip(logical.or_remove_left, reason = "Valid counts have zero failures when total is zero; if min_throughput is also zero the resulting NaN rate still compares false and returns Healthy.")]
     if total == 0 || total < min_throughput {
         return HealthStatus::Healthy;
     }

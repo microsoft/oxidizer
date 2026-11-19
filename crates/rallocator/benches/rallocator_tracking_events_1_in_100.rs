@@ -9,7 +9,7 @@ rallocator::rallocator!();
 
 fn main() {
     seismograph::recorder(seismograph::recorder::Configuration {
-        allocations: seismograph::recorder::RecordingPolicy {
+        allocations: seismograph::recorder::Policy {
             enabled: true,
             event_sampling: seismograph::recorder::EventSampling::one_in(100).expect("100 is within the supported nonzero sampling range"),
             ..Default::default()

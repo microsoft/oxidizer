@@ -8,11 +8,28 @@
 use std::sync::{Arc, Mutex};
 
 use bytesbuf::mem::testing::TransparentMemory;
-use bytesbuf::mem::{HasMemory, Memory, OpaqueMemory};
+use bytesbuf::mem::{GlobalPool, HasMemory, Memory, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use http_extensions::HttpBodyBuilder;
 use thread_aware::{Relocator, Thread, ThreadAware};
 use tick::Clock;
+
+#[test]
+fn body_builder_accepts_a_global_pool() {
+    let builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+
+    assert_eq!(BytesView::try_from(builder.text("payload")).unwrap(), b"payload");
+    assert!(builder.reserve(17).capacity() >= 17);
+}
+
+#[cfg(feature = "json")]
+#[test]
+fn lazy_json_can_be_read_repeatedly() {
+    let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &Clock::new_frozen());
+    let mut json = futures::executor::block_on(builder.text(r#""payload""#).into_json_ref::<String>()).unwrap();
+    assert_eq!(json.read().unwrap(), "payload");
+    assert_eq!(json.read().unwrap(), "payload");
+}
 
 /// Records which provider instance serves each body allocation.
 #[derive(Debug)]

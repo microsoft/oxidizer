@@ -76,7 +76,6 @@ pub(super) fn union(intervals: &[Interval]) -> Vec<Interval> {
 }
 
 /// The union is clipped before summing, so overlapping polls cannot exceed 100 percent.
-#[cfg_attr(test, mutants::skip)] // Floating-point chart occupancy is a defensive visualization projection.
 pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f64> {
     let span = window.end.checked_sub(window.start).filter(|span| *span > 0)?;
     let clipped = intervals
@@ -95,7 +94,6 @@ pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f6
 }
 
 /// Equal-width time bins; empty bins are unknown, including source-only legacy captures.
-#[cfg_attr(test, mutants::skip)] // Bin-boundary arithmetic is terminal visualization glue, not retained runtime state.
 pub(super) fn bins(intervals: &[Interval], window: Option<TimeWindow>, count: usize) -> Vec<Option<f64>> {
     let Some(window) = window.filter(|window| window.end > window.start) else {
         return vec![None; count];
@@ -176,6 +174,24 @@ pub(super) fn histogram(samples: &[u64], count: usize) -> Vec<HistogramBin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_survivor_timeline_bins_keep_zero_length_boundary_evidence() {
+        let window = Some(TimeWindow { start: 10, end: 30 });
+        assert_eq!(bins(&[Interval { start: 10, end: 10 }], window, 2), [Some(0.0), None]);
+        assert_eq!(bins(&[Interval { start: 20, end: 20 }], window, 2), [None, Some(0.0)]);
+        assert_eq!(bins(&[Interval { start: 30, end: 30 }], window, 2), [None, Some(0.0)]);
+        assert_eq!(
+            bins(&[Interval { start: 0, end: 0 }, Interval { start: 25, end: 30 }], window, 2),
+            [None, Some(0.5)]
+        );
+        assert_eq!(bins(&[Interval { start: 15, end: 20 }], window, 2), [Some(0.5), None]);
+        assert!(bins(&[Interval { start: 10, end: 20 }], window, 0).is_empty());
+        assert_eq!(
+            bins(&[Interval { start: 10, end: 10 }], Some(TimeWindow { start: 10, end: 10 }), 2),
+            [None, None]
+        );
+    }
 
     #[test]
     fn median_is_exact_not_average_and_distinguishes_zero() {

@@ -53,8 +53,12 @@
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
 #   * "--package A@v --package B@v" - the tier has members. Packages are
-#     version-qualified cargo specs so they resolve uniquely even when a
-#     like-named crate is also a transitive dependency.
+#     version-qualified cargo specs. Aggregate Cargo commands instead call
+#     _anvil-impact-exclude, which returns the same set as
+#     "--workspace --exclude C ...": Cargo resolves that against workspace
+#     members only, so it stays unambiguous when a registry dependency has
+#     the same name and version as a member. Per-package fan-out passes the
+#     specs to cargo-each and uses its source-qualified '{cargo-spec}'.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
 # These resolver outputs are only meaningful when the resolver succeeded, so
@@ -98,15 +102,6 @@
 # justfile must declare it (typically as a top-level line). anvil's
 # mod.just does NOT redeclare it, to avoid conflicting with adopters
 # who already have it.
-
-# Platform configs replace, rather than overlay, cargo-mutants' default config.
-# Selection is native Just evaluation, independent of the recipe's interpreter.
-_anvil_mutants_platform_config := ".cargo/mutants." + os() + ".toml"
-_anvil_mutants_config_arg := if path_exists(justfile_directory() / _anvil_mutants_platform_config) == "true" {
-    "--config=" + _anvil_mutants_platform_config
-} else {
-    ""
-}
 
 # _anvil-base-ref: single source of truth for "which git ref does a PR
 # diff against". Shared by the impact step (github/impact-action.yml,

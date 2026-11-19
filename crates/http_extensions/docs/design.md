@@ -2,7 +2,9 @@
 
 A memory provider allocates buffers for body data.
 Callers select the provider when they create an `HttpBodyBuilder`.
-The constructor takes `bytesbuf::mem::OpaqueMemory`, which wraps any `MemoryShared` provider.
+The constructor accepts `impl Into<bytesbuf::mem::OpaqueMemory>`.
+Pass `GlobalPool::new()` directly or wrap a custom `MemoryShared` provider with `OpaqueMemory::new(provider)`.
+Explicit `OpaqueMemory` arguments remain valid.
 `new_fake` uses the global pool and a frozen clock.
 
 The builder uses the provider for copied slices, text, JSON, and explicit memory reservations.

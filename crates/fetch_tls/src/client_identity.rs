@@ -1,25 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Backend-agnostic `mTLS` client identity.
+//! A client identity for mutual TLS (`mTLS`).
 //!
-//! [`ClientIdentity`] holds a `DER`-encoded certificate chain and private key
-//! and is consumed by both backends, so `mTLS` is configured the same way
-//! regardless of which backend is selected.
+//! [`ClientIdentity`] contains a `DER`-encoded certificate chain and private
+//! key. Both backends use the same type.
 
 use std::fmt;
 
 use rustls_pki_types::pem::PemObject;
 
-/// Error returned when constructing a [`ClientIdentity`] from key material fails.
+/// An error from constructing [`ClientIdentity`] from key material.
 #[ohno::error]
 pub struct ClientIdentityError;
 
 /// Client identity for mutual TLS (`mTLS`) authentication.
 ///
-/// Holds the client certificate chain and private key presented during the
-/// TLS handshake. The same value works with either backend; each one
-/// converts the contained `DER` bytes into its own internal form.
+/// Contains the certificate chain and private key for the TLS handshake.
+/// Each backend converts the `DER` bytes to its required format.
 ///
 /// # Example
 ///
@@ -43,8 +41,8 @@ impl Clone for ClientIdentity {
     fn clone(&self) -> Self {
         Self {
             cert_chain: self.cert_chain.clone(),
-            // `PrivateKeyDer` does not implement `Clone` because the inner key
-            // material is sensitive; `clone_key` makes the copy explicit.
+            // `PrivateKeyDer` does not implement `Clone` because it contains
+            // sensitive key material. `clone_key` makes this copy explicit.
             private_key: self.private_key.clone_key(),
         }
     }
@@ -53,16 +51,23 @@ impl Clone for ClientIdentity {
 impl ClientIdentity {
     /// Creates a client identity from `PEM`-encoded certificate and private key.
     ///
-    /// `cert_pem` may contain one or more certificates (leaf first, then
-    /// intermediates). `key_pem` must contain exactly one private key
-    /// (`PKCS#1`, `PKCS#8`, or `SEC1`).
+    /// `cert_pem` can contain zero or more certificates. Put the leaf first,
+    /// followed by intermediate certificates. A backend can reject an empty
+    /// chain when it builds. The method uses the first supported key in
+    /// `key_pem` (`PKCS#1`, `PKCS#8`, or `SEC1`) and ignores later content.
+    /// The backend validates the decoded certificate and key data.
     ///
-    /// The native-tls backend only accepts `PKCS#8` keys; `PKCS#1` and
-    /// `SEC1` work with rustls but cause native-tls to fail at build time.
+    /// Native TLS accepts only `PKCS#8` keys. Native TLS client identities are
+    /// unavailable on Apple platforms other than macOS. Rustls key support
+    /// depends on the crypto provider. The built-in `aws-lc-rs` and `ring`
+    /// providers also accept `PKCS#1` and `SEC1` keys.
     ///
     /// # Errors
     ///
-    /// Returns an error if either input is not valid `PEM`.
+    /// Returns an error for malformed `PEM` found while it searches for
+    /// certificates or the first supported private key. It also returns an
+    /// error when no supported key exists. Input without a certificate block
+    /// creates an empty certificate chain.
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self, ClientIdentityError> {
         let cert_chain: Vec<rustls_pki_types::CertificateDer<'static>> = rustls_pki_types::CertificateDer::pem_slice_iter(cert_pem)
             .collect::<Result<_, _>>()
@@ -73,8 +78,9 @@ impl ClientIdentity {
 
     /// Creates a client identity from `DER`-encoded certificate and private key.
     ///
-    /// `cert_chain` is leaf-first; `key_der` must be a `PKCS#8`-encoded
-    /// private key.
+    /// `cert_chain` must put the leaf first. `key_der` must contain a
+    /// `PKCS#8`-encoded private key. The iterator items and key must provide
+    /// their bytes through `AsRef<[u8]>`.
     #[must_use]
     pub fn from_der<I, C, K>(cert_chain: I, key_der: K) -> Self
     where
@@ -92,7 +98,6 @@ impl ClientIdentity {
 
     /// Returns the certificate chain as rustls types.
     #[cfg(any(feature = "rustls", test))]
-    #[cfg_attr(test, mutants::skip)] // trivial accessor, tested via `mTLS` integration
     pub(crate) fn cert_chain(&self) -> &[rustls_pki_types::CertificateDer<'static>] {
         &self.cert_chain
     }
@@ -105,12 +110,26 @@ impl ClientIdentity {
 
     /// Builds a [`native_tls::Identity`] from this client identity.
     ///
-    /// Re-encodes the `DER` components as `PEM` and feeds them to
-    /// [`native_tls::Identity::from_pkcs8`], the format supported across all
-    /// platform backends. Fails if the private key is not `PKCS#8` or if the
-    /// platform native TLS implementation rejects the material.
+    /// Converts the `DER` values to `PEM` for
+    /// [`native_tls::Identity::from_pkcs8`]. Returns an error if the key is not
+    /// `PKCS#8` or the platform rejects the identity.
+    ///
+    /// # Panics
+    ///
+    /// Panics on Apple platforms other than macOS because `native_tls` does not
+    /// support client identities there.
     #[cfg(any(feature = "native-tls", test))]
     pub(crate) fn build_native_identity(&self) -> Result<native_tls::Identity, ClientIdentityError> {
+        self.build_native_identity_with(|certificates, key| {
+            native_tls::Identity::from_pkcs8(certificates, key).map_err(ClientIdentityError::caused_by)
+        })
+    }
+
+    #[cfg(any(feature = "native-tls", test))]
+    fn build_native_identity_with<T>(
+        &self,
+        build: impl FnOnce(&[u8], &[u8]) -> Result<T, ClientIdentityError>,
+    ) -> Result<T, ClientIdentityError> {
         let key_pkcs8_der = match &self.private_key {
             rustls_pki_types::PrivateKeyDer::Pkcs8(key) => key.secret_pkcs8_der(),
             _ => {
@@ -125,15 +144,13 @@ impl ClientIdentity {
         let mut key_pem = Vec::new();
         write_pem_block(&mut key_pem, "PRIVATE KEY", key_pkcs8_der);
 
-        native_tls::Identity::from_pkcs8(&cert_pem, &key_pem).map_err(ClientIdentityError::caused_by)
+        build(&cert_pem, &key_pem)
     }
 }
 
 /// Writes a `PEM`-encoded object to `out`.
 ///
-/// Format per `RFC 7468`: a textual `-----BEGIN <label>-----` line, the body
-/// as `base64` broken into 64-character lines, and a matching
-/// `-----END <label>-----` line.
+/// Uses the `RFC 7468` format with 64-character `base64` lines.
 #[cfg(any(feature = "native-tls", test))]
 fn write_pem_block(out: &mut Vec<u8>, label: &str, der: &[u8]) {
     use std::io::Write;
@@ -166,10 +183,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn november6_native_identity_serializes_each_certificate_and_key_with_exact_labels() {
+        let identity = ClientIdentity::from_der([[1, 2, 3], [4, 5, 6]], [7, 8, 9]);
+        let result = identity
+            .build_native_identity_with(|certificates, key| {
+                assert_eq!(
+                    certificates,
+                    b"-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n\
+                      -----BEGIN CERTIFICATE-----\nBAUG\n-----END CERTIFICATE-----\n"
+                );
+                assert_eq!(key, b"-----BEGIN PRIVATE KEY-----\nBwgJ\n-----END PRIVATE KEY-----\n");
+                Ok(73)
+            })
+            .unwrap();
+        assert_eq!(result, 73);
+        let error = identity
+            .build_native_identity_with::<()>(|_, _| Err(ClientIdentityError::caused_by("identity rejected")))
+            .unwrap_err();
+        assert!(error.to_string().contains("identity rejected"));
+    }
+
+    #[test]
+    fn gamma_survivor_pem_lines_are_exactly_sixty_four_columns() {
+        let mut out = Vec::new();
+        write_pem_block(&mut out, "CERTIFICATE", &[0; 49]);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("-----BEGIN CERTIFICATE-----\n{}\nAA==\n-----END CERTIFICATE-----\n", "A".repeat(64))
+        );
+    }
+
+    #[test]
     fn from_pem_parses_valid_cert_and_key() {
-        // `rustls_pki_types`' PEM parser identifies items by label and treats
-        // the body as opaque DER, so short placeholder bytes round-trip fine
-        // for the purpose of exercising the happy path.
+        // The parser identifies each item by its label and treats the body as
+        // opaque DER. Short placeholder values can test the successful path.
         let mut cert_pem = Vec::new();
         write_pem_block(&mut cert_pem, "CERTIFICATE", &[0x30, 0x00]);
         write_pem_block(&mut cert_pem, "CERTIFICATE", &[0x30, 0x01, 0x00]);
@@ -177,7 +224,7 @@ mod tests {
         let mut key_pem = Vec::new();
         write_pem_block(&mut key_pem, "PRIVATE KEY", &[0x30, 0x00]);
 
-        let identity = ClientIdentity::from_pem(&cert_pem, &key_pem).expect("valid PEM should parse");
+        let identity = ClientIdentity::from_pem(&cert_pem, &key_pem).expect("valid PEM parses");
         assert_eq!(identity.cert_chain().len(), 2);
         assert!(matches!(identity.private_key(), rustls_pki_types::PrivateKeyDer::Pkcs8(_)));
     }
@@ -210,8 +257,7 @@ mod tests {
     }
 
     #[test]
-    // Miri can't execute the platform TLS FFI (`CertOpenStore` on Windows, etc.)
-    // that `native_tls::Identity::from_pkcs8` invokes to validate the inputs.
+    // Miri cannot run the platform TLS FFI that validates these inputs.
     #[cfg_attr(miri, ignore)]
     fn build_native_identity_fails_for_invalid_certificate() {
         let identity = ClientIdentity::from_der(vec![vec![0xffu8, 0xff]], vec![0x30u8, 0x00]);
@@ -219,9 +265,8 @@ mod tests {
         let Err(err) = identity.build_native_identity() else {
             panic!("expected error for invalid certificate");
         };
-        // The PKCS#8 key must be accepted by the match (the failure should come
-        // from `native_tls` rejecting the bogus certificate, not from our own
-        // "requires a `PKCS#8` private key" guard).
+        // The match must accept the PKCS#8 key. `native_tls` must reject the
+        // invalid certificate instead of our key-format guard.
         let msg = format!("{err}");
         assert!(
             !msg.contains("requires a `PKCS#8` private key"),
@@ -231,8 +276,7 @@ mod tests {
 
     #[test]
     fn build_native_identity_rejects_pkcs1_key() {
-        // Construct directly so the private key is the `PKCS#1` variant rather
-        // than the `PKCS#8` wrapper that `from_der` produces.
+        // Construct this value directly to use the `PKCS#1` variant.
         let identity = ClientIdentity {
             cert_chain: vec![CertificateDer::from(vec![0x30, 0x00])],
             private_key: PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(vec![0x30, 0x00])),

@@ -21,9 +21,10 @@ impl TelemetryHelper {
 
     #[cfg(any(feature = "metrics", test))]
     pub(crate) fn report_metrics(&self, attributes: &[opentelemetry::KeyValue]) {
-        if let Some(reporter) = &self.event_reporter {
-            reporter.add(1, attributes);
-        }
+        self.event_reporter
+            .as_ref()
+            .expect("all callers check metrics_enabled() before reporting an event")
+            .add(1, attributes);
     }
 }
 

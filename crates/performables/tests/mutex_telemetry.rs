@@ -9,7 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use performables::sync::mutex::Mutex;
 use seismograph::recorder::event::{EventKind, ObjectId};
-use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 
 #[test]
@@ -19,8 +19,8 @@ fn enabling_recording_while_held_preserves_poison_and_release_events() {
     let id = ObjectId::from_ptr(std::ptr::from_ref(&*mutex).cast::<()>());
     let guard = mutex.lock();
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
-        event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+        general_events: Policy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(64),
         ..Default::default()
     });
     catch_unwind(AssertUnwindSafe(move || {

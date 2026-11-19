@@ -78,12 +78,12 @@ impl Recording {
     fn configure(self) {
         #[cfg(feature = "seismograph")]
         {
-            use seismograph::recorder::{Configuration, RecordingPolicy};
+            use seismograph::recorder::{Configuration, Policy};
 
             let configuration = match self {
                 Self::Disabled => Configuration::default(),
                 Self::Enabled => Configuration {
-                    general_events: RecordingPolicy::all(false),
+                    general_events: Policy::all(false),
                     ..Configuration::default()
                 },
             };

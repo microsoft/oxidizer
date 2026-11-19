@@ -32,7 +32,7 @@ use crate::tls::TlsOptions;
 pub(crate) struct ClientOptions {
     /// Transport-level configuration handed to transport handlers.
     pub transport: TransportOptions,
-    /// Body-level policies (idle timeout, buffer limit) applied to every response body.
+    /// Defaults used by transports that build response bodies with the configured builder.
     pub response_body_options: HttpBodyOptions,
     /// Base-URI rewriting rules.
     pub router: Router,

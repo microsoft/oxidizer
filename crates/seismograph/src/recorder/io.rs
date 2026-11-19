@@ -42,7 +42,7 @@ static NEXT_IO_RESOURCE_ID: AtomicU64 = AtomicU64::new(1);
 
 fn allocate_id(counter: &AtomicU64) -> NonZeroU64 {
     let value = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
         .expect("a process cannot create u64::MAX telemetry identities");
     NonZeroU64::new(value).expect("generated identity counters start at one")
 }

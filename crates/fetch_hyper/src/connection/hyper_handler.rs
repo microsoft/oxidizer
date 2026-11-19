@@ -70,11 +70,7 @@ where
     fn execute(&self, mut input: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send {
         let captured = capture_connection::<HttpBody>(&mut input);
 
-        let body_options = input
-            .extensions()
-            .get::<BodyTimeout>()
-            .map(|v| HttpBodyOptions::default().timeout(v.duration()))
-            .unwrap_or_default();
+        let body_timeout = input.extensions().get::<BodyTimeout>().map(BodyTimeout::duration);
 
         self.client
             .request(input)
@@ -88,7 +84,16 @@ where
 
                 handle_poisoning(&captured, &parts.extensions);
 
-                HttpResponse::from_parts(parts, self.body_builder.body(body, &body_options))
+                let body = match body_timeout {
+                    Some(timeout) => self
+                        .body_builder
+                        .clone()
+                        .with_options(HttpBodyOptions::new().timeout(timeout))
+                        .body(body),
+                    None => self.body_builder.body(body),
+                };
+
+                HttpResponse::from_parts(parts, body)
             })
     }
 }
@@ -186,17 +191,106 @@ fn handle_poisoning(capture: &CaptureConnection, extensions: &Extensions) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use anyspawn::Spawner;
     use bytes::Bytes;
+    use bytesbuf::mem::GlobalPool;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
+    use hyper::body::Body;
+    use ohno::Labeled;
 
     use super::*;
     use crate::HyperTransport;
     use crate::testing::{FakeConnector, create_hyper_error, fake_body_builder};
+
+    #[test]
+    fn gamma_round2_expired_connection_poisons_hyper_pool_metadata() {
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let control = tick::ClockControl::new();
+            let clock = control.to_clock();
+            let now = clock.clone();
+            let info = ConnectionInfo::new(move || now.instant(), PoolIndex::new(0), Some(Duration::from_secs(1)));
+            let connector = FakeConnector::new_success(http_response_bytes(), clock);
+            let client = legacy::Client::builder(crate::builder::SpawnerExecutor(Spawner::new_tokio(None)))
+                .build(HyperConnectorAdapter::new(connector));
+            let mut request = test_request();
+            let capture = capture_connection::<HttpBody>(&mut request);
+            let _response = client.request(request).await.unwrap();
+            let mut extensions = Extensions::new();
+            extensions.insert(info.clone());
+            assert!(format!("{:?}", capture.connection_metadata().as_ref().unwrap()).contains("poisoned: false"));
+            control.advance(Duration::from_secs(2));
+            assert!(info.is_expired());
+            handle_poisoning(&capture, &extensions);
+            assert!(info.is_poisoned());
+            assert!(format!("{:?}", capture.connection_metadata().as_ref().unwrap()).contains("poisoned: true"));
+        });
+    }
+
+    struct GammaBoundedWriter {
+        remaining: usize,
+        output: String,
+    }
+
+    impl std::fmt::Write for GammaBoundedWriter {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            if s.len() > self.remaining {
+                return Err(std::fmt::Error);
+            }
+            self.remaining -= s.len();
+            self.output.push_str(s);
+            Ok(())
+        }
+    }
+
+    fn gamma_check_error_display(error: &HyperError) {
+        use std::fmt::Write as _;
+
+        let mut writer = GammaBoundedWriter {
+            remaining: 4096,
+            output: String::new(),
+        };
+        let mut expected = error.source().unwrap().to_string();
+        let mut source = error.source();
+        while let Some(current) = source {
+            write!(expected, "\ncaused by: {current}").unwrap();
+            source = current.source();
+        }
+        write!(writer, "{error}").unwrap();
+        assert_eq!(writer.output, expected);
+        for remaining in 0..expected.len() {
+            let mut writer = GammaBoundedWriter {
+                remaining,
+                output: String::new(),
+            };
+            write!(writer, "{error}").unwrap_err();
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_hyper_display_preserves_chain_and_formatter_errors() {
+        gamma_check_error_display(&HyperError::Hyper(create_hyper_error()));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        miri,
+        ignore = "native TLS construction requires OS/OpenSSL; Hyper error formatting retains Miri coverage"
+    )]
+    async fn gamma_survivor_legacy_display_preserves_chain_and_formatter_errors() {
+        let clock = tick::Clock::new_frozen();
+        let connector = FakeConnector::new_success(Bytes::from_static(b"NOT HTTP"), clock.clone());
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let builder = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options);
+        let handler = build_hyper_handler(builder, tls(), fake_body_builder(), &opentelemetry::global::meter("test"));
+        let error = handler.client.request(test_request()).await.unwrap_err();
+        gamma_check_error_display(&HyperError::Legacy(error));
+    }
 
     fn tls() -> TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()
@@ -211,7 +305,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.connection_pool.connection_lifetime = lifetime;
-        HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options)
+        HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
             .body_builder(HttpBodyBuilder::new_fake())
             .build(tls())
     }
@@ -231,7 +325,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler: HyperHandler<FakeConnector, crate::testing::FakeStream> = build_hyper_handler(
-            HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options),
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options),
             tls(),
             HttpBodyBuilder::new_fake(),
             &opentelemetry::global::meter("test"),
@@ -255,6 +349,41 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn request_body_timeout_configures_the_response_body() {
+        let connection_clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\n\r\n"), connection_clock.clone());
+        let body_clock = tick::ClockControl::new();
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &body_clock.to_clock())
+            .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)));
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let handler = build_hyper_handler(
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), connection_clock, options),
+            tls(),
+            body_builder,
+            &opentelemetry::global::meter("test"),
+        );
+        let mut request = test_request();
+        request.extensions_mut().insert(BodyTimeout::new(Duration::from_millis(100)));
+
+        let response = handler.execute(request).await.unwrap();
+        let mut body = response.into_body();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+        body_clock.advance(Duration::from_millis(99));
+        assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+        body_clock.advance(Duration::from_millis(1));
+
+        let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
+            panic!("the request body timeout must end the pending response body");
+        };
+        assert_eq!(error.label(), "body_timeout");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn http2_only_configures_hyper_correctly() {
         // Builder with HTTP/2-only flips `http2_only(true)` on hyper's builder.
         // Using FakeStream over HTTP/1.1-style data will fail, but we want to
@@ -264,7 +393,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.supported_http_versions = vec![Version::HTTP_2];
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options)
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
             .body_builder(HttpBodyBuilder::new_fake())
             .build(tls());
         // Execute to drive the http2 path; we don't care if it fails or not.
@@ -318,6 +447,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn end_to_end_response_is_returned_with_body() {
+        use futures::FutureExt;
+        use ohno::Labeled;
+
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let handler = make_handler(connector, ConnectionLifetime::unlimited());
@@ -325,6 +457,25 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&*body, b"hello");
+
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let connector =
+            FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"), clock.clone());
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock.clone(), options)
+            .body_builder(HttpBodyBuilder::new(bytesbuf::mem::GlobalPool::new(), &clock))
+            .build(tls());
+        let mut request = test_request();
+        request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
+        let response = handler.execute(request).await.unwrap();
+        let mut body = std::pin::pin!(response.into_body().collect());
+        assert!(body.as_mut().now_or_never().is_none());
+
+        control.advance(Duration::from_secs(1));
+        let error = body.as_mut().now_or_never().unwrap().unwrap_err();
+        assert_eq!(error.label(), "body_timeout");
     }
 
     #[test]

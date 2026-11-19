@@ -25,7 +25,6 @@ use arty::io::Io;
 use arty::runtime::{Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
-use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use testing_aids::is_mutation_testing;
 use tick::SimpleClock;
@@ -52,7 +51,8 @@ static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 assert_impl_all!(Io: Clone, Send, ThreadAware);
 assert_not_impl_any!(Io: UnwindSafe, RefUnwindSafe);
-assert_impl_all!(RuntimeBuilder: Send, Sync);
+assert_impl_all!(RuntimeBuilder: Send);
+assert_not_impl_any!(RuntimeBuilder: Sync);
 
 #[derive(Debug)]
 struct IoError(String);
@@ -148,6 +148,7 @@ markers!(
     ReservedSecondary,
     ShutdownWhileWaiting,
     ShutdownTaskCleanup,
+    SystemBeforeSpawn,
 );
 
 #[derive(Clone, Copy)]
@@ -159,10 +160,10 @@ enum RolePlan {
 
 /// Shared controls and observations for one context type across runtime workers.
 ///
-/// The atomics use one sequentially consistent ordering because some fields are
-/// progress gates observed before joins while others are counters read after
-/// completion. Keeping one ordering model avoids relying on field-specific
-/// synchronization when scenarios combine those roles.
+/// Some fields are progress gates that tests observe before joins. Other fields
+/// are counters that tests read after completion. The atomics use sequential
+/// consistency for both groups. This single ordering model avoids field-specific
+/// synchronization when a scenario combines the roles.
 struct Scenario {
     role_plan: RolePlan,
     context_constructions: AtomicUsize,
@@ -356,19 +357,19 @@ impl ThreadAware for ScenarioOptions {
     }
 }
 
-/// Rendezvous used to pause one driver construction attempt deterministically.
+/// A synchronization gate that pauses one driver construction attempt deterministically.
 #[derive(Default)]
 struct DriverGate {
     entered: bool,
     released: bool,
 }
 
-/// Action injected into context construction for nested-registration scenarios.
+/// An action that context construction uses for nested-registration scenarios.
 enum ContextAction {
     RegisterSelf { io: Io },
 }
 
-/// Context fixture whose marker selects a distinct runtime-wide registration.
+/// A context fixture whose marker selects a distinct runtime-wide registration.
 struct TestContext<M: Marker> {
     scenario: Arc<Scenario>,
     thread: Option<Thread>,
@@ -403,7 +404,7 @@ impl<M: Marker> IoContext for TestContext<M> {
     type ContextOptions = ScenarioOptions;
     type Driver = TestDriver<M>;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         options.context_constructions.fetch_add(1, Ordering::SeqCst);
         let action = options.context_action.lock().unwrap().take();
         match action {
@@ -450,7 +451,7 @@ impl<M: Marker> IoContext for TestContext<M> {
     }
 }
 
-/// Latched interrupt waker used to observe and release primary-driver waits.
+/// A latched interrupt waker that observes and releases primary-driver waits.
 struct DriverWake {
     scenario: Arc<Scenario>,
     notified: Mutex<bool>,
@@ -498,7 +499,7 @@ impl Wake for DriverWake {
     }
 }
 
-/// Worker-local driver fixture that applies the scenario's failures and gates.
+/// A worker-local driver fixture that applies the scenario's failures and gates.
 struct TestDriver<M: Marker> {
     scenario: Arc<Scenario>,
     role: DriverRole,
@@ -562,22 +563,12 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
-fn runtime_with_telemetry(workers: usize) -> (Runtime, MockProcessor) {
-    let (sink, processor) = test_emitter(TEST_ID);
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(workers))
-        .sink(sink)
-        .build()
-        .unwrap();
-    (runtime, processor)
-}
-
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {
     let schedulers: Vec<_> = (0..workers)
         .map(|_| {
             runtime
                 .scheduler()
-                .spawn_anywhere((), |builtins, ()| async move { builtins.scheduler().clone() })
+                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
                 .join()
                 .unwrap()
         })
@@ -590,10 +581,6 @@ fn flush_workers(workers: &[Scheduler]) {
     for worker in workers {
         worker.spawn(async |_| {}).join().unwrap();
     }
-}
-
-fn event_count(processor: &MockProcessor, name: &str) -> usize {
-    processor.events().iter().filter(|event| event.name() == name).count()
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -619,4 +606,3 @@ mod cycles;
 mod external;
 mod failures;
 mod registration;
-mod telemetry;

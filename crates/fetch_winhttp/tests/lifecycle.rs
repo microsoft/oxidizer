@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Client, connection and response-body lifetimes over localhost.
+//! Tests client, connection, and response-body lifetimes over localhost.
 //!
-//! Covers connection pool ownership and reuse, what happens when a caller abandons an in-flight
-//! download, and that a client assembled through the full `fetch` pipeline dispatches through this
-//! transport.
+//! Covers connection pool ownership and reuse, an abandoned download, and
+//! dispatch through the full `fetch` pipeline.
 
 #![cfg(windows)]
 
@@ -64,12 +63,10 @@ fn clients_reuse_only_their_own_connection_pools() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn extreme_idle_windows_are_accepted_and_still_pool() {
-    // The idle window is applied through an option WinHTTP rejects outright for
-    // an out-of-range value, and a rejected session option permanently fails the
-    // transport. Only a real platform can show that the two extremes of the
-    // generic option survive that check; mock-based tests establish which value
-    // the transport sends, not whether Windows takes it. Reusing a connection
-    // additionally shows the option did not disable pooling as a side effect.
+    // WinHTTP rejects an out-of-range idle window and permanently fails the
+    // transport. Only a live Windows test can show that both extreme values are
+    // accepted. Mock tests only show the value that the transport sends.
+    // Connection reuse also shows that the configuration keeps pooling enabled.
     for idle_timeout in [None, Some(Duration::ZERO)] {
         let server = TestServer::http([ResponsePlan::ok("one"), ResponsePlan::ok("two")]);
         let (builder, _body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
@@ -162,17 +159,11 @@ fn full_fetch_pipeline_uses_the_winhttp_transport() {
     let client = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .supported_http_versions(&[Version::HTTP_11])
-        // The standard pipeline's retry layer awaits `Clock::delay` for its backoff between
-        // attempts. This test drives a frozen clock, which never advances on its own and which no
-        // test logic advances, so a single retried attempt would block forever: the two
-        // `HttpTimeout` layers and the transport's connect deadline all run on that same frozen
-        // clock, and `WinHTTP`'s native timers are deliberately unlimited (see
-        // crates/fetch_winhttp/docs/design.md, "Timeouts and time"). A transient localhost failure
-        // would therefore turn a test failure into an indefinite hang instead of an assertion.
-        // Capping the retry budget at zero leaves every standard layer in the stack - including
-        // the retry layer and its recovery classification - while making it structurally
-        // impossible for a backoff delay to be awaited, because the retry loop breaks on the first
-        // attempt.
+        // The retry layer uses `Clock::delay` for backoff. This test uses a
+        // frozen clock that no test logic advances. A retry waits forever
+        // because both `HttpTimeout` layers and the connect deadline use that
+        // clock. WinHTTP native timers are unlimited. Set the retry budget to
+        // zero so all standard layers remain present but no backoff can start.
         .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(0)))
         .build();
 

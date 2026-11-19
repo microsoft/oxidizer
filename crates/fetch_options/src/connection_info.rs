@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Diagnostic information about connections that served HTTP responses.
+//! Information about connections that served HTTP responses.
 
 use std::fmt;
 use std::sync::Arc;
@@ -10,10 +10,11 @@ use std::time::{Duration, Instant};
 
 use crate::PoolIndex;
 
-/// Diagnostic information about the connection that served an HTTP response.
+/// Information about the connection that served an HTTP response.
 ///
-/// Attached as a response extension by real network connections; retrieve via
-/// `response.extensions().get::<ConnectionInfo>()`. Cheap to clone — clones share state.
+/// A transport that supports this information attaches it as a response extension.
+/// Read it with `response.extensions().get::<ConnectionInfo>()`. Clones share the
+/// same state.
 #[derive(Clone, Debug)]
 pub struct ConnectionInfo {
     inner: Arc<ConnectionInfoInner>,
@@ -44,11 +45,10 @@ impl fmt::Debug for NowFn {
 }
 
 impl ConnectionInfo {
-    /// Creates connection metadata whose age is measured using the supplied clock function.
+    /// Creates connection information that uses the supplied clock to measure age.
     ///
-    /// `now` is invoked once at creation to capture the connection's start instant, and again
-    /// on every [`age`](Self::age) call to measure elapsed time. Supplying a custom closure
-    /// (for example one backed by a test clock) keeps age calculations deterministic.
+    /// This function calls `now` once to record the start time. Each [`age`](Self::age)
+    /// call invokes `now` again. A test clock gives deterministic age values.
     #[must_use]
     pub fn new<F>(now: F, pool_index: PoolIndex, max_age: Option<Duration>) -> Self
     where
@@ -72,41 +72,41 @@ impl ConnectionInfo {
         self.inner.now.now().saturating_duration_since(self.inner.start)
     }
 
-    /// Pool that served the request (always `PoolIndex::new(0)` for single-pool clients).
+    /// Returns the pool that served the request.
+    ///
+    /// A client with one pool always returns `PoolIndex::new(0)`.
     #[must_use]
     pub fn pool_index(&self) -> PoolIndex {
         self.inner.pool_index
     }
 
-    /// `true` once the connection has been marked for removal from the pool.
+    /// Returns `true` after [`poison`](Self::poison) marks the connection for removal.
     #[must_use]
     pub fn is_poisoned(&self) -> bool {
         self.inner.poisoned.load(Ordering::Relaxed)
     }
 
-    /// Marks the connection for removal from the pool (e.g. after a protocol error).
+    /// Marks the connection for removal from the pool.
     ///
-    /// This is an associated function rather than a method, so it must be invoked
-    /// explicitly as `ConnectionInfo::poison(&info)`. This avoids accidental poisoning
-    /// through method-call syntax or auto-deref.
+    /// Call this associated function as `ConnectionInfo::poison(&info)`, for example
+    /// after a protocol error. Method-call syntax cannot mark a connection by accident.
     pub fn poison(this: &Self) {
         this.inner.poisoned.store(true, Ordering::Relaxed);
     }
 
-    /// Maximum wall-clock age the connection is permitted to reach before recycling.
+    /// Returns the maximum connection age before recycling.
     ///
-    /// Returns `None` when no maximum age is set (connections live until the server or
-    /// keep-alive probes close them).
+    /// `None` means that no maximum age is set. The server or keep-alive probes can
+    /// still close the connection.
     #[must_use]
     pub fn max_age(&self) -> Option<Duration> {
         self.inner.max_age
     }
 
-    /// Returns `true` once the connection's [`age`](Self::age) has strictly exceeded its
-    /// configured [`max_age`](Self::max_age). Always returns `false` when no `max_age` is set.
+    /// Returns `true` if [`age`](Self::age) is greater than [`max_age`](Self::max_age).
     ///
-    /// The comparison is strictly greater-than so that a connection at exactly `max_age`
-    /// is still considered fresh.
+    /// This returns `false` when `max_age` is `None`. A connection is not expired when
+    /// its age equals `max_age`.
     #[must_use]
     pub fn is_expired(&self) -> bool {
         self.max_age().is_some_and(|max_age| self.age() > max_age)
@@ -124,8 +124,7 @@ mod tests {
         Duration::from_secs(n)
     }
 
-    /// Returns a deterministic clock reporting `start + <offset>` plus a setter that moves
-    /// the offset, letting tests advance (or rewind) time at will.
+    /// Returns a clock at `start + <offset>` and a function that changes the offset.
     fn manual_clock() -> (impl Fn() -> Instant + Send + Sync + 'static, impl Fn(Duration)) {
         let base = Instant::now();
         let offset = Arc::new(AtomicU64::new(0));
@@ -147,14 +146,14 @@ mod tests {
     #[test]
     fn age_tracks_the_clock_relative_to_start() {
         let (clock, set) = manual_clock();
-        set(secs(5)); // connection is created at the 5s mark
+        set(secs(5)); // Create the connection at 5 seconds.
         let info = ConnectionInfo::new(clock, PoolIndex::new(0), None);
 
-        assert_eq!(info.age(), Duration::ZERO); // no time elapsed yet
+        assert_eq!(info.age(), Duration::ZERO); // No time elapsed.
         set(secs(8));
-        assert_eq!(info.age(), secs(3)); // re-read each call, measured from start
+        assert_eq!(info.age(), secs(3)); // Each call measures from the start time.
         set(Duration::ZERO);
-        assert_eq!(info.age(), Duration::ZERO); // saturates when the clock rewinds
+        assert_eq!(info.age(), Duration::ZERO); // A clock rewind saturates at zero.
     }
 
     #[cfg_attr(miri, ignore)]
@@ -167,7 +166,7 @@ mod tests {
         assert!(!info.is_poisoned());
 
         ConnectionInfo::poison(&info);
-        ConnectionInfo::poison(&info); // idempotent
+        ConnectionInfo::poison(&info); // A second call has no additional effect.
         assert!(info.is_poisoned());
 
         assert_eq!(ConnectionInfo::new(Instant::now, PoolIndex::new(0), None).max_age(), None);
@@ -219,8 +218,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn is_expired_uses_strictly_greater_than_at_max_age_boundary() {
-        // Pins the comparison as strictly greater-than: at age == max_age the
-        // connection is still considered fresh. Guards against `>` -> `>=`.
+        // The connection stays valid when its age equals `max_age`.
         let (clock, set) = manual_clock();
         let info = ConnectionInfo::new(clock, PoolIndex::new(0), Some(secs(5)));
         set(secs(5));

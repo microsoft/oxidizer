@@ -5,20 +5,20 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::time::Duration;
 
-/// Timing for one driver invocation.
+/// The wait limit for one driver invocation.
 #[derive(Debug)]
 pub struct Cycle {
     max_wait: Duration,
-    // A cycle describes one invocation on one async worker. Keeping it !Send and !Sync prevents
-    // runtimes from accidentally moving or sharing that invocation state across workers.
+    // A cycle belongs to one invocation on one async worker. The !Send and !Sync markers prevent
+    // the runtime from moving or sharing this state across workers.
     _not_send: PhantomData<Rc<()>>,
 }
 
 impl Cycle {
-    /// Creates the inputs for one driver invocation.
+    /// Creates the wait input for one driver invocation.
     ///
-    /// The runtime must use [`Duration::ZERO`] when no waiting is allowed, including for every
-    /// secondary driver.
+    /// The runtime must use [`Duration::ZERO`] when the driver must not wait. This requirement
+    /// applies to every secondary driver.
     #[must_use]
     #[inline]
     pub const fn new(max_wait: Duration) -> Self {
@@ -30,7 +30,7 @@ impl Cycle {
 
     /// Returns the maximum wait duration.
     ///
-    /// A [primary driver](crate::DriverRole::Primary) may wait on its worker for up to this
+    /// A [primary driver](crate::DriverRole::Primary) can wait on its worker for up to this
     /// duration. A [secondary driver](crate::DriverRole::Secondary) must not wait on its worker.
     /// [`Duration::ZERO`] means no waiting.
     #[must_use]

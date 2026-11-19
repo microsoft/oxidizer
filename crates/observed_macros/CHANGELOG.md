@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-11-06
+
+- Align the version with the `observed` package group. No independent source
+  or macro expansion change.
+- Update the local `observed_macros_impl` requirement from `0.30.0` to `0.30.1`.
+
+## [0.30.0] - 2026-11-02
+
+- Update the exact implementation requirement to reduce the work needed to generate event and
+  enrichment code. Accepted attributes, generated APIs, and behavior do not change.
+- Update the requirement for local package `observed_macros_impl` from `=0.29.0` to `=0.30.0`.
+
 ## [0.29.0] - 2026-10-20
 
 - Align the procedural macro package with the Observed 0.29 release.

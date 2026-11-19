@@ -61,6 +61,10 @@ use crate::Arena;
 mod dynamic_value;
 mod entry;
 mod enum_value;
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only allocator and visitor fixtures.
+#[path = "value/gamma_survivor.rs"]
+mod gamma_survivor;
 mod map;
 mod number;
 #[cfg(test)]
@@ -376,6 +380,7 @@ impl<'de, A: Allocator + Clone> Visitor<'de> for ValueVisitor<'_, A> {
         self.arena
             .try_alloc_vec_with_capacity(value.len())
             .and_then(|mut result| {
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding successful vector reservation covers exactly value.len bytes, so extending by this slice cannot allocate")]
                 result.try_extend_from_slice(value)?;
                 result.try_into_boxed_slice()
             })
@@ -838,7 +843,11 @@ impl<'de, A: Allocator + Clone> VariantAccess<'de> for EnumReplay<'de, A> {
     }
     fn struct_variant<V: Visitor<'de>>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error> {
         match self.payload {
-            EnumPayload::Value(value) => de::Deserializer::deserialize_struct(value, "", fields, visitor),
+            EnumPayload::Value(value) => de::Deserializer::deserialize_struct(
+                value,
+                // #[gamma::skip(literal.str_to_xyzzy, reason = "The concrete Value deserializer ignores its struct-name argument and dispatches solely on the Value representation")]
+                "", fields, visitor,
+            ),
             EnumPayload::Explicit(EnumValue::Struct(entries)) => visitor.visit_map(MapReplay::new(entries)),
             _ => type_error("invalid enum payload", "a struct variant"),
         }

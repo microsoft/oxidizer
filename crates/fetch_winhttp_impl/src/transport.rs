@@ -172,7 +172,6 @@ mod tests {
     use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use fetch::options::TransportOptions;
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
-    use http_extensions::HttpBodyOptions;
     use layered::Service;
     use observed::{Severity, Sink};
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
@@ -336,10 +335,7 @@ mod tests {
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
         let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock());
         let body_error = HttpError::unavailable("upload stream failed").with_request(request("https://unrelated.example/attached-by-body"));
-        let body = body_builder.stream(
-            futures::stream::iter([Err::<BytesView, _>(body_error)]),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.stream(futures::stream::iter([Err::<BytesView, _>(body_error)]));
         let mut input = http::Request::builder()
             .method(http::Method::POST)
             .uri("https://example.com/upload")
@@ -376,10 +372,7 @@ mod tests {
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
         let memory = OpaqueMemory::new(GlobalPool::new());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock());
-        let body = body_builder.stream(
-            futures::stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &memory))]),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.stream(futures::stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &memory))]));
         let mut input = http::Request::builder()
             .method(http::Method::POST)
             .uri("https://example.com/upload")

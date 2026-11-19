@@ -20,19 +20,19 @@
 //!
 //! ```
 //! use anyspawn::Spawner;
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use arty_mio::{MioContext, MioOptions};
 //! use fetch_mio::{MioConnector, MioConnectorOptions};
 //!
-//! fn worker_transport_parts(builtins: &Builtins) -> (MioConnector, Spawner) {
-//!     let context = builtins.io().context::<MioContext>(&MioOptions::default());
+//! fn worker_transport_parts(context: &Context) -> (MioConnector, Spawner) {
+//!     let io = context.io().context::<MioContext>(&MioOptions::default());
 //!     let connector = MioConnector::new(
-//!         context,
-//!         builtins.scheduler().clone(),
-//!         builtins.clock().clone(),
+//!         io,
+//!         context.scheduler().clone(),
+//!         context.clock().clone(),
 //!         MioConnectorOptions::default(),
 //!     );
-//!     let spawner = Spawner::new_arty(builtins.scheduler().clone());
+//!     let spawner = Spawner::new_arty(context.scheduler().clone());
 //!     (connector, spawner)
 //! }
 //! ```

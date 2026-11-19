@@ -11,13 +11,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use performables::sync::lock::RwLock;
 use seismograph::recorder::event::{EventKind, ObjectId};
-use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 
 fn enable_recording() {
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
-        event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+        general_events: Policy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(64),
         ..Default::default()
     });
 }
@@ -58,6 +58,7 @@ fn recording_enabled_while_held_preserves_release_and_poison_events() {
     drop(write_lock.read_result().unwrap_err().into_inner());
     let mut recovered = write_lock.write_result().unwrap_err().into_inner();
     *recovered += 1;
+    write_lock.clear_poison();
     write_lock.clear_poison();
     drop(recovered);
     let write_events = finish_recording(write_id);

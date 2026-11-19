@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public surface contract tests.
+//! Tests for the public API contract.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -74,7 +74,7 @@ fn driver_roles_have_stable_labels() {
 
 #[test]
 fn context_creates_driver_with_selected_role() {
-    let mut context = TestContext::context(7);
+    let mut context = TestContext::new(7);
     let _driver = context.driver(driver_options()).unwrap();
 
     assert_eq!(context, TestContext(7));
@@ -145,7 +145,7 @@ impl IoContext for TestContext {
     type ContextOptions = u8;
     type Driver = LocalDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self(options)
     }
 

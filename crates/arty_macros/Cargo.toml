@@ -3,8 +3,8 @@
 
 [package]
 name = "arty_macros"
-description = "Runtime entry-point macros for Arty."
-version = "0.5.0"
+description = "Attribute macros for Arty runtime entry points."
+version = "0.6.1"
 readme = "README.md"
 keywords = ["arty", "async", "runtime", "proc-macro"]
 categories = ["asynchronous"]
@@ -22,8 +22,8 @@ private-api = true
 [package.metadata.docs.rs]
 all-features = true
 
-# Thin proc-macro shims are exercised by consumer expansion; implementation
-# logic and its coverage gate live in arty_macros_impl.
+# Consumer expansion exercises these thin procedural macro shims.
+# arty_macros_impl contains the implementation logic and its coverage gate.
 [package.metadata.coverage-gate]
 min-lines-percent = 0
 
@@ -32,9 +32,6 @@ proc-macro = true
 
 [dependencies]
 arty_macros_impl = { workspace = true }
-
-[dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

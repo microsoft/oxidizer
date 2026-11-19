@@ -489,3 +489,33 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         deserializer.end().map_err(JsonError::from)
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use alloc::string::ToString;
+
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_callback_seed_returns_exact_sentinel_error_and_stops() {
+        let arena = Arena::new();
+        let mut saved = None;
+        let mut calls = 0;
+        let mut callback = |_: u8| {
+            calls += 1;
+            Err("callback stopped")
+        };
+        let seed = TryDeserializeEachSeed {
+            arena: &arena,
+            callback: &mut callback,
+            callback_error: &mut saved,
+            marker: core::marker::PhantomData::<fn() -> u8>,
+        };
+        let result = seed.deserialize(serde::de::value::SeqDeserializer::<_, serde::de::value::Error>::new(
+            [1_u8, 2].into_iter(),
+        ));
+        assert_eq!(result.unwrap_err().to_string(), "JSON element callback failed");
+        assert_eq!(saved, Some("callback stopped"));
+        assert_eq!(calls, 1);
+    }
+}

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Fully constructed TLS backends ready for use by an HTTP client.
+//! TLS backends for HTTP clients.
 
 #[cfg(any(feature = "native-tls", test))]
 use std::collections::HashMap;
@@ -11,15 +11,13 @@ use std::sync::Arc;
 #[cfg(any(feature = "native-tls", test))]
 use http::uri::Authority;
 
-/// Error returned when materializing a [`TlsBackend`] from
-/// [`TlsOptions`](super::TlsOptions) fails.
+/// An error from building a [`TlsBackend`] from [`TlsOptions`](super::TlsOptions).
 #[ohno::error]
 pub struct BackendError;
 
 /// A platform native TLS backend.
 ///
-/// The backend carries the platform connector together with any
-/// endpoint-specific server name overrides used during handshakes.
+/// Contains the platform connector and server name overrides for TLS handshakes.
 #[cfg(any(feature = "native-tls", test))]
 #[derive(Debug, Clone)]
 pub struct NativeTlsBackend {
@@ -42,10 +40,10 @@ impl NativeTlsBackend {
         &self.connector
     }
 
-    /// Returns the configured TLS server name for an endpoint.
+    /// Returns the TLS server name override for an endpoint.
     ///
-    /// An exact authority match, including the port when present, takes
-    /// precedence over a host-only override.
+    /// An exact authority match includes the port and takes priority over a
+    /// host-only override.
     #[must_use]
     pub fn server_name_for(&self, endpoint: &Authority) -> Option<&str> {
         self.server_name_overrides
@@ -68,34 +66,35 @@ pub(crate) fn server_name_override_key(endpoint: &Authority) -> String {
     }
 }
 
-/// A fully constructed TLS backend ready for use by an HTTP client.
+/// A TLS backend that an HTTP client can use.
 ///
-/// Where [`TlsOptions`](super::TlsOptions) describes *how* to build a TLS
-/// configuration, `TlsBackend` holds the result. Which variants are
-/// available depends on the enabled Cargo features.
+/// [`TlsOptions`](super::TlsOptions) describes the required TLS configuration.
+/// `TlsBackend` contains the built configuration. The enabled Cargo features
+/// determine which variants are available.
 ///
-/// Typically produced by [`TlsBackendBuilder`](super::TlsBackendBuilder);
-/// construct directly only when wrapping a backend you have already built.
+/// Use [`TlsBackendBuilder`](super::TlsBackendBuilder) to build this type.
+/// Construct it directly only to wrap a backend that you already built.
 #[derive(Debug, Clone)]
 #[allow(
     clippy::allow_attributes,
     clippy::large_enum_variant,
-    reason = "configuration object; boxing would clutter the public API without performance benefit"
+    reason = "this configuration object stays inline because boxing complicates the public API without a performance benefit"
 )]
 pub enum TlsBackend {
-    /// rustls backend, carrying a shared `rustls::ClientConfig`.
+    /// A rustls backend with a shared `rustls::ClientConfig`.
     #[cfg(any(feature = "rustls", test))]
     Rustls(std::sync::Arc<::rustls::ClientConfig>),
 
-    /// Platform native TLS backend (`SChannel` on Windows, Security Framework
-    /// on `macOS`, `OpenSSL` on Linux).
+    /// A platform native TLS backend.
+    ///
+    /// The backend uses `SChannel` on Windows, Security Framework on `macOS`,
+    /// and `OpenSSL` on Linux.
     ///
     /// # Migration from `fetch_tls` 0.4
     ///
-    /// This variant now contains [`NativeTlsBackend`] instead of
-    /// [`native_tls::TlsConnector`]. Construct it with `connector.into()`.
-    /// After destructuring the variant, access the platform connector with
-    /// [`NativeTlsBackend::connector`].
+    /// This variant contains [`NativeTlsBackend`] instead of
+    /// [`native_tls::TlsConnector`]. Use `connector.into()` to construct it.
+    /// Use [`NativeTlsBackend::connector`] to access the platform connector.
     #[cfg(any(feature = "native-tls", test))]
     NativeTls(NativeTlsBackend),
 }
@@ -134,7 +133,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn native_tls_backend_prefers_exact_authority_over_host() {
         let connector = ::native_tls::TlsConnector::new().unwrap();
         let backend = NativeTlsBackend::new(
@@ -157,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn native_tls_backend_matches_host_case_insensitively() {
         let connector = ::native_tls::TlsConnector::new().unwrap();
         let backend = NativeTlsBackend::new(
@@ -179,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn native_tls_backend_preserves_ipv6_brackets_in_exact_key() {
         let connector = ::native_tls::TlsConnector::new().unwrap();
         let backend = NativeTlsBackend::new(
@@ -202,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn native_tls_connector_converts_to_backend_payload() {
         let backend: NativeTlsBackend = ::native_tls::TlsConnector::new().unwrap().into();
         assert!(backend.server_name_overrides.is_empty());

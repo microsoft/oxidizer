@@ -1,53 +1,100 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Task scheduling and result handles.
+//! Starting tasks, choosing workers, and receiving results.
 //!
-//! Borrow a [`RuntimeScheduler`] from
-//! [`Runtime::scheduler`](crate::runtime::Runtime::scheduler) to let the runtime
-//! place a new task. Each task receives [`Builtins`] with its worker's services.
-//! [`Builtins::scheduler`] keeps child tasks on the same worker.
+//! Choose how Arty places a new task:
 //!
-//! Pass a factory, not an already-created future. Arty creates the future on
-//! its worker, where it can retain non-[`Send`] state. Factory captures and
-//! results cross the submission boundary and must be `Send`. Use
-//! [`ThreadAware`](crate::core::ThreadAware) data with `spawn_anywhere` when
-//! the runtime should choose a worker.
+//! - [`RuntimeScheduler`] submits work from outside the runtime and lets the
+//!   runtime select a worker.
+//! - [`Scheduler::spawn`] starts an ordinary child task on the scheduler's
+//!   worker.
+//! - [`Scheduler::spawn_anywhere`] lets the runtime select a worker.
+//! - [`Scheduler::spawn_at`] uses a worker from
+//!   [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
 //!
-//! Await a [`JoinHandle`] to receive a task's result. Panics and shutdown
-//! cancellation return [`JoinError`] to the caller, rather than unwinding it.
-//! A task returning `Result<T, E>` has two error layers: joining it returns
-//! `Result<Result<T, E>, JoinError>`.
+//! After a task starts, it stays on its assigned worker. If it awaits an
+//! operation that is not ready, that worker can poll another ready task
+//! assigned to it.
+//!
+//! Task APIs accept a factory, a function that creates a future.
+//! Arty runs the factory on the selected worker, so the future can keep
+//! non-[`Send`] state across awaits.
+//!
+//! Relocation updates a value's state for a selected worker.
+//! [`Scheduler::spawn_anywhere`] and [`Scheduler::spawn_at`] relocate the
+//! [`ThreadAware`](crate::core::ThreadAware) data passed to their factories
+//! before the factories run. The data and result must implement `ThreadAware`.
+//! When an Arty worker awaits the result, Arty relocates it to that worker.
+//! [`RuntimeScheduler::spawn_anywhere`] does not relocate its result.
+//!
+//! Use [`Scheduler::spawn_blocking`] or [`RuntimeScheduler::spawn_blocking`] for
+//! synchronous calls that can stop an async worker from running other tasks.
+//! Blocking functions run on separate threads in
+//! pools configured by [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+//!
+//! Await [`JoinHandle`] to receive a result or [`JoinError`]. Dropping a
+//! `JoinHandle` does not cancel its task.
 //!
 //! # Examples
 //!
-//! Submit a child task and await its result:
+//! Let Arty choose a worker and send it a clock and a number. The task waits
+//! for 1 ms, then returns the number:
 //!
-//! ```
+//! ```no_run
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! # #[arty::main]
-//! # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-//! let task = cx.scheduler().spawn(async |_| 6 * 7);
-//! assert_eq!(task.await?, 42);
+//! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
+//! let answer = cx
+//!     .scheduler()
+//!     .spawn_anywhere((cx.clock().clone(), 42_u32), |(clock, answer)| async move {
+//!         clock.delay(std::time::Duration::from_millis(1)).await;
+//!         answer
+//!     })
+//!     .await?;
+//! assert_eq!(answer, 42);
 //! # Ok(())
 //! # }
 //! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! Await work you need before shutdown, which cancels pending tasks. Dropping
-//! a join handle does not cancel its task. See [scheduling](crate::documentation::scheduling)
-//! and [thread awareness](crate::documentation::thread_awareness) for examples.
+//! Tuples implement `ThreadAware` when every element does. [`Clock`](crate::time::Clock)
+//! and `u32` implement it here. Arty relocates the clock before the factory
+//! runs.
+//!
+//! Create state on an async worker and run a blocking function
+//! outside the async worker. This example requires `macros`, which enables
+//! `rt`:
+//!
+//! ```
+//! use std::rc::Rc;
+//!
+//! # #[cfg(all(feature = "macros", feature = "rt"))]
+//! # #[arty::main]
+//! # async fn main(
+//! #     cx: arty::task::Context,
+//! # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//! let local = cx.scheduler().spawn(|_| {
+//!     let value = Rc::new(40);
+//!     async move { *value }
+//! });
+//! let blocking = cx.scheduler().spawn_blocking(|| 2);
+//! assert_eq!(local.await? + blocking.await?, 42);
+//! # Ok(())
+//! # }
+//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+//! ```
 
-pub(crate) mod builtins;
-pub(crate) mod execution;
-pub(crate) mod join;
+pub(crate) mod context;
+pub(crate) mod handle;
+pub(crate) mod preparation;
 mod runtime_scheduler;
 pub(crate) mod scheduler;
 
 #[doc(inline)]
-pub use builtins::Builtins;
+pub use context::Context;
 #[doc(inline)]
-pub use join::{JoinError, JoinHandle};
+pub use handle::{JoinError, JoinHandle};
 #[doc(inline)]
 pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]

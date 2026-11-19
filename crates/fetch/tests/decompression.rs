@@ -75,8 +75,18 @@ fn build(
     body: BytesView,
     configure: impl FnOnce(HttpClientBuilder) -> HttpClient,
 ) -> (HttpClient, SeenRequests) {
+    build_with_body_options(format_token, body, HttpBodyOptions::new(), configure)
+}
+
+fn build_with_body_options(
+    format_token: Option<&'static str>,
+    body: BytesView,
+    body_options: HttpBodyOptions,
+    configure: impl FnOnce(HttpClientBuilder) -> HttpClient,
+) -> (HttpClient, SeenRequests) {
     let seen = SeenRequests::default();
     let recorder = seen.clone();
+    let body_builder = fetch::HttpBodyBuilder::new_fake().with_options(body_options);
 
     let handler = FakeHandler::from_fn(move |request| {
         recorder
@@ -85,7 +95,7 @@ fn build(
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.headers().clone());
 
-        let mut response = HttpResponseBuilder::new_fake().status(StatusCode::OK);
+        let mut response = HttpResponseBuilder::new(&body_builder).status(StatusCode::OK);
         if let Some(format_token) = format_token {
             response = response.header(CONTENT_ENCODING, HeaderValue::from_static(format_token));
         }
@@ -424,12 +434,10 @@ async fn a_corrupt_body_fails_when_it_is_read_without_retrying() {
 async fn the_buffer_limit_applies_to_the_decompressed_body() {
     let expected = payload();
     let options = DecompressionOptions::with_formats(&[DecompressionFormat::Gzip]);
+    let body_options = HttpBodyOptions::new().buffer_limit(16);
     for options in [options.clone(), options.max_output_len(None)] {
-        let (client, _) = build(Some("gzip"), compress(Format::Gzip, expected.as_bytes()), |builder| {
-            builder
-                .response_body_options(HttpBodyOptions::default().buffer_limit(16))
-                .decompression(options)
-                .build()
+        let (client, _) = build_with_body_options(Some("gzip"), compress(Format::Gzip, expected.as_bytes()), body_options, |builder| {
+            builder.response_body_options(body_options).decompression(options).build()
         });
 
         let response = client.get(URL).fetch().await.unwrap();

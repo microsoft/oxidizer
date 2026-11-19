@@ -20,7 +20,7 @@ mod tests {
     use performables::sync::mutex::Mutex;
     use seismograph::monitor::Monitor;
     use seismograph::recorder::event::EventKind;
-    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+    use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
     use seismograph_protocol::io::MonitorIo;
     use seismograph_protocol::message::{Request, Response, SnapshotOptions};
     use seismograph_protocol::transport::Connection;
@@ -46,9 +46,9 @@ mod tests {
         let _session = SESSION.lock().unwrap();
         let monitor = Monitor::builder().name(NAME).instance(instance).start().unwrap();
         seismograph::recorder(Configuration {
-            general_events: RecordingPolicy::all(true),
-            arc_dereferences: RecordingPolicy::all(true),
-            event_capacity_per_thread: EventBufferCapacity::new(4_096).unwrap(),
+            general_events: Policy::all(true),
+            arc_dereferences: Policy::all(true),
+            event_capacity_per_thread: EventBufferCapacity::new(4_096),
             ..Default::default()
         });
         let stop = AtomicBool::new(false);

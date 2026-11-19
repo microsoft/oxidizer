@@ -4,6 +4,15 @@ All notable changes to this crate are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-02
+
+- Update synchronization and benchmark requirements. Use version 0.3.1 for all Internity packages.
+  Interning behavior does not change.
+- Update the requirement for local package `internity_macros` from `=0.3.0` to `=0.3.1`.
+- Update the requirement for `parking_lot` from `0.12.5` to `0.13.0`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+- Update the development requirement for `parking_lot` from `0.12.5` to `0.13.0`.
+
 ## [0.3.0] - 2026-10-20
 
 - Harden interner growth and shared snapshots; persisted 32-bit raw `Sym` handles require remapping because shard hashing changed.

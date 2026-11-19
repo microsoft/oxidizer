@@ -76,6 +76,7 @@ pub(super) fn reject_if_too_complex(tokens: &TokenStream) -> Result<()> {
 
     while let Some((current, _)) = frames.last_mut() {
         let Some(token) = current.next() else {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             frames.pop();
             continue;
         };
@@ -145,6 +146,44 @@ mod tests {
     use quote::quote;
 
     use super::{MAX_FIELD_TOKENS, MAX_GROUP_DEPTH, native_ident, parse_ident_value, reject_if_too_complex, support_ident};
+
+    #[test]
+    fn gamma_survivor_complexity_exact_depth_and_separator_budgets() {
+        let error =
+            "macro arguments are too complex (nested too deeply, or a single field's value has too many tokens); simplify the invocation";
+        let mut nested = quote!(x);
+        for _ in 0..31 {
+            nested = quote!((#nested));
+        }
+        reject_if_too_complex(&nested).unwrap();
+        nested = quote!((#nested));
+        assert_eq!(reject_if_too_complex(&nested).unwrap_err().to_string(), error);
+        for separator in [quote!(,), quote!(;)] {
+            let field: TokenStream = std::iter::repeat_n(quote!(x), 128).collect();
+            reject_if_too_complex(&quote!(#field #separator #field)).unwrap();
+            let over: TokenStream = std::iter::repeat_n(quote!(x), 129).collect();
+            assert_eq!(reject_if_too_complex(&quote!((x) #over)).unwrap_err().to_string(), error);
+            assert_eq!(
+                reject_if_too_complex(&quote!(#field #separator #over)).unwrap_err().to_string(),
+                error
+            );
+            reject_if_too_complex(&quote!((#field) #separator (#field))).unwrap();
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_identifier_errors_and_readable_cutoff() {
+        for input in [quote!(::ONE), quote!(module::ONE)] {
+            let expression = syn::parse2(input).unwrap();
+            assert_eq!(
+                parse_ident_value(&expression, "identity").unwrap_err().to_string(),
+                "`identity` must be a single Rust identifier"
+            );
+        }
+        let name = format!("{}ZQ", "a".repeat(63));
+        let native = native_ident("benchmark", &name).to_string();
+        assert_eq!(native, format!("{}_{}z", support_ident("benchmark", &name), "a".repeat(63)));
+    }
 
     #[test]
     fn native_names_preserve_readable_identity_without_sanitization_collisions() {

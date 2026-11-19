@@ -534,8 +534,8 @@ with a generated helper name.
 
 **Workspace-wide verification.** CI runs Miri (base, plus `-Zmiri-tree-borrows`,
 `-Zmiri-strict-provenance`, and a rotating `-Zmiri-many-seeds` window),
-`cargo careful`, `cargo mutants` (diff-scoped on pull requests, full runs
-nightly), and coverage. Because the library has exactly one module with
+`cargo careful`, `cargo gamma` (changed lines on pull requests, full runs
+in the scheduled exhaustive tier), and coverage. Because the library has exactly one module with
 `unsafe`, Miri's job here is narrow and precise: it validates the unchecked
 UTF-8 reconstruction and the index arithmetic that feeds it — that
 `get_unchecked` on `offsets`/`bytes` is always in bounds and that

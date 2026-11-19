@@ -7,7 +7,7 @@
 //! HTTP `Content-Encoding: br`. Where it lands on the speed/ratio trade depends on the payload and
 //! the level, so benchmark a representative corpus. Requires the `brotli` cargo feature.
 //!
-//! Brotli streams carry no magic bytes, so the format has to be known from context, such as a
+//! Brotli streams carry no magic bytes, so the format must be known from context, such as a
 //! `Content-Encoding` header.
 //!
 //! # Examples
@@ -33,7 +33,7 @@ use crate::limits::FormatLimits;
 ///
 /// Brotli has no structural expansion ceiling, so a ratio bound cannot distinguish a bomb from
 /// legitimate highly-compressible data, and brotli therefore declares none. What bounds untrusted
-/// brotli is the cap the buffering conveniences apply; see
+/// brotli is the cap that whole-buffer functions apply. See
 /// [`DecompressorLimits`][crate::DecompressorLimits].
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(None, None, None);
 use crate::macros::define_format;
@@ -78,11 +78,11 @@ define_format! {
     multi_stream_default = false,
 }
 
-/// The kind of data brotli should tune its model for.
+/// The kind of data for which brotli tunes its model.
 ///
 /// Brotli ships a static dictionary of common web text, and its entropy model can be biased
-/// towards a particular kind of input. Choosing correctly is worth a few percent on the ratio;
-/// choosing wrongly costs about as much, so leave it at [`Mode::Generic`] unless you know.
+/// towards a particular kind of input. A correct selection can improve the ratio by a few percent.
+/// A wrong selection costs about as much, so use [`Mode::Generic`] unless you know the input type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 #[non_exhaustive]
 pub enum Mode {
@@ -97,7 +97,7 @@ pub enum Mode {
 
 /// A compression quality on brotli's native `0..=11` scale.
 ///
-/// Quality zero is brotli's fastest mode; it still compresses. The portable [`Level`][crate::Level] scale maps
+/// Quality zero is brotli's fastest mode. It still compresses. The portable [`Level`][crate::Level] scale maps
 /// onto this range, while this type makes every native quality reachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Quality(u8);
@@ -148,11 +148,11 @@ impl From<Quality> for u8 {
 /// A larger window lets the compressor find matches further back, which is what helps on large inputs.
 ///
 /// RFC 7932 gives the declared window a format-level role: it is what a decoder must be prepared to
-/// buffer, so raising it is a cost the reader may pay as well as the writer.
+/// buffer, so raising it can increase memory use for the reader and writer.
 ///
 /// It is tempting to read this as a memory dial and shrink it to economize, but that is not
 /// dependable in either direction. Shrinking the window does not reduce compressor memory or raise
-/// throughput smoothly, and below some point it can worsen both; the ratio is not monotonic either,
+/// throughput smoothly. Below some point, it can worsen both. The ratio is not monotonic either,
 /// since a window comparable to the payload can beat a much larger one. Where those turning points
 /// fall depends on the payload, the level and the backend version, so they are not values this
 /// crate can state.
@@ -221,10 +221,10 @@ impl From<WindowSize> for u8 {
 
 /// Settings that only brotli has.
 ///
-/// The portable settings -- [`level`][crate::CompressorBuilder::level] and
-/// [`output_chunk_size`][crate::CompressorBuilder::output_chunk_size] -- are shared with every other format
+/// The portable settings, [`level`][crate::CompressorBuilder::level] and
+/// [`output_chunk_size`][crate::CompressorBuilder::output_chunk_size], are shared with every other format
 /// and are also reachable from a [`CompressorBuilder<()>`][crate::CompressorBuilder] that has not
-/// chosen a format yet. These are not: a builder that might produce any format cannot honour a
+/// chosen a format yet. The settings below are format-specific. A shared builder cannot honor a
 /// setting only brotli has, so reach for them through this concrete builder. Box the result when a
 /// call site needs to hold one of several formats without naming which.
 ///

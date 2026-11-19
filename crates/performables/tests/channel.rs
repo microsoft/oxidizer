@@ -687,15 +687,15 @@ fn channel_futures_are_send_for_send_values() {
 #[test]
 #[cfg(feature = "seismograph")]
 fn channel_operations_share_runtime_telemetry_identity() {
-    let thread_id = seismograph::recorder::current_thread_id();
+    let thread_id = seismograph::recorder::thread_id();
     seismograph::recorder(Configuration {
-        general_events: seismograph::recorder::RecordingPolicy {
+        general_events: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
         event_capacity_per_thread: if cfg!(miri) {
-            seismograph::recorder::EventBufferCapacity::new(64).unwrap()
+            seismograph::recorder::EventBufferCapacity::new(64)
         } else {
             seismograph::recorder::EventBufferCapacity::default()
         },

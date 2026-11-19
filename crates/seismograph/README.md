@@ -23,6 +23,10 @@ Recording is off by default, with sampling and optional backtraces to control
 its cost. Events are kept in bounded per-thread buffers. Snapshots combine
 those events with state supplied by registered sources, such as allocators
 and runtimes.
+Each snapshot resolves captured stack addresses inside the application.
+The file stores available function names and source locations for offline use.
+This does not require an allocator or runtime source. Missing debug information
+remains unknown, and events recorded without backtraces cannot gain them later.
 
 ## Usage
 
@@ -30,14 +34,19 @@ Enable the event categories you need, run your workload, then capture a
 snapshot. For ownership and synchronization events:
 
 ```rust
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
+use seismograph::recorder::{Configuration, Policy};
 
 seismograph::recorder(Configuration {
-    general_events: RecordingPolicy::all(false),
+    general_events: Policy::all(false),
     ..Default::default()
 });
 
 // Run application code that uses instrumented libraries.
+// To emit an event directly:
+seismograph::record(EventClass::General, || {
+    Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+});
 let snapshot = seismograph::snapshot(Default::default())?;
 ```
 
@@ -46,32 +55,16 @@ Inspect saved snapshots with `seismograph view` from the
 
 ## Live monitoring
 
-Applications built with the `monitor` feature can publish an OS-authorized local
-endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
-for as long as local control should remain available. The owning user and
-root/elevated administrators can connect without a token. Startup creates
-the user’s private registry automatically; no administrator setup is needed.
-Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
-fallback. Windows uses the user’s local application-data directory.
-Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
-the monitor’s identity, transport, discovery, persistence, and clock
-capability. Omitting it preserves native I/O; `seismograph_protocol`’s
-`test-util` feature provides an isolated in-memory implementation for
-application tests without host registry setup.
-
-```rust
-let _monitor = seismograph::monitor::Monitor::builder()
-    .name("worker")
-    .instance("west-europe")
-    .start()
-    .unwrap();
-```
+Enable `monitor`, call `seismograph::monitor::Monitor::builder().start()?`, and keep the returned handle alive.
+Run `seismograph monitor` to connect.
 
 ## Features
 
 * **`monitor`**: Enables the OS-authorized local monitor server.
-* **`test-util`**: Enables `monitor`, the protocol’s mock I/O controls, and
-  `monitor::Builder::isolated` for native tests using a temporary registry.
+* **`test-util`**: Enables `monitor`, the protocol’s mock I/O controls,
+  `monitor::Builder::isolated` for native tests using a temporary registry,
+  and `recorder::current_thread_events` for thread-local event assertions.
+  It also provides controlled snapshot construction and symbol resolution.
 
 
 <hr/>

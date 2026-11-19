@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClock, EventSequence, EventTimestamp, NumericEvent, ObjectId};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::thread::{ThreadId, ThreadLog};
-use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+use seismograph::recorder::{Policies, Policy};
 use seismograph::snapshot::DecodedSnapshot;
 use seismograph_rallocator::callers::AddressLookupFields;
 use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics};
@@ -58,11 +58,11 @@ fn events(events: Vec<Event>) -> Events {
     Events {
         clock: EventClock::ProcessMonotonic,
         total_events: totals.values().sum(),
-        recording: RecordingPolicies {
-            runtime_tasks: RecordingPolicy::all(true),
-            general_events: RecordingPolicy::all(true),
-            allocations: RecordingPolicy::all(true),
-            ..RecordingPolicies::default()
+        recording: Policies {
+            runtime_tasks: Policy::all(true),
+            general_events: Policy::all(true),
+            allocations: Policy::all(true),
+            ..Policies::default()
         },
         threads: totals
             .into_iter()
@@ -406,7 +406,7 @@ fn legacy_unknown_recording_policy_is_not_assumed_unsampled() {
         operation(1, 2, 2, EventKind::MutexAccess, 7),
         finish(1, 3, 3, (1, 1), 2),
     ]);
-    raw.recording = RecordingPolicies::default();
+    raw.recording = Policies::default();
     let snapshot = TaskEventsSnapshot::from_events(&raw, &[], None);
     assert_eq!((snapshot.tasks.len(), snapshot.ambiguous_events), (0, 1));
 }
@@ -493,12 +493,14 @@ fn active_source() -> Snapshot {
             created_at: EventTimestamp::from_ticks(0),
             retired_at: None,
             counters: Counters::default(),
+            counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
             workers: Vec::new(),
             tasks: vec![Task {
                 id: TaskId::from_raw(1).unwrap(),
                 parent: None,
                 type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                spawned_at: EventTimestamp::from_ticks(0),
+                spawned_at: None,
+                metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                 last_worker_id: None,
                 metrics: TaskMetrics::default(),
                 activity: Some(TaskActivity {
@@ -509,7 +511,6 @@ fn active_source() -> Snapshot {
                     poll_worker_id: WorkerId::from_raw(101),
                     queued_since: None,
                 }),
-                spawn_backtrace: vec![Address::new(900)],
                 future_size_bytes: None,
             }],
         }],
@@ -753,6 +754,18 @@ fn all_existing_thread_operations_have_task_history_and_measurements() {
         } else {
             operation(1, sequence, sequence, kind.event_kind(), sequence)
         };
+        if kind == ThreadOperationKind::Reallocation {
+            event.payload = EventPayload::Reallocation(Reallocation {
+                allocation_id: AllocationId::new(1),
+                heap_id: HeapId::new(8),
+                heap_kind: HeapKind::General,
+                old_address: Address::new(0x8000),
+                new_address: Address::new(0x8000),
+                old_size: 64,
+                new_size: 64,
+                alignment: 16,
+            });
+        }
         if kind == ThreadOperationKind::ChannelHighWatermark {
             event.payload = EventPayload::Numeric(NumericEvent {
                 object_id: ObjectId::new(sequence),
@@ -778,8 +791,104 @@ fn all_existing_thread_operations_have_task_history_and_measurements() {
                 .detail
                 .clone()
         ),
-        (37, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
+        (38, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
     );
+}
+
+#[test]
+fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
+    let resize = Event {
+        payload: EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(7),
+            heap_id: HeapId::new(8),
+            heap_kind: HeapKind::General,
+            old_address: Address::new(0x8000),
+            new_address: Address::new(0x9000),
+            old_size: 64,
+            new_size: 4096,
+            alignment: 16,
+        }),
+        ..operation(2, 1, 4, EventKind::Reallocation, 7)
+    };
+    let mut free = allocation(3, 1, 6, EventKind::Deallocation, 0x9000);
+    if let EventPayload::Allocation(allocation) = &mut free.payload {
+        allocation.address = Address::new(0x9000);
+        allocation.size = 4096;
+    }
+    let captured = super::super::snapshot::prepare(DecodedSnapshot {
+        events: events(vec![
+            allocation(1, 1, 2, EventKind::Allocation, 7),
+            resize,
+            allocation(2, 2, 5, EventKind::Allocation, 7),
+            free,
+        ]),
+        ..DecodedSnapshot::default()
+    })
+    .unwrap();
+    let snapshot = &captured.task_events;
+
+    assert_eq!(
+        snapshot
+            .histories
+            .iter()
+            .map(|history| { history.events.iter().map(|event| event.kind).collect::<Vec<_>>() })
+            .collect::<Vec<_>>(),
+        [
+            vec![EventKind::Allocation, EventKind::Reallocation, EventKind::Deallocation],
+            vec![EventKind::Allocation],
+        ]
+    );
+    assert_eq!(
+        snapshot.histories[0].events.iter().map(|event| event.thread_id).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(
+        snapshot.histories[0].events[1].detail,
+        "resize 0x8000 / 64 B -> 0x9000 / 4096 B align=16 heap=8 (moved)"
+    );
+    let rows = &captured.allocations.as_ref().unwrap().records;
+    assert!(rows[0].label().starts_with("alloc "));
+    assert!(rows[3].label().starts_with("free "));
+    let resize = rows.iter().find(|row| row.label().starts_with("resize ")).unwrap();
+    assert!(resize.label().ends_with("matched retained allocation/free pair (source capture)"));
+}
+
+#[test]
+fn resize_only_capture_preserves_one_orphan_lifetime_across_moves() {
+    let resize = |thread, old, new, old_size, new_size| Event {
+        payload: EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(old),
+            heap_id: HeapId::new(8),
+            heap_kind: HeapKind::General,
+            old_address: Address::new(old),
+            new_address: Address::new(new),
+            old_size,
+            new_size,
+            alignment: 16,
+        }),
+        ..operation(thread, 1, thread, EventKind::Reallocation, old)
+    };
+    let captured = super::super::snapshot::prepare(DecodedSnapshot {
+        events: events(vec![resize(1, 0x8000, 0x9000, 64, 4096), resize(2, 0x9000, 0xa000, 4096, 8192)]),
+        ..DecodedSnapshot::default()
+    })
+    .unwrap();
+
+    assert_eq!(
+        captured
+            .task_events
+            .histories
+            .iter()
+            .map(|history| history.events.iter().map(|event| (event.thread_id, event.kind)).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        [vec![(1, EventKind::Reallocation), (2, EventKind::Reallocation)]]
+    );
+    let rows = &captured.allocations.as_ref().unwrap().records;
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert!(row.label().starts_with("resize "));
+        assert!(row.label().ends_with("orphan resize (no retained allocation)"));
+    }
 }
 
 fn with_stack(mut event: Event, addresses: &[u64]) -> Event {

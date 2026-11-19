@@ -3,50 +3,9 @@
 
 //! Native v4 owner observations, separate from application allocation events.
 
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
-
-static PUBLICATION_ENABLED: AtomicBool = AtomicBool::new(true);
-static OBSERVATION_ROUND: AtomicU64 = AtomicU64::new(1);
-static EPOCH: OnceLock<Instant> = OnceLock::new();
-
-/// Whether accepted recorded allocation/free operations may publish observations.
-///
-/// Sampled-out operations and merely enabled recording attempts do not publish.
-#[must_use]
-pub fn publication_enabled() -> bool {
-    PUBLICATION_ENABLED.load(Ordering::Relaxed)
-}
-
-/// Enables or disables publication; this does not enable event recording.
-pub fn set_publication_enabled(enabled: bool) {
-    PUBLICATION_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-/// Round requested by the most recent collector or explicit app-side request.
-#[must_use]
-pub fn observation_round() -> u64 {
-    OBSERVATION_ROUND.load(Ordering::Relaxed)
-}
-
-/// Requests another observation on the next accepted recorded allocation/free.
-///
-/// Collectors request the next round only after collection. Monitor polling
-/// drives successive rounds; applications can also schedule requests explicitly.
-/// No timer or background worker is started. Saturates instead of wrapping.
-pub fn request_observation() -> u64 {
-    let previous = OBSERVATION_ROUND.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |round| Some(round.saturating_add(1)));
-    match previous {
-        Ok(round) | Err(round) => round.saturating_add(1),
-    }
-}
-
-/// Process-relative monotonic time, saturated to the wire representation.
-#[must_use]
-pub fn captured_nanos() -> u64 {
-    u64::try_from(EPOCH.get_or_init(Instant::now).elapsed().as_nanos()).unwrap_or(u64::MAX)
-}
+// Preserve existing snmalloc control paths. New code uses the backend-neutral
+// snapshot module; both paths refer to the same process-wide controls.
+pub use crate::observation::{captured_nanos, observation_round, publication_enabled, request_observation, set_publication_enabled};
 
 /// Number of native small-object size classes.
 pub const CLASS_COUNT: usize = 44;
@@ -136,7 +95,7 @@ pub struct RemoteState {
 pub struct Observation {
     /// Lease generation to which this observation belongs.
     pub generation: u64,
-    /// Recorder session accepting the contributing operation; zero for idle inspection.
+    /// Historical recorder session, or zero for recording-independent observations.
     pub session_id: u64,
     /// Observation round.
     pub round: u64,
@@ -207,7 +166,9 @@ pub enum ObservationSource {
     /// No safely readable observation exists.
     #[default]
     Unobserved,
-    /// A thread published after an accepted recorded allocation/free completed.
+    /// A thread published after a completed allocation, resize, or free.
+    ///
+    /// Allocation recording was enabled. Event sampling does not control publication.
     Published,
     /// The collector inspected a returned owner under the pool lock.
     IdleInspection,
@@ -252,7 +213,7 @@ pub struct GlobalState {
 pub struct Snapshot {
     /// Process-relative monotonic collection time.
     pub captured_nanos: u64,
-    /// Recorder session represented by the surrounding container.
+    /// Historical recorder session, or zero for recording-independent observations.
     pub session_id: u64,
     /// Round requested before this collection.
     pub round: u64,
@@ -275,13 +236,13 @@ pub enum Freshness {
     Unknown,
     /// Independently inspected idle owner in this capture.
     IdleInspection,
-    /// Same session, lease and requested round: contributed this round, not a current census.
+    /// Matching lease and requested round: a contribution, not a current census.
     Current,
     /// Publication belongs to a prior lease; contributor is not the current actor.
     PreviousLease,
-    /// Publication belongs to another recording session.
+    /// Historical publication belongs to another recording session.
     PreviousSession,
-    /// Same lease/session but from an older requested round.
+    /// Publication uses the current lease but an older requested round.
     PreviousRound,
     /// Publication is newer than the capture's round or monotonic time.
     NewerThanCapture,
@@ -316,7 +277,7 @@ impl Owner {
         if self.source == ObservationSource::IdleInspection {
             return Freshness::IdleInspection;
         }
-        if observation.session_id == 0 || observation.session_id != snapshot.session_id {
+        if observation.session_id != snapshot.session_id {
             return Freshness::PreviousSession;
         }
         if observation.round > snapshot.round || observation.captured_nanos > snapshot.captured_nanos {

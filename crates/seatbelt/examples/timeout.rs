@@ -6,12 +6,14 @@
 //!
 //! It cancels operations that take too long.
 
+use std::future::pending;
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
+use observed_destination_core::MeterProviderBuilderExt;
+use observed_destination_stdout::stdout_metrics;
 use ohno::{AppError, app_err};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_stdout::MetricExporter;
 use seatbelt::ResilienceContext;
 use seatbelt::timeout::Timeout;
 use tick::Clock;
@@ -19,7 +21,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const TIMEOUT_DURATION: Duration = Duration::from_millis(100);
-const PROCESSING_DELAY: Duration = Duration::from_millis(500);
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -37,16 +38,7 @@ async fn main() -> Result<(), AppError> {
             .timeout(TIMEOUT_DURATION)
             // Create the error output for a timeout.
             .timeout_error(|args| app_err!("timeout occurred, timeout: {}ms", args.timeout().as_millis())),
-        Execute::new({
-            let clock = clock.clone();
-            move |_input| {
-                let clock = clock.clone();
-                async move {
-                    clock.delay(PROCESSING_DELAY).await; // Add enough delay to trigger the timeout.
-                    Ok(())
-                }
-            }
-        }),
+        Execute::new(move |_input| pending::<Result<(), AppError>>()),
     );
 
     // Create the service from the stack.
@@ -69,6 +61,7 @@ fn configure_telemetry() -> SdkMeterProvider {
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
-        .with_periodic_exporter(MetricExporter::default())
+        .register(stdout_metrics())
+        .expect("the stdout metric destination has no fallible configuration")
         .build()
 }

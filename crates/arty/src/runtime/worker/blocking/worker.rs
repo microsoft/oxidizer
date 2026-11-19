@@ -1,0 +1,975 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Admission and pool execution for blocking workers.
+
+use std::num::NonZeroUsize;
+use std::sync::atomic::Ordering;
+use std::thread;
+
+use arty_executor::discard_task_panic_payload;
+use performables::arc::Arc;
+use performables::sync::mutex::Mutex;
+
+use crate::runtime::config::RuntimeName;
+#[cfg(test)]
+use crate::runtime::monitoring::BlockingJob;
+use crate::runtime::monitoring::{BlockingPoolMonitoring, BlockingWorkerMonitoring};
+use crate::runtime::shutdown::{Shutdown, ShutdownState};
+use crate::runtime::worker::blocking::queue::{Queue, QueuedJob};
+use crate::runtime::worker::blocking::{LocalWorker, PoolIdentity};
+use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::prepare_blocking;
+
+const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
+
+fn attach_thread(pool: PoolIdentity) {
+    LocalWorker::attach(pool);
+}
+
+/// Grow-only blocking pool that retains worker handles for deterministic shutdown.
+#[derive(derive_more::Debug)]
+#[debug(
+    "JoinableThreadPool {{ name: {:?}, queued_count: {}, active_count: {}, max_count: {} }}",
+    name,
+    self.queued_count(),
+    self.active_count(),
+    self.max_count()
+)]
+struct JoinableThreadPool {
+    name: RuntimeName,
+    async_worker_index: Option<usize>,
+    jobs: Option<std::sync::Arc<Queue>>,
+    workers: Vec<thread::JoinHandle<()>>,
+    identity: PoolIdentity,
+    receiver: std::sync::Arc<Queue>,
+    queued_count: Arc<std::sync::atomic::AtomicUsize>,
+    active_count: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl JoinableThreadPool {
+    fn new(name: RuntimeName, async_worker_index: Option<usize>, thread_count: usize, identity: PoolIdentity) -> Self {
+        let receiver = std::sync::Arc::new(Queue::default());
+        let mut pool = Self {
+            name,
+            async_worker_index,
+            jobs: Some(std::sync::Arc::clone(&receiver)),
+            workers: Vec::with_capacity(thread_count),
+            identity,
+            receiver,
+            queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+        pool.set_num_threads(thread_count);
+        pool
+    }
+
+    #[cfg(test)]
+    fn execute<F>(&self, job: F) -> bool
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.enqueue(QueuedJob {
+            body: BlockingJob::Plain(Box::new(job)),
+            shutdown: None,
+        })
+    }
+
+    fn enqueue(&self, job: QueuedJob) -> bool {
+        let Some(jobs) = &self.jobs else {
+            return false;
+        };
+        self.queued_count.fetch_add(1, Ordering::SeqCst);
+        if !jobs.push(job) {
+            self.queued_count.fetch_sub(1, Ordering::SeqCst);
+            return false;
+        }
+        true
+    }
+
+    fn set_num_threads(&mut self, thread_count: usize) {
+        while self.workers.len() < thread_count {
+            let receiver = std::sync::Arc::clone(&self.receiver);
+            let index = receiver.add_worker();
+            let queued_count = Arc::clone(&self.queued_count);
+            let active_count = Arc::clone(&self.active_count);
+            let identity = Arc::clone(&self.identity);
+            let name = self.name.blocking_worker(self.async_worker_index, self.workers.len());
+            let worker = thread::Builder::new()
+                .name(name)
+                .spawn(move || {
+                    // #[gamma::skip(call_result.default, reason = "attach_thread returns unit; default_after preserves its side effects and unit result.")]
+                    attach_thread(identity);
+                    let mut diagnostics = BlockingWorkerMonitoring::default();
+                    while let Some(job) = receiver.pop(index, &mut diagnostics) {
+                        active_count.fetch_add(1, Ordering::SeqCst);
+                        queued_count.fetch_sub(1, Ordering::SeqCst);
+                        let canceled = job
+                            .shutdown
+                            .as_ref()
+                            .is_some_and(|shutdown| matches!(shutdown.state(), ShutdownState::Started));
+                        let outcome = diagnostics.run(job.body, canceled);
+                        active_count.fetch_sub(1, Ordering::SeqCst);
+                        if let Err(panic) = outcome {
+                            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                            discard_task_panic_payload(panic);
+                        }
+                    }
+                    receiver.retire(index);
+                })
+                .expect("blocking worker thread creation must succeed");
+            // #[gamma::skip(stmt.delete_call, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            self.workers.push(worker);
+        }
+    }
+
+    fn max_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    fn active_count(&self) -> usize {
+        self.active_count.load(Ordering::SeqCst)
+    }
+
+    fn queued_count(&self) -> usize {
+        self.queued_count.load(Ordering::SeqCst)
+    }
+
+    // #[gamma::skip(fn_value.unit, reason = "Consuming self still runs Pool::drop, which calls shutdown_and_join.")]
+    fn join(mut self) {
+        // #[gamma::skip(stmt.delete_call, reason = "Consuming self still runs Pool::drop, which calls shutdown_and_join.")]
+        self.shutdown_and_join();
+    }
+
+    fn shutdown_and_join(&mut self) {
+        if let Some(jobs) = self.jobs.take() {
+            jobs.stop();
+        }
+        for worker in self.workers.drain(..) {
+            if let Err(panic) = worker.join() {
+                discard_task_panic_payload(panic);
+            }
+        }
+    }
+}
+
+impl Drop for JoinableThreadPool {
+    fn drop(&mut self) {
+        self.shutdown_and_join();
+    }
+}
+
+/// Worker for blocking tasks.
+///
+/// Each async worker thread has one blocking worker for scheduling blocking
+/// tasks.
+#[derive(Debug)]
+pub(crate) struct Worker {
+    pool: Pool,
+    remote_results: JoinHandlePool,
+}
+
+impl Worker {
+    pub(crate) fn new(pool: Pool, runtime_shutdown: Shutdown) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            remote_results: JoinHandlePool::new(runtime_shutdown),
+        })
+    }
+
+    /// Submits a blocking task to the worker.
+    ///
+    /// If the worker is shutting down, the worker ignores the task.
+    pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let runtime_shutdown = self.remote_results.shutdown().clone();
+        let monitoring = self.pool.monitoring.task::<F>(&runtime_shutdown);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring);
+        if matches!(runtime_shutdown.state(), ShutdownState::Started) {
+            drop(task);
+            return join_handle;
+        }
+        let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
+        let job = QueuedJob {
+            body: task,
+            shutdown: Some(runtime_shutdown),
+        };
+        if submit_while_running(self.remote_results.shutdown(), job, |job| self.pool.enqueue(job)) {
+            self.pool.grow_if_overloaded();
+        }
+
+        join_handle
+    }
+
+    /// Waits for the currently running blocking tasks to complete.
+    pub(crate) fn join(&self) {
+        self.pool.join();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        matches!(self.remote_results.shutdown().state(), ShutdownState::Started)
+    }
+}
+
+fn submit_while_running<F>(shutdown: &Shutdown, task: F, submit: impl FnOnce(F) -> bool) -> bool {
+    matches!(shutdown.state(), ShutdownState::Running) && submit(task)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Pool {
+    inner: Arc<Mutex<Option<JoinableThreadPool>>>,
+    identity: PoolIdentity,
+    max_thread_count: NonZeroUsize,
+    monitoring: BlockingPoolMonitoring,
+}
+
+impl Pool {
+    #[cfg(test)]
+    pub(crate) fn shares_pool_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// Initial number of threads in the pool.
+    ///
+    /// The pool starts with one thread and grows when the queue is overloaded.
+    const INITIAL_THREAD_COUNT: usize = 1;
+
+    /// Queue-growth rule adapted from the [`blocking`](https://github.com/smol-rs/blocking/blob/master/src/lib.rs) pool.
+    const MAX_TASKS_PER_THREAD: usize = 5;
+
+    /// Default per-pool thread limit for blocking tasks.
+    const MAX_THREAD_COUNT_DEFAULT: NonZeroUsize = NonZeroUsize::new(64).expect("the default blocking thread limit is nonzero");
+
+    pub(crate) fn new(name: RuntimeName, async_worker_index: Option<usize>, max_thread_count: Option<NonZeroUsize>) -> Self {
+        // Start with one thread and let the pool grow as needed.
+        let identity = Arc::new(());
+        let thread_pool = JoinableThreadPool::new(name, async_worker_index, Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
+        let monitoring = thread_pool.receiver.monitoring.clone();
+
+        Self {
+            inner: Arc::new(Mutex::new(Some(thread_pool))),
+            identity,
+            max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
+            monitoring,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execute<F>(&self, f: F) -> bool
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.enqueue(QueuedJob {
+            body: BlockingJob::Plain(Box::new(f)),
+            shutdown: None,
+        })
+    }
+
+    fn enqueue(&self, job: QueuedJob) -> bool {
+        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
+        let Some(pool) = pool.as_ref() else {
+            // Shutdown closed the shared pool before this racing submission arrived.
+            return false;
+        };
+        pool.enqueue(job)
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn enable_monitoring(&self, runtime: &seismograph_runtime::RuntimeHandle) {
+        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
+        if let Some(pool) = pool.as_ref() {
+            pool.receiver.enable_monitoring(runtime);
+        }
+    }
+
+    fn join(&self) {
+        // Do not keep the pool alive through retained scheduler handles, and do not
+        // hold its submission lock while waiting for blocking functions to finish.
+        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK).take();
+        if let Some(pool) = pool {
+            // #[gamma::skip(stmt.delete_call, reason = "Dropping the consumed pool also calls shutdown_and_join through Pool::drop.")]
+            pool.join();
+        }
+    }
+
+    /// Grows the pool by one thread if possible, returning whether it grew.
+    ///
+    /// Returns `false` when the pool is already at its maximum permitted size.
+    #[cfg(test)]
+    fn grow(&self) -> bool {
+        let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
+        let Some(pool) = pool.as_mut() else {
+            return false;
+        };
+        let new_thread_count = pool.max_count().saturating_add(1);
+
+        if new_thread_count > self.max_thread_count.get() {
+            return false;
+        }
+        pool.set_num_threads(new_thread_count);
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn max_thread_count(&self) -> usize {
+        self.max_thread_count.get()
+    }
+
+    #[cfg(test)]
+    fn is_overloaded(&self) -> bool {
+        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
+        pool.as_ref().is_some_and(Self::thread_pool_is_overloaded)
+    }
+
+    fn grow_if_overloaded(&self) {
+        let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
+        let Some(pool) = pool.as_mut() else {
+            return;
+        };
+        if !Self::thread_pool_is_overloaded(pool) {
+            return;
+        }
+
+        let new_thread_count = pool.max_count().saturating_add(1);
+        if new_thread_count <= self.max_thread_count.get() {
+            pool.set_num_threads(new_thread_count);
+        }
+    }
+
+    fn thread_pool_is_overloaded(pool: &JoinableThreadPool) -> bool {
+        pool.active_count().saturating_add(pool.queued_count()) > pool.max_count().saturating_mul(Self::MAX_TASKS_PER_THREAD)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public schedulers cannot inject channel failures or inspect pool counters and ownership.
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::channel;
+    use std::thread;
+
+    use arty_executor::ShutdownCause;
+    use events_once::Event;
+    use performables::arc::Arc;
+    use performables::sync::mutex::Mutex;
+    use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
+
+    use super::{JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};
+    use crate::runtime::config::RuntimeName;
+    use crate::runtime::shutdown::Shutdown;
+
+    #[test]
+    fn gamma_round2_late_shutdown_rejects_submission_and_drops_the_job_before_entering_the_pool() {
+        struct Dropped<'a>(&'a AtomicBool);
+
+        impl Drop for Dropped<'_> {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let shutdown = Shutdown::default();
+        shutdown.begin(ShutdownCause::default());
+        let dropped = AtomicBool::new(false);
+        assert!(!super::submit_while_running(&shutdown, Dropped(&dropped), |_| {
+            panic!("a shutdown published before admission must not reach the pool")
+        }));
+        assert!(dropped.load(Ordering::Relaxed));
+        let mut submissions = 0;
+        assert!(super::submit_while_running(&Shutdown::default(), 53, |job| {
+            submissions += 1;
+            assert_eq!(job, 53);
+            true
+        }));
+        assert_eq!(submissions, 1);
+    }
+
+    fn limit(value: usize) -> NonZeroUsize {
+        NonZeroUsize::new(value).unwrap()
+    }
+
+    fn joinable_pool(thread_count: usize) -> JoinableThreadPool {
+        JoinableThreadPool::new(RuntimeName::default(), None, thread_count, Arc::new(()))
+    }
+
+    #[test]
+    fn shutting_down_a_pool_closes_its_queue_even_without_workers() {
+        let mut pool = joinable_pool(0);
+        assert!(pool.execute(|| {}));
+        assert_eq!(pool.queued_count(), 1);
+        let queue = std::sync::Arc::clone(&pool.receiver);
+
+        pool.shutdown_and_join();
+
+        assert!(!queue.push(super::QueuedJob {
+            body: super::BlockingJob::Plain(Box::new(|| {})),
+            shutdown: None,
+        }));
+        assert!(!pool.execute(|| {}));
+    }
+
+    #[test]
+    fn gamma_survivor_private_blocking_pool_tracks_queued_active_and_joined_workers_without_timers() {
+        let mut pool = joinable_pool(1);
+        assert_eq!(
+            format!("{pool:?}"),
+            "JoinableThreadPool { name: RuntimeName(\"arty\"), queued_count: 0, active_count: 0, max_count: 1 }"
+        );
+        let (started, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release, release_rx) = std::sync::mpsc::sync_channel(1);
+        let (finished, finished_rx) = std::sync::mpsc::sync_channel(2);
+        let first_finished = finished.clone();
+        let identity = Arc::clone(&pool.identity);
+        assert!(pool.execute(move || {
+            assert!(LocalWorker::is_current_pool(&identity));
+            assert_eq!(thread::current().name(), Some("arty-blocking-0"));
+            started.send(()).unwrap();
+            release_rx.recv().unwrap();
+            first_finished.send(13).unwrap();
+        }));
+        started_rx.recv().unwrap();
+        assert_eq!(pool.active_count(), 1);
+        assert_eq!(pool.queued_count(), 0);
+        assert!(pool.execute(move || finished.send(17).unwrap()));
+        assert_eq!(pool.queued_count(), 1);
+        release.send(()).unwrap();
+        pool.shutdown_and_join();
+        assert_eq!(pool.active_count(), 0);
+        assert_eq!(pool.queued_count(), 0);
+        assert_eq!(pool.max_count(), 0);
+        assert_eq!(finished_rx.recv().unwrap(), 13);
+        assert_eq!(finished_rx.recv().unwrap(), 17);
+        assert!(!pool.execute(|| panic!("closed pool must not accept work")));
+    }
+
+    #[test]
+    fn gamma_survivor_private_blocking_pool_contains_job_join_and_drop_panic_payloads() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::AtomicUsize;
+
+        struct Payload(StdArc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("blocking panic payload");
+            }
+        }
+        let drops = StdArc::new(AtomicUsize::new(0));
+        let mut pool = joinable_pool(1);
+        assert!(pool.execute({
+            let drops = StdArc::clone(&drops);
+            move || std::panic::panic_any(Payload(drops))
+        }));
+        let (finished, observed) = std::sync::mpsc::sync_channel(1);
+        assert!(pool.execute(move || finished.send(17).unwrap()));
+        assert_eq!(observed.recv().unwrap(), 17);
+        pool.workers.push(thread::spawn({
+            let drops = StdArc::clone(&drops);
+            move || std::panic::panic_any(Payload(drops))
+        }));
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pool.shutdown_and_join())).unwrap();
+        assert_eq!(pool.max_count(), 0);
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+
+        let mut pool = joinable_pool(0);
+        let worker = thread::spawn({
+            let drops = StdArc::clone(&drops);
+            move || std::panic::panic_any(Payload(drops))
+        });
+        while !worker.is_finished() {
+            thread::yield_now();
+        }
+        pool.workers.push(worker);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(pool))).unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn gamma_survivor_private_blocking_pool_grows_only_under_queued_pressure() {
+        let pool = Pool::new(RuntimeName::default(), None, Some(limit(2)));
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
+        pool.inner
+            .lock_result()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .queued_count
+            .store(Pool::MAX_TASKS_PER_THREAD * 2 + 1, Ordering::SeqCst);
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+        pool.inner
+            .lock_result()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .queued_count
+            .store(0, Ordering::SeqCst);
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+    }
+
+    #[test]
+    fn blocking_pool_grow_increases_thread_count() {
+        let blocking_pool = Pool::new(RuntimeName::default(), None, None);
+        assert!(blocking_pool.grow());
+        assert_eq!(
+            blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(),
+            Pool::INITIAL_THREAD_COUNT + 1,
+            "worker thread count must increase by one"
+        );
+    }
+
+    #[test]
+    fn blocking_pool_grow_to_maximum() {
+        let blocking_pool = Pool::new(RuntimeName::default(), None, Some(limit(5)));
+
+        // Despite its name, max_count reports the current worker count.
+        assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
+        assert!(blocking_pool.grow()); // 2
+        assert!(blocking_pool.grow()); // 3
+        assert!(blocking_pool.grow()); // 4
+        assert!(blocking_pool.grow()); // 5
+        assert!(!blocking_pool.grow()); // The pool reached its configured limit of five threads.
+
+        // Despite its name, max_count reports the current worker count.
+        assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 5);
+    }
+
+    #[test]
+    fn overloaded_pool_grows_only_to_configured_thread_limit() {
+        let pool = Pool::new(RuntimeName::default(), None, Some(limit(2)));
+        let queued_task_count = Pool::MAX_TASKS_PER_THREAD * 2 + 1;
+        pool.inner
+            .lock_result()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .queued_count
+            .store(queued_task_count, Ordering::SeqCst);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+    }
+
+    #[test]
+    fn blocking_pool_reports_configured_max_thread_count() {
+        // The configured maximum differs from the initial count and the crate
+        // default. The getter must return it without substituting either.
+        assert_eq!(Pool::new(RuntimeName::default(), None, Some(limit(7))).max_thread_count(), 7);
+        assert_eq!(
+            Pool::new(RuntimeName::default(), None, None).max_thread_count(),
+            Pool::MAX_THREAD_COUNT_DEFAULT.get()
+        );
+    }
+
+    #[test]
+    fn closed_pool_rejects_work_and_cannot_grow() {
+        let pool = Pool::new(RuntimeName::default(), None, Some(limit(2)));
+        pool.join();
+        let invoked = Arc::new(AtomicBool::new(false));
+        assert!(!pool.execute({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Relaxed)
+        }));
+        assert!(!invoked.load(Ordering::Relaxed));
+        assert!(!pool.grow());
+        assert!(!pool.is_overloaded());
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn runtime_releases_pool_even_when_a_scheduler_is_retained() {
+        execute_or_abandon(|| {
+            let runtime = crate::runtime::Runtime::builder()
+                .workers(crate::runtime::WorkersPolicy::exactly(1))
+                .build()
+                .unwrap();
+            let scheduler = runtime
+                .scheduler()
+                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+                .join()
+                .unwrap();
+            let worker = Arc::clone(scheduler.blocking_worker());
+            drop(runtime);
+            assert!(worker.pool.inner.lock_result().unwrap().is_none());
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn spawn_on_worker() {
+        let blocking_pool = Pool::new(RuntimeName::default(), None, None);
+        let (sender, receiver) = channel();
+        blocking_pool.execute(move || {
+            sender.send("joined").unwrap();
+        });
+
+        // The sender exists only in the task. If the pool drops the task,
+        // `recv` returns a disconnect instead of waiting.
+        let res = receiver.recv().expect("the worker pool must run the dispatched task");
+        assert_eq!(res, "joined");
+    }
+
+    #[test]
+    fn closed_pool_rejects_worker_submission_after_admission() {
+        let pool = Pool::new(RuntimeName::default(), None, NonZeroUsize::new(1));
+        let worker = Worker::new(pool.clone(), Shutdown::default());
+        pool.join();
+
+        let invoked = Arc::new(AtomicBool::new(false));
+        let join = worker.spawn_blocking({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Relaxed)
+        });
+
+        assert!(join.join().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Relaxed));
+        pool.grow_if_overloaded();
+    }
+
+    #[test]
+    fn joinable_pool_attaches_blocking_worker_identity() {
+        let current = Arc::new(());
+        let other = Arc::new(());
+        let pool = JoinableThreadPool::new(RuntimeName::default(), None, 1, Arc::clone(&current));
+        let (observed, received) = channel();
+
+        assert!(pool.execute(move || {
+            observed
+                .send((LocalWorker::is_current_pool(&current), LocalWorker::is_current_pool(&other)))
+                .unwrap();
+        }));
+
+        assert_eq!(received.recv_timeout(TEST_TIMEOUT).unwrap(), (true, false));
+        pool.join();
+    }
+
+    #[test]
+    fn joinable_pool_reports_active_work() {
+        let pool = joinable_pool(1);
+        let (started, ready) = channel();
+        let (release, released) = channel();
+        assert!(pool.execute(move || {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+        }));
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        assert_eq!(pool.active_count(), 1);
+        release.send(()).unwrap();
+        pool.join();
+    }
+
+    #[test]
+    fn joinable_pool_rejects_work_after_shutdown() {
+        let mut pool = joinable_pool(1);
+        pool.shutdown_and_join();
+
+        assert!(!pool.execute(|| panic!("a shut down pool must reject work")));
+    }
+
+    #[test]
+    fn joinable_pool_reports_closed_submission() {
+        let receiver = std::sync::Arc::new(super::Queue::default());
+        receiver.stop();
+        let mut pool = JoinableThreadPool {
+            name: RuntimeName::default(),
+            async_worker_index: None,
+            jobs: Some(std::sync::Arc::clone(&receiver)),
+            workers: Vec::new(),
+            identity: Arc::new(()),
+            receiver,
+            queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+
+        assert!(!pool.execute(|| {}));
+        assert_eq!(pool.queued_count(), 0);
+        pool.shutdown_and_join();
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    #[test]
+    fn joined_workers_stop_while_the_queue_is_still_owned() {
+        use seismograph_runtime::RuntimeMetadata;
+        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("joined-blocking-workers", 2));
+        let mut pool = joinable_pool(2);
+        pool.receiver.enable_monitoring(&runtime.handle());
+
+        pool.shutdown_and_join();
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(snapshot.workers.len(), 2);
+        assert!(snapshot.workers.iter().all(|worker| worker.state == WorkerState::Stopped));
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    #[test]
+    fn a_closed_pool_does_not_register_workers_when_monitoring_is_enabled() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let pool = Pool::new(RuntimeName::default(), None, Some(limit(1)));
+        pool.join();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-pool", 1));
+
+        pool.enable_monitoring(&runtime.handle());
+
+        assert!(
+            runtime
+                .handle()
+                .capture(seismograph_runtime::snapshot::CaptureOptions::default())
+                .unwrap()
+                .workers
+                .is_empty()
+        );
+        assert!(!pool.execute(|| panic!("a closed pool must not accept work")));
+    }
+
+    #[test]
+    fn joinable_pool_contains_job_panics() {
+        let pool = joinable_pool(1);
+        assert!(pool.execute(|| panic!("direct pool job panic")));
+        let (completed, received) = channel();
+        assert!(pool.execute(move || completed.send(()).unwrap()));
+
+        received.recv_timeout(TEST_TIMEOUT).unwrap();
+        pool.join();
+    }
+
+    #[test]
+    fn joinable_pool_discards_worker_panic() {
+        let worker = thread::spawn(|| panic!("worker failure"));
+        let receiver = std::sync::Arc::new(super::Queue::default());
+        let mut pool = JoinableThreadPool {
+            name: RuntimeName::default(),
+            async_worker_index: None,
+            jobs: None,
+            workers: vec![worker],
+            identity: Arc::new(()),
+            receiver,
+            queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+
+        pool.shutdown_and_join();
+    }
+
+    #[test]
+    fn joinable_pool_debug_reports_counts() {
+        let pool = joinable_pool(1);
+
+        let debug = format!("{pool:?}");
+        assert!(debug.contains("queued_count: 0"));
+        assert!(debug.contains("active_count: 0"));
+        assert!(debug.contains("max_count: 1"));
+        pool.join();
+    }
+
+    #[test]
+    fn overload_worker() {
+        execute_or_abandon(move || {
+            let blocking_pool = Pool::new(RuntimeName::default(), None, None);
+            let (worker_thread_started_tx, worker_thread_started_rx) = channel();
+            let (worker_thread_finished_tx, worker_thread_finished_rx) = Event::<()>::boxed();
+
+            // Only the first thread uses this receiver. The wrapper provides
+            // the thread-safe type that the task boundary requires.
+            let worker_thread_finished_rx = Arc::new(Mutex::<Option<_>>::new(Some(worker_thread_finished_rx)));
+
+            for i in 0..Pool::MAX_TASKS_PER_THREAD {
+                blocking_pool.execute({
+                    let worker_thread_started_tx = worker_thread_started_tx.clone();
+                    let worker_thread_finished_rx = Arc::clone(&worker_thread_finished_rx);
+                    move || {
+                        if i == 0 {
+                            // This is the first spawned task on a single threaded pool.
+                            // We need to wait for it to start and then
+                            // block it, so we can schedule further tasks and overload the pool.
+                            worker_thread_started_tx.send(()).unwrap();
+
+                            futures::executor::block_on(async {
+                                let rx = worker_thread_finished_rx.lock_result().unwrap().take().unwrap();
+                                rx.await.unwrap();
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Drop every sender we still hold so a pool that never runs the first task
+            // leaves the receiver with no senders at all. `recv` then observes an
+            // immediate disconnect and this test fails deterministically rather than
+            // hanging.
+            drop(worker_thread_started_tx);
+            drop(worker_thread_finished_rx);
+
+            // First barrier: wait for the thread pool to start the first task.
+            worker_thread_started_rx.recv().expect("the worker pool must start the first task");
+
+            assert!(
+                !blocking_pool.is_overloaded(),
+                "worker pool must be at the task limit but not overloaded"
+            );
+
+            // The blocked thread pool cannot start this task before the assertion.
+            blocking_pool.execute(move || {});
+
+            assert!(blocking_pool.is_overloaded(), "worker pool must be overloaded");
+
+            // Now we can release the second barrier and clean up
+            worker_thread_finished_tx.send(());
+            blocking_pool.join();
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn blocking_worker_join_waits_for_tasks_to_complete() {
+        let events = Arc::new(Mutex::<Vec<&str>>::new(Vec::new()));
+        let (task_start_tx, task_start_rx) = channel();
+
+        let thread_join_handle = thread::spawn({
+            let events = Arc::clone(&events);
+            move || {
+                let worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+
+                drop(worker.spawn_blocking({
+                    let events = Arc::clone(&events);
+                    move || {
+                        events.lock_result().unwrap().push("task started");
+                        task_start_tx.send(()).unwrap();
+                        events.lock_result().unwrap().push("task finished");
+                    }
+                }));
+
+                // The sender exists only in the blocking task. If the worker
+                // drops the task, `recv` returns a disconnect instead of waiting.
+                task_start_rx.recv().expect("the worker must run the blocking task");
+
+                worker.remote_results.shutdown().begin(ShutdownCause::default());
+                worker.join();
+                events.lock_result().unwrap().push("worker joined");
+            }
+        });
+
+        execute_or_abandon(|| {
+            thread_join_handle.join().unwrap();
+        })
+        .unwrap();
+
+        assert_eq!(
+            events.lock_result().unwrap().as_slice(),
+            &["task started", "task finished", "worker joined"]
+        );
+    }
+
+    #[test]
+    fn blocking_worker_shutdown_prevents_new_tasks() {
+        struct WorkItem {
+            dropped: Arc<AtomicBool>,
+            work_done: Arc<AtomicBool>,
+        }
+
+        impl WorkItem {
+            fn do_work(&self) {
+                self.work_done.store(true, Ordering::Release);
+            }
+        }
+
+        impl Drop for WorkItem {
+            fn drop(&mut self) {
+                self.dropped.store(true, Ordering::Release);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let work_done = Arc::new(AtomicBool::new(false));
+
+        let worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+
+        worker.remote_results.shutdown().begin(ShutdownCause::default());
+
+        let work_item = WorkItem {
+            dropped: Arc::clone(&dropped),
+            work_done: Arc::clone(&work_done),
+        };
+
+        let task = worker.spawn_blocking(move || {
+            work_item.do_work();
+        });
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(!work_done.load(Ordering::Acquire));
+        drop(task);
+    }
+
+    #[test]
+    fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
+        let runtime_shutdown = Shutdown::default();
+        let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), runtime_shutdown.clone());
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = Event::<()>::boxed();
+
+        let running = worker.spawn_blocking(move || {
+            started_tx.send(()).unwrap();
+            futures::executor::block_on(release_rx).unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let invoked = Arc::new(AtomicBool::new(false));
+        let queued = worker.spawn_blocking({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Release)
+        });
+        runtime_shutdown.begin(ShutdownCause::default());
+        release_tx.send(());
+
+        running.join().unwrap();
+        assert!(queued.join().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Acquire));
+        worker.remote_results.shutdown().begin(ShutdownCause::default());
+        worker.join();
+    }
+
+    #[test]
+    fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
+        let runtime_shutdown = Shutdown::default();
+        runtime_shutdown.begin(ShutdownCause::default());
+        let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), runtime_shutdown);
+        let invoked = Arc::new(AtomicBool::new(false));
+
+        let rejected = worker.spawn_blocking({
+            let invoked = Arc::clone(&invoked);
+            move || invoked.store(true, Ordering::Release)
+        });
+
+        assert!(rejected.join().unwrap_err().is_shutdown());
+        assert!(!invoked.load(Ordering::Acquire));
+        worker.remote_results.shutdown().begin(ShutdownCause::default());
+        worker.join();
+    }
+
+    #[test]
+    fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
+        let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), Shutdown::default());
+        attach_thread(Arc::clone(&worker.pool.identity));
+        worker.remote_results.shutdown().begin(ShutdownCause::default());
+
+        let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
+
+        assert!(rejected.is_shutdown());
+        worker.join();
+    }
+}

@@ -3,11 +3,13 @@
 
 //! Integration tests for [`Merger::execute()`].
 
+use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{AcqRel, Acquire};
 use std::time::Duration;
 
+use future_assert::FutureTestExt;
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use tokio::sync::Notify;
@@ -132,27 +134,34 @@ async fn late_wait() {
 }
 
 #[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn cancel() {
+#[test]
+fn cancel() {
     let group = Merger::<String, String, _>::new_per_process();
 
-    // The executor was cancelled; the other awaiter will create a new future and execute.
-    let fut_cancel = group.execute(&"key".to_string(), unreachable_future);
-    let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
-    let fut_late = group.execute("key", || async { "Result2".to_string() });
-    assert_eq!(fut_late.await, Ok("Result2".to_string()));
+    {
+        let mut fut_cancel = pin!(group.execute(&"key".to_string(), unreachable_future));
+        fut_cancel.as_mut().unwrap_pending();
+    }
 
-    // the first executer is slow but not dropped, so the result will be the first ones.
-    let begin = tokio::time::Instant::now();
-    let fut_1 = group.execute("key", || async {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        "Result1".to_string()
-    });
-    let fut_2 = group.execute(&"key".to_string(), unreachable_future);
-    let (v1, v2) = tokio::join!(fut_1, fut_2);
-    assert_eq!(v1, Ok("Result1".to_string()));
-    assert_eq!(v2, Ok("Result1".to_string()));
-    assert!(begin.elapsed() > Duration::from_millis(1500));
+    let fut_late = group.execute("key", || async { "Result2".to_string() });
+    assert_eq!(fut_late.unwrap_ready(), Ok("Result2".to_string()));
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn pending_leader_is_not_cancelled() {
+    let group = Merger::<String, String, _>::new_per_process();
+    let (complete, completion) = tokio::sync::oneshot::channel();
+    let mut leader = pin!(group.execute("key", || async { completion.await.unwrap() }));
+    let mut follower = pin!(group.execute(&"key".to_string(), unreachable_future));
+
+    leader.as_mut().unwrap_pending();
+    follower.as_mut().unwrap_pending();
+
+    complete.send("Result1".to_string()).unwrap();
+
+    assert_eq!(leader.as_mut().unwrap_ready(), Ok("Result1".to_string()));
+    assert_eq!(follower.as_mut().unwrap_ready(), Ok("Result1".to_string()));
 }
 
 #[cfg_attr(miri, ignore)]

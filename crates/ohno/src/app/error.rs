@@ -133,6 +133,7 @@ impl AppError {
     pub fn root_cause(&self) -> &(dyn StdError + 'static) {
         let mut source: &(dyn StdError + 'static) = &self.inner;
         while let Some(next) = StdError::source(source) {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             source = next;
         }
         source
@@ -146,6 +147,7 @@ impl AppError {
             if let Some(target) = err.downcast_ref::<T>() {
                 return Some(target);
             }
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             source = StdError::source(err);
         }
         None

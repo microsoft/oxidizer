@@ -768,6 +768,17 @@ fn drain_removes_and_yields() {
 }
 
 #[test]
+fn dropping_an_empty_drain_preserves_the_vector() {
+    let arena = Arena::new();
+    let mut v = arena.alloc_vec();
+    v.extend(0_u32..4);
+
+    drop(v.drain(2..2));
+
+    assert_eq!(v.as_slice(), &[0, 1, 2, 3]);
+}
+
+#[test]
 fn clone_produces_equal_independent_vec() {
     let arena = Arena::new();
     let mut v = arena.alloc_vec();

@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-02
+
+- Update routing, build-tool, and test dependencies. Use version 0.3.1 to match the Routerama
+  packages. REST-over-gRPC behavior does not change.
+- Update the requirement for local package `http_path_template` from `0.2.2` to `0.2.3`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `routerama` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `routerama_build` from `=0.3.0` to `=0.3.1`.
+- Update the development requirement for `protox` from `0.9.1` to `0.10.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.3.0] - 2026-10-20
 
 - Require `Generator::generate()` callers to handle `std::io::Result`, enforce authorization/body limits, and correct transcoding and OpenAPI behavior.

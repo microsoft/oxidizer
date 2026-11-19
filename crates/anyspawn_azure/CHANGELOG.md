@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0] - 2026-11-06
+
+- Return task panic and cancellation as a boxed Anyspawn `JoinError` instead of restarting
+  the panic in the joining task. Convert shutdown rejection to an I/O error.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `anyspawn`.
+- Update the local `anyspawn` requirement from `0.10.0` to `0.11.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
+## [0.6.0] - 2026-11-02
+
+- Update the Azure integration to use the new Anyspawn and tick versions. This release does not
+  change the package's source code.
+- Update the requirement for local package `anyspawn` from `0.9.2` to `0.10.0`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.5.0] - 2026-10-20
 
 - The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.

@@ -12,7 +12,7 @@ use std::task::Waker;
 use std::thread::{self, ThreadId};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-use arty::task::{Builtins, Scheduler};
+use arty::task::{Context, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
 use support::JoinHandleExt as _;
@@ -36,7 +36,7 @@ impl IoContext for RelocationIoContext {
     type ContextOptions = RelocationIoOptions;
     type Driver = RelocationIoDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self(options)
     }
 
@@ -64,7 +64,7 @@ impl Driver for RelocationIoDriver {
 }
 
 #[test]
-fn relocating_builtins_leaves_shared_source_clones_on_the_source_worker() {
+fn relocating_context_leaves_shared_source_clones_on_the_source_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (source, original, scheduler) = runtime
         .scheduler()
@@ -118,9 +118,44 @@ impl ThreadAware for ReturnedProbe {
 }
 
 #[test]
+fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().id();
+            let tasks = (0..4).map(|_| {
+                cx.scheduler().spawn_anywhere(cx.clone(), |request| async move {
+                    let worker = thread::current().id();
+                    let child = request
+                        .scheduler()
+                        .spawn(async |_| {
+                            let local = std::rc::Rc::new(thread::current().id());
+                            testing_aids::YieldFuture::default().await;
+                            *local
+                        })
+                        .await
+                        .unwrap();
+                    (worker, child)
+                })
+            });
+            let results = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
+            assert_ne!(results[0].0, source);
+            assert_eq!(results[1].0, source);
+            assert_eq!(results[2], results[0]);
+            assert_eq!(results[3], results[1]);
+            for (worker, child) in results {
+                assert_eq!(worker, child);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
-        (Runtime::new().unwrap(), 1),
+        (Runtime::builder().build().unwrap(), 1),
         (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
     ] {
         runtime
@@ -200,10 +235,10 @@ fn spawn_at_relocates_results_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
-// Return Builtins and schedule child work to prove that its services bind to
-// the worker that receives the result.
+// Return `Context` and schedule child work. This proves that its services bind
+// to the worker that receives the result.
 #[test]
-fn spawn_anywhere_returns_builtins_bound_to_the_source_worker() {
+fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     runtime
         .scheduler()
@@ -222,8 +257,8 @@ fn spawn_anywhere_returns_builtins_bound_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
-// Poll the join on a different worker to prove that the receiving worker,
-// rather than the submitting worker, selects the result destination.
+// Poll the join on a different worker. This proves that the receiving worker
+// selects the result destination, not the submitting worker.
 #[test]
 fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
@@ -252,8 +287,8 @@ fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     runtime.stop().unwrap();
 }
 
-// Poll outside the runtime to prove that result relocation requires a receiving
-// Arty worker.
+// Poll outside the runtime. This proves that result relocation requires a
+// receiving Arty worker.
 #[test]
 fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
@@ -304,13 +339,13 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
     assert_eq!(actual, Some(source));
 }
 
-/// Identifies which thread-aware handle a relocation scenario should move.
+/// Identifies the thread-aware handle that the relocation scenario moves.
 #[derive(Clone, Copy)]
 enum RelocationTarget {
-    /// Relocate a worker-bound `Scheduler` clone directly.
+    /// A worker-bound `Scheduler` clone.
     Scheduler,
-    /// Relocate a `Builtins` clone directly.
-    Builtins,
+    /// A `Context` clone.
+    Context,
 }
 
 /// The thread that ran a piece of work before and after a relocation.
@@ -319,19 +354,21 @@ struct BeforeAfter {
     after: ThreadId,
 }
 
-/// Observations gathered while relocating a thread-aware handle to a different worker.
+/// Observations from relocating a thread-aware handle to a different worker.
 struct RelocationObservation {
-    /// The thread executing the scenario's outermost task (the source worker).
+    /// The thread that runs the outermost task (the source worker).
     origin: ThreadId,
-    /// Thread that ran a blocking task (`spawn_blocking`) before/after relocation.
+    /// The thread that ran a blocking task (`spawn_blocking`) before and after relocation.
     blocking_task: BeforeAfter,
-    /// Thread that ran an async task (`spawn`) before/after relocation.
+    /// The thread that ran an async task (`spawn`) before and after relocation.
     async_task: BeforeAfter,
 }
 
-/// Builds a two-processor runtime with the given worker-pool policy, relocates the
-/// requested thread-aware handle from the current worker to a different worker, and
-/// records the threads that ran a blocking task and an async task before and after.
+/// Builds a two-processor runtime with the specified worker-pool policy.
+///
+/// It relocates the specified thread-aware handle to another worker. It records
+/// the threads that run a blocking task and an async task before and after
+/// relocation.
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
@@ -341,14 +378,14 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
         .expect("failed to build runtime");
     runtime
         .scheduler()
-        .block_on(async move |cx: Builtins| {
+        .block_on(async move |cx: Context| {
             let scheduler = cx.scheduler();
             let origin = thread::current().id();
             let here = cx.thread().clone();
 
-            // Discover a different worker by relocating a Builtins clone onto every worker.
+            // Find another worker by relocating a `Context` clone to each worker.
             let threads =
-                join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move { worker.thread().clone() })))
+                join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker: Context| async move { worker.thread().clone() })))
                     .await;
 
             let there = threads
@@ -381,16 +418,16 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
                         },
                     }
                 }
-                RelocationTarget::Builtins => {
-                    let mut builtins = cx.clone();
+                RelocationTarget::Context => {
+                    let mut cx = cx.clone();
 
-                    let blocking_before = builtins.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
-                    let async_before = builtins.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
+                    let blocking_before = cx.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
+                    let async_before = cx.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
 
-                    builtins.relocate(Some(&here), &there);
+                    cx.relocate(Some(&here), &there);
 
-                    let blocking_after = builtins.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
-                    let async_after = builtins.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
+                    let blocking_after = cx.scheduler().spawn_blocking(|| thread::current().id()).await.unwrap();
+                    let async_after = cx.scheduler().spawn(async move |_| thread::current().id()).await.unwrap();
 
                     RelocationObservation {
                         origin,
@@ -409,10 +446,10 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
         .unwrap()
 }
 
-/// Async tasks always run on the worker the scheduler is currently associated with,
-/// regardless of the worker-pool policy: before relocation on the origin worker,
-/// after relocation on the (distinct) destination worker.
-#[cfg_attr(test, mutants::skip)] // Test oracle, not production behavior; assertion mutations invalidate the test itself.
+/// Async tasks always run on the worker associated with the scheduler.
+///
+/// The worker-pool policy does not change this behavior. The task runs on the
+/// origin worker before relocation and on the distinct destination worker after it.
 fn assert_async_follows_relocation(observation: &RelocationObservation) {
     assert_eq!(
         observation.async_task.before, observation.origin,
@@ -447,29 +484,29 @@ fn relocating_scheduler_uses_same_pool_when_shared() {
 }
 
 #[test]
-fn relocating_builtins_uses_destination_pool_when_per_worker() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Builtins);
+fn relocating_context_uses_destination_pool_when_per_worker() {
+    let observation = relocate_and_observe(BlockingPoolPolicy::per_worker(), RelocationTarget::Context);
 
     assert_ne!(
         observation.blocking_task.before, observation.blocking_task.after,
-        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating Builtins"
+        "a per-worker pool must dispatch blocking tasks to the destination worker's pool after relocating Context"
     );
     assert_async_follows_relocation(&observation);
 }
 
 #[test]
-fn relocating_builtins_uses_same_pool_when_shared() {
-    let observation = relocate_and_observe(BlockingPoolPolicy::shared().max(1), RelocationTarget::Builtins);
+fn relocating_context_uses_same_pool_when_shared() {
+    let observation = relocate_and_observe(BlockingPoolPolicy::shared().max(1), RelocationTarget::Context);
 
     assert_eq!(
         observation.blocking_task.before, observation.blocking_task.after,
-        "a shared single-threaded pool must keep dispatching blocking tasks to the same thread after relocating Builtins"
+        "a shared single-threaded pool must keep dispatching blocking tasks to the same thread after relocating Context"
     );
     assert_async_follows_relocation(&observation);
 }
 
 #[test]
-fn relocated_builtins_initializes_io_on_the_destination_worker() {
+fn relocated_context_initializes_io_on_the_destination_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let initialized = Arc::new(Mutex::new(Vec::new()));
     let destination = runtime
@@ -514,26 +551,26 @@ fn relocated_builtins_initializes_io_on_the_destination_worker() {
 fn foreign_owner_relocation_preserves_runtime_binding() {
     let source_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let mut builtins = source_runtime
+    let mut cx = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
         .join()
         .unwrap();
-    let source = builtins.thread().clone();
+    let source = cx.thread().clone();
     let destination = destination_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
         .join()
         .unwrap();
-    let blocking_thread = builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
+    let blocking_thread = cx.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap();
 
-    builtins.relocate(Some(&source), &destination);
+    cx.relocate(Some(&source), &destination);
 
     assert_eq!(
         (
-            builtins.thread(),
-            builtins.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
-            builtins.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap(),
+            cx.thread(),
+            cx.scheduler().spawn(async |_| thread::current().id()).join().unwrap(),
+            cx.scheduler().spawn_blocking(|| thread::current().id()).join().unwrap(),
         ),
         (&source, source.id(), blocking_thread),
     );
@@ -566,12 +603,12 @@ fn repeated_spawn_after_relocation_uses_destination() {
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let source_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let destination_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let builtins = source_runtime
+    let cx = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
         .join()
         .unwrap();
-    let mut scheduler = builtins.scheduler().clone();
+    let mut scheduler = cx.scheduler().clone();
     let destination = destination_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.thread().clone() })
@@ -579,13 +616,13 @@ fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
         .unwrap();
     let blocking_thread = scheduler.spawn_blocking(|| thread::current().id()).join().unwrap();
 
-    scheduler.relocate(Some(builtins.thread()), &destination);
+    scheduler.relocate(Some(cx.thread()), &destination);
 
     assert_eq!(
         (
             scheduler.spawn(async |_| thread::current().id()).join().unwrap(),
             scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
         ),
-        (builtins.thread().id(), blocking_thread),
+        (cx.thread().id(), blocking_thread),
     );
 }

@@ -66,6 +66,12 @@ mod private {
     impl Sealed for super::PerNuma {}
     impl Sealed for super::PerProcess {}
 
+    pub trait MakeMutSealed {}
+
+    impl<T: Clone> MakeMutSealed for T {}
+    impl<T: Clone> MakeMutSealed for [T] {}
+    impl MakeMutSealed for str {}
+
     pub trait AffinityStrategy: Sealed {
         type Key: Clone + Debug + Eq + Hash + Send + Sync + 'static;
 
@@ -140,9 +146,9 @@ pub trait Strategy<T: ?Sized>: private::Sealed {
         T: Send + Sync;
 }
 
-/// Internal cloning contract for process-wide [`Arc::make_mut`].
+/// Sealed cloning contract for process-wide [`Arc::make_mut`].
 #[doc(hidden)]
-pub trait MakeMutTarget {
+pub trait MakeMutTarget: private::MakeMutSealed {
     /// Clones the allocation when necessary and returns unique mutable access.
     fn make_mut(arc: &mut StdArc<Self>) -> &mut Self;
 }
@@ -612,6 +618,22 @@ impl<T: ?Sized> Arc<T, PerProcess> {
 
 impl<T: ?Sized + MakeMutTarget> Arc<T, PerProcess> {
     /// Makes the allocation uniquely owned and returns mutable access.
+    ///
+    /// You cannot supply a custom cloning implementation:
+    ///
+    /// ```compile_fail,E0277
+    /// use std::sync::Arc;
+    ///
+    /// use performables::arc::MakeMutTarget;
+    ///
+    /// struct Custom;
+    ///
+    /// impl MakeMutTarget for Custom {
+    ///     fn make_mut(arc: &mut Arc<Self>) -> &mut Self {
+    ///         Arc::get_mut(arc).unwrap()
+    ///     }
+    /// }
+    /// ```
     pub fn make_mut(this: &mut Self) -> &mut T {
         T::make_mut(&mut this.state)
     }
@@ -854,14 +876,6 @@ where
     #[must_use]
     pub fn as_ptr(this: &Self) -> *const T {
         StdArc::as_ptr(S::current(&this.state))
-    }
-
-    /// Returns the current pointee address used as the telemetry identity.
-    #[cfg(feature = "seismograph")]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn telemetry_object_id(this: &Self) -> seismograph::recorder::event::ObjectId {
-        seismograph::recorder::event::ObjectId::from_ptr(Self::as_ptr(this).cast::<()>())
     }
 }
 
@@ -1154,6 +1168,85 @@ mod tests {
     use thread_aware::Relocator;
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_affinity_cache_hit_binds_an_unregistered_clone_owner() {
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let mut first = Arc::<u64, PerThread>::new_with(|| 42);
+        let mut unregistered = first.clone();
+        first.relocate(source.as_ref(), &destination);
+        assert!(unregistered.state.current_owner.is_none());
+        unregistered.relocate(None, &destination);
+        assert!(Arc::ptr_eq(&first, &unregistered));
+        assert_eq!(unregistered.state.current_owner.as_ref(), Some(destination.owner()));
+    }
+
+    #[test]
+    fn gamma_round2_affinity_materialization_selects_a_reentrant_cache_winner() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        thread_local! {
+            static HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+        }
+
+        fn construct() -> u64 {
+            let hook = HOOK.with(|hook| hook.borrow_mut().take());
+            if let Some(hook) = hook {
+                hook();
+            }
+            42
+        }
+
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let mut first = Arc::<u64, PerThread>::new_with(construct);
+        let peer = Rc::new(RefCell::new(first.clone()));
+        let nested = Rc::clone(&peer);
+        let nested_source = source.clone();
+        let nested_destination = destination.clone();
+        HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                nested.borrow_mut().relocate(nested_source.as_ref(), &nested_destination);
+            }));
+        });
+        first.relocate(source.as_ref(), &destination);
+        assert!(Arc::ptr_eq(&first, &peer.as_ref().borrow()));
+        assert_eq!(first.state.current_owner.as_ref(), Some(destination.owner()));
+    }
+
+    #[test]
+    fn gamma_survivor_affinity_owner_metadata_is_bound_for_every_relocation_branch() {
+        let (source, destination) = Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        let mut value = Arc::<u64, PerThread>::new_with(|| 42);
+        assert!(value.state.current_owner.is_none());
+        value.relocate(Some(&source), &destination);
+        assert_eq!(value.state.current_owner.as_ref(), Some(destination.owner()));
+        value.relocate(Some(&destination), &source);
+        assert_eq!(value.state.current_owner.as_ref(), Some(source.owner()));
+        let allocations = StdArc::new(AtomicUsize::new(0));
+        let mut same = Arc::<u64, PerThread>::with_clone_fn(StdArc::clone(&allocations), |count| {
+            count.fetch_add(1, Ordering::Relaxed);
+            Box::new(42)
+        });
+        same.relocate(Some(&destination), &destination);
+        assert_eq!(same.state.current_owner.as_ref(), Some(destination.owner()));
+        assert_eq!(allocations.load(Ordering::Relaxed), 1);
+        assert!(
+            same.state
+                .shared
+                .inner
+                .read()
+                .unwrap()
+                .storage
+                .get_clone(&destination.id())
+                .is_some()
+        );
+        let existing = Arc::<u64, PerThread>::try_from_values(&source, [(source.clone(), Arc::new(42))]).unwrap();
+        assert_eq!(existing.state.current_owner.as_ref(), Some(source.owner()));
+        let (_, foreign) = Relocator::between_threads().different_owner().relocate(&mut ());
+        assert!(!existing.state.shared.inner.write().unwrap().storage.bind_owner(foreign.owner()));
+    }
 
     mod warm_relocation;
 

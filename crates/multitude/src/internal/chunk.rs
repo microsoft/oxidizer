@@ -23,7 +23,7 @@ use core::mem;
 use core::ptr::{self, NonNull};
 #[cfg(feature = "stats")]
 use core::sync::atomic::AtomicU32;
-use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 use allocator_api2::alloc::Allocator;
 
@@ -31,6 +31,11 @@ use super::chunk_alloc::chunk_alloc_size;
 use super::chunk_provider::ChunkProvider;
 use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
 use crate::AllocError;
+use crate::sync_fence::fence;
+
+#[cfg(test)]
+#[path = "gamma_survivor_chunk.rs"]
+mod gamma_survivor;
 
 /// A bump-allocation chunk whose allocations can outlive the arena.
 ///
@@ -60,6 +65,18 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     data: [UnsafeCell<u8>],
 }
 
+fn credited_refcount(previous: usize, additional: usize) -> Option<usize> {
+    previous.checked_add(additional)
+}
+
+#[test]
+fn gamma_round2_refcount_credit_accepts_the_exact_maximum_and_rejects_overflow() {
+    assert_eq!(credited_refcount(1, 0), Some(1));
+    assert_eq!(credited_refcount(1, 7), Some(8));
+    assert_eq!(credited_refcount(usize::MAX - 7, 7), Some(usize::MAX));
+    assert_eq!(credited_refcount(usize::MAX - 7, 8), None);
+}
+
 impl<A: Allocator + Clone> Chunk<A> {
     /// Reads the wasted-tail count stashed at retire time.
     #[cfg(feature = "stats")]
@@ -82,7 +99,6 @@ impl<A: Allocator + Clone> Chunk<A> {
 
     #[inline]
     // This is the exact fixed header size for either feature layout.
-    #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) const fn header_size() -> usize {
         // Under `stats`, `wasted_at_retire` is the last fixed-size field;
         // otherwise it's `next`. The `[UnsafeCell<u8>]` tail has align 1 and
@@ -98,7 +114,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     const fn struct_align() -> usize {
         let base = Self::value_align();
         if base >= CHUNK_ALIGN { base } else { CHUNK_ALIGN }
@@ -107,7 +122,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// The chunk type's own alignment, used to round allocation size. This is
     /// separate from [`Self::struct_align`], the base-address alignment.
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     const fn value_align() -> usize {
         let a = mem::align_of::<Arc<A>>();
         let b = mem::align_of::<usize>();
@@ -118,7 +132,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     ///
     /// Uses [`NonNull::byte_sub`] to preserve provenance.
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn header_from_value_ptr(value: NonNull<u8>) -> NonNull<u8> {
         let offset_within_chunk = (value.as_ptr() as usize) & (CHUNK_ALIGN - 1);
         // SAFETY: the smart-pointer invariant guarantees `value` lies
@@ -147,7 +160,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     // A chunk allocation must remain within pointer-offset limits.
-    #[cfg_attr(test, mutants::skip)]
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "alloc_chunk_raw returns storage aligned to struct_align(), which is at least Chunk's value alignment"
@@ -288,8 +300,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         // observes the previous refcount; if it returns true the
         // caller holds the unique remaining reference and we route
         // through `teardown_and_release`.
-        let chunk_ref = chunk.as_ref();
-        if chunk_ref.dec_ref() {
+        if Self::dec_ref(chunk) {
             Self::teardown_and_release(chunk);
         }
     }
@@ -311,7 +322,9 @@ impl<A: Allocator + Clone> Chunk<A> {
             return;
         }
         let prev = self.ref_count.fetch_add(n, Ordering::Relaxed);
-        if prev.checked_add(n).is_none() {
+        #[cfg(test)]
+        crate::sync_fence::trace::record(Ordering::Relaxed);
+        if credited_refcount(prev, n).is_none() {
             overflow();
         }
     }
@@ -330,6 +343,8 @@ impl<A: Allocator + Clone> Chunk<A> {
             return;
         }
         let prev = self.ref_count.fetch_sub(n, Ordering::Release);
+        #[cfg(test)]
+        crate::sync_fence::trace::record(Ordering::Release);
         debug_assert!(prev >= n, "refund_refs underflow: prev={prev} n={n}");
     }
 
@@ -343,7 +358,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// reference on this chunk. After this call those references no longer
     /// exist.
     #[inline]
-    pub(crate) unsafe fn refund_refs_and_release_one(&self, n: usize) -> bool {
+    pub(crate) unsafe fn refund_refs_and_release_one(chunk: NonNull<Self>, n: usize) -> bool {
         #[cfg_attr(coverage_nightly, coverage(off))]
         #[inline(never)]
         #[cold]
@@ -353,7 +368,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         let Some(released) = n.checked_add(1) else {
             overflow();
         };
-        let prev = self.ref_count.fetch_sub(released, Ordering::Release);
+        let prev = (*chunk.as_ptr()).ref_count.fetch_sub(released, Ordering::Release);
         debug_assert!(prev >= released, "combined ref release underflow: prev={prev} released={released}");
         if prev == released {
             fence(Ordering::Acquire);
@@ -366,7 +381,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     #[inline]
     // Returning an incorrect capacity can make allocation retries infinite.
-    #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) fn capacity(&self) -> usize {
         self.capacity
     }
@@ -390,9 +404,16 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// Decrements the chunk's strong reference count by one. Returns `true`
     /// if the count reached zero, signaling the caller must tear the chunk
     /// down.
+    ///
+    /// # Safety
+    ///
+    /// Caller must own the strong reference being released and must not
+    /// access `chunk` afterward unless this returns `true`.
     #[inline]
-    pub(crate) fn dec_ref(&self) -> bool {
-        let prev = self.ref_count.fetch_sub(1, Ordering::Release);
+    pub(crate) unsafe fn dec_ref(chunk: NonNull<Self>) -> bool {
+        // Borrow only the atomic: another releaser can destroy the header
+        // before this call returns after a non-final decrement.
+        let prev = (*chunk.as_ptr()).ref_count.fetch_sub(1, Ordering::Release);
         if prev == 1 {
             fence(Ordering::Acquire);
             true
@@ -450,6 +471,29 @@ mod tests {
     use allocator_api2::alloc::Global;
 
     use super::*;
+
+    #[test]
+    fn a_mutator_can_outlive_its_provider_and_release_the_backing_allocator() {
+        use crate::internal::chunk_mutator::ChunkMutator;
+        use crate::internal::chunk_provider::ChunkProviderConfig;
+        use crate::internal::constants::SizeClass;
+
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        let provider_lifetime = Arc::downgrade(&provider);
+        let chunk = provider.acquire(16, SizeClass::ZERO).unwrap();
+        // SAFETY: acquire returns a live chunk whose owned reference is held here.
+        let allocator_lifetime = unsafe { Arc::downgrade(&(*chunk.as_ptr()).allocator) };
+        // SAFETY: The mutator takes that reference without copying or releasing it.
+        let mutator = unsafe { ChunkMutator::from_owned(chunk) };
+
+        drop(provider);
+        assert!(provider_lifetime.upgrade().is_none());
+        assert!(allocator_lifetime.upgrade().is_some());
+        assert!(mutator.try_alloc_bytes(8).is_some());
+
+        drop(mutator);
+        assert!(allocator_lifetime.upgrade().is_none());
+    }
 
     /// `header_size` is `offset_of!(<last field>) + size_of::<<last field>>()`.
     /// Every fixed header field is pointer-sized and pointer-aligned, so the
@@ -610,6 +654,23 @@ mod tests {
 
     // The test configuration turns pre-credit overflow into a panic.
     #[test]
+    fn gamma_nov4_precredit_accepts_the_exact_maximum_through_its_overflow_check() {
+        let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("a 64-byte test chunk must fit");
+        // SAFETY: This test owns the fresh chunk's only reference.
+        let header = unsafe { chunk.as_ref() };
+        header.set_ref_count_for_test(usize::MAX - 7);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            header.pre_credit_refs(7);
+        }));
+        let count = header.ref_count.load(Ordering::Relaxed);
+        header.set_ref_count_for_test(0);
+        // SAFETY: The counter is restored to zero and the chunk remains exclusively owned.
+        unsafe { Chunk::destroy(chunk) };
+        assert!(result.is_ok(), "an exact usize::MAX refcount is not an overflow");
+        assert_eq!(count, usize::MAX);
+    }
+
+    #[test]
     #[should_panic(expected = "refcount overflow")]
     fn pre_credit_refs_overflow_triggers_abort_guard() {
         // SAFETY: the test owns the chunk and restores its count before
@@ -635,7 +696,7 @@ mod tests {
         unsafe {
             let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = chunk.as_ref().refund_refs_and_release_one(usize::MAX);
+                let _ = Chunk::refund_refs_and_release_one(chunk, usize::MAX);
             }));
             chunk.as_ref().set_ref_count_for_test(0);
             Chunk::destroy(chunk);

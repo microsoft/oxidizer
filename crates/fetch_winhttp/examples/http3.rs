@@ -3,11 +3,10 @@
 
 //! Issues a request over HTTP/3.
 //!
-//! Protocol selection is explicit. `supported_http_versions` lists what the client may
-//! negotiate, and listing HTTP/3 alone makes it mandatory: the request fails if HTTP/3
-//! cannot be established, rather than quietly falling back to HTTP/1.1 or HTTP/2. That
-//! failure is what a caller who requires HTTP/3 wants to see, so the example provokes it
-//! too by pointing the same client at a fixture that only speaks HTTP over TCP.
+//! `supported_http_versions` lists the protocols that the client can negotiate.
+//! A list that contains only HTTP/3 requires HTTP/3. The request fails instead
+//! of using HTTP/1.1 or HTTP/2. This example also sends the client to a fixture
+//! that supports only HTTP over TCP to show that failure.
 //!
 //! Run with `cargo run -p fetch_winhttp --example http3`.
 
@@ -65,7 +64,7 @@ mod example {
         );
 
         let Err(error) = test_client.client.get(server.url("/h3")).fetch().await else {
-            ohno::bail!("a peer without HTTP/3 should not satisfy a required HTTP/3 request");
+            ohno::bail!("a peer without HTTP/3 cannot satisfy a required HTTP/3 request");
         };
 
         println!("required HTTP/3 does not fall back: {error}");

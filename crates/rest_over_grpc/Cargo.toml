@@ -3,7 +3,7 @@
 
 [package]
 name = "rest_over_grpc"
-version = "0.3.0"
+version = "0.3.1"
 description = "Automatically transcode gRPC services to REST/JSON endpoints"
 documentation = "https://docs.rs/rest_over_grpc"
 readme = "README.md"
@@ -116,7 +116,6 @@ http-body = { workspace = true }
 http-body-util = { workspace = true }
 http_path_template = { path = "../http_path_template" }
 layered = { path = "../layered" }
-mutants = { workspace = true }
 prettyplease = { workspace = true }
 proc-macro2 = { workspace = true }
 prost-reflect = { workspace = true }

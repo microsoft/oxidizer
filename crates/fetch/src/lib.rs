@@ -101,16 +101,16 @@
 //! > **Note**: Use [`HttpClient::builder_tokio`] to add handlers or change timeouts and other
 //! > configuration.
 //!
-//! Arty applications can create a client from the task's built-in services:
+//! Arty applications can create a client from the task context:
 //!
 //! ```rust,no_run
 //! # #[cfg(all(feature = "arty", any(feature = "rustls", feature = "native-tls")))]
 //! # {
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use fetch::{HttpClient, HttpError};
 //!
 //! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), HttpError> {
+//! async fn main(cx: Context) -> Result<(), HttpError> {
 //!     let client = HttpClient::new_arty(&cx);
 //!     let response = client.get("https://example.com").fetch().await?;
 //!     println!("status: {}", response.status());

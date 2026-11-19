@@ -7,24 +7,21 @@ use crate::Thread;
 
 /// A type that adapts after it arrives on a different [`Thread`].
 ///
-/// Implement this trait when part of a type depends on where it runs: memory near a
-/// particular node, a handle to a thread-local driver, a shard index, a cached thread id.
-/// [`relocate`](Self::relocate) brings that state back into line. Implementors do not call
-/// it themselves; a runtime does, as described in
+/// Implement this trait when part of a type depends on where it runs. Examples include nearby
+/// memory, a thread-local driver handle, a shard index, or a cached thread id.
+/// [`relocate`](Self::relocate) adapts that state. A runtime calls it as described in
 /// [driving relocation](crate#runtime-authors-driving-relocation).
 ///
-/// Implement or derive it for any type that may end up inside a value a runtime relocates,
-/// including types that do nothing on relocation, since an empty implementation is what lets
-/// an enclosing type derive the trait. Do not implement it merely because a type is
-/// [`Send`], and never put anything correctness depends on inside
-/// [`relocate`](Self::relocate); it may affect performance only.
+/// Implement or derive the trait for each field that relocation traverses. Use an explicit skip
+/// policy or wrapper for other fields. An empty implementation lets an enclosing type derive the
+/// trait. Do not implement it only because a type is [`Send`]. [`relocate`](Self::relocate) can
+/// affect performance, but correctness must not depend on it.
 ///
 /// # Implementing
 ///
-/// Implementations usually take the following shapes.
+/// Implementations usually use one of these patterns:
 ///
-/// 1. **Do nothing.** Nothing in the type depends on where it runs. An empty body is a
-///    complete implementation, and is what the primitive types do.
+/// 1. Do nothing if no state depends on the thread.
 ///
 ///    ```
 ///    use thread_aware_core::{Thread, ThreadAware};
@@ -35,67 +32,54 @@ use crate::Thread;
 ///        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 ///    }
 ///    ```
-/// 2. **Record the destination.** Store the new thread id, [`NumaNode`](crate::NumaNode) or
-///    [`Owner`](crate::Owner) for later use.
-/// 3. **Adapt an optimization.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
-///    for a buffer pool, the thread id for a driver handle, [`Owner`](crate::Owner) for
-///    runtime-specific state. If it changed, an implementation may replace, detach, or retain
-///    the old resource according to what remains usable and worthwhile.
-/// 4. **Forward to fields.** A type composed of other types calls `relocate` on each field.
-///    Prefer `#[derive(ThreadAware)]` to writing this by hand.
+/// 2. Record the destination thread id, [`NumaNode`](crate::NumaNode), or
+///    [`Owner`](crate::Owner).
+/// 3. Adapt an optimization when its relevant id changes.
+/// 4. Forward `relocate` to each field. Prefer `#[derive(ThreadAware)]` over a manual
+///    implementation.
 ///
-/// To *detach* is to release a resource and leave the field empty, so that the value can
-/// acquire a new one later or run without it. Such a field needs a type that can be empty,
-/// such as `Option<Handle>`.
+/// To detach a resource means to release it and leave the field empty. The value can get a new
+/// resource later or continue without one. The field needs an empty state such as
+/// `Option<Handle>`.
 ///
 /// # Requirements
 ///
-/// [`relocate`](Self::relocate) cannot fail and has no way to report an error, so every
-/// implementation must:
+/// [`relocate`](Self::relocate) cannot return an error. Every implementation must meet these
+/// requirements:
 ///
-/// * **Preserve real data.** Anything that exists only for speed may be rebuilt: caches,
-///   pools, scratch buffers, handles. Nothing observable through the value may be lost or
-///   altered. A cache still holding writes that have not been flushed is real data, and must
-///   be moved rather than dropped.
+/// - Preserve data. An implementation can rebuild caches, pools, scratch buffers, and handles
+///   that exist only for performance. It must preserve observable data. For example, it must not
+///   drop a cache that contains writes that are not flushed.
 ///
-/// * **Remain correct.** When the ideal adaptation is unavailable, being slower is preferred
-///   to being wrong, and keeping the old resource is acceptable. Whatever the value holds
-///   must keep working even if this method is never called, so a driver handle must remain
-///   usable from the new thread. Relocation brings it closer; it does not make it valid.
+/// - Remain correct. If adaptation is not available, keep usable old state and accept lower
+///   performance. The value must also work if the runtime never calls this method.
 ///
-/// * **Neither panic nor perform long blocking work.** This runs while the runtime is placing work,
-///   so it takes no contended lock, performs no network or disk I/O, and does not wait for external
-///   progress. Brief in-memory coordination is acceptable. Defer longer adaptation; retaining usable
-///   state is acceptable.
+/// - Do not panic or perform long blocking work. Do not take a contended lock, perform network or
+///   disk I/O, or wait for external progress. Brief in-memory coordination is allowed. Defer longer
+///   work and keep usable state.
 ///
-/// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
-///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
-///   return early when nothing has changed.
+/// - Accept repeated calls. A call with equal relevant coordinates must be safe and cheap. Compare
+///   the relevant ids and return early if they did not change.
 ///
-/// * **Tolerate no call at all.** The value remains correct either way.
+/// - Remain correct without a call.
 ///
-/// * **Tolerate an unfamiliar [`Thread`].** A `destination` may name an OS thread the value
-///   has never seen and carry an [`Owner`](crate::Owner) belonging to another runtime. The
-///   value must remain sound whether it retains usable state, abandons an optimization, or
-///   prepares to replace runtime-specific state later. State keyed on
-///   [`NumaNode`](crate::NumaNode) may remain useful, subject to the caveat in
-///   [what the ids mean](crate#what-the-ids-mean).
+/// - Accept an unfamiliar [`Thread`]. The destination can use a new OS thread or an
+///   [`Owner`](crate::Owner) from another runtime. The value can keep usable state, remove an
+///   optimization, or prepare replacement state. See [what the ids mean](crate#what-the-ids-mean)
+///   before sharing state by [`NumaNode`](crate::NumaNode).
 ///
-/// A [`Thread`] may be cloned and retained. Its thread id remains unique after the OS thread exits,
-/// but retaining the coordinate does not keep that thread or its runtime operational.
+/// A [`Thread`] can be cloned and stored. Its thread id remains unique after the OS thread exits.
+/// The stored coordinate does not keep the thread or runtime operational.
 ///
-/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) from the thread
-/// that now owns the value, only after the value has actually moved, pass `None` when no previous
-/// [`Thread`] is known, build one [`Owner`](crate::Owner) per runtime, and never rely on the call
-/// for correctness. `destination` describes the thread executing the callback rather than a remote
-/// target for it; this lets locality-sensitive implementations release or rebuild state on the
-/// thread whose allocator and NUMA locality they are intended to use. Nothing enforces any of this.
+/// A runtime calls [`relocate`](Self::relocate) on the thread that owns the moved value. It passes
+/// `None` if the previous [`Thread`] is unknown. It creates one [`Owner`](crate::Owner) for each
+/// runtime. It must not depend on relocation for correctness. Nothing enforces these requirements.
 ///
 /// # Examples
 ///
-/// A type that releases a scratch buffer when the nearest memory changes, so that the next
-/// use allocates near the new node. The buffer holds nothing between calls, so discarding it
-/// is safe, while the `name` field is real data and is left alone.
+/// This type releases a scratch buffer when the nearest memory changes. The next use can allocate
+/// the buffer near the new node. The buffer holds no data between calls. The `name` field remains
+/// unchanged because it is data.
 ///
 /// ```
 /// use thread_aware_core::{NumaNode, Thread, ThreadAware};
@@ -103,22 +87,19 @@ use crate::Thread;
 /// struct Encoder {
 ///     name: String,
 ///     numa_node: Option<NumaNode>,
-///     /// Reused between calls purely to avoid re-allocating; empty outside a call.
+///     /// Reused between calls to avoid allocation. It is empty outside a call.
 ///     scratch: Vec<u8>,
 /// }
 ///
 /// impl ThreadAware for Encoder {
 ///     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-///         // Only pay for this when the nearest memory actually changed.
+///         // Adapt only if the nearest memory changed.
 ///         if source.map(Thread::numa_node) == Some(destination.numa_node()) {
 ///             return;
 ///         }
 ///
-///         // Record the node and drop the buffer allocated near the old one. `Vec` cannot
-///         // choose a node itself, so placement comes from the allocator the application
-///         // installs; releasing here is what gives it the chance to allocate near
-///         // `numa_node` on the next use. Since this callback runs on the destination thread,
-///         // that allocation can use the destination thread's locality when the allocator
+///         // Record the node and drop the old buffer. `Vec` uses the application's allocator.
+///         // The next allocation can use the destination thread's locality if the allocator
 ///         // supports it.
 ///         self.numa_node = Some(destination.numa_node().clone());
 ///         self.scratch = Vec::new();
@@ -148,20 +129,16 @@ use crate::Thread;
 /// }
 /// ```
 pub trait ThreadAware: Send {
-    /// Adapts this value to the [`Thread`] it now occupies.
+    /// Adapts this value to its current [`Thread`].
     ///
-    /// Implementors provide this method but do not normally call it. A runtime calls it
-    /// after moving the value.
+    /// A runtime calls this method after it moves the value.
     ///
-    /// `destination` describes the thread where the value runs from now on and where this method
-    /// is executing. It is not a request to relocate the value from another thread. `source` is
-    /// where it ran before, or `None` when that is unknown, which is normal for a first placement
-    /// or for a value arriving from outside the runtime. `None` means the implementation can
-    /// assume nothing about the previous [`Thread`]; it does not indicate an error.
+    /// `destination` describes the thread that runs this method and owns the value. It is not a
+    /// request to move the value. `source` describes the previous thread. It is `None` for an
+    /// unknown source, a first placement, or a value from outside the runtime. `None` is not an
+    /// error.
     ///
-    /// This method cannot fail, must not panic, and is safe to call more than once,
-    /// including with `source` equal to `destination`. See the
-    /// [requirements](Self#requirements) for the rest, and the trait-level
-    /// [examples](Self#examples) for implementations.
+    /// This method cannot return an error. It must not panic. Repeated calls and equal coordinates
+    /// must be safe. See the [requirements](Self#requirements) and [examples](Self#examples).
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread);
 }

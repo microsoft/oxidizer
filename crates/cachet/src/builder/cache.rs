@@ -380,6 +380,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(feature = "memory")]
+    fn gamma_round2_memory_builder_installs_an_eviction_hook_only_when_requested() {
+        let clock = tick::Clock::new_frozen();
+        let plain = crate::Cache::builder::<i32, i32>(clock.clone()).memory_with(|builder| builder);
+        assert!(plain.eviction_hook.is_none());
+        let observed = crate::Cache::builder::<i32, i32>(clock).memory_with(super::InMemoryCacheBuilder::with_eviction_telemetry);
+        assert!(observed.eviction_hook.is_some());
+    }
+
     use super::*;
 
     #[test]
@@ -494,7 +504,7 @@ mod tests {
     fn mock_builder_fallback_time_to_refresh() {
         let clock = Clock::new_frozen();
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
-        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
+        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(None));
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .fallback(fb)

@@ -68,7 +68,6 @@ pub(crate) enum NativeTlsStream<S> {
 
 // Pure I/O forwarding preserves the behavior of the wrapped HTTP/TLS stream;
 // mutating these methods only creates equivalent behavior or artificial hangs.
-#[cfg_attr(test, mutants::skip)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
@@ -79,7 +78,6 @@ impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Write for NativeTlsStream<S> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
@@ -134,7 +132,6 @@ impl<S: HyperIo + Unpin> Connection for NativeTlsStream<S> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Native TLS owns ALPN negotiation; this only maps its reported protocol into hyper metadata.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn negotiated_h2<S: std::io::Read + std::io::Write>(stream: &native_tls::TlsStream<S>) -> bool {
     stream.negotiated_alpn().unwrap_or(None).is_some_and(|protocol| protocol == b"h2")
@@ -154,51 +151,50 @@ pub(crate) struct RecordingIo<S> {
 impl<S: Read + Unpin> Read for RecordingIo<S> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
 }
 
 impl<S: Write + Unpin> Write for RecordingIo<S> {
-    #[cfg_attr(test, mutants::skip)] // Returning artificial zero-progress writes makes native-tls spin without yielding.
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write(cx, buf);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding; native TLS handshakes use poll_write.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure capability forwarding.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn is_write_vectored(&self) -> bool {
         self.inner.is_write_vectored()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding; the handshake's transient I/O path is covered through poll_read.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_flush(cx);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding after connection establishment.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_shutdown(cx);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Pure connection-metadata forwarding.
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Connection> Connection for RecordingIo<S> {
     fn connected(&self) -> Connected {
@@ -265,7 +261,6 @@ where
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    #[cfg_attr(test, mutants::skip)] // Pure readiness delegation; replacing Ready(Ok(())) is observationally equivalent for the adapter.
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.http.poll_ready(cx).map(|result| result.map_err(Into::into))
     }
@@ -324,7 +319,6 @@ async fn connect_https<S: HyperIo + Unpin>(
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Type-only adaptation after a successful platform TLS handshake.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn wrap_https_stream<S>(stream: tokio_native_tls::TlsStream<TokioIo<RecordingIo<S>>>) -> NativeTlsStream<S> {
     NativeTlsStream::Https(TokioIo::new(stream))
@@ -370,6 +364,70 @@ mod tests {
     use crate::HyperTransportBuilder;
     use crate::testing::{FakeConnector, FakeStream, TestError};
     use crate::tls::connector::TlsConnector;
+
+    struct GammaErrorIo(bool);
+
+    impl hyper::rt::Read for GammaErrorIo {
+        fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)))
+        }
+    }
+
+    impl hyper::rt::Write for GammaErrorIo {
+        fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[u8]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)))
+        }
+
+        fn poll_write_vectored(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::ConnectionAborted)))
+        }
+
+        fn is_write_vectored(&self) -> bool {
+            self.0
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::TimedOut)))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::NotConnected)))
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_native_io_capabilities_and_error_kinds_are_forwarded() {
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        for vectored in [false, true] {
+            let recorded = Arc::new(Mutex::new(None));
+            let mut io = RecordingIo {
+                inner: GammaErrorIo(vectored),
+                error_kind: Arc::clone(&recorded),
+            };
+            assert_eq!(hyper::rt::Write::is_write_vectored(&io), vectored);
+            assert!(hyper::rt::Write::poll_write_vectored(Pin::new(&mut io), &mut cx, &[IoSlice::new(b"x")]).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::ConnectionAborted));
+            *recorded.lock().unwrap() = None;
+            assert!(hyper::rt::Write::poll_flush(Pin::new(&mut io), &mut cx).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::TimedOut));
+            *recorded.lock().unwrap() = None;
+            assert!(hyper::rt::Write::poll_shutdown(Pin::new(&mut io), &mut cx).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::NotConnected));
+            let stream = NativeTlsStream::Http(GammaErrorIo(vectored));
+            assert_eq!(hyper::rt::Write::is_write_vectored(&stream), vectored);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native tests cover server-name overrides through native TLS; Miri retains stream forwarding"
+    )]
+    fn gamma_survivor_native_server_name_strips_ipv6_brackets() {
+        let backend = native_tls_backend_config_with_override();
+        assert_eq!(server_name(&backend, &"https://[::1]:8443/path".parse().unwrap()), "::1");
+        assert_eq!(server_name(&backend, &"/path".parse().unwrap()), "");
+    }
 
     fn native_tls_backend() -> fetch_tls::TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()
@@ -780,7 +838,7 @@ mod tests {
         };
         let mut transport_options = TransportOptions::default();
         transport_options.supported_http_versions = vec![Version::HTTP_11];
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), Clock::new_tokio(), transport_options)
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), Clock::new_tokio(), transport_options)
             .body_builder(HttpBodyBuilder::new_fake())
             .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
         let body_builder = HttpBodyBuilder::new_fake();

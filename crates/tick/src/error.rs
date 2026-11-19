@@ -124,6 +124,13 @@ impl Error {
     /// An application can use this classification to distinguish an unsupported
     /// timestamp from malformed input without matching the error message.
     #[must_use]
+    #[cfg_attr(
+        not(any(feature = "fmt", test)),
+        expect(
+            clippy::unused_self,
+            reason = "the receiver is used when fmt or tests enable the out-of-range error kind"
+        )
+    )]
     pub const fn is_out_of_range(&self) -> bool {
         #[cfg(any(feature = "fmt", test))]
         {
@@ -201,6 +208,30 @@ impl From<SystemTimeError> for Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "native tests cover standard-library backtrace capture and writer errors")]
+    fn gamma_round2_backtrace_formatting_preserves_a_writer_error() {
+        use std::fmt::Write as _;
+
+        struct FirstWriteOnly(bool);
+
+        impl std::fmt::Write for FirstWriteOnly {
+            fn write_str(&mut self, _: &str) -> std::fmt::Result {
+                if std::mem::replace(&mut self.0, false) {
+                    Ok(())
+                } else {
+                    Err(std::fmt::Error)
+                }
+            }
+        }
+
+        let error = super::Error {
+            kind: super::ErrorKind::Timeout(std::io::Error::other("round2")),
+            backtrace: std::backtrace::Backtrace::force_capture(),
+        };
+        assert!(write!(FirstWriteOnly(true), "{error}").is_err());
+    }
+
     use std::error::Error as StdError;
 
     use super::*;

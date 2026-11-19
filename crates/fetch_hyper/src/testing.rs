@@ -71,6 +71,7 @@ impl Connection for PanickingStream {
 /// then delivered in one read, and `EOF` is returned afterwards.
 pub struct FakeStream {
     result: Option<std::result::Result<Bytes, TestError>>,
+    pending_after_response: bool,
     state: Arc<Mutex<FakeStreamState>>,
 }
 
@@ -98,13 +99,15 @@ impl Read for FakeStream {
         state.read_waker = None;
         drop(state);
 
-        self.as_mut().result.take().map_or(Poll::Ready(Ok(())), |res| match res {
-            Ok(bytes) => {
+        match self.as_mut().result.take() {
+            Some(Ok(bytes)) => {
                 buf.put_slice(&bytes);
                 Poll::Ready(Ok(()))
             }
-            Err(error) => Poll::Ready(Err(error.into_io_error())),
-        })
+            Some(Err(error)) => Poll::Ready(Err(error.into_io_error())),
+            None if self.pending_after_response => Poll::Pending,
+            None => Poll::Ready(Ok(())),
+        }
     }
 }
 
@@ -148,6 +151,7 @@ pub struct FakeConnector {
     response: Option<std::result::Result<Bytes, TestError>>,
     connect_error: Option<TestError>,
     clock: Clock,
+    pending_after_response: bool,
     /// Delay applied before the connect resolves. `Duration::ZERO` by default.
     pub delay: Duration,
 }
@@ -160,6 +164,17 @@ impl FakeConnector {
             response: Some(Ok(data.into())),
             connect_error: None,
             clock,
+            pending_after_response: false,
+            delay: Duration::ZERO,
+        }
+    }
+
+    pub(crate) fn new_pending_response(data: impl Into<Bytes>, clock: Clock) -> Self {
+        Self {
+            response: Some(Ok(data.into())),
+            connect_error: None,
+            clock,
+            pending_after_response: true,
             delay: Duration::ZERO,
         }
     }
@@ -171,6 +186,7 @@ impl FakeConnector {
             response: Some(Err(error)),
             connect_error: None,
             clock,
+            pending_after_response: false,
             delay: Duration::ZERO,
         }
     }
@@ -182,6 +198,7 @@ impl FakeConnector {
             response: None,
             connect_error: Some(error),
             clock,
+            pending_after_response: false,
             delay: Duration::ZERO,
         }
     }
@@ -202,6 +219,7 @@ impl layered::Service<BaseUri> for FakeConnector {
         let connect_error = self.connect_error.clone();
         let clock = self.clock.clone();
         let delay = self.delay;
+        let pending_after_response = self.pending_after_response;
 
         async move {
             clock.delay(delay).await;
@@ -212,6 +230,7 @@ impl layered::Service<BaseUri> for FakeConnector {
 
             Ok(FakeStream {
                 result: response,
+                pending_after_response,
                 state: Arc::new(Mutex::new(FakeStreamState {
                     request_received: false,
                     read_waker: None,
@@ -379,7 +398,7 @@ mod tests {
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
-            Spawner::new_tokio(),
+            Spawner::new_tokio(None),
             clock,
             options,
         )
@@ -405,7 +424,7 @@ mod tests {
                 TestError::new("forced connect error").with_inner_recoverability(RecoveryInfo::retry()),
                 clock.clone(),
             ),
-            Spawner::new_tokio(),
+            Spawner::new_tokio(None),
             clock,
             options,
         )
@@ -430,7 +449,7 @@ mod tests {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
-            Spawner::new_tokio(),
+            Spawner::new_tokio(None),
             clock,
             // default RequestFilter is Https only
             fetch_options::TransportOptions::default(),

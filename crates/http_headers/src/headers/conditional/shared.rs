@@ -51,6 +51,7 @@ where
         self.0.next()
     }
 
+    // #[gamma::skip(fn_value.one, fn_value.zero, expr.increment, tag = "equivalent", reason = "This hint is used only for initial Vec capacity; all tags are subsequently pushed until next_tag returns None")]
     fn remaining_hint(&self) -> usize {
         self.0.size_hint().0
     }
@@ -64,6 +65,7 @@ pub(super) fn tag_values_from_source(name: &'static FieldName, tags: &mut dyn Ow
     let Some(second) = tags.next_tag() else {
         return Ok(TagValues::One(first));
     };
+    // #[gamma::skip(iter.min_to_max, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "This is only the initial allocation hint; every tag is pushed independently and Vec grows as needed")]
     let mut values = Vec::with_capacity(2_usize.saturating_add(tags.remaining_hint()).min(128));
     values.push(first);
     values.push(second.into_field_value());
@@ -787,6 +789,7 @@ where
         Self {
             values,
             current: None,
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "current is None initially and loading the first field line overwrites position with zero before any read")]
             position: 0,
         }
     }
@@ -808,7 +811,10 @@ where
                     None => self.current = None,
                 }
             }
-            self.current = Some(self.values.next()?.as_bytes());
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.current =
+            // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            Some(self.values.next()?.as_bytes());
             self.position = 0;
         }
     }
@@ -832,7 +838,10 @@ fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<
     let mut index = *position;
 
     while index < length && matches!(bytes[index], b' ' | b'\t' | b',') {
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     if index == length {
         *position = index;
@@ -858,6 +867,7 @@ fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<
             return Some(ListItem::Malformed);
         }
         index += 1;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding successful quote lookup proves index was within bytes before incrementing it once, so index is now at most bytes.len()")]
         let Some(closing) = bytes.get(index..)?.iter().position(|byte| *byte == b'"') else {
             *position = length;
             return Some(ListItem::Malformed);
@@ -875,7 +885,10 @@ fn next_list_item<'a>(bytes: &'a [u8], position: &mut usize) -> Option<ListItem<
     };
 
     while index < length && matches!(bytes[index], b' ' | b'\t') {
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     if index < length && bytes[index] != b',' {
         *position = length;
@@ -965,7 +978,10 @@ pub(super) fn validate_tag_line_with(bytes: &[u8], state: TagListState, mode: cr
                     if class & (TAG_OWS | TAG_COMMA) == 0 {
                         break class;
                     }
-                    index += 1;
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    index +=
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1;
                 }
             }
         };
@@ -991,7 +1007,10 @@ pub(super) fn validate_tag_line_with(bytes: &[u8], state: TagListState, mode: cr
         }
 
         while index < length && TAG_CLASS[bytes[index] as usize] & (TAG_OWS | TAG_QUOTE) == 0 {
-            index += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
         if bytes.get(index) != Some(&b'"') {
             return None;
@@ -999,10 +1018,15 @@ pub(super) fn validate_tag_line_with(bytes: &[u8], state: TagListState, mode: cr
         index += 1;
 
         while index < length && TAG_CLASS[bytes[index] as usize] & TAG_OWS != 0 {
-            index += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
         match bytes.get(index) {
+            // #[gamma::skip(loop.break_to_continue, tag = "equivalent", reason = "At end of input a continue reaches the outer loop's immediate None lookup and exits through its labelled break")]
             None => break,
+            // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "If this comma is not consumed here, the outer loop's class scan consumes it before inspecting the next item")]
             Some(&b',') => index += 1,
             Some(_) => return None,
         }
@@ -1028,7 +1052,10 @@ pub(super) fn validate_tag_line_outlined_with(bytes: &[u8], state: TagListState,
 
 pub(super) fn parse_http_date(name: &'static FieldName, value: FieldValueRef<'_>) -> Result<SystemTime, DecodeError> {
     let bytes = value.as_bytes();
-    if let Some(seconds) = parse_imf_fixdate(bytes) {
+    if let Some(seconds) =
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining the canonical fixed-date shortcut leaves the full HTTP-date parser, which accepts every recognized date at the identical instant")]
+        parse_imf_fixdate(bytes)
+    {
         return Ok(UNIX_EPOCH + Duration::from_secs(seconds));
     }
     if bytes.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) || bytes.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
@@ -1051,7 +1078,10 @@ pub(super) fn parse_http_date_with(
     }
     let wire = ascii_str(value.as_bytes())
         .ok_or_else(|| crate::headers::invalid_syntax(name))?
-        .trim_matches([' ', '\t']);
+        .trim_matches(
+            // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "Character-array trim patterns are unordered membership sets")]
+            [' ', '\t'],
+        );
     parse_relaxed_http_date(wire).ok_or_else(|| crate::headers::invalid_syntax(name))
 }
 
@@ -1060,12 +1090,24 @@ fn parse_relaxed_http_date(wire: &str) -> Option<SystemTime> {
         return Some(date);
     }
     let mut parts = wire.split(' ');
-    let weekday = parts.next()?.strip_suffix(',')?;
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "A fresh str::Split always yields its first segment, including one empty segment for an empty string")]
+    let weekday = parts.next()?;
+    let weekday = weekday.strip_suffix(',')?;
     let day = parse_short_decimal(parts.next()?, 2)?;
     let month = parts.next()?;
     let year = parse_short_decimal(parts.next()?, 4)?;
     let time = parts.next()?;
     let zone = parts.next()?;
+    // #[gamma::skip(literal.int_decrement, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The final standard HTTP-date parser independently rejects every year below 1970; normalizing those four-digit years performs only bounded decimal arithmetic")]
+    let minimum_year = 1970;
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The four-digit decimal parser already bounds year at 9999, and the final standard HTTP-date parser independently rejects every year below 1970")]
+    if !(minimum_year..=
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The four-digit decimal parser already bounds year at 9999, so raising this upper bound to 10000 cannot admit another year")]
+        9999)
+        .contains(&year)
+    {
+        return None;
+    }
     if parts.next().is_some()
         || !matches!(weekday, "Sun" | "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat")
         || !matches!(
@@ -1073,15 +1115,18 @@ fn parse_relaxed_http_date(wire: &str) -> Option<SystemTime> {
             "Jan" | "Feb" | "Mar" | "Apr" | "May" | "Jun" | "Jul" | "Aug" | "Sep" | "Oct" | "Nov" | "Dec"
         )
         || !matches!(zone, "GMT" | "UTC")
-        || !(1970..=9999).contains(&year)
     {
         return None;
     }
     let mut clock = time.split(':');
-    let hour = parse_short_decimal(clock.next()?, 2)?;
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "A fresh str::Split always yields a first segment, even when the time string is empty")]
+    let first_clock_segment = clock.next()?;
+    let hour = parse_short_decimal(first_clock_segment, 2)?;
     let minute = parse_short_decimal(clock.next()?, 2)?;
     let second = parse_short_decimal(clock.next()?, 2)?;
-    if clock.next().is_some() || hour > 23 || minute > 59 || second > 59 {
+    if
+    // #[gamma::skip(logical.or_remove_right, literal.int_increment, tag = "equivalent", reason = "Each component already has at most two digits; the standard HTTP-date parser below independently rejects hours 24 through 99 and minutes/seconds 60 through 99, while the extra-segment check remains intact")]
+    clock.next().is_some() || hour > 23 || minute > 59 || second > 59 {
         return None;
     }
     // The validated fixed-width form needs neither heap storage nor formatting dispatch.
@@ -1104,7 +1149,9 @@ fn date_decimal_pair(value: u16) -> [u8; 2] {
 }
 
 fn parse_short_decimal(value: &str, max_digits: usize) -> Option<u16> {
-    if value.is_empty() || value.len() > max_digits || !value.as_bytes().iter().all(u8::is_ascii_digit) {
+    // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "An empty string also fails the u16 parser below, so removing this explicit empty-input rejection still returns None")]
+    let invalid_length = value.is_empty() || value.len() > max_digits;
+    if invalid_length || !value.as_bytes().iter().all(u8::is_ascii_digit) {
         return None;
     }
     value.parse().ok()
@@ -1203,7 +1250,14 @@ fn parse_imf_fixdate(bytes: &[u8]) -> Option<u64> {
     let second = two_digits(bytes[23], bytes[24])?;
     let year = u16::from(two_digits(bytes[12], bytes[13])?) * 100 + u16::from(two_digits(bytes[14], bytes[15])?);
 
-    if hour > 23 || minute > 59 || second > 59 || !(1970..=9999).contains(&year) {
+    if hour > 23
+        || minute > 59
+        || second > 59
+        || !(1970..=
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The fixed four-byte decimal year field already bounds year at 9999")]
+        9999)
+            .contains(&year)
+    {
         return None;
     }
 
@@ -1261,9 +1315,148 @@ mod tests {
     use crate::source::{FieldLines, FieldSource};
     use crate::{DecodeErrorKind, DecodeMode, Field, FieldName, FieldValue, FieldValueRef, SingleValueField};
 
+    #[test]
+    fn gamma_round2_imf_calendar_does_not_hide_behind_the_general_parser() {
+        for year in 1970_u64..=9999 {
+            // March exposes the accumulated leap-day count, including century boundaries.
+            let previous = year - 1;
+            let days = (year - 1970) * 365 + (previous / 4 - 1969 / 4) - (previous / 100 - 1969 / 100)
+                + (previous / 400 - 1969 / 400)
+                + 59
+                + u64::from(year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)));
+            let seconds = days * 86_400 + 23 * 3600 + 59 * 60 + 59;
+            let wire = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(seconds));
+            assert_eq!(parse_imf_fixdate(wire.as_bytes()), Some(seconds), "{wire}");
+        }
+        for year in [1970_u64, 1972, 1999, 2000, 2004, 2099, 2100, 2399, 2400, 9999] {
+            let previous = year - 1;
+            let start = (year - 1970) * 365 + (previous / 4 - 1969 / 4) - (previous / 100 - 1969 / 100) + (previous / 400 - 1969 / 400);
+            let count = if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) {
+                366
+            } else {
+                365
+            };
+            for day in 0..count {
+                let seconds = (start + day) * 86_400 + 12_345;
+                let wire = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(seconds));
+                assert_eq!(parse_imf_fixdate(wire.as_bytes()), Some(seconds), "{wire}");
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_imf_rejects_bad_year_digits_and_calendar_overflows() {
+        for wire in [
+            "Thu, 01 Jan 1970 00:00:00 GMT",
+            "Tue, 29 Feb 2000 12:34:56 GMT",
+            "Fri, 31 Dec 9999 23:59:59 GMT",
+        ] {
+            for index in [12, 13, 14, 15] {
+                let mut bytes = wire.as_bytes().to_vec();
+                bytes[index] = b'x';
+                assert_eq!(parse_imf_fixdate(&bytes), None);
+            }
+        }
+        for wire in [
+            "Thu, 32 Jan 1970 00:00:00 GMT",
+            "Thu, 01 Jan 1970 24:00:00 GMT",
+            "Thu, 01 Jan 1970 00:60:00 GMT",
+            "Thu, 01 Jan 1970 00:00:60 GMT",
+            "Tue, 29 Feb 2100 00:00:00 GMT",
+            "Wed, 30 Apr 2008 00:00:00 GMT",
+        ] {
+            let expected = httpdate::parse_http_date(wire)
+                .ok()
+                .map(|date| date.duration_since(UNIX_EPOCH).unwrap().as_secs());
+            assert_eq!(parse_imf_fixdate(wire.as_bytes()), expected, "{wire}");
+        }
+        for high in 0..=u8::MAX {
+            for low in [b'0', b'9', b':', b'/', 0, 255] {
+                let expected = (high.is_ascii_digit() && low.is_ascii_digit()).then(|| (high - b'0') * 10 + low - b'0');
+                assert_eq!(two_digits(high, low), expected);
+            }
+        }
+        for year in [2000, 2001, 2100] {
+            for month in ["Jan", "Feb", "Apr", "Jun", "Sep", "Nov"] {
+                for day in [29, 30, 31, 32] {
+                    for weekday in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] {
+                        let wire = format!("{weekday}, {day:02} {month} {year} 00:00:00 GMT");
+                        let expected = httpdate::parse_http_date(&wire)
+                            .ok()
+                            .map(|date| date.duration_since(UNIX_EPOCH).unwrap().as_secs());
+                        assert_eq!(parse_imf_fixdate(wire.as_bytes()), expected, "{wire}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_relaxed_date_missing_parts_and_decimal_widths() {
+        for wire in [
+            "",
+            "Thu,",
+            "Thu, 1",
+            "Thu, 1 Jan",
+            "Thu, 1 Jan 1970",
+            "Thu, 1 Jan 1970 0",
+            "Thu, 1 Jan 1970 0 GMT",
+            "Thu, 1 Jan 1970 0:0 GMT",
+            "Thu, 1 Jan 1970 0:0: GMT",
+            "Thu, x Jan 1970 0:0:0 UTC",
+            "Thu, 001 Jan 1970 0:0:0 UTC",
+            "Thu, 1 Jan 01970 0:0:0 UTC",
+            "Thu, 1 Jan 1970 000:0:0 UTC",
+            "Thu, 1 Jan 1970 0:000:0 UTC",
+            "Thu, 1 Jan 1970 0:0:000 UTC",
+            "Thu, 1 Jan 1970 24:0:0 UTC",
+            "Thu, 1 Jan 1970 0:60:0 UTC",
+            "Thu, 1 Jan 1970 0:0:60 UTC",
+            "Thu, 1 Jan 1970 0:0:0 UTC extra",
+            "bad, 1 Jan 1970 0:0:0 UTC",
+            "Thu, 1 Xxx 1970 0:0:0 UTC",
+            "Thu, 1 Jan 1970 0:0:0 XYZ",
+        ] {
+            assert_eq!(parse_relaxed_http_date(wire), None, "{wire}");
+        }
+        assert_eq!(parse_relaxed_http_date("Thu, 1 Jan 1970 0:0:0 UTC"), Some(UNIX_EPOCH));
+        for value in ["", "+1", "-1", "1x", "x1", "001", "65536"] {
+            assert_eq!(parse_short_decimal(value, 2), None, "{value}");
+        }
+    }
+
     struct Source {
         name: &'static FieldName,
         values: Vec<FieldValue>,
+    }
+
+    #[test]
+    fn gamma_round2_tag_projection_rejects_malformed_prefixes_and_consumes_empty_tail() {
+        for bytes in [b"w\"tag\"".as_slice(), b"W", b"x\"tag\"", b"\"unfinished", b"Wx\"tag\"", b"Xtag\""] {
+            let mut position = 0;
+            assert!(matches!(next_list_item(bytes, &mut position), Some(ListItem::Malformed)));
+            assert_eq!(position, bytes.len());
+        }
+
+        let bytes = b" \t,,";
+        let mut position = 0;
+        assert!(next_list_item(bytes, &mut position).is_none());
+        assert_eq!(position, bytes.len());
+        assert!(next_list_item(bytes, &mut position).is_none());
+    }
+
+    #[test]
+    fn gamma_round2_tag_validation_state_retains_empty_tags_and_rejects_star_suffixes() {
+        for wire in [b"\"\"".as_slice(), b"W/\"\"", b"\"a\"", b"\"a\",W/\"\""] {
+            let state = super::validate_tag_line_with(wire, super::TagListState::EMPTY, crate::DecodeMode::Strict).unwrap();
+            assert_eq!(state.0, super::TagListState::TAGGED, "{wire:?}");
+        }
+        for wire in [b"*x".as_slice(), b"\" \"", b"W/\" \"", b"\"a\"x", b"*\"a\""] {
+            assert!(
+                super::validate_tag_line_with(wire, super::TagListState::EMPTY, crate::DecodeMode::Strict).is_none(),
+                "{wire:?}"
+            );
+        }
     }
 
     impl FieldSource for Source {

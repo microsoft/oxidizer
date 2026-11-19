@@ -12,26 +12,18 @@ use tick::{Clock, Delay};
 
 use crate::{HttpError, Result};
 
-/// Wraps a streaming body to enforce an idle timeout on data reception.
+/// Applies an idle timeout while polling a streaming body.
 #[pin_project]
-pub(crate) struct TimeoutBody<B> {
-    /// The inner body, or `None` after the idle timeout fires.
-    ///
-    /// A timeout drops the inner body.
-    /// Each later poll returns `None`, which matches [`Body::is_end_stream`].
+pub(super) struct TimeoutBody<B> {
     #[pin]
     inner: Option<B>,
     timeout: Duration,
     clock: Clock,
-    /// The cached delay.
-    ///
-    /// The first pending poll creates it.
-    /// The next progress event or timeout clears it.
     current_delay: Option<Delay>,
 }
 
 impl<B> TimeoutBody<B> {
-    pub(crate) fn new(inner: B, timeout: Duration, clock: &Clock) -> Self {
+    pub(super) fn new(inner: B, timeout: Duration, clock: &Clock) -> Self {
         Self {
             inner: Some(inner),
             timeout,
@@ -43,7 +35,8 @@ impl<B> TimeoutBody<B> {
 
 impl<B> Body for TimeoutBody<B>
 where
-    B: Body<Data = BytesView, Error = HttpError>,
+    B: Body<Data = BytesView>,
+    B::Error: Into<HttpError>,
 {
     type Data = BytesView;
     type Error = HttpError;
@@ -51,26 +44,16 @@ where
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
         let mut this = self.project();
 
-        // After the timeout fires, the inner body is None.
-        // Return None to signal the end of the stream.
         let Some(inner) = this.inner.as_mut().as_pin_mut() else {
             return Poll::Ready(None);
         };
 
-        // Poll the inner body for data first. Clear any in-flight delay when
-        // data arrives so the next pending poll starts a fresh timer.
         if let Poll::Ready(result) = inner.poll_frame(cx) {
             *this.current_delay = None;
-            return Poll::Ready(result);
+            return Poll::Ready(result.map(|result| result.map_err(Into::into)));
         }
 
-        // The inner body is pending. Apply the timeout through a delay.
-        // Reuse the existing delay if we are re-polled without the inner body
-        // making progress, or create a new one for the full timeout duration.
-        // `Delay` implements `Unpin` (a deliberate guarantee from the `tick` crate),
-        // so we can poll it through `Pin::new` without needing a pinned projection.
         let delay = this.current_delay.get_or_insert_with(|| Delay::new(this.clock, *this.timeout));
-
         if Pin::new(delay).poll(cx).is_ready() {
             *this.current_delay = None;
             this.inner.set(None);
@@ -81,11 +64,11 @@ where
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.inner.as_ref().map(http_body::Body::size_hint).unwrap_or_default()
+        self.inner.as_ref().map_or_else(|| SizeHint::with_exact(0), Body::size_hint)
     }
 
     fn is_end_stream(&self) -> bool {
-        self.inner.as_ref().is_none_or(http_body::Body::is_end_stream)
+        self.inner.as_ref().is_none_or(Body::is_end_stream)
     }
 }
 
@@ -107,6 +90,21 @@ mod tests {
     use crate::{HttpBodyBuilder, HttpBodyOptions, HttpError, Result};
 
     #[test]
+    fn gamma_survivor_timeout_clears_cached_delay_and_inner_body() {
+        let control = ClockControl::new();
+        let mut body = super::TimeoutBody::new(PendingBody, Duration::from_millis(100), &control.to_clock());
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Pin::new(&mut body).poll_frame(&mut context).is_pending());
+        assert!(body.current_delay.is_some());
+        control.advance(Duration::from_millis(100));
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(Some(Err(_)))));
+        assert!(body.current_delay.is_none());
+        assert!(body.inner.is_none());
+        assert!(body.is_end_stream());
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(None)));
+    }
+
+    #[test]
     fn stream_body_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
@@ -115,7 +113,7 @@ mod tests {
         // exercising the TimeoutBody happy path via stream with timeout options.
         let chunks: Vec<Result<BytesView>> = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.stream(futures::stream::iter(chunks), &options);
+        let body = builder.with_options(options).stream(futures::stream::iter(chunks));
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"streamed data");
     }
@@ -127,7 +125,7 @@ mod tests {
 
         // A body that never yields data.
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let body = builder.body(PendingBody, &options);
+        let body = builder.with_options(options).body(PendingBody);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
             err.to_string().contains("body data was not fully received"),
@@ -143,9 +141,8 @@ mod tests {
 
         assert_eq!(builder.options, HttpBodyOptions::default().buffer_limit(1024));
 
-        // Timeout is applied per-body, not on the builder.
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.body(PendingBody, &options);
+        let body = builder.with_options(options).body(PendingBody);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(err.to_string().contains("body data was not fully received"));
     }
@@ -167,10 +164,8 @@ mod tests {
 
         // A full body has an exact size hint. TimeoutBody keeps this hint.
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.body(
-            http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
-            &options,
-        );
+        let builder = builder.with_options(options);
+        let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)));
         let hint = body.size_hint();
         assert_eq!(hint.lower(), 5);
         assert_eq!(hint.upper(), Some(5));
@@ -182,7 +177,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
-        let body = builder.body(http_body_util::Empty::new(), &options);
+        let body = builder.with_options(options).body(http_body_util::Empty::new());
         assert!(body.is_end_stream());
     }
 
@@ -192,7 +187,8 @@ mod tests {
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
-        let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)), &options);
+        let builder = builder.with_options(options);
+        let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)));
         assert!(!body.is_end_stream());
     }
 
@@ -202,10 +198,8 @@ mod tests {
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.body(
-            http_body_util::Full::new(BytesView::copied_from_slice(b"payload", &builder)),
-            &options,
-        );
+        let builder = builder.with_options(options);
+        let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"payload", &builder)));
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"payload");
     }
@@ -217,7 +211,7 @@ mod tests {
 
         // A body that never yields data with a very short timeout.
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));
-        let body = builder.body(PendingBody, &options);
+        let body = builder.with_options(options).body(PendingBody);
 
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
@@ -234,10 +228,8 @@ mod tests {
 
         // Use a body that has data immediately available (Full is always ready).
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));
-        let body = builder.body(
-            http_body_util::Full::new(BytesView::copied_from_slice(b"ready data", &builder)),
-            &options,
-        );
+        let builder = builder.with_options(options);
+        let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"ready data", &builder)));
 
         // Advance the clock past the timeout before polling.
         control.advance(Duration::from_mins(1));
@@ -264,7 +256,7 @@ mod tests {
         };
 
         let timeout_body = super::TimeoutBody::new(body, timeout, &clock);
-        let http_body = HttpBodyBuilder::new_fake().body(timeout_body, &HttpBodyOptions::default());
+        let http_body = HttpBodyBuilder::new_fake().body(timeout_body);
 
         let err = block_on(http_body.into_bytes()).unwrap_err();
         assert!(

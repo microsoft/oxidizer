@@ -146,6 +146,63 @@ impl fmt::Display for WinHttpError {
 
 impl std::error::Error for WinHttpError {}
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use std::fmt::Write as _;
+
+    use super::{WinHttpError, WinHttpOperation};
+
+    struct FailingWriter {
+        reject: &'static str,
+        rejected: bool,
+    }
+
+    impl std::fmt::Write for FailingWriter {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            if s.contains(self.reject) {
+                self.rejected = true;
+                return Err(std::fmt::Error);
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_operation_descriptions_are_exact() {
+        for (operation, description) in [
+            (WinHttpOperation::CloseHandle, "closing a WinHTTP handle"),
+            (WinHttpOperation::Connect, "creating a WinHTTP connection handle"),
+            (WinHttpOperation::Open, "opening a WinHTTP session"),
+            (WinHttpOperation::OpenRequest, "opening a WinHTTP request"),
+            (WinHttpOperation::QueryHeaders, "querying WinHTTP headers"),
+            (WinHttpOperation::QueryOption, "querying a WinHTTP option"),
+            (WinHttpOperation::ReadData, "reading WinHTTP response data"),
+            (WinHttpOperation::ReceiveResponse, "receiving a WinHTTP response"),
+            (WinHttpOperation::SendRequest, "sending a WinHTTP request"),
+            (WinHttpOperation::SetOption, "setting a WinHTTP option"),
+            (WinHttpOperation::SetStatusCallback, "registering a WinHTTP status callback"),
+            (WinHttpOperation::SetTimeouts, "setting WinHTTP timeouts"),
+            (WinHttpOperation::WriteData, "writing WinHTTP request data"),
+        ] {
+            assert_eq!(operation.to_string(), description);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_error_display_propagates_writer_failure() {
+        let error = WinHttpError::new(5, WinHttpOperation::Open).with_secure_failure_flags(0x8000_0001);
+        assert_eq!(
+            error.to_string(),
+            "opening a WinHTTP session failed with Win32 error 5 (secure-failure flags: 0x80000001)"
+        );
+        for reject in ["opening a WinHTTP session", "secure-failure flags:"] {
+            let mut writer = FailingWriter { reject, rejected: false };
+            assert_eq!(write!(writer, "{error}"), Err(std::fmt::Error));
+            assert!(writer.rejected);
+        }
+    }
+}
+
 pub(crate) const fn raw_win32_from_hresult(hresult: i32) -> Option<u32> {
     let bits = hresult.cast_unsigned();
 

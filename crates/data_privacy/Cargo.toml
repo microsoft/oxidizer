@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy"
 description = "Data annotation and redaction system providing a robust way to manipulate sensitive information."
-version = "0.13.1"
+version = "0.13.2"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
@@ -48,7 +48,6 @@ xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 [dev-dependencies]
 derive_more = { workspace = true, features = ["constructor", "from"] }
 insta.workspace = true
-mutants.workspace = true
 once_cell = { workspace = true, features = ["std"] }
 rapidhash = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }

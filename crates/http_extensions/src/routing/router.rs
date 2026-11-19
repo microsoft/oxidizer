@@ -91,17 +91,10 @@ pub struct RequestUris {
 /// [`HttpRequestBuilder::build`][crate::HttpRequestBuilder::build] renders this value once.
 /// Routing changes only the [`BaseUri`].
 /// [`Router::resolve_request_uri`] reuses the rendered value for every attempt.
-#[derive(Clone)]
-pub(crate) struct RenderedPath(pub(crate) http::uri::PathAndQuery);
-
-impl std::fmt::Debug for RenderedPath {
-    // Do not include the path and query contents.
-    // A rendered URI can contain sensitive IDs, tokens, and query parameters.
-    // This behavior matches the redacted Debug implementation for PathAndQuery.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RenderedPath").finish_non_exhaustive()
-    }
-}
+// A rendered URI can contain sensitive IDs, tokens, and query parameters.
+// This matches the redacted Debug output for PathAndQuery.
+#[derive(Clone, derive_more::Debug)]
+pub(crate) struct RenderedPath(#[debug(skip)] pub(crate) http::uri::PathAndQuery);
 
 impl RequestUris {
     /// Creates a [`RequestUris`] with the given templated [`Uri`] as the
@@ -277,6 +270,7 @@ impl Router {
         // Clone the target so that an error leaves the request unchanged.
         let (original, built_request): (Uri, bool) = match request.extensions().get::<RequestUris>() {
             Some(uris) => (uris.original().clone(), true),
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "TryFrom<http::Uri> for templated_uri::Uri only moves validated components and returns Ok on every branch")]
             None => (request.uri().clone().try_into()?, false),
         };
         let resolved = self.resolve_uri(context.with_request(request), original.clone())?;
@@ -324,28 +318,16 @@ impl Router {
 
 type RouterFn = dyn Fn(&RouterContext) -> Option<BaseUri> + Send + Sync + 'static;
 
-#[derive(Default)]
+#[derive(Default, derive_more::Debug)]
 enum Resolver {
     #[default]
     Empty,
     Fixed(BaseUri),
     Custom {
+        #[debug(skip)]
         resolver: Arc<RouterFn>,
         has_alternatives: bool,
     },
-}
-
-impl std::fmt::Debug for Resolver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("Empty"),
-            Self::Fixed(base_uri) => f.debug_tuple("Fixed").field(base_uri).finish(),
-            Self::Custom { has_alternatives, .. } => f
-                .debug_struct("Custom")
-                .field("has_alternatives", has_alternatives)
-                .finish_non_exhaustive(),
-        }
-    }
 }
 
 fn use_fallback(context: &RouterContext) -> bool {
@@ -372,6 +354,24 @@ mod tests {
     use ohno::Labeled;
 
     use super::*;
+
+    #[test]
+    fn november4_routing_retains_the_built_path_cache_for_every_attempt() {
+        let bodies = crate::HttpBodyBuilder::new(
+            bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
+            &tick::Clock::new_frozen(),
+        );
+        let mut request = crate::HttpRequestBuilder::new(&bodies).uri("/items?x=7").build().unwrap();
+        for prefix in ["first", "second"] {
+            let router =
+                Router::fixed(format!("https://example.test/{prefix}/").parse().unwrap()).conflict_policy(BaseUriConflict::UseRouted);
+            router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
+            assert_eq!(request.uri().to_string(), format!("https://example.test/{prefix}/items?x=7"));
+            assert_eq!(request.extensions().get::<RenderedPath>().unwrap().0.as_str(), "/items?x=7");
+            let uris = request.extensions().get::<RequestUris>().unwrap();
+            assert_eq!(http::Uri::try_from(uris.original().clone()).unwrap(), "/items?x=7");
+        }
+    }
 
     fn target_with_base() -> Uri {
         "https://existing.example.com/items".parse().unwrap()

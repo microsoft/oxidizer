@@ -14,12 +14,12 @@ use bytesbuf::BytesView;
 /// conflating them turns a missing check into an infinite loop.
 ///
 /// It is deliberately *not* `#[non_exhaustive]`. These states describe a complete engine step,
-/// and a caller that fails to handle one has a bug. Forcing a wildcard arm would convert that bug
+/// and a caller that fails to handle one has a bug. A wildcard arm can convert that bug
 /// from a compile error into silent misbehavior, which is the opposite of what a wildcard is for.
 #[derive(Debug)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "a BytesView is ~272 bytes because it stores its first spans inline; boxing it would add an allocation per chunk on the hot path, which is exactly what this crate exists to avoid"
+    reason = "a BytesView is ~272 bytes because it stores its first spans inline. Boxing adds one allocation per chunk on the hot path"
 )]
 pub enum Output {
     /// Bytes are available now.
@@ -71,7 +71,7 @@ impl Output {
         matches!(*self, Self::NeedInput)
     }
 
-    /// Whether the engine made progress and should be pulled again.
+    /// Whether the engine made progress and requires another pull.
     #[must_use]
     pub fn is_progress(&self) -> bool {
         matches!(*self, Self::Progress)

@@ -2,68 +2,77 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test code")]
-#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 //! Tests for `JoinHandle` implementations.
 
+use std::error::Error as _;
 use std::future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::ThreadAware;
-use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use anyspawn::{JoinHandle, Spawner};
 
 static_assertions::assert_impl_all!(anyspawn::JoinHandle<()>: Send, Unpin);
 static_assertions::assert_not_impl_any!(anyspawn::JoinHandle<()>: Sync);
 
-#[derive(Clone, ThreadAware)]
-struct DroppingSpawner;
-
-impl SpawnCustom for DroppingSpawner {
-    fn spawn(&self, _task: BoxedFuture) {}
-
-    fn spawn_anywhere(&self, _task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {}
-
-    fn spawn_blocking(&self, _task: BoxedBlockingTask) {}
-}
-
-fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
-    panic
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| panic.downcast_ref::<&str>().copied())
-        .unwrap()
-}
-
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn join_handle_debug() {
-    let spawner = Spawner::new_tokio();
+    let spawner = Spawner::new_tokio(None);
     let handle = spawner.spawn(async { 42 });
     let debug_str = format!("{handle:?}");
     assert!(debug_str.contains("JoinHandle"));
-    let _ = handle.await;
-}
-
-#[test]
-fn dropped_custom_task_reports_the_channel_error() {
-    let spawner = Spawner::new_custom("dropping", DroppingSpawner);
-    let handle = spawner.spawn(async {});
-
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
-
-    assert!(panic_message(&*panic).contains("channel closed"));
+    assert_eq!(handle.await.unwrap(), 42);
 }
 
 #[test]
 fn tokio_runtime_shutdown_reports_the_join_error() -> std::io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    let spawner = Spawner::new_tokio_with_handle(runtime.handle().clone());
+    let spawner = Spawner::new_tokio(runtime.handle().clone());
     let handle = spawner.spawn(future::pending::<()>());
     drop(runtime);
 
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
+    let error = futures::executor::block_on(handle).unwrap_err();
 
-    assert!(panic_message(&*panic).contains("was cancelled"));
+    assert!(error.is_cancelled());
+    assert!(!error.is_panic());
+    assert!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<tokio::task::JoinError>()
+            .unwrap()
+            .is_cancelled()
+    );
+    assert!(error.to_string().contains("cancelled"));
     Ok(())
+}
+
+#[test]
+fn tokio_task_panics_return_join_errors() {
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    runtime.block_on(async {
+        let spawner = Spawner::new_tokio(None);
+        let handles: [JoinHandle<()>; 3] = [
+            spawner.spawn(async { panic!("async task failed") }),
+            spawner.spawn_anywhere((), |()| async { panic!("anywhere task failed") }),
+            spawner.spawn_blocking(|| panic!("blocking task failed")),
+        ];
+
+        for handle in handles {
+            let error = handle.await.unwrap_err();
+            assert!(error.is_panic());
+            assert!(!error.is_cancelled());
+            assert!(error.source().unwrap().downcast_ref::<tokio::task::JoinError>().unwrap().is_panic());
+            assert!(error.to_string().contains("task failed"));
+        }
+    });
+}
+
+#[test]
+fn task_error_is_separate_from_join_error() {
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    runtime.block_on(async {
+        let spawner = Spawner::new_tokio(None);
+        let result = spawner.spawn(async { Err::<(), _>("task failed") }).await.unwrap();
+        assert_eq!(result, Err("task failed"));
+    });
 }

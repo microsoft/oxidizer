@@ -43,7 +43,6 @@ impl<In> EnableIf<In> {
     }
 
     /// Returns `true` if the middleware is enabled for the input.
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub(crate) fn call(&self, input: &In) -> bool {
         match self {
             Self::Enabled => true,

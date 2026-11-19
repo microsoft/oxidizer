@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.1] - 2026-11-02
+
+- Simplify recovery documentation. Error classifications, recovery signatures, and behavior do not
+  change.
+
 ## [0.3.0] - 2026-10-20
 
 - Rename the public `_documentation` module to `documentation`.

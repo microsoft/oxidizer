@@ -37,7 +37,9 @@ fn set_reference_marker(marker: &Cell<bool>) {
 /// writes, and that transition is cold.
 #[inline]
 fn mark_local_reference(marker: &Cell<bool>) {
+    // #[gamma::skip(cond.always_true, reason = "The marker helper only stores true in this same Cell; repeating that store after the first transition is idempotent")]
     if !marker.get() {
+        // #[gamma::skip(call_result.default, reason = "The reference marker is still updated and its result is unit")]
         set_reference_marker(marker);
     }
 }
@@ -104,7 +106,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     #[cfg(test)]
     #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)] // test-only helper
     fn free_bytes(&self) -> usize {
         let top = self.end.get().as_ptr() as usize;
         let cur = self.bump.get().as_ptr() as usize;
@@ -184,23 +185,22 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `checked_add` because `size` is caller-controlled.
     #[inline]
     // Always rejecting requests would make caller refill loops infinite.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn try_alloc(&self, size: usize, align: usize) -> Option<InChunk<u8>> {
         self.try_alloc_before_commit(size, align, || {})
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// [`Self::try_alloc`] that also records the reservation in `marker`.
     /// See [`mark_local_reference`] for what the marker guarantees.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_local(&self, size: usize, align: usize, marker: &Cell<bool>) -> Option<InChunk<u8>> {
+        // #[gamma::skip(call_result.default, reason = "The callback still marks the reference and its result is unit")]
         self.try_alloc_before_commit(size, align, || mark_local_reference(marker))
     }
 
     /// Shared allocation core with a success-only action immediately before the
     /// bump cursor is committed.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_before_commit(&self, size: usize, align: usize, before_commit: impl FnOnce()) -> Option<InChunk<u8>> {
         debug_assert!(align.is_power_of_two(), "align must be a power of two");
         debug_assert!(size.checked_add(align).is_some(), "size + align overflows usize");
@@ -210,7 +210,9 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // SAFETY: `cur_addr` is a live chunk bump-cursor address, hence non-zero;
         // on 64-bit targets, chunk addresses fit in `isize`.
         unsafe {
+            // #[gamma::skip(stmt.delete_call, relational.gt_to_ge, literal.int_increment, reason = "A real chunk bump cursor is nonnull and beyond address one; these optimizer assumptions have no state or error result")]
             hint::assert_unchecked(cur_addr > 0);
+            // #[gamma::skip(stmt.delete_call, expr.decrement, expr.increment, tag = "equivalent", reason = "The live lower-half chunk cursor is nonzero and far below isize::MAX; its adjacent addresses preserve the same optimizer assumption")]
             #[cfg(target_pointer_width = "64")]
             hint::assert_unchecked(isize::try_from(cur_addr).is_ok());
         }
@@ -223,6 +225,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // `size.max(1)` probes that byte without changing the ZST bump.
         let probe_end = aligned_addr.checked_add(size.max(1))?;
         if probe_end > limit_addr {
+            // #[gamma::skip(stmt.delete_call, reason = "cold_path is an optimizer hint with no state or result")]
             hint::cold_path();
             return None;
         }
@@ -241,16 +244,15 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Reserves storage for one `T` and returns an `Uninit<'_, T>` ticket.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_uninit<T>(&self) -> Option<Uninit<'_, T>> {
         let bytes = self.try_alloc(mem::size_of::<T>(), mem::align_of::<T>())?;
         Some(Uninit::new(bytes.cast::<T>()))
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// [`Self::try_alloc_uninit`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_local<T>(&self, marker: &Cell<bool>) -> Option<Uninit<'_, T>> {
         let bytes = self.try_alloc_local(mem::size_of::<T>(), mem::align_of::<T>(), marker)?;
         Some(Uninit::new(bytes.cast::<T>()))
@@ -261,7 +263,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// caller doesn't need to use [`Self::chunk_ptr_unchecked`] (which
     /// would require an `unsafe` block) afterwards.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_with_chunk(&self, size: usize, align: usize) -> Option<(InChunk<u8>, NonNull<Chunk<A>>)> {
         let in_chunk = self.try_alloc(size, align)?;
         // SAFETY: a successful `try_alloc` proves the mutator owns a
@@ -272,7 +273,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Byte-slice fast path: skips the alignment mask, `checked_mul`,
     /// and ZST branch. Only valid for `T = u8` (align 1, size 1).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes(&self, len: usize) -> Option<Uninit<'_, [u8]>> {
         self.try_alloc_bytes_before_commit(len, || {})
     }
@@ -280,20 +280,22 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// [`Self::try_alloc_bytes`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes_local(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [u8]>> {
+        // #[gamma::skip(call_result.default, reason = "The callback still marks the reference and its result is unit")]
         self.try_alloc_bytes_before_commit(len, || mark_local_reference(marker))
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     fn try_alloc_bytes_before_commit(&self, len: usize, before_commit: impl FnOnce()) -> Option<Uninit<'_, [u8]>> {
         let cur = self.bump.get();
         let cur_addr = cur.as_ptr() as usize;
         let limit_addr = self.end.get().as_ptr() as usize;
+        // #[gamma::skip(call_result.default, reason = "The optimizer assumption still executes and its result is unit")]
+        // #[gamma::skip(call.replace_with_default, stmt.delete_call, expr.decrement, expr.increment, reason = "The helper only supplies optimizer assumptions already guaranteed for this live lower-half chunk cursor and its adjacent bytes")]
         hint_chunk_cur_addr_nonnull(cur_addr);
         let end_addr = cur_addr.checked_add(len)?;
         if end_addr > limit_addr {
+            // #[gamma::skip(stmt.delete_call, reason = "cold_path is an optimizer hint with no state or result")]
             hint::cold_path();
             return None;
         }
@@ -306,7 +308,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// [`Self::try_alloc_bytes`] paired with the owning chunk pointer.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes_with_chunk(&self, len: usize) -> Option<ByteAllocation<'_, A>> {
         let uninit = self.try_alloc_bytes(len)?;
         // SAFETY: a successful byte reservation proves the mutator owns a
@@ -316,28 +317,27 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Reserves storage for `len` consecutive `T`s and returns an
     /// `Uninit<'_, [T]>` ticket.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_uninit_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let size = mem::size_of::<T>().checked_mul(len)?;
         let bytes = self.try_alloc(size, mem::align_of::<T>())?;
         Some(Uninit::new(bytes.into_slice::<T>(len)))
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// [`Self::try_alloc_uninit_slice`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {
         let size = mem::size_of::<T>().checked_mul(len)?;
         let bytes = self.try_alloc_local(size, mem::align_of::<T>(), marker)?;
         Some(Uninit::new(bytes.into_slice::<T>(len)))
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Local-reference slice reservation with a precomputed byte size.
     ///
     /// # Safety
     ///
     /// `size` must equal `size_of::<T>() * len` without overflow.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) unsafe fn try_alloc_uninit_slice_with_size_local<T>(
         &self,
         len: usize,
@@ -362,22 +362,22 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// The returned [`Uninit<[T]>`] ticket addresses the payload only;
     /// init helpers fill exactly `len * size_of::<T>()` bytes and have
     /// no awareness of the prefix.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_slice_prefixed<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let (payload, _) = self.try_alloc_prefixed_slice_payload::<T>(len)?;
         Some(Uninit::new(payload))
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Like [`Self::try_alloc_uninit_slice_prefixed`] with a precomputed
     /// payload byte size.
     ///
     /// # Safety
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) unsafe fn try_alloc_uninit_slice_prefixed_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
         // SAFETY: forwarded to the caller.
         let (payload, _) = unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }?;
+        // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         Some(Uninit::new(payload))
     }
 
@@ -390,7 +390,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `payload_bytes` is floored to 1 so the value pointer stays inside the
     /// chunk and preserves header recovery by mask.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     fn try_alloc_smart_prefixed<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -400,8 +399,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         self.try_alloc_smart_prefixed_before_commit::<S>(payload_bytes, value_align, meta_bytes, || {})
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_smart_prefixed_local<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -409,11 +408,11 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         meta_bytes: usize,
         marker: &Cell<bool>,
     ) -> Option<NonNull<u8>> {
+        // #[gamma::skip(call_result.default, reason = "The callback still marks the reference and its result is unit")]
         self.try_alloc_smart_prefixed_before_commit::<S>(payload_bytes, value_align, meta_bytes, || mark_local_reference(marker))
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_smart_prefixed_before_commit<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -436,7 +435,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// [`Self::try_alloc_smart_prefixed`] plus the owning chunk pointer.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_arc_value<S: super::thin_dst::Strong, T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let value_ptr = self.try_alloc_smart_prefixed::<S>(mem::size_of::<T>(), mem::align_of::<T>(), 0)?;
         // SAFETY: a successful reservation proves the mutator owns a chunk.
@@ -448,7 +446,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Slice form of [`Self::try_alloc_arc_value`], including the strong
     /// prefix and slice-length metadata word.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -465,7 +462,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -503,7 +499,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     unsafe fn try_alloc_freezable_slice_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
         debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
         let value_ptr =
@@ -514,17 +509,16 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Checked form of [`Self::try_alloc_freezable_slice_with_size`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         // SAFETY: `payload_bytes == size_of::<T>() * len` (just checked).
         unsafe { self.try_alloc_freezable_slice_with_size::<T>(len, payload_bytes) }
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// [`Self::try_alloc_freezable_slice`] that also records the reservation
     /// in `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_freezable_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
@@ -540,7 +534,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// DST form of [`Self::try_alloc_arc_value`]. The caller writes metadata
     /// before the returned value pointer and initializes the payload.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[cfg(feature = "dst")]
     pub(crate) fn try_alloc_arc_dst<S: super::thin_dst::Strong>(
         &self,
@@ -556,7 +549,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Thin-DST slice reservation; returns the payload ticket and absolute
     /// payload address.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_prefixed_slice_payload<T>(&self, len: usize) -> Option<(InChunk<[T]>, usize)> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         // SAFETY: just verified by `checked_mul`.
@@ -571,7 +563,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `payload_bytes` must equal `size_of::<T>() * len` (without
     /// overflow).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
@@ -588,7 +579,13 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // smart-pointer header recovery.
         let payload_bytes = payload_bytes.max(1);
         let total = payload_offset.checked_add(payload_bytes)?;
-        let base_in_chunk = self.try_alloc(total, elem_align.max(1))?;
+        let base_in_chunk = self.try_alloc(
+            total,
+            elem_align.max(
+                // #[gamma::skip(literal.int_decrement, reason = "Element alignment comes from align_of and is nonzero, so max with zero and max with one are identical")]
+                1,
+            ),
+        )?;
         // SAFETY: `base + payload_offset` is elem-align-aligned (both
         // factors are powers of two). The prefix word lives at
         // `payload - prefix_size` — for low-align T at offset 0, for
@@ -705,7 +702,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // SAFETY: guaranteed by the caller; this mutator owns the additional
         // +1 released by the same atomic operation.
         unsafe {
-            if chunk.as_ref().refund_refs_and_release_one(refund) {
+            if Chunk::<A>::refund_refs_and_release_one(chunk, refund) {
                 Chunk::<A>::teardown_and_release(chunk);
             }
         }
@@ -726,8 +723,7 @@ impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
                 let wasted = self.wasted_tail_for_stats();
                 Chunk::<A>::record_retire(chunk, wasted);
             }
-            let chunk_ref = chunk.as_ref();
-            if chunk_ref.dec_ref() {
+            if Chunk::<A>::dec_ref(chunk) {
                 Chunk::<A>::teardown_and_release(chunk);
             }
         }
@@ -739,18 +735,20 @@ impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
 /// sourced from a real chunk in the lower half of the address space).
 #[expect(clippy::inline_always, reason = "pure codegen hint; must inline to take effect")]
 #[inline(always)]
-#[cfg_attr(test, mutants::skip)] // pure hint, no observable behavior
+// #[gamma::skip(fn_value.unit, reason = "The entire helper only supplies optimizer assumptions already guaranteed by its live chunk cursor precondition")]
 fn hint_chunk_cur_addr_nonnull(cur_addr: usize) {
     // SAFETY: `cur_addr` is the address of a `NonNull<u8>` bump cursor sourced
     // from a real chunk, so it is non-zero; on 64-bit targets that chunk lives
     // in the lower half of the address space, so the address fits in `isize`.
     // These hints are only asserted under those guarantees.
     unsafe {
+        // #[gamma::skip(stmt.delete_call, relational.gt_to_ge, literal.int_increment, reason = "A real chunk bump cursor is nonnull and beyond address one; these optimizer assumptions have no state or error result")]
         hint::assert_unchecked(cur_addr > 0);
         // Only asserted on 64-bit, where every valid address is below
         // `isize::MAX`. On narrower targets an address may exceed
         // `isize::MAX`, which would make this `assert_unchecked` false
         // (→ UB); the caller's `checked_add` stays correct without it.
+        // #[gamma::skip(stmt.delete_call, expr.decrement, expr.increment, tag = "equivalent", reason = "The live lower-half chunk cursor is nonzero and far below isize::MAX; its adjacent addresses preserve the same optimizer assumption")]
         #[cfg(target_pointer_width = "64")]
         hint::assert_unchecked(isize::try_from(cur_addr).is_ok());
     }
@@ -766,12 +764,295 @@ fn align_up(value: usize, align: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_prefixed_byte_slice_preserves_an_odd_cursor_without_padding() {
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        assert!(mutator.rewind());
+        assert!(mutator.try_alloc(1, 1).is_some());
+        let before = mutator.bump.get().as_ptr().addr();
+        assert_eq!(before % 2, 1);
+        let (payload, address) = mutator.try_alloc_prefixed_slice_payload::<u8>(3).unwrap();
+        assert_eq!(address, before + mem::size_of::<usize>());
+        assert_eq!(payload.as_ptr().len(), 3);
+        assert_eq!(mutator.bump.get().as_ptr().addr(), address + 3);
+    }
+
+    #[test]
+    fn gamma_round2_nonlocal_freezable_tickets_reserve_exact_payload_and_prefix_bytes() {
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        for len in [0_usize, 1, 7] {
+            assert!(mutator.rewind());
+            let before = mutator.bump.get().as_ptr().addr();
+            let ticket = mutator.try_alloc_freezable_slice::<u8>(len).unwrap();
+            let values = ticket.init_copy_from_slice(&[0x71; 7][..len]);
+            let payload = before.div_ceil(4) * 4 + 4 + mem::size_of::<usize>();
+            assert_eq!(values.as_ptr().addr(), payload);
+            assert_eq!(values, &[0x71; 7][..len]);
+            assert_eq!(mutator.bump.get().as_ptr().addr(), payload + len.max(1));
+        }
+        let empty = empty_mutator();
+        assert!(empty.try_alloc_freezable_slice::<u8>(1).is_none());
+        assert!(empty.try_alloc_prefixed_slice_payload::<u8>(usize::MAX).is_none());
+    }
+
+    #[cfg(feature = "dst")]
+    #[test]
+    fn gamma_round2_dst_reservations_and_growth_rejection_preserve_the_exact_cursor() {
+        use crate::internal::thin_dst::AtomicStrong;
+
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        for payload in [0_usize, 1, 7] {
+            assert!(mutator.rewind());
+            let before = mutator.bump.get().as_ptr().addr();
+            let (pointer, _) = mutator.try_alloc_arc_dst::<AtomicStrong>(payload, 1, 8).unwrap();
+            assert_eq!(pointer.as_ptr().addr(), before.div_ceil(4) * 4 + 12);
+            assert_eq!(mutator.bump.get().as_ptr().addr(), pointer.as_ptr().addr() + payload.max(1));
+        }
+        assert!(mutator.rewind());
+        let before = mutator.bump.get().as_ptr().addr();
+        assert!(mutator.try_alloc(8, 1).is_some());
+        let cursor = mutator.bump.get();
+        assert!(!mutator.try_grow_in_place(before, 8, 8 + mutator.free_bytes() + 1));
+        assert_eq!(mutator.bump.get(), cursor);
+    }
+
     use allocator_api2::alloc::Global;
 
     use super::*;
 
+    #[test]
+    fn gamma_survivor_mutator_exact_cursor_probe_and_reclaim() {
+        let empty = empty_mutator();
+        assert_eq!(empty.bump.get().as_ptr() as usize, 2);
+        assert_eq!(empty.end.get().as_ptr() as usize, 1);
+        assert!(empty.try_alloc_bytes(0).is_none());
+        assert!(empty.try_alloc(1, 1).is_none());
+        assert!(!empty.try_reclaim_tail(2, 0));
+        assert!(!empty.try_grow_in_place(2, 0, 0));
+        assert!(empty.forget_into_chunk().is_none());
+
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        assert!(mutator.rewind());
+        let start = mutator.bump.get().as_ptr() as usize;
+        let capacity = mutator.free_bytes();
+        let first = mutator.try_alloc_bytes(3).unwrap();
+        assert_eq!(first.init_copy_from_slice(&[1, 2, 3]).as_ptr() as usize, start);
+        assert_eq!(mutator.free_bytes(), capacity - 3);
+        let cursor = mutator.bump.get();
+        assert!(mutator.try_alloc(usize::MAX - 1, 1).is_none());
+        assert!(mutator.try_alloc_bytes(usize::MAX).is_none());
+        assert_eq!(mutator.bump.get(), cursor);
+        assert!(!mutator.try_grow_in_place(start + 1, 3, 4));
+        assert!(!mutator.try_grow_in_place(usize::MAX, 3, 4));
+        assert!(!mutator.try_grow_in_place(start, 3, usize::MAX));
+        assert_eq!(mutator.bump.get(), cursor);
+        assert!(mutator.try_grow_in_place(start, 3, 3));
+        assert_eq!(mutator.bump.get(), cursor);
+        assert!(mutator.try_grow_in_place(start, 3, 7));
+        assert_eq!(mutator.bump.get().as_ptr() as usize, start + 7);
+        assert!(!mutator.try_reclaim_tail(start + 6, 3));
+        assert_eq!(mutator.bump.get().as_ptr() as usize, start + 7);
+        assert!(mutator.try_reclaim_tail(start + 7, 3));
+        assert_eq!(mutator.bump.get().as_ptr() as usize, start + 4);
+        let remaining = mutator.free_bytes();
+        assert!(mutator.try_alloc_bytes(remaining).is_some());
+        assert_eq!(mutator.free_bytes(), 0);
+        let cursor = mutator.bump.get();
+        assert!(mutator.try_alloc(0, 1).is_none());
+        assert!(mutator.try_alloc_bytes(1).is_none());
+        assert_eq!(mutator.bump.get(), cursor);
+        assert!(mutator.rewind());
+        assert_eq!(mutator.free_bytes(), capacity);
+        assert!(mutator.try_alloc_bytes(capacity - 1).is_some());
+        let cursor = mutator.bump.get();
+        assert!(mutator.try_alloc(0, 1).is_some());
+        assert_eq!(mutator.bump.get(), cursor);
+        assert!(mutator.try_alloc(1, 1).is_some());
+        assert_eq!(mutator.free_bytes(), 0);
+        assert!(mutator.try_alloc(0, 1).is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_mutator_alignment_independent_integer_oracle() {
+        for align in [1_usize, 2, 4, 8, 16, 256, 4096] {
+            for value in [0_usize, 1, align - 1, align, align + 1, usize::MAX - align, usize::MAX] {
+                let rounded = (value as u128).div_ceil(align as u128) * (align as u128);
+                assert_eq!(align_up(value, align), usize::try_from(rounded).ok());
+            }
+        }
+    }
+
     fn empty_mutator() -> ChunkMutator<Global> {
         ChunkMutator::<Global>::empty()
+    }
+
+    #[test]
+    fn gamma_survivor_mutator_prefixed_slice_tickets_and_local_markers() {
+        use crate::internal::thin_dst::AtomicStrong;
+
+        fn check_prefix<T, A: Allocator + Clone>(mutator: &ChunkMutator<A>) {
+            for len in [0_usize, 1, 2, 7] {
+                assert!(mutator.rewind());
+                let before = mutator.bump.get().as_ptr().addr();
+                let align = mem::align_of::<T>();
+                let offset = mem::size_of::<usize>().max(align);
+                let base = before.div_ceil(align) * align;
+                let (payload, address) = mutator.try_alloc_prefixed_slice_payload::<T>(len).unwrap();
+                assert_eq!(address, base + offset);
+                assert_eq!(payload.as_ptr().len(), len);
+                assert_eq!(mutator.bump.get().as_ptr().addr(), address + (mem::size_of::<T>() * len).max(1));
+                // SAFETY: the ticket initialized the word immediately before its payload.
+                let stored_length = unsafe { ptr::read_unaligned((address - mem::size_of::<usize>()) as *const usize) };
+                assert_eq!(stored_length, len);
+            }
+        }
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        check_prefix::<u8, _>(mutator);
+        check_prefix::<u16, _>(mutator);
+        check_prefix::<u64, _>(mutator);
+        check_prefix::<u128, _>(mutator);
+        for len in [0_usize, 1, 2, 7] {
+            assert!(mutator.rewind());
+            let before = mutator.bump.get().as_ptr().addr();
+            let ticket = mutator.try_alloc_uninit_slice::<u16>(len).unwrap();
+            assert_eq!(mutator.bump.get().as_ptr().addr(), before.div_ceil(2) * 2 + 2 * len);
+            assert_eq!(ticket.init_copy_from_slice(&[17_u16; 7][..len]), &[17_u16; 7][..len]);
+        }
+        for len in [0_usize, 1, 2, 7] {
+            assert!(mutator.rewind());
+            let before = mutator.bump.get().as_ptr().addr();
+            let (ticket, _) = mutator.try_alloc_arc_slice::<AtomicStrong, u16>(len).unwrap();
+            let payload = before.div_ceil(4) * 4 + (4 + mem::size_of::<usize>()).div_ceil(2) * 2;
+            assert_eq!(mutator.bump.get().as_ptr().addr(), payload + (2 * len).max(1));
+            // SAFETY: the Arc slice ticket wrote its length word before the payload.
+            let stored_length = unsafe { ptr::read_unaligned((payload - mem::size_of::<usize>()) as *const usize) };
+            assert_eq!(stored_length, len);
+            assert_eq!(ticket.init_copy_from_slice(&[17_u16; 7][..len]), &[17_u16; 7][..len]);
+        }
+        let marker = Cell::new(false);
+        assert!(mutator.rewind());
+        let before = mutator.bump.get().as_ptr().addr();
+        let ticket = mutator.try_alloc_freezable_slice_local::<u8>(3, &marker).unwrap();
+        assert_eq!(
+            mutator.bump.get().as_ptr().addr(),
+            before.div_ceil(4) * 4 + 4 + mem::size_of::<usize>() + 3
+        );
+        assert_eq!(ticket.init_copy_from_slice(&[17_u8; 3]), &[17_u8; 3]);
+        assert!(marker.get());
+        for family in 0..5 {
+            for len in [0_usize, 1, 3] {
+                assert!(mutator.rewind());
+                marker.set(false);
+                let before = mutator.bump.get().as_ptr().addr();
+                let success = match family {
+                    0 => mutator.try_alloc_local(len, 1, &marker).is_some(),
+                    1 => mutator.try_alloc_bytes_local(len, &marker).is_some(),
+                    2 => mutator.try_alloc_uninit_slice_local::<u16>(len, &marker).is_some(),
+                    3 => {
+                        // SAFETY: the supplied byte size equals len * size_of::<u16>().
+                        unsafe {
+                            mutator
+                                .try_alloc_uninit_slice_with_size_local::<u16>(len, 2 * len, &marker)
+                                .is_some()
+                        }
+                    }
+                    _ => mutator.try_alloc_freezable_slice_local::<u16>(len, &marker).is_some(),
+                };
+                assert!(success);
+                assert!(marker.get(), "family {family}, len {len}");
+                let expected = match family {
+                    0 | 1 => before + len,
+                    2 | 3 => before.div_ceil(2) * 2 + 2 * len,
+                    _ => before.div_ceil(4) * 4 + (4 + mem::size_of::<usize>()).div_ceil(2) * 2 + (2 * len).max(1),
+                };
+                assert_eq!(mutator.bump.get().as_ptr().addr(), expected);
+            }
+        }
+        marker.set(false);
+        let before = mutator.bump.get();
+        assert!(mutator.try_alloc_freezable_slice::<u16>(usize::MAX).is_none());
+        assert!(mutator.try_alloc_freezable_slice_local::<u16>(usize::MAX, &marker).is_none());
+        assert!(mutator.try_alloc_uninit_slice_local::<u16>(usize::MAX, &marker).is_none());
+        assert!(!marker.get());
+        assert_eq!(mutator.bump.get(), before);
+        assert!(mutator.try_alloc_bytes(mutator.free_bytes()).is_some());
+        let before = mutator.bump.get();
+        assert!(mutator.try_alloc_arc_slice::<AtomicStrong, u16>(1).is_none());
+        assert!(mutator.try_alloc_uninit_slice::<u16>(1).is_none());
+        assert!(mutator.try_alloc_uninit_slice_prefixed::<u16>(1).is_none());
+        assert!(!marker.get());
+        assert_eq!(mutator.bump.get(), before);
+    }
+
+    #[test]
+    fn gamma_survivor_mutator_exact_strong_prefix_and_overflow() {
+        use crate::internal::thin_dst::{AtomicStrong, LocalStrong};
+
+        let arena = crate::Arena::builder().with_capacity(1024).build();
+        let _ = arena.alloc(0_u8);
+        let mutator = arena.current();
+        for atomic in [false, true] {
+            for align in [1_usize, 2, 4, 8, 16] {
+                for metadata in [0_usize, mem::size_of::<usize>()] {
+                    for payload in [0_usize, 1, 2, 7] {
+                        assert!(mutator.rewind());
+                        let before = mutator.bump.get().as_ptr() as usize;
+                        let block_align = if atomic { align.max(4) } else { align };
+                        let base = before.div_ceil(block_align) * block_align;
+                        let prefix = (4 + metadata).div_ceil(align) * align;
+                        let calls = Cell::new(0);
+                        let callback = || {
+                            assert_eq!(mutator.bump.get().as_ptr() as usize, before);
+                            calls.set(calls.get() + 1);
+                        };
+                        let pointer = if atomic {
+                            mutator.try_alloc_smart_prefixed_before_commit::<AtomicStrong>(payload, align, metadata, callback)
+                        } else {
+                            mutator.try_alloc_smart_prefixed_before_commit::<LocalStrong>(payload, align, metadata, callback)
+                        }
+                        .unwrap();
+                        assert_eq!(calls.get(), 1);
+                        assert_eq!(pointer.as_ptr() as usize, base + prefix);
+                        assert_eq!(mutator.bump.get().as_ptr() as usize, base + prefix + payload.max(1));
+                        // SAFETY: the reservation initialized the four-byte
+                        // count at its base, and no handle concurrently accesses it.
+                        let count = unsafe { ptr::read_unaligned((pointer.as_ptr().wrapping_sub(prefix)).cast::<u32>()) };
+                        assert_eq!(count, 1);
+                    }
+                }
+            }
+        }
+        let before = mutator.bump.get();
+        assert!(mutator.try_alloc_smart_prefixed::<AtomicStrong>(usize::MAX, 1, 0).is_none());
+        assert!(mutator.try_alloc_arc_slice::<AtomicStrong, u128>(usize::MAX).is_none());
+        assert!(mutator.try_alloc_uninit_slice::<u16>(usize::MAX).is_none());
+        assert!(mutator.try_alloc_prefixed_slice_payload::<u16>(usize::MAX).is_none());
+        assert_eq!(mutator.bump.get(), before);
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn gamma_survivor_mutator_wasted_tail_saturates_without_dereferencing_sentinels() {
+        let empty = empty_mutator();
+        assert_eq!(empty.wasted_tail_for_stats(), 0);
+        if let Ok(end) = usize::try_from(u64::from(u32::MAX) + 9) {
+            empty.end.set(NonNull::new(ptr::without_provenance_mut(end)).unwrap());
+            assert_eq!(empty.wasted_tail_for_stats(), u32::MAX);
+        }
+        empty.end.set(NonNull::new(ptr::without_provenance_mut(19)).unwrap());
+        assert_eq!(empty.wasted_tail_for_stats(), 17);
+        empty.end.set(NonNull::new(ptr::without_provenance_mut(1)).unwrap());
+        assert_eq!(empty.wasted_tail_for_stats(), 0);
     }
 
     #[test]

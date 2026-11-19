@@ -1,25 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::{NonZero, NonZeroUsize};
+use std::num::NonZero;
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy};
 use crate::runtime::error::Error;
 
-/// A worker-count policy for the async runtime.
+/// Selects how many async workers run and which processors they use.
 ///
 /// The runtime assigns each async worker to one available processor. More than
 /// one worker can share a processor when an exact count exceeds the available
 /// processor count. Pass a policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
-/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) for
-/// an upper bound, [`exactly`](Self::exactly) for a fixed worker count, or
+/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) to set
+/// a maximum, [`exactly`](Self::exactly) for a fixed worker count, or
 /// [`all`](Self::all) to use all available processors.
 ///
-/// Counts are validated when the runtime is built. Both `at_most(0)` and
-/// `exactly(0)` produce a construction error.
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) rejects a count of zero.
+/// Both `at_most(0)` and `exactly(0)` return an error when you build the runtime.
 ///
 /// # Examples
 ///
@@ -35,13 +34,11 @@ impl WorkersPolicy {
     /// Creates a policy requiring exactly `count` workers.
     ///
     /// Each worker is a separate operating-system thread. If `count` exceeds
-    /// the available processor count, Arty assigns workers to processors in
-    /// repeated processor-ID order. The operating system schedules the workers
-    /// that share each processor.
+    /// the available processor count, some workers share a processor.
     ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
     /// [`Error`] if `count` is zero. Creating the policy does not validate the
-    /// count. Large counts can consume substantial thread and stack resources.
+    /// count. Large counts can use many threads and much memory for their stacks.
     /// Use [`at_most`](Self::at_most) if the application can work with fewer
     /// workers.
     ///
@@ -59,7 +56,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using at most `count` workers.
     ///
-    /// Fewer available processors means fewer workers, not a construction error.
+    /// If fewer processors are available, Arty starts fewer workers instead of returning an error.
     /// A zero count is rejected by
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build), not when
     /// creating this policy.
@@ -78,8 +75,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using all available processors.
     ///
-    /// This explicitly selects all processors rather than relying on the
-    /// default policy.
+    /// The default starts one worker. This starts one worker for each available processor.
     ///
     /// # Examples
     ///
@@ -101,6 +97,7 @@ impl WorkersPolicy {
                 let workers = processors.iter().cycle().take(count).cloned().collect();
                 Ok(WorkerPlacements {
                     workers,
+                    #[cfg(test)]
                     processors_used: count.min(processors.len()),
                 })
             }
@@ -128,6 +125,7 @@ impl Default for WorkersPolicy {
 
 fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
+    // #[gamma::skip(iter.first_to_last, reason = "decompose produces singleton processor sets, whose first and last processor are identical.")]
     processors.sort_by_key(|processor| processor.processors().first().id());
     processors
 }
@@ -135,6 +133,7 @@ fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
 #[derive(Debug)]
 pub(crate) struct WorkerPlacements {
     workers: Vec<ProcessorSet>,
+    #[cfg(test)]
     processors_used: usize,
 }
 
@@ -142,6 +141,7 @@ impl WorkerPlacements {
     fn from_selected(processors: &ProcessorSet) -> Self {
         Self {
             workers: sorted_singletons(processors),
+            #[cfg(test)]
             processors_used: processors.len(),
         }
     }
@@ -150,6 +150,7 @@ impl WorkerPlacements {
         self.workers.len()
     }
 
+    #[cfg(test)]
     pub(crate) const fn processors_used(&self) -> usize {
         self.processors_used
     }
@@ -171,42 +172,14 @@ enum WorkersPolicyKind {
     All,
 }
 
-/// Resource settings validated during runtime construction.
-#[derive(Debug)]
-pub(crate) struct RuntimeConfig {
-    pub(crate) workers_policy: WorkersPolicy,
-    pub(crate) stack_size: NonZeroUsize,
-    pub(crate) blocking_pool_policy: BlockingPoolPolicy,
-    pub(crate) monitor_options: MonitorOptions,
-    pub(crate) panic_policy: PanicPolicy,
-}
-
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            workers_policy: WorkersPolicy::default(),
-            // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
-            // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
-            stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
-            blocking_pool_policy: BlockingPoolPolicy::default(),
-            monitor_options: MonitorOptions::default(),
-            panic_policy: PanicPolicy::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public runtime construction cannot inject processor sets or inspect unused placements.
 mod tests {
     use many_cpus::SystemHardware;
     use many_cpus::fake::HardwareBuilder;
 
     use super::*;
-
-    #[test]
-    fn default_runtime_shares_blocking_pool() {
-        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
-    }
 
     #[test]
     fn exact_count_assigns_requested_workers() {

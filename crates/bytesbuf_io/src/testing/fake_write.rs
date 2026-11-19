@@ -102,7 +102,6 @@ impl Default for FakeWrite {
 impl Write for FakeWrite {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn write(&mut self, data: BytesView) -> Result<(), Infallible> {
         self.write(data).await
     }
@@ -110,7 +109,6 @@ impl Write for FakeWrite {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeWrite {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -118,7 +116,6 @@ impl Memory for FakeWrite {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeWrite {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }
@@ -135,10 +132,11 @@ pub struct FakeWriteBuilder {
 impl FakeWriteBuilder {
     /// The memory provider to use in memory-related stream operations.
     ///
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     /// Optional. Defaults to using the Rust global allocator.
     #[must_use]
-    pub fn memory(mut self, memory: OpaqueMemory) -> Self {
-        self.memory = memory;
+    pub fn memory(mut self, memory: impl Into<OpaqueMemory>) -> Self {
+        self.memory = memory.into();
         self
     }
 

@@ -35,12 +35,12 @@ readiness, but the `Registered` owner retains and drops the source.
 ```rust
 use std::io;
 
-use arty::task::Builtins;
+use arty::task::Context;
 use arty_mio::{MioContext, MioOptions};
 use mio::Interest;
 
-async fn receive(builtins: &Builtins) -> io::Result<()> {
-    let io = builtins.io().context::<MioContext>(&MioOptions::default());
+async fn receive(context: &Context) -> io::Result<()> {
+    let io = context.io().context::<MioContext>(&MioOptions::default());
     let address = "127.0.0.1:0".parse().expect("the example address is valid");
     let socket = mio::net::UdpSocket::bind(address)?;
     let mut registration = io.register(socket, Interest::READABLE)?;
@@ -73,9 +73,9 @@ async fn receive(builtins: &Builtins) -> io::Result<()> {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_mio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbbaCaxEkgr4IbeDlfhG65fEcbhCYt6LPRAb4bsjsNd_IMJJhhZIKCaGFydHlfbWlvZTAuMS4wgmNtaW9lMS4yLjM
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbqRHr4evGZHsb99Dk9UTHh34bYVdZY8UiE0kbAm3GWWRQoANhZIKCaGFydHlfbWlvZTAuMS4wgmNtaW9lMS4yLjU
  [__link0]: https://docs.rs/arty_mio/0.1.0/arty_mio/?search=MioDriver
- [__link1]: https://docs.rs/mio/1.2.3/mio/?search=Poll
+ [__link1]: https://docs.rs/mio/1.2.5/mio/?search=Poll
  [__link2]: https://docs.rs/arty_mio/0.1.0/arty_mio/?search=MioContext
  [__link3]: https://docs.rs/arty_mio/0.1.0/arty_mio/?search=MioContext::register
  [__link4]: https://docs.rs/arty_mio/0.1.0/arty_mio/?search=Registered

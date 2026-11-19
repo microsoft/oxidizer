@@ -4,7 +4,7 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.8.0"
+version = "0.9.1"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["date-and-time"]
@@ -64,13 +64,10 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 alloc_tracker = { workspace = true }
 
 #external
-chrono = { workspace = true, features = ["clock"] }
-chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
 metabench = { path = "../metabench", default-features = false }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
@@ -102,10 +99,6 @@ required-features = ["test-util"]
 [[example]]
 name = "data"
 required-features = ["test-util", "serde", "tokio"]
-
-[[example]]
-name = "interop_chrono"
-required-features = ["test-util"]
 
 [[example]]
 name = "interop_time"

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.1] - 2026-11-02
+
+- Use version 0.7.1 to match the Templated URI packages. Macro behavior does not change.
+- Update the requirement for local package `templated_uri_macros_impl` from `=0.7.0` to `=0.7.1`.
+
 ## [0.7.0] - 2026-10-20
 
 - Refresh published macro documentation and classify the macro crate as private API.

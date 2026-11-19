@@ -1,10 +1,81 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::Any;
+use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt::{self, Debug};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::task::Waker;
 
 use ohno::OhnoCore;
+
+/// A handle that requests executor shutdown.
+///
+/// Clones share the first shutdown cause on the executor owner thread.
+#[derive(Clone, derive_more::Debug)]
+pub struct Shutdown {
+    #[debug(ignore)]
+    inner: Rc<ShutdownInner>,
+}
+
+// Shutdown records a complete, write-once cause before it invokes the owner
+// waker. A panicking waker cannot expose a partial cause through another clone.
+impl std::panic::UnwindSafe for Shutdown {}
+impl std::panic::RefUnwindSafe for Shutdown {}
+
+impl Shutdown {
+    pub(crate) fn new(owner_waker: Waker) -> Self {
+        Self {
+            inner: Rc::new(ShutdownInner {
+                cause: OnceCell::new(),
+                owner_waker,
+            }),
+        }
+    }
+
+    /// Requests executor shutdown with `cause`.
+    ///
+    /// The first cause remains authoritative. Later requests do not replace it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the executor owner waker panics.
+    pub fn trigger(&self, cause: ShutdownCause) {
+        if self.publish(cause) {
+            self.inner.owner_waker.wake_by_ref();
+        }
+    }
+
+    /// Returns whether executor shutdown has started.
+    #[must_use]
+    pub fn is_triggered(&self) -> bool {
+        self.inner.cause.get().is_some()
+    }
+
+    /// Returns the first shutdown cause.
+    ///
+    /// Returns the default cause if shutdown has not started.
+    #[must_use]
+    pub fn cause(&self) -> ShutdownCause {
+        self.inner.cause.get().cloned().unwrap_or_default()
+    }
+
+    /// Records the first shutdown cause without waking the executor owner.
+    ///
+    /// Returns `true` only for the caller that records the cause. The executor
+    /// uses this while it is already running a cycle and during synchronous
+    /// cleanup, when another owner notification is not needed.
+    pub(crate) fn publish(&self, cause: ShutdownCause) -> bool {
+        self.inner.cause.set(cause).is_ok()
+    }
+}
+
+struct ShutdownInner {
+    cause: OnceCell<ShutdownCause>,
+    owner_waker: Waker,
+}
 
 /// A cloneable error that caused executor shutdown.
 ///
@@ -28,6 +99,12 @@ impl std::panic::UnwindSafe for ShutdownError {}
 impl std::panic::RefUnwindSafe for ShutdownError {}
 
 impl ShutdownError {
+    /// Returns whether a contained task panic initiated shutdown.
+    #[must_use]
+    pub fn is_panic(&self) -> bool {
+        self.inner().is::<ContainedRuntimePanic>()
+    }
+
     /// Wraps an error that caused shutdown.
     pub fn new(error: impl Error + Send + Sync + 'static) -> Self {
         Self {
@@ -79,6 +156,23 @@ pub struct ShutdownCause {
 }
 
 impl ShutdownCause {
+    /// Creates a shutdown cause without consuming the original panic payload.
+    ///
+    /// String payloads supply the diagnostic message. Other payloads use
+    /// `non-string panic payload` because they have no required display format.
+    #[must_use]
+    pub fn panic(payload: &(dyn Any + Send)) -> Self {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        ShutdownError::new(ContainedRuntimePanic {
+            message: Arc::from(message),
+        })
+        .into()
+    }
+
     /// Creates a shutdown cause from an error.
     #[must_use]
     pub fn from_error(error: ShutdownError) -> Self {
@@ -98,6 +192,19 @@ impl ShutdownCause {
     }
 }
 
+#[derive(Debug)]
+struct ContainedRuntimePanic {
+    message: Arc<str>,
+}
+
+impl fmt::Display for ContainedRuntimePanic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime shutdown was caused by a task panic: {}", self.message)
+    }
+}
+
+impl Error for ContainedRuntimePanic {}
+
 impl From<ShutdownError> for ShutdownCause {
     fn from(error: ShutdownError) -> Self {
         Self::from_error(error)
@@ -109,70 +216,5 @@ impl Debug for ShutdownCause {
         f.debug_struct("ShutdownCause")
             .field("has_error", &self.as_error().is_some())
             .finish()
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use std::error::Error;
-    use std::fmt::{self, Debug, Display};
-    use std::panic::{RefUnwindSafe, UnwindSafe};
-
-    use static_assertions::assert_impl_all;
-
-    use super::{ShutdownCause, ShutdownError};
-
-    #[derive(Debug)]
-    struct SourceError;
-
-    impl Display for SourceError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("source failure")
-        }
-    }
-
-    impl Error for SourceError {}
-
-    #[test]
-    fn default_cause_has_no_error() {
-        assert_impl_all!(ShutdownCause: Clone, Debug, Default, Send, Sync, UnwindSafe, RefUnwindSafe);
-
-        assert!(ShutdownCause::default().as_error().is_none());
-    }
-
-    #[test]
-    fn default_cause_and_clone_have_no_error() {
-        let cause = ShutdownCause::default();
-        let clone = cause.clone();
-
-        assert!(cause.as_error().is_none());
-        assert!(clone.as_error().is_none());
-    }
-
-    #[test]
-    fn cloned_error_preserves_source_identity() {
-        assert_impl_all!(ShutdownError: Clone, Debug, Display, Error, Send, Sync, UnwindSafe, RefUnwindSafe);
-
-        let error = ShutdownError::new(SourceError);
-        let clone = error.clone();
-
-        let source = error.inner().downcast_ref::<SourceError>().unwrap();
-        let cloned_source = clone.inner().downcast_ref::<SourceError>().unwrap();
-        assert!(std::ptr::eq(source, cloned_source));
-        assert_eq!(error.to_string(), "source failure");
-        assert!(format!("{error:?}").contains("ShutdownError"));
-    }
-
-    #[test]
-    fn consuming_error_cause_returns_the_shutdown_error() {
-        let error = ShutdownError::new(SourceError);
-        let expected = error.clone();
-
-        let consumed = ShutdownCause::from_error(error).into_error().unwrap();
-
-        let expected = expected.inner().downcast_ref::<SourceError>().unwrap();
-        let consumed = consumed.inner().downcast_ref::<SourceError>().unwrap();
-        assert!(std::ptr::eq(expected, consumed));
     }
 }

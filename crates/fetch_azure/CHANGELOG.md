@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.11.0] - 2026-11-06
+
+- Simplify documentation for the Azure SDK transport backed by Fetch.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `fetch`, `http_extensions`, `seatbelt_http`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `fetch` requirement from `0.20.0` to `0.21.0`.
+
+## [0.10.0] - 2026-11-02
+
+- Update the Azure client integration to use Fetch 0.20.0 and Bytesbuf 0.13.0. This release does not
+  change the transport implementation.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `fetch` from `0.19.0` to `0.20.0`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.9.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

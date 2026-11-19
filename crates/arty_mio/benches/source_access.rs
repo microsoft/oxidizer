@@ -67,7 +67,7 @@ impl Source for BenchSource {
 }
 
 fn context() -> (MioContext, MioDriver) {
-    let mut io = MioContext::context(MioOptions::default());
+    let mut io = MioContext::new(MioOptions::default());
     let thread = ThreadBuilder::default().build(std::thread::current().id());
     io.relocate(None, &thread);
     let driver = io

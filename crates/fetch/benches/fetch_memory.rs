@@ -16,7 +16,6 @@ use criterion::{BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criteri
 use fetch::{HttpBodyBuilder, HttpClient};
 use futures::executor::block_on;
 use http::StatusCode;
-use http_extensions::HttpBodyOptions;
 use tick::Clock;
 
 #[global_allocator]
@@ -53,7 +52,7 @@ fn memory(c: &mut Criterion) {
         });
         operation(&mut group, &session, "stream_read", size, || {
             let frames = [Ok(frame.clone()), Ok(frame.clone())];
-            let body = black_box(&builder).stream(futures::stream::iter(frames), &HttpBodyOptions::default());
+            let body = black_box(&builder).stream(futures::stream::iter(frames));
             block_on(body.into_buffered()).unwrap()
         });
     }

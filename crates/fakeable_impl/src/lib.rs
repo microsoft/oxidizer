@@ -12,8 +12,14 @@ use syn::punctuated::Punctuated;
 use syn::{ItemImpl, ItemStruct, Meta, Token, parse_quote};
 
 mod args;
+#[cfg(any(test, feature = "mockall"))]
+mod lifetimes;
 
 use args::FakeableArgs;
+#[cfg(any(test, feature = "mockall"))]
+use lifetimes::add_explicit_lifetimes;
+#[cfg(feature = "mockall")]
+use lifetimes::{count_nested_elided_references, type_contains_bound_lifetimes, type_contains_implicit_higher_ranked_elision};
 
 /// Gates fakes on unit tests and, optionally, a consumer feature.
 fn fakes_cfg_attr(fakes_feature: Option<&str>) -> proc_macro2::TokenStream {
@@ -303,8 +309,6 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
             .into_compile_error();
     }
 
-    let cfg_attrs: Vec<_> = item_impl.attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
-
     // Extract the struct segment from the impl target, including generic arguments.
     let struct_segment = match extract_struct_segment(item_impl) {
         Ok(segment) => segment,
@@ -377,6 +381,7 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
         #[cfg(feature = "mockall")]
         {
+            let cfg_attrs: Vec<_> = item_impl.attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
             let fake_name = struct_name.to_string();
             let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
             let visibility = args.mockall_fake_visibility.clone().unwrap_or_else(|| parse_quote!(pub));
@@ -482,10 +487,9 @@ fn meta_applies_attribute(meta: &Meta, attribute_name: &str) -> bool {
 
 /// Extracts the final type path segment from an impl block.
 fn extract_struct_segment(item_impl: &ItemImpl) -> Result<syn::PathSegment, syn::Error> {
+    // Parsed qualified-self paths have a leading `::` or multiple segments.
     match &*item_impl.self_ty {
-        syn::Type::Path(type_path)
-            if type_path.qself.is_none() && type_path.path.leading_colon.is_none() && type_path.path.segments.len() == 1 =>
-        {
+        syn::Type::Path(type_path) if type_path.path.leading_colon.is_none() && type_path.path.segments.len() == 1 => {
             Ok(type_path.path.segments[0].clone())
         }
         syn::Type::Path(_) => Err(syn::Error::new_spanned(
@@ -627,6 +631,7 @@ fn generate_delegation_method(
             ));
         }
 
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "Syn stores reference mutability inside ReceiverKind::Reference, leaving receiver.mutability empty; typed receivers already returned above.")]
         if matches!(receiver.kind, syn::ReceiverKind::Value) && receiver.mutability.is_some() {
             return Err(syn::Error::new_spanned(
                 method_sig,
@@ -977,6 +982,7 @@ fn unknown_receiver_kind() -> ! {
 }
 
 fn fresh_binding(base: &str, param_names: &[proc_macro2::Ident]) -> proc_macro2::Ident {
+    // #[gamma::skip(expr.increment, tag = "equivalent", reason = "N parameter names cannot occupy all N + 1 distinct candidates, so extending the range cannot change the first free binding.")]
     (0..=param_names.len())
         .map(|suffix| {
             let candidate = if suffix == 0 {
@@ -1180,6 +1186,7 @@ fn trait_path_contains_wrapper_sensitive_type(path: &syn::Path, service_name: &p
 /// Converts an async function signature to a non-async function with impl Future return type because
 /// for methods with impl Future return types, mockall supports futures to be returned by mocks, unlike
 /// for async methods, for which it only supports returning values that are wrapped in immediate futures.
+#[cfg(feature = "mockall")]
 fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStream {
     // Extract the original return type
     let output_type = match &sig.output {
@@ -1195,189 +1202,7 @@ fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStrea
     quote! { #converted }
 }
 
-/// Adds explicit lifetimes to a method signature for mockall compatibility.
-/// This is needed because mockall cannot handle elided lifetimes in generic type arguments.
-fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
-    let mut sig = sig.clone();
-
-    let needs_lifetime = sig.inputs.iter().any(|input| {
-        if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input {
-            contains_reference_in_generic(ty)
-        } else {
-            false
-        }
-    });
-
-    if !needs_lifetime {
-        return sig;
-    }
-
-    let mut existing_lifetimes = std::collections::HashSet::new();
-    for param in &sig.generics.params {
-        if let syn::GenericParam::Lifetime(lifetime) = param {
-            existing_lifetimes.insert(lifetime.lifetime.ident.to_string());
-        }
-    }
-
-    let mut lifetime_name = None;
-    for suffix in 0..=existing_lifetimes.len() {
-        let candidate = if suffix == 0 { "mock".to_string() } else { format!("mock{suffix}") };
-        if !existing_lifetimes.contains(&candidate) {
-            lifetime_name = Some(candidate);
-            break;
-        }
-    }
-    let lifetime_name = lifetime_name.expect("one more candidate than existing lifetimes guarantees a free name");
-
-    let lifetime: syn::LifetimeParam = syn::parse_str(&format!("'{lifetime_name}")).expect("constructed from a valid Rust identifier");
-    let lifetime_value = lifetime.lifetime.clone();
-    let mut insert_at = sig.generics.params.len();
-    for (index, param) in sig.generics.params.iter().enumerate() {
-        if !matches!(param, syn::GenericParam::Lifetime(_)) {
-            insert_at = index;
-            break;
-        }
-    }
-    sig.generics.params.insert(insert_at, syn::GenericParam::Lifetime(lifetime));
-
-    // Add the lifetime to all elided references in generic type arguments
-    for input in &mut sig.inputs {
-        if let syn::FnArg::Typed(syn::PatType { ty, .. }) = input {
-            add_lifetime_to_references(ty, &lifetime_value);
-        }
-    }
-
-    sig
-}
-
-/// Checks if a type contains references within generic arguments.
-fn contains_reference_in_generic(ty: &syn::Type) -> bool {
-    count_nested_elided_references(ty, false) > 0
-}
-
-fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
-    struct BoundLifetimeVisitor {
-        found: bool,
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for BoundLifetimeVisitor {
-        fn visit_bound_lifetimes(&mut self, _i: &'ast syn::BoundLifetimes) {
-            self.found = true;
-        }
-    }
-
-    let mut visitor = BoundLifetimeVisitor { found: false };
-    syn::visit::Visit::visit_type(&mut visitor, ty);
-    visitor.found
-}
-
-fn type_contains_implicit_higher_ranked_elision(ty: &syn::Type) -> bool {
-    struct ElidedReferenceVisitor {
-        found: bool,
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for ElidedReferenceVisitor {
-        fn visit_type_reference(&mut self, i: &'ast syn::TypeReference) {
-            if i.lifetime.is_none() {
-                self.found = true;
-                return;
-            }
-            syn::visit::visit_type_reference(self, i);
-        }
-    }
-
-    struct ImplicitHigherRankedElisionVisitor {
-        found: bool,
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for ImplicitHigherRankedElisionVisitor {
-        fn visit_type_fn_ptr(&mut self, i: &'ast syn::TypeFnPtr) {
-            if i.lifetimes.is_none() {
-                let mut visitor = ElidedReferenceVisitor { found: false };
-                syn::visit::Visit::visit_type_fn_ptr(&mut visitor, i);
-                self.found |= visitor.found;
-            }
-            syn::visit::visit_type_fn_ptr(self, i);
-        }
-
-        fn visit_trait_bound(&mut self, i: &'ast syn::TraitBound) {
-            if i.lifetimes.is_none()
-                && i.path
-                    .segments
-                    .last()
-                    .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "Fn" | "FnMut" | "FnOnce"))
-            {
-                let mut visitor = ElidedReferenceVisitor { found: false };
-                syn::visit::Visit::visit_trait_bound(&mut visitor, i);
-                self.found |= visitor.found;
-            }
-            syn::visit::visit_trait_bound(self, i);
-        }
-    }
-
-    let mut visitor = ImplicitHigherRankedElisionVisitor { found: false };
-    syn::visit::Visit::visit_type(&mut visitor, ty);
-    visitor.found
-}
-
-fn count_nested_elided_references(ty: &syn::Type, nested: bool) -> usize {
-    struct NestedReferenceVisitor {
-        nested: bool,
-        count: usize,
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for NestedReferenceVisitor {
-        fn visit_type(&mut self, i: &'ast syn::Type) {
-            if let syn::Type::Reference(reference) = i
-                && self.nested
-                && reference.lifetime.is_none()
-            {
-                self.count += 1;
-            }
-
-            let parent_nested = self.nested;
-            self.nested = true;
-            syn::visit::visit_type(self, i);
-            self.nested = parent_nested;
-        }
-    }
-
-    let mut visitor = NestedReferenceVisitor { nested, count: 0 };
-    syn::visit::Visit::visit_type(&mut visitor, ty);
-    visitor.count
-}
-
-/// Adds a lifetime to all elided references within generic type arguments.
-fn add_lifetime_to_references(ty: &mut syn::Type, lifetime: &syn::Lifetime) {
-    add_lifetime_to_nested_references(ty, lifetime, false);
-}
-
-fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetime, nested: bool) {
-    struct LifetimeVisitor<'a> {
-        nested: bool,
-        lifetime: &'a syn::Lifetime,
-    }
-
-    impl syn::visit_mut::VisitMut for LifetimeVisitor<'_> {
-        fn visit_type_mut(&mut self, i: &mut syn::Type) {
-            if let syn::Type::Reference(reference) = i
-                && self.nested
-                && reference.lifetime.is_none()
-            {
-                reference.lifetime = Some(self.lifetime.clone());
-            }
-
-            let parent_nested = self.nested;
-            self.nested = true;
-            syn::visit_mut::visit_type_mut(self, i);
-            self.nested = parent_nested;
-        }
-    }
-
-    let mut visitor = LifetimeVisitor { nested, lifetime };
-    syn::visit_mut::VisitMut::visit_type_mut(&mut visitor, ty);
-}
-
+#[cfg(feature = "mockall")]
 fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Result<(), syn::Error> {
     if !is_delegated {
         return Ok(());
@@ -1483,6 +1308,7 @@ fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Resu
 }
 
 /// Generates a mockall mock! macro for the given impl block.
+#[cfg(feature = "mockall")]
 fn generate_mockall_fake(
     item_impl: &ItemImpl,
     fake_name: &str,
@@ -1619,6 +1445,7 @@ fn rewrite_expect_in_tokens(tokens: TokenStream) -> TokenStream {
     };
 
     for meta in metas.iter_mut().skip(1) {
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "The helper returns unit; default_after preserves its metadata rewrite and replaces unit with unit.")]
         rewrite_expect_meta(meta);
     }
 
@@ -1642,16 +1469,21 @@ fn rewrite_expect_meta(meta: &mut Meta) {
 mod output_verification;
 
 #[cfg(test)]
+mod gamma_survivor_tests;
+
+#[cfg(test)]
+mod gamma_round2;
+
+#[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use proc_macro2::TokenStream;
-    use quote::{ToTokens, quote};
-    use syn::{Meta, Type, parse_quote};
+    use quote::quote;
+    use syn::{Meta, parse_quote};
 
     use super::{
-        add_explicit_lifetimes, add_lifetime_to_references, cfg_attr_can_disable_item, cfg_attr_tokens_can_disable_item,
-        contains_reference_in_generic, fakeable_impl, fresh_binding, generate_delegation_calls, meta_can_disable_item,
-        rewrite_expect_in_tokens, transform_expect_to_allow,
+        cfg_attr_can_disable_item, cfg_attr_tokens_can_disable_item, fakeable_impl, fresh_binding, generate_delegation_calls,
+        meta_can_disable_item, rewrite_expect_in_tokens, transform_expect_to_allow,
     };
 
     fn expansion(args: TokenStream, input: TokenStream) -> String {
@@ -1674,92 +1506,6 @@ mod tests {
     fn fresh_binding_avoids_parameter_collisions() {
         let names = vec![parse_quote!(__fakeable_real), parse_quote!(__fakeable_real_1)];
         assert_eq!(fresh_binding("__fakeable_real", &names).to_string(), "__fakeable_real_2");
-    }
-
-    #[test]
-    fn detects_references_nested_in_generic_arguments() {
-        let nested: Type = parse_quote!(Option<Vec<&str>>);
-        let below_reference: Type = parse_quote!(&Option<&str>);
-        let without_reference: Type = parse_quote!(Option<Vec<String>>);
-        let direct: Type = parse_quote!(&str);
-
-        assert!(contains_reference_in_generic(&nested));
-        assert!(contains_reference_in_generic(&below_reference));
-        assert!(!contains_reference_in_generic(&without_reference));
-        assert!(!contains_reference_in_generic(&direct));
-    }
-
-    #[test]
-    fn adds_lifetimes_below_direct_references() {
-        let mut ty: Type = parse_quote!(&Option<&str>);
-
-        add_lifetime_to_references(&mut ty, &parse_quote!('mock));
-
-        assert_eq!(ty.into_token_stream().to_string(), "& Option < & 'mock str >");
-    }
-
-    #[test]
-    fn adds_lifetimes_recursively_and_ignores_unrelated_types() {
-        let mut nested: Type = parse_quote!(Option<Vec<&str>>);
-        let mut explicit: Type = parse_quote!(Option<&'static str>);
-        let mut lifetime_argument: Type = parse_quote!(Container<'static>);
-        let mut tuple: Type = parse_quote!((u8, u16));
-
-        add_lifetime_to_references(&mut nested, &parse_quote!('mock));
-        add_lifetime_to_references(&mut explicit, &parse_quote!('mock));
-        add_lifetime_to_references(&mut lifetime_argument, &parse_quote!('mock));
-        add_lifetime_to_references(&mut tuple, &parse_quote!('mock));
-
-        assert_eq!(nested.into_token_stream().to_string(), "Option < Vec < & 'mock str > >");
-        assert_eq!(explicit.into_token_stream().to_string(), "Option < & 'static str >");
-        assert_eq!(lifetime_argument.into_token_stream().to_string(), "Container < 'static >");
-        assert_eq!(tuple.into_token_stream().to_string(), "(u8 , u16)");
-    }
-
-    #[test]
-    fn preserves_existing_explicit_lifetimes() {
-        let signature: syn::Signature = parse_quote!(fn value<'a>(&self, input: Option<&'a str>));
-
-        let converted = add_explicit_lifetimes(&signature);
-
-        assert_eq!(converted.into_token_stream().to_string(), signature.into_token_stream().to_string());
-    }
-
-    #[test]
-    fn adds_noncolliding_lifetime_alongside_existing_lifetimes() {
-        let signature: syn::Signature = parse_quote!(
-            fn value<'mock, 'a>(
-                &self,
-                direct: &'a str,
-                nested: Option<&str>,
-            )
-        );
-
-        let converted = add_explicit_lifetimes(&signature);
-
-        assert_eq!(
-            converted.into_token_stream().to_string(),
-            "fn value < 'mock , 'a , 'mock1 > (& self , direct : & 'a str , nested : Option < & 'mock1 str > ,)"
-        );
-    }
-
-    #[test]
-    fn inserts_mock_lifetime_before_type_parameters() {
-        let signature: syn::Signature = parse_quote!(
-            fn value<'a, T>(
-                &self,
-                direct: &'a str,
-                nested: Option<&str>,
-                value: T,
-            )
-        );
-
-        let converted = add_explicit_lifetimes(&signature);
-
-        assert_eq!(
-            converted.into_token_stream().to_string(),
-            "fn value < 'a , 'mock , T > (& self , direct : & 'a str , nested : Option < & 'mock str > , value : T ,)"
-        );
     }
 
     #[test]

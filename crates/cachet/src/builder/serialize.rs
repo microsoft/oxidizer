@@ -23,16 +23,17 @@ where
     /// Applies a serialization boundary that converts keys and values to [`BytesView`](bytesbuf::BytesView).
     ///
     /// Subsequent `.fallback()` tiers must work with `BytesView` keys and values.
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+    /// use bytesbuf::mem::GlobalPool;
     /// use cachet::Cache;
     /// use tick::Clock;
     ///
     /// let clock = Clock::new_tokio();
-    /// let memory = OpaqueMemory::new(GlobalPool::new());
+    /// let memory = GlobalPool::new();
     /// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
     ///
     /// let cache = Cache::builder::<String, String>(clock)
@@ -42,11 +43,12 @@ where
     ///     .build();
     /// ```
     #[must_use]
-    pub fn serialize(self, memory: OpaqueMemory) -> TransformBuilder<K, V, BytesView, BytesView, Self>
+    pub fn serialize(self, memory: impl Into<OpaqueMemory>) -> TransformBuilder<K, V, BytesView, BytesView, Self>
     where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
+        let memory = memory.into();
         self.transform(PostcardEncoder::new(memory.clone()), PostcardCodec::new(memory))
     }
 }
@@ -59,12 +61,15 @@ where
     FB: CacheTierBuilder<K, V>,
 {
     /// Applies a serialization boundary on a fallback builder.
+    ///
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     #[must_use]
-    pub fn serialize(self, memory: OpaqueMemory) -> TransformBuilder<K, V, BytesView, BytesView, Self>
+    pub fn serialize(self, memory: impl Into<OpaqueMemory>) -> TransformBuilder<K, V, BytesView, BytesView, Self>
     where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
+        let memory = memory.into();
         self.transform(PostcardEncoder::new(memory.clone()), PostcardCodec::new(memory))
     }
 }

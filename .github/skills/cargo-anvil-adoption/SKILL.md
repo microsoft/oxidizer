@@ -127,6 +127,7 @@ its failures first. Examples:
 - `just anvil-pr-test`
 - `just anvil-pr-msrv`
 - `just anvil-pr-runtime-analysis`
+- `just anvil-pr-fuzzing`
 - `just anvil-pr-mutants`
 
 When a check fails, fix the root cause and rerun that specific recipe instead of

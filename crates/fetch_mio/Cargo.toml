@@ -63,12 +63,13 @@ socket2 = { workspace = true }
 
 [dev-dependencies]
 arty = { path = "../arty", features = ["macros", "rt", "test-util"] }
-ctor = { workspace = true, features = ["proc_macro"] }
 criterion = { workspace = true }
+ctor = { workspace = true, features = ["proc_macro"] }
 fetch_hyper = { path = "../fetch_hyper", features = ["native-tls", "rustls"] }
 fetch_tls = { path = "../fetch_tls", features = ["native-tls", "rustls"] }
 future_assert = { path = "../future_assert" }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
+metabench = { path = "../metabench", default-features = false }
 native-tls = { workspace = true, features = ["alpn"] }
 rcgen = { workspace = true, features = ["aws_lc_rs"] }
 rustls = { workspace = true, features = ["aws-lc-rs", "std", "tls12"] }
@@ -76,7 +77,6 @@ static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", features = ["std", "test-utils"] }
 tick = { path = "../tick", features = ["test-util"] }
-metabench = { path = "../metabench", default-features = false }
 
 # >>> anvil-managed: anvil-lints
 [lints]

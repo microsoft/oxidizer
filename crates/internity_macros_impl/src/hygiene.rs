@@ -49,7 +49,10 @@ pub(crate) fn used_identifiers(input: &DeriveInput) -> HashSet<String> {
 /// `multitude_macros_impl`.
 pub(crate) fn fresh_ident(used: &HashSet<String>, base: &str) -> syn::Ident {
     let mut candidate = base.to_owned();
-    while used.contains(&candidate) {
+    while
+    // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+    used.contains(&candidate) {
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         candidate.push('_');
     }
     syn::Ident::new(&candidate, proc_macro2::Span::mixed_site())

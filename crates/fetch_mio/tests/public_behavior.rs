@@ -14,7 +14,7 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use arty::task::Builtins;
+use arty::task::Context;
 use arty_mio::{MioContext, MioOptions};
 use fetch_hyper::{HyperIo, HyperTransportBuilder};
 use fetch_mio::{MioConnector, MioConnectorOptions, MioStream};
@@ -40,8 +40,8 @@ assert_not_impl_any!(MioOptions: Copy);
 assert_not_impl_any!(MioStream: ThreadAware);
 
 #[arty::test]
-async fn connector_rejects_unsupported_scheme(builtins: Builtins) {
-    let error = connector(&builtins, SocketOptions::default())
+async fn connector_rejects_unsupported_scheme(context: Context) {
+    let error = connector(&context, SocketOptions::default())
         .execute(BaseUri::from_static("ftp://127.0.0.1:21"))
         .await
         .unwrap_err();
@@ -52,38 +52,39 @@ async fn connector_rejects_unsupported_scheme(builtins: Builtins) {
 }
 
 #[arty::test]
-async fn spawner_preserves_bound_and_anywhere_semantics(builtins: Builtins) {
-    let worker = builtins.thread().id();
-    let runtime = Spawner::new_arty(builtins.scheduler().clone());
+async fn spawner_preserves_bound_and_anywhere_semantics(context: Context) {
+    let worker = context.thread().id();
+    let runtime = Spawner::new_arty(context.scheduler().clone());
 
-    let bound = runtime.spawn(async { std::thread::current().id() }).await;
+    let bound = runtime.spawn(async { std::thread::current().id() }).await.unwrap();
     assert_eq!(bound, worker);
 
     let (relocated, destination, actual) = runtime
         .spawn_anywhere(RelocationProbe::default(), |probe| async move {
             (probe.relocated, probe.destination, std::thread::current().id())
         })
-        .await;
+        .await
+        .unwrap();
     assert!(relocated);
     assert_eq!(destination, Some(actual));
 
-    let blocking = runtime.spawn_blocking(|| std::thread::current().id()).await;
+    let blocking = runtime.spawn_blocking(|| std::thread::current().id()).await.unwrap();
     assert_ne!(blocking, worker);
 }
 
 #[arty::test]
-async fn hyper_transport_accepts_mio_stream_with_native_tls_path(builtins: Builtins) {
+async fn hyper_transport_accepts_mio_stream_with_native_tls_path(context: Context) {
     let (port, certificate, server) = tls_server();
     let mut builder = native_tls::TlsConnector::builder();
     builder.add_root_certificate(native_tls::Certificate::from_der(certificate.as_ref()).unwrap());
-    let response = request(&builtins, format!("https://127.0.0.1:{port}/"), builder.build().unwrap().into()).await;
+    let response = request(&context, format!("https://127.0.0.1:{port}/"), builder.build().unwrap().into()).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     server.join().unwrap();
 }
 
 #[arty::test]
-async fn hyper_transport_accepts_mio_stream_with_rustls_path(builtins: Builtins) {
+async fn hyper_transport_accepts_mio_stream_with_rustls_path(context: Context) {
     let (port, certificate, server) = tls_server();
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut roots = rustls::RootCertStore::empty();
@@ -94,22 +95,22 @@ async fn hyper_transport_accepts_mio_stream_with_rustls_path(builtins: Builtins)
         .with_root_certificates(roots)
         .with_no_client_auth()
         .into();
-    let response = request(&builtins, format!("https://127.0.0.1:{port}/"), tls).await;
+    let response = request(&context, format!("https://127.0.0.1:{port}/"), tls).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     server.join().unwrap();
 }
 
-async fn request(builtins: &Builtins, uri: String, tls: TlsBackend) -> http_extensions::HttpResponse {
+async fn request(context: &Context, uri: String, tls: TlsBackend) -> http_extensions::HttpResponse {
     let mut options = TransportOptions::default();
     options.request_filter = RequestFilter::HttpAndHttps;
     options.connect_timeout = Duration::from_secs(5);
     options.supported_http_versions = vec![http::Version::HTTP_11];
 
     let handler = HyperTransportBuilder::new(
-        connector(builtins, SocketOptions::default()),
-        Spawner::new_arty(builtins.scheduler().clone()),
-        builtins.clock().clone(),
+        connector(context, SocketOptions::default()),
+        Spawner::new_arty(context.scheduler().clone()),
+        context.clock().clone(),
         options,
     )
     .body_builder(HttpBodyBuilder::new_fake())
@@ -118,11 +119,11 @@ async fn request(builtins: &Builtins, uri: String, tls: TlsBackend) -> http_exte
     handler.execute(request).await.unwrap()
 }
 
-fn connector(builtins: &Builtins, socket: SocketOptions) -> MioConnector {
+fn connector(context: &Context, socket: SocketOptions) -> MioConnector {
     MioConnector::new(
-        builtins.io().context::<MioContext>(&MioOptions::default()),
-        builtins.scheduler().clone(),
-        builtins.clock().clone(),
+        context.io().context::<MioContext>(&MioOptions::default()),
+        context.scheduler().clone(),
+        context.clock().clone(),
         MioConnectorOptions::default().socket(socket),
     )
 }

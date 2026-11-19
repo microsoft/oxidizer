@@ -36,12 +36,13 @@ impl WinHttpDeps {
     /// Starts building dependencies for the WinHTTP transport.
     ///
     /// The memory provider serves request-body and response-body allocations.
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     /// Cloning dependencies clones the provider, and relocation reaches the provider.
     #[must_use]
-    pub fn builder(clock: Clock, memory: OpaqueMemory, sink: Sink) -> WinHttpDepsBuilder {
+    pub fn builder(clock: Clock, memory: impl Into<OpaqueMemory>, sink: Sink) -> WinHttpDepsBuilder {
         WinHttpDepsBuilder {
             clock,
-            memory,
+            memory: memory.into(),
             sink,
             tls: WinHttpTlsConfig::default(),
         }

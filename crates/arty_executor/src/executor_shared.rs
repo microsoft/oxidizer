@@ -4,20 +4,22 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::OnceLock;
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use events_once::LocalEventLake;
 use observed::Sink;
 use performables::sync::channel;
-use plurality::MultiPool;
+use plurality::{Arc as PoolArc, MultiPool};
 
-use crate::remote::Sender as RemoteSender;
+use crate::inspection::CompletionInspector;
 use crate::wake::RemoteWake;
 use crate::{
-    JoinHandle, ShutdownCause, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_remote_task, allocate_task,
+    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskMetadata, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
     discard_task_panic_payload,
 };
 
@@ -32,27 +34,39 @@ struct ExecutorSharedInner {
     new_tasks: RefCell<VecDeque<TaskHandle>>,
     task_storage: MultiPool,
     task_count: Cell<usize>,
-    join_events: LocalEventLake,
-    shutdown_cause: Rc<OnceLock<ShutdownCause>>,
+    shutdown: Shutdown,
     wake: WakeShared,
     // Owner-only reception breaks the wake queue -> task -> shared wake state ownership cycle.
     remote_wakes: channel::Receiver<RemoteWake>,
     sink: Sink,
+    panic_policy: PanicPolicy,
 }
 
 impl ExecutorShared {
-    pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId) -> Self {
+    #[cfg(feature = "inspection")]
+    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
+        let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
+        for task in tasks.iter() {
+            if visit(task).is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
+        let shutdown = Shutdown::new(owner_waker.clone());
         let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);
         Self {
             inner: Rc::new(ExecutorSharedInner {
                 new_tasks: RefCell::new(VecDeque::new()),
                 task_storage: MultiPool::new(),
                 task_count: Cell::new(0),
-                join_events: LocalEventLake::new(),
-                shutdown_cause: Rc::new(OnceLock::new()),
+                shutdown,
                 wake,
                 remote_wakes,
                 sink,
+                panic_policy,
             }),
         }
     }
@@ -69,12 +83,8 @@ impl ExecutorShared {
         self.inner.wake.close_remote_wakes(&self.inner.remote_wakes);
     }
 
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        self.inner.shutdown_cause.get().is_some()
-    }
-
-    pub(crate) fn shutdown_cause(&self) -> ShutdownCause {
-        self.inner.shutdown_cause.get().cloned().unwrap_or_default()
+    pub(crate) fn shutdown(&self) -> &Shutdown {
+        &self.inner.shutdown
     }
 
     pub(crate) fn accept_new_tasks(&self, active: &mut VecDeque<TaskHandle>) -> usize {
@@ -108,74 +118,45 @@ impl ExecutorShared {
 
     pub(crate) fn shutdown_complete(&self) -> bool {
         debug_assert!(self.inner.new_tasks.borrow().is_empty());
-        self.is_shutting_down() && self.inner.task_count.get() == 0
+        self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn begin_shutdown(&self, cause: ShutdownCause) -> ShutdownCause {
-        _ = self.inner.shutdown_cause.set(cause);
-        self.shutdown_cause()
-    }
-
-    pub(crate) fn request_shutdown(&self, cause: ShutdownCause) -> ShutdownCause {
-        self.begin_shutdown(cause)
-    }
-
-    pub(crate) fn add_task<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
+    pub(crate) fn add_task<F, T, I>(&self, future: F, metadata: TaskMetadata, completion: T, inspector: I)
     where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static,
+        F: IntoFuture + 'static,
+        F::Output: 'static,
+        T: TaskCompletion<F::Output>,
+        I: CompletionInspector<F::IntoFuture, T>,
     {
-        if let Some(join_handle) = self.rejected_submission() {
-            return join_handle;
+        if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
+            completion.cancelled(self.shutdown().cause());
+            return;
         }
         let future = future.into_future();
-        if let Some(join_handle) = self.rejected_submission() {
-            return join_handle;
+        if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
+            completion.cancelled(self.shutdown().cause());
+            return;
         }
-        let (result_tx, result_rx) = self.inner.join_events.rent();
         self.register_task(allocate_task(
             &self.inner.task_storage,
             future,
-            result_tx,
-            options,
+            metadata,
             self.inner.sink.clone(),
-        ));
-        JoinHandle::new(result_rx, Rc::clone(&self.inner.shutdown_cause))
-    }
-
-    pub(crate) fn add_remote_task<F, R>(&self, future: F, options: TaskOptions, remote_result_tx: RemoteSender<R>)
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        if self.is_shutting_down() {
-            if let Err(panic) = remote_result_tx.shutdown(self.shutdown_cause()) {
-                discard_task_panic_payload(panic);
-            }
-            return;
-        }
-        let future = future.into_future();
-        if self.is_shutting_down() {
-            if let Err(panic) = remote_result_tx.shutdown(self.shutdown_cause()) {
-                discard_task_panic_payload(panic);
-            }
-            return;
-        }
-        self.register_task(allocate_remote_task(
-            &self.inner.task_storage,
-            future,
-            options,
-            self.inner.sink.clone(),
-            remote_result_tx,
+            completion,
+            inspector,
         ));
     }
 
-    fn rejected_submission<R: 'static>(&self) -> Option<JoinHandle<R>> {
-        self.is_shutting_down()
-            .then(|| JoinHandle::disconnected(&self.inner.join_events, Rc::clone(&self.inner.shutdown_cause)))
-    }
-
-    fn register_task(&self, task_handle: TaskHandle) {
+    #[inline]
+    fn register_task<T: TypeErasedTask + 'static>(&self, task: Pin<PoolArc<T>>) {
+        // Keep the concrete type at this boundary so task setup can use direct calls.
+        let task_handle = TaskHandle::new(task);
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.
@@ -196,22 +177,132 @@ impl ExecutorShared {
         self.inner.task_count.get() != 0
     }
 
-    #[cfg(test)]
-    pub(crate) fn task_storage_is_empty(&self) -> bool {
-        self.inner.task_storage.is_empty()
+    pub(crate) fn panic_policy(&self) -> &PanicPolicy {
+        &self.inner.panic_policy
     }
 }
 
 #[cfg(test)]
+// Public submission does not expose a mutable borrow of the pending-task queue.
 mod tests {
     use super::*;
+    use crate::ShutdownCause;
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn inspection_stops_at_the_first_break_and_can_visit_the_whole_submission_queue() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+        for _ in 0..3 {
+            shared.add_task(
+                std::future::pending::<()>(),
+                TaskMetadata::default(),
+                crate::task::TestCompletion,
+                (),
+            );
+        }
+        let mut visited = Vec::new();
+        shared
+            .inspect_new_tasks(|task| {
+                visited.push(task.as_ptr());
+                ControlFlow::Break(())
+            })
+            .unwrap();
+        assert_eq!(visited.len(), 1);
+        let first = *visited.first().unwrap();
+        visited.clear();
+        shared
+            .inspect_new_tasks(|task| {
+                visited.push(task.as_ptr());
+                ControlFlow::Continue(())
+            })
+            .unwrap();
+        assert_eq!(visited.len(), 3);
+        assert_eq!(visited.first(), Some(&first));
+        let _borrow = shared.inner.new_tasks.borrow_mut();
+        assert_eq!(shared.inspect_new_tasks(|_| unreachable!()), Err(crate::InspectionError::Busy));
+    }
 
     #[test]
-    fn shutdown_completion_requires_a_shutdown_request() {
-        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), std::thread::current().id());
+    fn gamma_survivor_shared_close_drains_remote_owners_and_closes_receiver() {
+        let owner = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
+        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), owner, PanicPolicy::default());
+        let pool = MultiPool::new();
+        let task = crate::task::allocate_test_task_in(&pool);
+        let signal = std::pin::pin!(WakeSignal::new(shared.wake().clone(), task.as_ptr()));
+        // SAFETY: the cloned waker is dropped before its pinned signal leaves scope.
+        let waker = unsafe { signal.as_ref().waker_ref() }.clone();
+        waker.wake_by_ref();
+        assert!(shared.wake().has_remote_wakes());
+        shared.close_remote_wakes();
+        assert!(!shared.wake().has_remote_wakes());
+        assert!(shared.inner.remote_wakes.try_recv().unwrap_err().is_closed());
+        signal.retire();
+        drop(waker);
+        drop(task);
+        assert!(pool.is_empty());
+    }
 
+    #[test]
+    fn gamma_survivor_accept_counts_and_shutdown_completion_track_live_ownership() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+        let mut active = VecDeque::new();
+        assert_eq!(shared.accept_new_tasks(&mut active), 0);
+        assert!(!shared.has_new_tasks());
+        shared.add_task(
+            std::future::pending::<()>(),
+            TaskMetadata::default(),
+            crate::task::TestCompletion,
+            (),
+        );
+        shared.add_task(
+            std::future::pending::<()>(),
+            TaskMetadata::default(),
+            crate::task::TestCompletion,
+            (),
+        );
+        assert!(shared.has_new_tasks());
+        assert_eq!(shared.accept_new_tasks(&mut active), 2);
+        assert_eq!(active.len(), 2);
+        assert!(!shared.has_new_tasks());
+        shared.shutdown().trigger(ShutdownCause::default());
         assert!(!shared.shutdown_complete());
-        shared.request_shutdown(ShutdownCause::default());
+        for task in active {
+            // SAFETY: each active handle owns an initialized task on this thread.
+            unsafe { task.as_task() }.abort(ShutdownCause::default());
+        }
+        shared.decrement_task_count(1);
+        assert!(shared.has_tasks());
+        assert!(!shared.shutdown_complete());
+        shared.decrement_task_count(1);
+        assert!(!shared.has_tasks());
         assert!(shared.shutdown_complete());
+    }
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+        let borrowed = shared.inner.new_tasks.borrow_mut();
+
+        let busy = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+        drop(borrowed);
+        let released = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+
+        assert_eq!((busy, released), (Err(crate::InspectionError::Busy), Ok(())));
     }
 }

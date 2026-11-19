@@ -43,8 +43,8 @@ thread_aware_core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 arty = { path = "../arty" }
-ctor = { workspace = true, features = ["proc_macro"] }
 criterion = { workspace = true }
+ctor = { workspace = true, features = ["proc_macro"] }
 metabench = { path = "../metabench", default-features = false }
 mio = { workspace = true, features = ["net", "os-poll"] }
 observed_testing = { path = "../observed_testing" }

@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compressing and decompressing a body that arrives over time, on tokio.
+//! Compresses and decompresses a body that arrives over time on tokio.
 //!
-//! The body is never held whole: each chunk passes through the engine and leaves, so peak memory
-//! follows the chunk size rather than the size of the body.
+//! The example does not retain the complete body. Peak memory follows the chunk size instead of the
+//! body size.
 
 use std::env;
 use std::time::Duration;
@@ -17,14 +17,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
 
-/// How often a chunk arrives from the stand-in upstream.
+/// The interval between chunks from the simulated upstream.
 const ARRIVAL_PERIOD: Duration = Duration::from_millis(1);
 
-/// Stands in for an upstream that produces a body gradually, such as a socket.
+/// Simulates an upstream source, such as a socket, that produces a body gradually.
 ///
-/// Takes its clock rather than choosing one, so a caller can drive the arrivals in simulated time
-/// instead of waiting for them. Input views come from the same [`Resources`] the engines do, so one
-/// caller-owned provider covers the whole pipeline.
+/// The caller supplies the clock and can use simulated time. Input views and engines use the same
+/// caller-owned [`Resources`].
 fn body(clock: Clock, resources: Resources) -> impl Stream<Item = Result<BytesView, std::io::Error>> {
     let (sender, receiver) = mpsc::channel(4);
 
@@ -48,13 +47,11 @@ fn body(clock: Clock, resources: Resources) -> impl Stream<Item = Result<BytesVi
 
 #[tokio::main]
 async fn main() -> Result<(), compressors::Error> {
-    // Held once and handed to everything: the arriving chunks, the compressor and the decompressor
-    // all draw on this provider and share its pool of recycled engines.
+    // Arriving chunks and both engines use this provider and its shared engine pool.
     let resources = Resources::new(GlobalPool::new());
 
-    // Under Anvil this runs as an automated check, where waiting out 200 real
-    // arrivals would be two seconds of wall clock and a dependency on runtime scheduling. A clock
-    // that advances itself on every query settles the same 200 arrivals immediately.
+    // Anvil runs this example as an automated test. An auto-advancing clock avoids two seconds of
+    // wall time and removes a dependency on runtime scheduling.
     let clock = if env::var_os("ANVIL_EXAMPLE").is_some() {
         ClockControl::new().auto_advance(ARRIVAL_PERIOD).to_clock()
     } else {

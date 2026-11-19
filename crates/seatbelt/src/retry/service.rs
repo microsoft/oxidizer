@@ -87,7 +87,6 @@ where
 {
     type Out = Out;
 
-    #[cfg_attr(test, mutants::skip)] // Mutating enable_if check causes infinite loops
     async fn execute(&self, mut input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
@@ -176,7 +175,6 @@ impl<In, Out> RetryShared<In, Out> {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn is_recoverable(&self, recovery: &RecoveryInfo) -> bool {
         match recovery.kind() {
             RecoveryKind::Unavailable => self.handle_unavailable,
@@ -307,7 +305,6 @@ where
         self.inner.poll_ready(cx)
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn call(&mut self, req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);

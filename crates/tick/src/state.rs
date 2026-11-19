@@ -170,16 +170,16 @@ impl ClockState {
     pub(crate) fn unregister_driver(&self, registration: DriverRegistration) {
         match self {
             Self::System(storage) => {
-                if let Some(driver_id) = registration.driver_id() {
-                    storage.unregister_driver(driver_id);
-                }
+                let driver_id = registration
+                    .driver_id()
+                    .expect("register_driver always supplies a registration for a system-clock driver");
+                storage.unregister_driver(driver_id);
             }
             #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(_) => unregister_controlled_driver(registration),
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub(crate) fn driver_is_finished(&self) -> bool {
         match self {
             Self::System(storage) => storage.has_no_clock_owners(),
@@ -328,7 +328,6 @@ impl SystemClockStorage {
         key
     }
 
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
         // The single-slot probe keeps the idle and one-ready-timer paths small. Larger bursts use
         // eight stack slots per follow-up lock acquisition and loop without imposing a limit.
@@ -358,7 +357,10 @@ impl SystemClockStorage {
                 waker.take().expect("filled by pop_ready_into for every counted slot").wake();
             }
 
-            if count < READY_BATCH_SIZE || next.is_none_or(|next| next > now) {
+            if
+            // #[gamma::skip(logical.or_remove_left, relational.lt_to_gt, reason = "pop_ready_into fills every available output slot while due timers remain; a short batch therefore already has no next due timer.")]
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            count < READY_BATCH_SIZE || next.is_none_or(|next| next > now) {
                 return next;
             }
         }
@@ -378,6 +380,112 @@ mod tests {
     impl std::task::Wake for CountingWake {
         fn wake(self: std::sync::Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_completed_ready_batches_defer_reentrant_registrations_to_the_next_turn() {
+        use std::sync::{Arc, Weak};
+        use std::task::Wake;
+
+        struct Reentrant {
+            storage: Weak<SystemClockStorage>,
+            now: Instant,
+            inserted: Arc<CountingWake>,
+            calls: AtomicUsize,
+        }
+
+        impl Wake for Reentrant {
+            fn wake(self: Arc<Self>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.storage
+                    .upgrade()
+                    .unwrap()
+                    .register_timer(self.now, Waker::from(Arc::clone(&self.inserted)));
+            }
+        }
+
+        let now = crate::ClockControl::new().to_clock().instant();
+        let due = now - std::time::Duration::from_nanos(1);
+        let next = now + std::time::Duration::from_nanos(1);
+        for prefix in [0, 8] {
+            let storage = Arc::new(SystemClockStorage::new_shared());
+            let earlier = Arc::new(CountingWake(AtomicUsize::new(0)));
+            let inserted = Arc::new(CountingWake(AtomicUsize::new(0)));
+            let reentrant = Arc::new(Reentrant {
+                storage: Arc::downgrade(&storage),
+                now,
+                inserted: Arc::clone(&inserted),
+                calls: AtomicUsize::new(0),
+            });
+            for _ in 0..prefix {
+                storage.register_timer(due, Waker::from(Arc::clone(&earlier)));
+            }
+            storage.register_timer(due, Waker::from(Arc::clone(&reentrant)));
+            storage.register_timer(next, Waker::noop().clone());
+            assert_eq!(storage.try_advance_timers(now), Some(next));
+            assert_eq!(earlier.0.load(Ordering::Relaxed), prefix);
+            assert_eq!(reentrant.calls.load(Ordering::Relaxed), 1);
+            assert_eq!(inserted.0.load(Ordering::Relaxed), 0);
+            assert_eq!(storage.with_timers(|timers| timers.len()), 2);
+            assert_eq!(storage.try_advance_timers(now), Some(next));
+            assert_eq!(inserted.0.load(Ordering::Relaxed), 1);
+            assert_eq!(storage.try_advance_timers(next), None);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_ready_batches_wake_every_due_timer_once_and_return_next_deadline() {
+        let now = crate::ClockControl::new().to_clock().instant();
+        let next = now + std::time::Duration::from_nanos(1);
+        let due_at = now - std::time::Duration::from_nanos(1);
+        for due in [0, 1, 8, 9, 10, 17, 18] {
+            let storage = SystemClockStorage::new_shared();
+            let count = std::sync::Arc::new(CountingWake(AtomicUsize::new(0)));
+            for _ in 0..due {
+                let _ = storage.register_timer(due_at, Waker::from(std::sync::Arc::clone(&count)));
+            }
+            let _ = storage.register_timer(next, Waker::from(std::sync::Arc::clone(&count)));
+            assert_eq!(storage.try_advance_timers(now), Some(next));
+            assert_eq!(count.0.load(Ordering::Relaxed), due);
+            assert_eq!(storage.try_advance_timers(now), Some(next));
+            assert_eq!(count.0.load(Ordering::Relaxed), due);
+            assert_eq!(storage.try_advance_timers(next), None);
+            assert_eq!(count.0.load(Ordering::Relaxed), due + 1);
+            assert_eq!(storage.try_advance_timers(next), None);
+            assert_eq!(count.0.load(Ordering::Relaxed), due + 1);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_driver_ids_advance_once_and_unregister_releases_both_wakers() {
+        let storage = SystemClockStorage::new_shared();
+        let count = std::sync::Arc::new(CountingWake(AtomicUsize::new(0)));
+        let first = storage.register_driver(Waker::from(std::sync::Arc::clone(&count)));
+        let second = storage.register_driver(Waker::from(std::sync::Arc::clone(&count)));
+        assert_eq!(first, 0);
+        assert_eq!(second, 1);
+        assert_eq!(std::sync::Arc::strong_count(&count), 3);
+        storage.unregister_driver(first);
+        storage.unregister_driver(second);
+        assert_eq!(std::sync::Arc::strong_count(&count), 1);
+        assert!(storage.storage().driver_wakers.lock().is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_isolated_clock_state_relocation_restores_original_driver_identity() {
+        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut ());
+        let source = source.unwrap();
+        for owns_clock in [false, true] {
+            let mut state = ClockState::new_system();
+            if owns_clock {
+                state.activate_clock_owner();
+            }
+            assert_eq!(state.register_driver(Waker::noop().clone()).driver_id(), Some(0));
+            state.relocate(Some(&source), &destination);
+            assert_eq!(state.register_driver(Waker::noop().clone()).driver_id(), Some(0));
+            state.relocate(Some(&destination), &source);
+            assert_eq!(state.register_driver(Waker::noop().clone()).driver_id(), Some(1));
         }
     }
 

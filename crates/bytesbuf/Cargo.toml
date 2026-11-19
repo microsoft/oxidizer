@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.12.0"
+version = "0.14.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -61,7 +61,6 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
-mutants = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
 plurality = { path = "../plurality" }

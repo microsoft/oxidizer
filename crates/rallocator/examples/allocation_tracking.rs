@@ -20,7 +20,7 @@ rallocator::rallocator!();
 
 fn main() {
     seismograph::recorder(Configuration {
-        allocations: seismograph::recorder::RecordingPolicy {
+        allocations: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()

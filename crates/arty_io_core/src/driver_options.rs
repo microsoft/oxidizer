@@ -8,7 +8,7 @@ use thread_aware_core::Thread;
 use crate::DriverRole;
 
 #[derive(Debug)]
-/// Inputs for creating a driver on one async worker.
+/// Inputs for driver creation on one async worker.
 pub struct DriverOptions {
     thread: Thread,
     owner_waker: Waker,
@@ -16,7 +16,7 @@ pub struct DriverOptions {
 }
 
 impl DriverOptions {
-    /// Creates options for a driver on the async worker represented by `thread`.
+    /// Creates the inputs for a driver on the async worker that `thread` identifies.
     #[must_use]
     pub fn new(thread: Thread, owner_waker: Waker, role: DriverRole) -> Self {
         Self { thread, owner_waker, role }
@@ -28,7 +28,7 @@ impl DriverOptions {
         &self.thread
     }
 
-    /// Returns the waker that wakes the owning async worker.
+    /// Returns the waker for the owning async worker.
     ///
     /// A driver must not return this waker from [`Driver::waker`](crate::Driver::waker)
     /// or synchronously wake it from that waker.

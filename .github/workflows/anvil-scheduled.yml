@@ -17,9 +17,11 @@ jobs:
   anvil-scheduled:
     uses: ./.github/workflows/anvil-scheduled-impl.yml
     # A called workflow cannot elevate beyond its caller, so the root grants
-    # issues:write while the implementation resets ordinary jobs to read-only
-    # and restores that scope only on publish-failure.
+    # publication scopes while the implementation resets ordinary jobs to read-only
+    # and restores each scope only on its publishing job.
     permissions:
       contents: read
+      actions: read
+      security-events: write
       issues: write
     secrets: inherit

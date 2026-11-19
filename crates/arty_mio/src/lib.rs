@@ -29,12 +29,12 @@
 //! ```no_run
 //! use std::io;
 //!
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use arty_mio::{MioContext, MioOptions};
 //! use mio::Interest;
 //!
-//! async fn receive(builtins: &Builtins) -> io::Result<()> {
-//!     let io = builtins.io().context::<MioContext>(&MioOptions::default());
+//! async fn receive(context: &Context) -> io::Result<()> {
+//!     let io = context.io().context::<MioContext>(&MioOptions::default());
 //!     let address = "127.0.0.1:0".parse().expect("the example address is valid");
 //!     let socket = mio::net::UdpSocket::bind(address)?;
 //!     let mut registration = io.register(socket, Interest::READABLE)?;

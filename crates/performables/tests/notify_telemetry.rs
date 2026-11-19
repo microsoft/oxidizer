@@ -12,7 +12,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use performables::sync::Async;
 use performables::sync::notify::Notify;
 use seismograph::recorder::event::{EventKind, ObjectId};
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 
 #[test]
@@ -24,7 +24,7 @@ fn notifications_have_distinct_stable_events_and_live_recording() {
     let mut cx = Context::from_waker(Waker::noop());
     assert!(wait.as_mut().poll(&mut cx).is_pending());
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
+        general_events: Policy::all(false),
         ..Default::default()
     });
     notify.notify_one();
@@ -67,7 +67,7 @@ fn reentrant_delivery_records_signal_before_access() {
     let notify = Arc::new(Notify::<Async>::new());
     let id = ObjectId::from_ptr(Arc::as_ptr(&notify).cast::<()>());
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
+        general_events: Policy::all(false),
         ..Default::default()
     });
     let wait = Arc::new(ReentrantWait(Mutex::new(Box::pin({

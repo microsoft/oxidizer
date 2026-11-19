@@ -4,7 +4,7 @@
 [package]
 name = "fakeable"
 description = "Procedural macros for switching concrete types between real and fake implementations."
-version = "0.2.2"
+version = "0.2.4"
 readme = "README.md"
 keywords = ["oxidizer", "fake", "mock", "testing"]
 categories = ["development-tools::testing", "rust-patterns"]
@@ -41,7 +41,6 @@ fakeable_impl = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

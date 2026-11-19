@@ -39,13 +39,13 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
+    // #[gamma::skip(parameter.default_shadow, reason = "A null source ignores the requested byte count and always returns the input buffer unchanged")]
     pub async fn read_at_most_into(&mut self, _len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         Ok((0, into))
     }
@@ -55,7 +55,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -71,7 +70,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -87,7 +85,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -137,17 +134,15 @@ impl Default for Null {
 impl Read for Null {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
+    // #[gamma::skip(parameter.default_shadow, reason = "The forwarded count is ignored by the inherent null-source read")]
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -157,7 +152,6 @@ impl Read for Null {
 impl Write for Null {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn write(&mut self, _sequence: BytesView) -> impl Future<Output = Result<(), Infallible>> {
         ready(Ok(()))
     }
@@ -165,7 +159,6 @@ impl Write for Null {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for Null {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }
@@ -173,7 +166,6 @@ impl HasMemory for Null {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for Null {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -195,9 +187,10 @@ impl NullBuilder {
     /// traits that every stream implements.
     ///
     /// Optional. Defaults to using the Rust global allocator.
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     #[must_use]
-    pub fn memory(mut self, memory: OpaqueMemory) -> Self {
-        self.memory = memory;
+    pub fn memory(mut self, memory: impl Into<OpaqueMemory>) -> Self {
+        self.memory = memory.into();
         self
     }
 

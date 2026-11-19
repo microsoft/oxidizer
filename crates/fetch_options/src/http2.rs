@@ -1,20 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! HTTP/2 specific connection options.
+//! HTTP/2 connection options.
 
-/// Configuration options for HTTP/2 connections.
+/// Configures HTTP/2 stream limits and flow control.
 ///
-/// Controls HTTP/2-specific behavior such as stream limits and protocol settings.
+/// Transport support varies. Some transports ignore these settings.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct Http2Options {
-    /// Initial maximum number of streams that can be sent over HTTP/2 connections.
+    /// Initial maximum number of streams that the client can send on an HTTP/2 connection.
     ///
     /// `None` requests no override. The transport chooses its initial cap and updates it from
     /// the peer's HTTP/2 settings.
     pub initial_max_send_streams: Option<usize>,
-    /// Whether adaptive tuning of the HTTP/2 flow-control window is enabled.
+    /// Enables adaptive tuning of the HTTP/2 flow-control window.
     ///
     /// Defaults to `false`.
     pub adaptive_window: bool,
@@ -46,10 +46,10 @@ impl Http2Options {
         self
     }
 
-    /// Enables adaptive tuning of the window size.
+    /// Sets whether adaptive tuning of the window size is enabled.
     ///
-    /// Defaults to `false`, which keeps the initial window size fixed.
-    /// If `true`, the client enables adaptive flow control.
+    /// The default is `false`, which keeps the initial window size fixed.
+    /// `true` enables adaptive flow control.
     ///
     /// # Examples
     ///

@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::{TaskHandle, TaskPtr};
@@ -15,12 +17,26 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
+    #[cfg(feature = "inspection")]
+    pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> ControlFlow<()>) {
+        let mut next = self.head;
+        while let Some(task) = next {
+            // SAFETY: The list owns these live tasks. Inspection cannot mutate the
+            // list, and a cycle cannot run while its owner borrows it for inspection.
+            next = unsafe { task.as_task() }.links().next.get();
+            if visit(task).is_break() {
+                break;
+            }
+        }
+    }
+
     pub(crate) fn insert(&mut self, task_handle: TaskHandle) -> TaskPtr {
         let pointer = task_handle.as_ptr();
         // SAFETY: `task_handle` keeps the pinned allocation alive on its owner thread.
         let links = unsafe { pointer.as_task() }.get_ref().links();
         assert!(!links.linked.replace(true), "a task may be linked only once");
         links.previous.set(self.tail);
+        // #[gamma::skip(stmt.delete_call, reason = "New tasks initialize next to None; removal resets next to None before a task can be reinserted.")]
         links.next.set(None);
 
         if let Some(tail) = self.tail {
@@ -84,21 +100,64 @@ impl std::fmt::Debug for TaskList {
 
 impl Drop for TaskList {
     fn drop(&mut self) {
-        while self.pop_front().is_some() {}
+        while
+        // #[gamma::skip(cond.negate, option.is_some_to_is_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self.pop_front().is_some() {}
     }
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+// Intrusive links and raw-pointer ownership are not exposed by the executor API.
 mod tests {
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::allocate_test_task_in;
 
-    fn task(pool: &MultiPool) -> TaskHandle {
-        allocate_test_task_in(pool)
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn inspection_advances_once_per_task_and_honors_early_termination() {
+        let pool = MultiPool::new();
+        let mut list = TaskList::default();
+        let expected: Vec<_> = (0..3).map(|_| list.insert(crate::allocate_test_task_in(&pool))).collect();
+        let mut visited = Vec::new();
+        list.inspect_until(|pointer| {
+            assert!(!visited.contains(&pointer), "inspection must advance to the next task");
+            visited.push(pointer);
+            ControlFlow::Continue(())
+        });
+        assert_eq!(visited, expected);
+        visited.clear();
+        list.inspect_until(|pointer| {
+            visited.push(pointer);
+            ControlFlow::Break(())
+        });
+        assert_eq!(visited, vec![*expected.first().unwrap()]);
+        drop(list);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_middle_and_tail_unlinks_preserve_neighbors_and_owner_counts() {
+        let pool = MultiPool::new();
+        let mut list = TaskList::default();
+        let pointers: Vec<_> = (0..4).map(|_| list.insert(crate::allocate_test_task_in(&pool))).collect();
+        assert!(!list.is_empty());
+        // SAFETY: all pointers remain owned by this list on the current thread.
+        let middle = unsafe { list.remove(pointers[1]) }.unwrap();
+        // SAFETY: middle still owns the unlinked allocation.
+        assert!(unsafe { list.remove(pointers[1]) }.is_none());
+        drop(middle);
+        // SAFETY: the tail remains owned by this list.
+        drop(unsafe { list.remove(pointers[3]) }.unwrap());
+        assert_eq!(list.pop_front().unwrap().as_ptr(), pointers[0]);
+        assert_eq!(list.pop_front().unwrap().as_ptr(), pointers[2]);
+        assert!(list.is_empty());
+        for _ in 0..4 {
+            list.insert(crate::allocate_test_task_in(&pool));
+        }
+        drop(list);
+        assert!(pool.is_empty());
     }
 
     #[test]
@@ -107,40 +166,24 @@ mod tests {
     }
 
     #[test]
-    fn insertion_removal_and_drain_preserve_ownership_order() {
+    fn insertion_removal_and_drop_preserve_ownership() {
         let pool = MultiPool::new();
-        let first = task(&pool);
+        let first = crate::allocate_test_task_in(&pool);
         let first_pointer = first.as_ptr();
-        let second = task(&pool);
+        let second = crate::allocate_test_task_in(&pool);
         let second_pointer = second.as_ptr();
         let mut list = TaskList::default();
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
-        assert!(!list.is_empty());
         assert_eq!(format!("{list:?}"), "TaskList { .. }");
-
         // SAFETY: `first_pointer` is live and belongs to `list`.
-        let removed = unsafe { list.remove(first_pointer) }.unwrap();
-        assert_eq!(removed.as_ptr(), first_pointer);
-        drop(removed);
-
-        let remaining = list.pop_front().unwrap();
-        assert_eq!(remaining.as_ptr(), second_pointer);
-        drop(remaining);
+        drop(unsafe { list.remove(first_pointer) }.unwrap());
+        assert_eq!(list.pop_front().unwrap().as_ptr(), second_pointer);
         assert!(list.is_empty());
-        assert!(pool.is_empty());
-    }
 
-    #[test]
-    fn dropping_the_list_releases_its_owned_tasks() {
-        let pool = MultiPool::new();
-        {
-            let mut list = TaskList::default();
-            _ = list.insert(task(&pool));
-            _ = list.insert(task(&pool));
-        }
-
+        _ = list.insert(crate::allocate_test_task_in(&pool));
+        drop(list);
         assert!(pool.is_empty());
     }
 }
