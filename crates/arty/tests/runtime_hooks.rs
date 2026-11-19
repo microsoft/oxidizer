@@ -7,14 +7,14 @@
 
 mod support;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::hook::{HookFn, Panic, WorkerInit};
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{Runtime, RuntimeControl, WorkersPolicy};
 use arty::task::Context;
 use support::JoinHandleExt as _;
 
@@ -145,6 +145,59 @@ impl Clone for CloneCount {
 }
 
 impl ThreadAware for CloneCount {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct LocalRegistrationProbe {
+    clones: Arc<AtomicUsize>,
+    relocated: mpsc::Sender<(ThreadId, ThreadId)>,
+}
+
+impl Clone for LocalRegistrationProbe {
+    fn clone(&self) -> Self {
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            clones: Arc::clone(&self.clones),
+            relocated: self.relocated.clone(),
+        }
+    }
+}
+
+impl ThreadAware for LocalRegistrationProbe {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        let source = source
+            .expect("runtime control supplies the source worker for worker-local registration")
+            .id();
+        assert!(
+            self.relocated.send((source, destination.id())).is_ok(),
+            "the test retains the relocation receiver until registration completes"
+        );
+    }
+}
+
+struct ShutdownDuringRegistration {
+    control: RuntimeControl,
+    original_dropped: Option<Arc<AtomicBool>>,
+}
+
+impl Clone for ShutdownDuringRegistration {
+    fn clone(&self) -> Self {
+        Self {
+            control: self.control.clone(),
+            original_dropped: None,
+        }
+    }
+}
+
+impl Drop for ShutdownDuringRegistration {
+    fn drop(&mut self) {
+        if let Some(original_dropped) = &self.original_dropped {
+            original_dropped.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl ThreadAware for ShutdownDuringRegistration {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -343,6 +396,53 @@ fn control_registration_applies_before_local_spawn() {
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
+}
+
+#[test]
+fn local_registration_clones_once_and_relocates_from_the_current_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let clones = Arc::new(AtomicUsize::new(0));
+    let (relocated, relocation) = mpsc::channel();
+
+    let source = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().id();
+            cx.control().on(HookFn::<Panic, _>::new(
+                LocalRegistrationProbe {
+                    clones: Arc::clone(&clones),
+                    relocated,
+                },
+                |_event, _data| {},
+            ));
+            assert_eq!(clones.load(Ordering::SeqCst), 1);
+            source
+        })
+        .unwrap();
+
+    assert_eq!(relocation.try_recv().unwrap(), (source, source));
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn local_worker_init_retains_original_before_callback_starts_shutdown() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let original_dropped = Arc::new(AtomicBool::new(false));
+
+    let result = runtime.scheduler().block_on(async |cx| {
+        cx.control().on(HookFn::<WorkerInit, _>::new(
+            ShutdownDuringRegistration {
+                control: cx.control().clone(),
+                original_dropped: Some(Arc::clone(&original_dropped)),
+            },
+            |_event, data| data.control.request_stop(),
+        ));
+        assert!(!original_dropped.load(Ordering::SeqCst));
+    });
+
+    result.unwrap();
+    runtime.stop().unwrap();
+    assert!(original_dropped.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -578,5 +678,17 @@ fn control_ignores_registration_after_shutdown_starts() {
     control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
 
     assert_eq!(clones.load(Ordering::SeqCst), 0);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn control_clones_nonretained_hook_data_for_each_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let control = support::runtime_control(&runtime);
+    let clones = Arc::new(AtomicUsize::new(0));
+
+    control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
+
+    assert_eq!(clones.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }

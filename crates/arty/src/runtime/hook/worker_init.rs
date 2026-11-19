@@ -7,6 +7,10 @@ use thread_aware::Thread;
 ///
 /// Each registered callback runs exactly once on every worker. This includes
 /// workers that start after callback registration.
+///
+/// Do not request runtime shutdown from this callback, including through
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
+/// Worker initialization callbacks must finish their setup and return normally.
 #[derive(Debug)]
 pub struct WorkerInit {
     thread: Thread,

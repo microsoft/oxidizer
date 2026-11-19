@@ -191,7 +191,8 @@ mod private {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
-    use std::time::Duration;
+
+    use testing_aids::TEST_TIMEOUT;
 
     use super::{RuntimeState, TokioSupport};
     use crate::TokioHandle;
@@ -243,7 +244,7 @@ mod tests {
             started.send(()).unwrap();
             released.recv().unwrap();
         });
-        task_started.recv_timeout(Duration::from_secs(5)).unwrap();
+        task_started.recv_timeout(TEST_TIMEOUT).unwrap();
         let support = TokioSupport::from_handle(TokioHandle::from(runtime));
         let (completed, completion) = mpsc::sync_channel(1);
         let drop_thread = std::thread::spawn(move || {
@@ -251,7 +252,7 @@ mod tests {
             completed.send(()).unwrap();
         });
 
-        let result = completion.recv_timeout(Duration::from_secs(1));
+        let result = completion.recv_timeout(TEST_TIMEOUT);
         release.send(()).unwrap();
         drop_thread.join().unwrap();
 
