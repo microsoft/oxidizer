@@ -387,7 +387,7 @@ fn local_worker_init_retains_original_before_callback_starts_shutdown() {
         assert!(!original_dropped.load(Ordering::SeqCst));
     });
 
-    assert!(result.is_ok());
+    result.unwrap();
     runtime.stop().unwrap();
     assert!(original_dropped.load(Ordering::SeqCst));
 }
