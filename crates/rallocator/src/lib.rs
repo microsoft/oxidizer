@@ -8,10 +8,6 @@
 //! We use it to experiment with allocation hinting, backend selection,
 //! and runtime telemetry through `seismograph`.
 //!
-//! The default backend is a Rust port of [snmalloc](https://github.com/microsoft/snmalloc).
-//! An experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc)
-//! is also available.
-//!
 //! # Why use it
 //!
 //! The design targets allocation-heavy multithreaded and thread-per-core
@@ -30,29 +26,27 @@
 //! rallocator = "0.4"
 //! ```
 //!
-//! Call [`rallocator!`] once in your executable to install the global allocator:
+//! Call [`rallocator!`] once in your executable. `rallocator::rallocator!();` uses the default personality.
 //!
-//! ```rust
-//! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!();
-//! ```
+//! | Personality | Macro call | Allocator |
+//! | --- | --- | --- |
+//! | `snmalloc` (default) | `rallocator::rallocator!(backend = snmalloc);` | Rust port of [snmalloc](https://github.com/microsoft/snmalloc) |
+//! | `mimalloc` | `rallocator::rallocator!(backend = mimalloc);` | Experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc) |
+//! | `dynamic` | `rallocator::rallocator!(backend = dynamic);` | Selected at startup |
 //!
-//! To fix the backend at compile time, use `rallocator!(backend = snmalloc)` or `rallocator!(backend = mimalloc)`.
-//! Neither form reads the environment. The default remains snmalloc.
+//! Only `dynamic` reads the variable below. Set it before launch. The first allocation fixes the choice for the process.
 //!
-//! To use the same executable with different allocators, install the dynamic backend:
+//! | `RALLOCATOR_DYNAMIC_PERSONALITY` | Allocator used |
+//! | --- | --- |
+//! | `snmalloc` | Rust snmalloc |
+//! | `mimalloc` | Rust mimalloc |
+//! | `system` | System allocator |
+//! | Unset or empty | Rust snmalloc (default) |
+//! | Any other value | Rust snmalloc, with a warning on standard error |
 //!
-//! ```rust
-//! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!(backend = dynamic);
-//! ```
+//! # Recording
 //!
-//! Before starting the executable, set `RALLOCATOR_DYNAMIC_PERSONALITY` to `mimalloc`, `snmalloc`, or `system`.
-//! The first allocation fixes the choice for the life of the process.
-//! An unset or empty value selects snmalloc. For any other unrecognized value, the allocator warns on standard error and uses snmalloc.
-//!
-//! All three choices record allocation events when recording is enabled.
-//! Only the snmalloc and mimalloc backends provide Seismograph state snapshots.
+//! Only snmalloc and mimalloc provide Seismograph state snapshots.
 //! State observations can be incomplete or stale. Allocator capacity is not application-live memory.
 //!
 //! With allocation recording enabled, [`Rallocator`] records allocations, successful
@@ -61,11 +55,6 @@
 //! Failed resizes and calls that keep both the address and size produce no event.
 //! For a move, recording completes before the old block becomes reusable.
 //! A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
-//!
-//! ```rust
-//! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!(backend = mimalloc);
-//! ```
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -94,18 +83,14 @@ pub use allocator::Rallocator;
 /// Use a single statically linked allocator instance. Allocations must be freed
 /// by the instance that created them, not by independently linked copies in other DLLs.
 ///
-/// # Backend selection
-///
-/// The default is snmalloc. Select a backend through the macro:
+/// # Example
 ///
 /// ```rust
 /// # #![forbid(unsafe_code)]
-/// rallocator::rallocator!(backend = snmalloc);
+/// rallocator::rallocator!(backend = dynamic);
 /// ```
 ///
-/// Use `rallocator!(backend = mimalloc)` for the Rust mimalloc backend.
-/// Use `rallocator!(backend = dynamic)` to select `snmalloc`, `mimalloc`, or `system`
-/// with `RALLOCATOR_DYNAMIC_PERSONALITY` before the executable starts. See the [crate documentation](crate).
+/// See the [usage tables](crate#usage) for all personalities and environment values.
 #[macro_export]
 macro_rules! rallocator {
     () => {
