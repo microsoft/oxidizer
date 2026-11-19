@@ -15,7 +15,7 @@
 
 An experimental Rust global allocator for NUMA and mostly thread-local workloads.
 
-We use it to experiment with allocation hinting, compile-time configuration,
+We use it to experiment with allocation hinting, backend selection,
 and runtime telemetry through `seismograph`.
 
 The default backend is a Rust port of [snmalloc][__link0].
@@ -46,14 +46,24 @@ Call [`rallocator!`][__link3] once in your executable to install the global allo
 rallocator::rallocator!();
 ```
 
-Select a backend at compile time with `rallocator!(backend = snmalloc)` or
-`rallocator!(backend = mimalloc)`. The default remains snmalloc.
-The macro installs [`Rallocator`][__link4] with the selected backend.
-An allocation must return to the backend that created it.
-Both backends record allocation events and provide Seismograph state snapshots.
+To fix the backend at compile time, use `rallocator!(backend = snmalloc)` or `rallocator!(backend = mimalloc)`.
+Neither form reads the environment. The default remains snmalloc.
+
+To use the same executable with different allocators, install the dynamic backend:
+
+```rust
+rallocator::rallocator!(backend = dynamic);
+```
+
+Before starting the executable, set `RALLOCATOR_BACKEND` to `mimalloc`, `snmalloc`, or `system`.
+The first allocation fixes the choice for the life of the process.
+An unset or empty value selects snmalloc. For any other unrecognized value, the allocator warns on standard error and uses snmalloc.
+
+All three choices record allocation events when recording is enabled.
+Only the snmalloc and mimalloc backends provide Seismograph state snapshots.
 State observations can be incomplete or stale. Allocator capacity is not application-live memory.
 
-With allocation recording enabled, [`Rallocator`][__link5] records allocations, successful
+With allocation recording enabled, [`Rallocator`][__link4] records allocations, successful
 resizes, and frees. A resize is one event with the previous and new addresses
 and requested sizes. In-place size changes also produce this event.
 Failed resizes and calls that keep both the address and size produce no event.
@@ -70,10 +80,9 @@ rallocator::rallocator!(backend = mimalloc);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbC8Y1TJO1Sg8bwEdgFkYejY8bzx67V7D_17MbmjZtsqiOsjthZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb91LeXjezy1Uboll5llgYG2Qbg7r4p1N8h5sbf1cKAsy4FSNhZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://github.com/microsoft/snmalloc
  [__link1]: https://github.com/microsoft/mimalloc
  [__link2]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
  [__link3]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html
  [__link4]: https://docs.rs/rallocator/0.4.0/rallocator/?search=Rallocator
- [__link5]: https://docs.rs/rallocator/0.4.0/rallocator/?search=Rallocator

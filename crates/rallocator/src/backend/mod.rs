@@ -1,23 +1,25 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compile-time backend selectors for [`Rallocator`](crate::Rallocator).
+//! Backend selectors for [`Rallocator`](crate::Rallocator).
 //!
 //! Internal support for [`rallocator!`](crate::rallocator).
 //! The selectors do not implement [`GlobalAlloc`](std::alloc::GlobalAlloc).
 
 pub(crate) mod abort;
+mod dynamic;
 #[cfg(target_os = "macos")]
 mod macos_mutex;
 mod mimalloc;
 pub(crate) mod snmalloc;
 
+pub use dynamic::Dynamic;
 pub use mimalloc::Mimalloc;
 pub use snmalloc::Snmalloc;
 
 /// A built-in backend for [`Rallocator`](crate::Rallocator).
 ///
-/// This trait is sealed. Only [`Snmalloc`] and [`Mimalloc`] implement it.
+/// This trait is sealed. Only [`Snmalloc`], [`Mimalloc`], and [`Dynamic`] implement it.
 #[doc(hidden)]
 pub trait Backend: sealed::Operations {}
 

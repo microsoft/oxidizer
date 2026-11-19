@@ -7,10 +7,11 @@ use seismograph::recorder::event::EventClass;
 
 use crate::backend::{Backend, Snmalloc};
 
-/// A stateless allocator handle with a backend selected at compile time.
+/// A stateless allocator handle.
 ///
 /// Use [`rallocator!`](crate::rallocator) to install the global allocator.
-/// The macro selects the backend. The default is snmalloc.
+/// The macro selects a fixed backend or defers the choice to process startup.
+/// The default is snmalloc.
 ///
 /// Handles with the same backend share allocator state. Return each allocation
 /// to the backend that created it.
