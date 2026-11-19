@@ -413,9 +413,8 @@ impl Clock {
 
     /// Returns time in the comparison domain of this clock's timers.
     ///
-    /// Controlled timers follow controlled time. System timers use the precise
-    /// driver source. A coarse read can lag after the driver wakes a deadline.
-    /// That lag can leave a future pending with no later wake.
+    /// Controlled timers follow controlled time. System timers read the same
+    /// precise source as the timer driver.
     pub(super) fn timer_instant(&self) -> Instant {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]

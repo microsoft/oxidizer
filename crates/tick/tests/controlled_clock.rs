@@ -192,15 +192,14 @@ fn controlled_simple_clock_stopwatch_observes_controlled_time() {
 
 #[test]
 fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
-    let control = ClockControl::new();
+    let control = ClockControl::new().auto_advance(Duration::from_secs(1));
     let mut watch = control.to_simple_clock().stopwatch();
 
-    control.advance(Duration::from_secs(1));
     assert_eq!(watch.restart(), Duration::from_secs(1));
-    assert_eq!(watch.elapsed(), Duration::ZERO);
 
-    control.advance(Duration::from_secs(2));
-    assert_eq!(watch.elapsed(), Duration::from_secs(2));
+    control.set_time(SystemTime::UNIX_EPOCH);
+    assert_eq!(watch.restart(), Duration::ZERO);
+    assert_eq!(watch.restart(), Duration::from_secs(1));
 }
 
 #[cfg(feature = "coarse-time")]

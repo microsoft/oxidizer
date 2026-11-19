@@ -754,22 +754,29 @@ mod gamma_round2_tests {
     }
 
     #[test]
-    fn gamma_round2_finish_cycle_records_the_exact_frozen_elapsed_time() {
+    fn gamma_round2_finish_cycle_records_time_advanced_by_a_polled_task() {
         let control = tick::ClockControl::new_at(SystemTime::UNIX_EPOCH);
         let mut executor = Executor::builder().build();
         executor.stopwatch = Stopwatch::start_new(control.to_simple_clock());
+        let task_control = control.clone();
+        executor
+            .tasks()
+            .task(async move {
+                task_control.advance(Duration::from_millis(5));
+            })
+            .register(Completion);
         let duration = metric(&CYCLE_DURATION_MILLIS);
         let gap = metric(&CYCLE_GAP_MILLIS);
         assert!(executor.last_cycle_ended.is_none());
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
-        assert_eq!(executor.last_cycle_ended, Some(Duration::ZERO));
-        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 0);
+        assert_eq!(executor.last_cycle_ended, Some(Duration::from_millis(5)));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 5);
         assert_delta(&CYCLE_GAP_MILLIS, gap, 0, 0);
         assert_all_observations_pushed();
         control.advance(Duration::from_millis(7));
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
-        assert_eq!(executor.last_cycle_ended, Some(Duration::from_millis(7)));
-        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 0);
+        assert_eq!(executor.last_cycle_ended, Some(Duration::from_millis(12)));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 5);
         assert_delta(&CYCLE_GAP_MILLIS, gap, 1, 7);
         assert_all_observations_pushed();
     }
