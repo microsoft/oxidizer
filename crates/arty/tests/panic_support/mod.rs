@@ -9,7 +9,6 @@ use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 
 pub(crate) fn runtime() -> Runtime {
     Runtime::builder()
-        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .on(Panic::ignore())

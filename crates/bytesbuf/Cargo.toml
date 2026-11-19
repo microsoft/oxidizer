@@ -83,6 +83,10 @@ windows-sys = { workspace = true, features = [
     "Win32_System_SystemInformation",
 ] }
 
+[[test]]
+name = "memory_providers"
+required-features = ["test-util"]
+
 [[bench]]
 name = "buf"
 harness = false

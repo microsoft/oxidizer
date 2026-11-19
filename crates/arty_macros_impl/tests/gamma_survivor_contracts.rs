@@ -19,10 +19,10 @@ fn gamma_survivor_controlled_clock_forces_builder() {
     for expected in [
         quote!(::arty::runtime::Runtime::builder()),
         quote!(.clock(::core::clone::Clone::clone(&__arty_clock_control))),
-        quote!(.monitor(::arty::runtime::policy::MonitorPolicy::disabled())),
     ] {
         assert!(text.contains(&expected.to_string()), "{expected}");
     }
+    assert!(!text.contains(&quote!(.monitor(::arty::runtime::policy::MonitorPolicy::disabled())).to_string()));
     assert!(!text.contains(&quote!(Runtime::new()).to_string()));
 }
 

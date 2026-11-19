@@ -110,7 +110,6 @@ fn controlled_timer_callback_submission_wakes_bound_worker() {
 
     let control = ClockControl::new();
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()

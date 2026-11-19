@@ -45,11 +45,7 @@ impl Drop for ShutdownGuard {
 
 #[test]
 fn external_spawn_survives_scheduler_slot_teardown() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (spawned, received) = mpsc::channel();
 
@@ -75,11 +71,7 @@ fn external_spawn_survives_scheduler_slot_teardown() {
 
 #[test]
 fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let rejected = runtime
         .scheduler()
         .block_on(async |cx| {
@@ -102,11 +94,7 @@ fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
 #[test]
 fn thread_local_shutdown_guard_survives_worker_slot_teardown() {
     std::thread::spawn(|| {
-        let runtime = Runtime::builder()
-            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
-            .workers(WorkersPolicy::exactly(1))
-            .build()
-            .unwrap();
+        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
         let (control, scheduler) = runtime
             .scheduler()
             .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))

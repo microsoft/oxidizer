@@ -221,6 +221,7 @@ impl Runtime {
     )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        self.scheduler.dispatcher.release_retained_hooks();
         #[cfg(any(test, feature = "monitor"))]
         let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
@@ -313,7 +314,7 @@ mod tests {
                 shutdown.clone(),
             ),
         );
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new()));
         let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
@@ -354,6 +355,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
@@ -375,6 +377,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));
         dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());
@@ -397,7 +400,6 @@ mod tests {
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
-            .monitor(crate::runtime::policy::MonitorPolicy::disabled())
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::ignore())
             .build()
@@ -451,7 +453,6 @@ mod tests {
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
-            .monitor(crate::runtime::policy::MonitorPolicy::disabled())
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::ignore())
             .build()
@@ -560,7 +561,6 @@ mod tests {
 
     fn single_worker_runtime() -> Runtime {
         Runtime::builder()
-            .monitor(crate::runtime::policy::MonitorPolicy::disabled())
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .blocking_pool(crate::runtime::policy::BlockingPoolPolicy::shared().max(1))
             .build()

@@ -65,10 +65,12 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 
 * `rt`: Enables the runtime, task, and I/O APIs.
 * `macros`: Enables [`main`][__link13] and [`test`][__link14]. It also enables `rt`.
-* `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
-  [`MonitorPolicy`][__link15] starts a local connection for
-  the Seismograph CLI. Task collection runs on request. Event recording stays
-  off until an application or the CLI enables it. This feature also forwards
+* `monitor`: Connects runtime workers and tasks to Seismograph. The default
+  [`MonitorPolicy`][__link15] disables monitoring for
+  tests, doctests, documentation examples, and Miri. It enables monitoring
+  in other environments. An enabled policy starts a local connection for the
+  Seismograph CLI. Task collection runs on request. Event recording stays off
+  until an application or the CLI enables it. This feature also forwards
   monitoring support for `performables` when `performables` is enabled.
 * `test-util`: Enables testing utilities, including
   [`ClockControl`][__link16].
@@ -80,7 +82,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQboV7xXIhtm-sb8D5ubNYUalUbyhME6L1HlNcbgZdI3lc7LyZhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrXZSOrZZ5bkbvTzsKfOtLxsbgvkdGv_ZpkcbMPiYkjAmfxBhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.1/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.1/arty/core/index.html

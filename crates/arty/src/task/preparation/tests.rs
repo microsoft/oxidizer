@@ -20,11 +20,7 @@ use crate::task::Context;
 use crate::task::handle::JoinHandlePool;
 
 fn test_context() -> (Runtime, Context) {
-    let runtime = Runtime::builder()
-        .monitor(crate::runtime::policy::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
     (runtime, cx)
 }

@@ -43,6 +43,7 @@ impl Drop for RecorderGuard {
 
 fn runtime(name: &str) -> Runtime {
     Runtime::builder()
+        .monitor(MonitorPolicy::enabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .name(name)
@@ -83,9 +84,9 @@ fn capture(runtime: &Runtime) -> RuntimeSnapshot {
 }
 
 #[test]
-fn monitor_policy_defaults_to_enabled() {
+fn enabled_monitor_policy_starts_monitoring() {
     let _recording = RecorderGuard::new();
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().monitor(MonitorPolicy::enabled()).build().unwrap();
     let diagnostics = runtime.diagnostics().unwrap();
     let workers = runtime
         .scheduler()
@@ -761,6 +762,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
         ..Configuration::default()
     });
     let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::enabled())
         .workers(WorkersPolicy::exactly(2))
         .name("remote-parent-links")
         .build()
@@ -1066,6 +1068,7 @@ fn growing_pool(name: &str, policy: BlockingPoolPolicy, expected_blocking_worker
         ..Configuration::default()
     });
     let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::enabled())
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(policy.max(2))
         .name(name)

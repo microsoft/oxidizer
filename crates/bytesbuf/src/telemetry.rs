@@ -97,6 +97,7 @@ const fn identity_after_allocation_race(existing: u64) -> u64 {
 
 #[cfg(all(test, feature = "seismograph"))]
 mod tests {
+    // The test exercises private identity transfer and clearing primitives.
     use super::*;
 
     #[test]
