@@ -130,7 +130,6 @@ impl ThreadAware for InactiveClock<Isolated> {
     }
 }
 
-#[cfg(any(feature = "rt-shared", test))]
 impl InactiveClock<Shared> {
     /// Creates an [`InactiveClock`] with one shared timer set.
     ///

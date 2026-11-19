@@ -5,11 +5,14 @@ use std::time::{Duration, SystemTime};
 
 use http::header::RETRY_AFTER;
 use http::{HeaderMap, Response};
+use jiff::fmt::strtime;
+use jiff::tz::Offset;
 use recoverable::{RecoveryInfo, RecoveryKind};
 use tick::Clock;
-use tick::fmt::Rfc2822;
 
 use crate::{HeaderMapExt, StatusExt};
+
+const IMF_FIXDATE: &str = "%a, %d %b %Y %H:%M:%S GMT";
 
 /// Response recovery information with `Retry-After` support.
 ///
@@ -46,13 +49,20 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
         return Some(Duration::from_secs(seconds));
     }
 
-    if let Ok(timestamp) = retry_after_raw.parse::<Rfc2822>() {
-        let timestamp: SystemTime = timestamp.into();
-
+    if let Some(timestamp) = parse_http_date(retry_after_raw) {
         return Some(timestamp.duration_since(clock.system_time()).unwrap_or(Duration::ZERO));
     }
 
     None
+}
+
+fn parse_http_date(value: &str) -> Option<SystemTime> {
+    let datetime = strtime::parse(IMF_FIXDATE, value.trim_matches(|c| matches!(c, ' ' | '\t')))
+        .ok()?
+        .to_datetime()
+        .ok()?;
+    let timestamp = Offset::UTC.to_timestamp(datetime).ok()?;
+    SystemTime::try_from(timestamp).ok()
 }
 
 mod sealed {
@@ -66,7 +76,14 @@ mod sealed {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use jiff::Timestamp;
+
     use super::*;
+
+    fn format_http_date(value: SystemTime) -> String {
+        let timestamp = Timestamp::try_from(value).expect("the test timestamps are within Jiff's range");
+        strtime::format(IMF_FIXDATE, timestamp).expect("the IMF-fixdate format is valid for a timestamp")
+    }
 
     #[test]
     fn retry_after_seconds_value_ok() {
@@ -87,8 +104,7 @@ mod tests {
         let future = now.checked_add(Duration::from_secs(5)).unwrap();
 
         let mut headers = HeaderMap::new();
-        let rfc = Rfc2822::try_from(future).unwrap();
-        headers.insert(RETRY_AFTER, rfc.to_string().parse().unwrap());
+        headers.insert(RETRY_AFTER, format_http_date(future).parse().unwrap());
 
         let delay = get_retry_after_duration(&headers, &clock).unwrap();
         assert_eq!(delay, Duration::from_secs(5));
@@ -102,11 +118,22 @@ mod tests {
         let past = now.checked_sub(Duration::from_secs(5)).unwrap();
 
         let mut headers = HeaderMap::new();
-        let rfc = Rfc2822::try_from(past).unwrap();
-        headers.insert(RETRY_AFTER, rfc.to_string().parse().unwrap());
+        headers.insert(RETRY_AFTER, format_http_date(past).parse().unwrap());
 
         let delay = get_retry_after_duration(&headers, &clock).unwrap();
         assert_eq!(delay, Duration::ZERO);
+    }
+
+    #[test]
+    fn retry_after_date_with_optional_whitespace() {
+        let clock = Clock::new_frozen();
+        let future = clock.system_time().checked_add(Duration::from_secs(5)).unwrap();
+        let value = format!(" \t{}\t ", format_http_date(future));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, value.parse().unwrap());
+
+        assert_eq!(get_retry_after_duration(&headers, &clock), Some(Duration::from_secs(5)));
     }
 
     #[test]
@@ -121,6 +148,24 @@ mod tests {
     fn retry_after_invalid_none() {
         let mut headers = HeaderMap::new();
         headers.insert(RETRY_AFTER, "not-a-date".parse().unwrap());
+
+        let clock = Clock::new_frozen();
+        assert_eq!(get_retry_after_duration(&headers, &clock), None);
+    }
+
+    #[test]
+    fn retry_after_invalid_calendar_date_none() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, "Fri, 31 Feb 2023 00:00:00 GMT".parse().unwrap());
+
+        let clock = Clock::new_frozen();
+        assert_eq!(get_retry_after_duration(&headers, &clock), None);
+    }
+
+    #[test]
+    fn retry_after_date_outside_timestamp_range_none() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, "Fri, 31 Dec 9999 00:00:00 GMT".parse().unwrap());
 
         let clock = Clock::new_frozen();
         assert_eq!(get_retry_after_duration(&headers, &clock), None);

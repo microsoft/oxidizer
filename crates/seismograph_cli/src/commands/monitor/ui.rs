@@ -1937,7 +1937,7 @@ fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant, zone: Result<Time
     let (Some(captured_at), Some(captured_instant)) = (snapshot.captured_at, snapshot.captured_instant) else {
         return "capture time not recorded".into();
     };
-    let local = zone.and_then(|zone| Timestamp::try_from(captured_at).map(|timestamp| timestamp.to_zoned(zone)));
+    let local = zone.and_then(|zone| Timestamp::try_from(captured_at).map(|timestamp| timestamp.to_zoned_datetime(zone)));
     let time = match local {
         Ok(local) => local.strftime("%H:%M:%S").to_string(),
         Err(error) => format!("capture time unavailable: {error}"),
@@ -4292,7 +4292,7 @@ mod tests {
     fn snapshot_time_reports_conversion_and_timezone_errors() {
         let mut snapshot = representative_capture();
         let now = snapshot.captured_instant.unwrap();
-        let out_of_range = std::time::SystemTime::from(Timestamp::MAX) + Duration::from_secs(1);
+        let out_of_range = std::time::SystemTime::try_from(Timestamp::MAX).unwrap() + Duration::from_secs(1);
         snapshot.captured_at = Some(out_of_range);
         assert!(snapshot_time_at(&snapshot, now, Ok(TimeZone::UTC)).starts_with("capture time unavailable: "));
 

@@ -4,7 +4,7 @@
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
-    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
+    not(all(feature = "test-util", feature = "tokio")),
     expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
@@ -81,7 +81,6 @@
 //! - [`Delay`] completes after a duration.
 //! - [`Timer`] produces periodic ticks.
 //! - [`Error`] reports failures and provides limited error inspection.
-//! - [`fmt`] parses and displays `SystemTime`. Enable `fmt` to use it.
 //! - [`runtime`] connects clocks to async runtimes.
 //!
 //! The [design guide](https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md)
@@ -90,8 +89,6 @@
 //! # Extensions
 //!
 //! - [`FutureExt`] adds timeouts to `Future`.
-//! - [`SystemTimeExt`] adds display formats to
-//!   [`SystemTime`][`std::time::SystemTime`].
 //!
 //! # Time retrieval without timers
 //!
@@ -119,7 +116,8 @@
 //! let _now = clock.system_time();
 //!
 //! // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
-//! let stopwatch = Stopwatch::new(&clock);
+//! let mut stopwatch = Stopwatch::new(&clock);
+//! stopwatch.start();
 //! let _elapsed = stopwatch.elapsed();
 //! ```
 //!
@@ -132,12 +130,29 @@
 //! - Human time uses calendars, local clock time, and time zones. These values
 //!   can be ambiguous.
 //!
-//! This crate focuses on machine time. Use [jiff] or [time] for
-//! human time. `tick` values can convert to types from these crates. See the
-//! `interop_*` examples.
+//! This crate focuses on machine time. Use [Jiff] for parsing, formatting,
+//! calendar arithmetic, local clock time, and time zones.
 //!
-//! [jiff]: https://crates.io/crates/jiff
-//! [time]: https://crates.io/crates/time
+//! [`Clock::system_time_as`] and [`SimpleClock::system_time_as`] convert the
+//! current time directly to types that implement `TryFrom<SystemTime>`.
+//! Jiff's [`Timestamp`](https://docs.rs/jiff/latest/jiff/struct.Timestamp.html)
+//! implements this conversion:
+//!
+//! ```
+//! # #[cfg(feature = "test-util")]
+//! # {
+//! use jiff::Timestamp;
+//! use tick::Clock;
+//!
+//! let clock = Clock::new_frozen();
+//! let timestamp: Timestamp = clock.system_time_as();
+//! assert_eq!(timestamp, Timestamp::UNIX_EPOCH);
+//! # }
+//! ```
+//!
+//! See the `interop_jiff` example for time zones and formatting.
+//!
+//! [Jiff]: https://crates.io/crates/jiff
 //!
 //! # Thread-aware relocation
 //!
@@ -249,42 +264,25 @@
 //! - `test-util` adds [`ClockControl`] for deterministic tests. It can freeze
 //!   time, advance time, or advance timers automatically. Enable it only in
 //!   `dev-dependencies`.
-//! - `serde` adds serialization through [serde](https://serde.rs/).
-//! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
-//! - `fast-instant` lets each clock clone select a lower-overhead,
-//!   lower-precision instant source on Linux and Windows. Timer scheduling stays
-//!   precise. Other platforms use [`std::time::Instant::now`]. Precise reads
-//!   remain the default.
+//! - `coarse-time` adds [`Stopwatch::new_coarse`]. This constructor uses a
+//!   lower-overhead, lower-precision instant source on Linux and Windows.
+//!   Other platforms use [`std::time::Instant::now`].
 //!
-//! ## Fast instant contract
+//! ## Coarse stopwatch
 //!
-//! Fast instant reads are disabled by default. Each clock clone has its own
-//! setting. Values do not decrease, but consecutive reads can be equal. The
-//! platform defines their precision. A stopwatch keeps the source setting of
-//! its clock.
-//!
-//! This option does not affect `system_time()`, controlled clocks, or precise
-//! timer scheduling. On an unsupported platform, it keeps the standard instant
-//! source.
-//!
-//! ## Using precise and fast clocks together
-//!
-//! A component can create a fast clone from an existing [`Clock`]. It does not
-//! need a separate application dependency. The original clock stays precise:
+//! Use a coarse stopwatch only if measurements show that elapsed-time reads are
+//! a performance bottleneck. Values do not decrease, but consecutive reads can
+//! be equal. The platform defines their precision.
 //!
 //! ```
 //! # fn main() {
-//! # #[cfg(feature = "fast-instant")] {
-//! use tick::Clock;
+//! # #[cfg(feature = "coarse-time")] {
+//! use tick::{SimpleClock, Stopwatch};
 //!
-//! fn process(clock: &Clock) {
-//!     let fast_clock = clock.clone().with_fast_instant(true);
-//!
-//!     let decision_time = clock.instant();
-//!     let telemetry_time = fast_clock.instant();
-//!     // Use precise time for logic and fast time for debug data.
-//! #   let _ = (decision_time, telemetry_time);
-//! }
+//! let mut stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
+//! stopwatch.start();
+//! let elapsed = stopwatch.elapsed();
+//! # let _ = elapsed;
 //! # }
 //! # }
 //! ```
@@ -297,20 +295,15 @@
 mod clock;
 #[cfg(any(feature = "test-util", test))]
 mod clock_control;
+#[cfg(any(feature = "coarse-time", test))]
+mod coarse_time;
 mod delay;
 mod error;
-#[cfg(any(feature = "fast-instant", test))]
-mod fast_instant;
-
-#[cfg(any(feature = "fmt", test))]
-pub mod fmt;
 
 mod future_ext;
 mod simple_clock;
 mod state;
 mod stopwatch;
-#[cfg(any(feature = "fmt", test))]
-mod system_time_ext;
 mod timer;
 mod timers;
 #[cfg(any(feature = "tokio", test))]
@@ -326,8 +319,6 @@ pub use error::Error;
 pub use future_ext::FutureExt;
 pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
-#[cfg(any(feature = "fmt", test))]
-pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
 pub use timer::{Timer, TimerTick};
 
