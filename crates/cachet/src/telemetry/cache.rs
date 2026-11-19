@@ -504,6 +504,7 @@ impl CacheTelemetry {
     }
 }
 
+// Retain direct event injection, arbitrary request contexts, and helper-only states.
 #[cfg(test)]
 mod tests {
     #[test]
@@ -608,57 +609,6 @@ mod tests {
         capture.assert_contains("cache.get");
         capture.assert_contains("12345");
         capture.assert_contains("true");
-    }
-
-    #[test]
-    fn logs_emit_at_correct_severity_levels() {
-        let telemetry = CacheTelemetry::with_logging();
-
-        let capture = Capture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-        let request_id = next_request_id();
-        futures::executor::block_on(async {
-            async { telemetry.record_get_error("cache", Duration::ZERO, false) }
-                .with_request_id(request_id)
-                .await;
-        });
-        capture.assert_contains("ERROR");
-
-        let capture = Capture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-        let request_id = next_request_id();
-        futures::executor::block_on(async {
-            async { telemetry.record_expired("cache", Duration::ZERO, false) }
-                .with_request_id(request_id)
-                .await;
-        });
-        capture.assert_contains("INFO");
-
-        let capture = Capture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-        let request_id = next_request_id();
-        futures::executor::block_on(async {
-            async { telemetry.record_hit("cache", Duration::ZERO, false) }
-                .with_request_id(request_id)
-                .await;
-        });
-        capture.assert_contains("DEBUG");
-    }
-
-    #[test]
-    fn telemetry_disabled_emits_nothing() {
-        let telemetry = CacheTelemetry::new();
-        let capture = Capture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-
-        let request_id = next_request_id();
-        futures::executor::block_on(async {
-            async { telemetry.record_hit("cache", Duration::from_secs(1), false) }
-                .with_request_id(request_id)
-                .await;
-        });
-
-        assert!(capture.output().is_empty());
     }
 
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
@@ -843,15 +793,6 @@ mod tests {
             *operation_events.lock().expect("test handler mutex should not be poisoned"),
             vec![(request_id, "cache".to_string(), "cache.get".to_string(), 11, true)]
         );
-    }
-
-    #[test]
-    fn next_request_id_returns_unique_incrementing_values() {
-        let a = next_request_id();
-        let b = next_request_id();
-        let c = next_request_id();
-        assert!(b > a, "request IDs must increment: got {a} then {b}");
-        assert!(c > b, "request IDs must increment: got {b} then {c}");
     }
 
     #[test]

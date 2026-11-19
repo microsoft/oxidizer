@@ -182,18 +182,26 @@ where
 /// Unit tests for internal fallback cache implementation details.
 ///
 /// Public API tests are in `tests/fallback.rs`.
+
+// Cache hides the fallback's Debug representation and construction state.
+// Public reads call do_refresh only when refresh is configured.
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use cachet_tier::MockCache;
 
     use super::*;
+    use crate::InsertPolicy;
     use crate::wrapper::CacheWrapper;
-    use crate::{Cache, InsertPolicy};
-
     type TestPrimary = CacheWrapper<String, i32, MockCache<String, i32>>;
     type TestFallbackCache = FallbackCache<String, i32, TestPrimary, MockCache<String, i32>>;
+    /// Tests that `FallbackCacheInner` Debug output is correct.
+    #[test]
+    fn fallback_cachet_inner_debug() {
+        let cache = make_fallback_cache();
+
+        let debug_str = format!("{cache:?}");
+        assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
+    }
 
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
@@ -207,261 +215,6 @@ mod tests {
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
         FallbackCache::new("fallback", primary, fallback_mock, clock, None, telemetry)
-    }
-
-    /// Tests that promotion from fallback to primary works correctly.
-    /// This test accesses internal state to verify promotion behavior.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_cachet_promotes_from_fallback_to_primary() {
-        let clock = Clock::new_frozen();
-
-        let primary_storage = MockCache::<String, i32>::new();
-        let primary_check = primary_storage.clone();
-        let fallback_storage = MockCache::<String, i32>::new();
-
-        fallback_storage
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("insert failed");
-
-        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-
-        let cache = Cache::builder::<String, i32>(clock)
-            .storage(primary_storage)
-            .insert_policy(InsertPolicy::always())
-            .fallback(fallback)
-            .build();
-
-        // Primary should be empty initially
-        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-        assert!(primary_result.is_none());
-
-        // Get should find in fallback and promote to primary
-        let result = cache.get(&"key".to_string()).await.expect("get failed");
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), 42);
-
-        // Now primary should have the value (promoted from fallback)
-        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-        assert!(primary_result.is_some());
-    }
-
-    /// Tests that Never promotion policy prevents promotion to primary.
-    /// This test accesses internal state to verify no promotion occurs.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_cachet_never_policy_does_not_promote() {
-        let clock = Clock::new_frozen();
-
-        let primary_storage = MockCache::<String, i32>::new();
-        let primary_check = primary_storage.clone();
-        let fallback_storage = MockCache::<String, i32>::new();
-
-        fallback_storage
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("insert failed");
-
-        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-
-        let cache = Cache::builder::<String, i32>(clock)
-            .storage(primary_storage)
-            .insert_policy(InsertPolicy::never())
-            .fallback(fallback)
-            .build();
-
-        // Get should find in fallback but NOT promote
-        let result = cache.get(&"key".to_string()).await.expect("get failed");
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), 42);
-
-        // Primary should still be empty (no promotion)
-        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-        assert!(primary_result.is_none());
-    }
-
-    /// Tests that `FallbackCacheInner` Debug output is correct.
-    #[test]
-    fn fallback_cachet_inner_debug() {
-        let cache = make_fallback_cache();
-
-        let debug_str = format!("{cache:?}");
-        assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
-    }
-
-    /// Tests that conditional promotion policy only promotes matching entries.
-    /// This test accesses internal state to verify selective promotion.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_cachet_when_policy_conditional_promotion() {
-        fn is_positive(entry: &CacheEntry<i32>) -> bool {
-            *entry.value() > 0
-        }
-
-        let clock = Clock::new_frozen();
-
-        let primary_storage = MockCache::<String, i32>::new();
-        let primary_check = primary_storage.clone();
-        let fallback_storage = MockCache::<String, i32>::new();
-
-        fallback_storage
-            .insert("positive".to_string(), CacheEntry::new(42))
-            .await
-            .expect("insert failed");
-        fallback_storage
-            .insert("negative".to_string(), CacheEntry::new(-10))
-            .await
-            .expect("insert failed");
-
-        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-
-        let cache = Cache::builder::<String, i32>(clock)
-            .storage(primary_storage)
-            .insert_policy(InsertPolicy::when(is_positive))
-            .fallback(fallback)
-            .build();
-
-        // Get positive value - should be promoted
-        let result = cache.get(&"positive".to_string()).await.expect("get failed");
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), 42);
-
-        // Get negative value - should NOT be promoted
-        let result = cache.get(&"negative".to_string()).await.expect("get failed");
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), -10);
-
-        // Check primary has positive but not negative
-        let positive = primary_check.get(&"positive".to_string()).await.expect("get failed");
-        assert!(positive.is_some());
-        let negative = primary_check.get(&"negative".to_string()).await.expect("get failed");
-        assert!(negative.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn policy_type_debug_formatting() {
-        let always = InsertPolicy::<i32>::always();
-        let never = InsertPolicy::<i32>::never();
-        let when = InsertPolicy::<i32>::when(|_| true);
-
-        let always_str = format!("{always:?}");
-        let never_str = format!("{never:?}");
-        let when_str = format!("{when:?}");
-
-        assert!(always_str.contains("Always"), "got: {always_str}");
-        assert!(never_str.contains("Never"), "got: {never_str}");
-        assert!(when_str.contains("WhenBoxed"), "got: {when_str}");
-    }
-
-    #[test]
-    fn insert_policy_always() {
-        let policy = InsertPolicy::<i32>::always();
-        let entry = CacheEntry::new(42);
-        assert!(policy.should_insert(&entry));
-    }
-
-    #[test]
-    fn insert_policy_never() {
-        let policy = InsertPolicy::<i32>::never();
-        let entry = CacheEntry::new(42);
-        assert!(!policy.should_insert(&entry));
-    }
-
-    #[test]
-    fn insert_policy_when() {
-        let policy = InsertPolicy::<i32>::when(|e| *e.value() > 10);
-        assert!(policy.should_insert(&CacheEntry::new(42)));
-        assert!(!policy.should_insert(&CacheEntry::new(5)));
-    }
-
-    #[test]
-    fn fallback_cache_new_constructs() {
-        let cache = make_fallback_cache();
-        assert_eq!(cache.inner.name, "fallback");
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_get_miss_both() {
-        let cache = make_fallback_cache();
-        let result = cache.get(&"key".to_string()).await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_insert_writes_both() {
-        let cache = make_fallback_cache();
-        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        // Both tiers should have the value
-        let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
-        assert_eq!(*entry.value(), 42);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_invalidate() {
-        let cache = make_fallback_cache();
-        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        cache.invalidate(&"key".to_string()).await.unwrap();
-        assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_clear() {
-        let cache = make_fallback_cache();
-        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        cache.clear().await.unwrap();
-        assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_len() {
-        let cache = make_fallback_cache();
-        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
-        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
-    }
-
-    /// Exercises the background-refresh-on-get path: when a primary hit has a
-    /// stale `cached_at`, `FallbackCache::get` should trigger `do_refresh`.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn fallback_get_triggers_background_refresh() {
-        let clock = Clock::new_frozen();
-        let primary_mock = MockCache::<String, i32>::new();
-
-        // Insert an entry with an old cached_at so should_refresh returns true
-        let old_time = clock.system_time() - Duration::from_mins(2);
-        let entry = CacheEntry::expires_at(42, Duration::from_mins(5), old_time);
-        primary_mock.insert("key".to_string(), entry).await.unwrap();
-
-        let fallback_mock = MockCache::<String, i32>::new();
-        let telemetry = CacheTelemetry::new();
-        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(None));
-
-        let primary = CacheWrapper::new(
-            "primary",
-            primary_mock,
-            clock.clone(),
-            None,
-            telemetry.clone(),
-            InsertPolicy::default(),
-            false,
-        );
-        let fc = FallbackCache::new("test", primary, fallback_mock, clock, Some(refresh), telemetry);
-
-        // Primary hit with stale cached_at should trigger background refresh
-        let result = fc.get(&"key".to_string()).await.unwrap();
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), 42);
-
-        // Give the spawned refresh task time to run
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     #[test]
