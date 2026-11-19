@@ -197,7 +197,7 @@ fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
 
     assert_eq!(watch.restart(), Duration::from_secs(1));
 
-    control.set_time(SystemTime::UNIX_EPOCH);
+    control.set_time(SystemTime::UNIX_EPOCH + Duration::from_millis(500));
     assert_eq!(watch.restart(), Duration::ZERO);
     assert_eq!(watch.restart(), Duration::from_secs(1));
 }
