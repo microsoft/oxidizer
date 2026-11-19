@@ -5,9 +5,8 @@ use std::time::{Duration, SystemTime};
 
 use http::header::RETRY_AFTER;
 use http::{HeaderMap, Response};
-#[cfg(test)]
-use jiff::Timestamp;
 use jiff::fmt::strtime;
+use jiff::tz::Offset;
 use recoverable::{RecoveryInfo, RecoveryKind};
 use tick::Clock;
 
@@ -59,14 +58,8 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
 
 fn parse_http_date(value: &str) -> Option<SystemTime> {
     let datetime = strtime::parse(IMF_FIXDATE, value).ok()?.to_datetime().ok()?;
-    let timestamp = datetime.in_tz("UTC").ok()?.timestamp();
+    let timestamp = Offset::UTC.to_timestamp(datetime).ok()?;
     SystemTime::try_from(timestamp).ok()
-}
-
-#[cfg(test)]
-fn format_http_date(value: SystemTime) -> String {
-    let timestamp = Timestamp::try_from(value).expect("the test timestamps are within Jiff's range");
-    strtime::format(IMF_FIXDATE, timestamp).expect("the IMF-fixdate format is valid for a timestamp")
 }
 
 mod sealed {
@@ -80,7 +73,14 @@ mod sealed {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use jiff::Timestamp;
+
     use super::*;
+
+    fn format_http_date(value: SystemTime) -> String {
+        let timestamp = Timestamp::try_from(value).expect("the test timestamps are within Jiff's range");
+        strtime::format(IMF_FIXDATE, timestamp).expect("the IMF-fixdate format is valid for a timestamp")
+    }
 
     #[test]
     fn retry_after_seconds_value_ok() {
