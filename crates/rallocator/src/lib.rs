@@ -26,13 +26,13 @@
 //! rallocator = "0.4"
 //! ```
 //!
-//! Call [`rallocator!`] once in your executable. `rallocator::rallocator!();` uses the default personality.
+//! Call [`rallocator!`] once in your executable. `rallocator!()` selects snmalloc.
 //!
-//! | Personality | Macro call | Allocator |
-//! | --- | --- | --- |
-//! | `snmalloc` (default) | `rallocator::rallocator!(backend = snmalloc);` | Rust port of [snmalloc](https://github.com/microsoft/snmalloc) |
-//! | `mimalloc` | `rallocator::rallocator!(backend = mimalloc);` | Experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc) |
-//! | `dynamic` | `rallocator::rallocator!(backend = dynamic);` | Selected at startup |
+//! | Personality | Allocator |
+//! | --- | --- |
+//! | `rallocator!(backend = snmalloc)` | Rust port of [snmalloc](https://github.com/microsoft/snmalloc) |
+//! | `rallocator!(backend = mimalloc)` | Experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc) |
+//! | `rallocator!(backend = dynamic)` | Selected at startup |
 //!
 //! Only `dynamic` reads the variable below. Set it before launch. The first allocation fixes the choice for the process.
 //!
@@ -41,8 +41,7 @@
 //! | `snmalloc` | Rust snmalloc |
 //! | `mimalloc` | Rust mimalloc |
 //! | `system` | System allocator |
-//! | Unset or empty | Rust snmalloc (default) |
-//! | Any other value | Rust snmalloc, with a warning on standard error |
+//! | Unset or empty | System allocator (default) |
 //!
 //! # Recording
 //!

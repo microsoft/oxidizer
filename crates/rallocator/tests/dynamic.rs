@@ -21,8 +21,8 @@ fn launch_selects_the_backend_for_all_threads() {
     }
 
     for (setting, expected, warn) in [
-        (None, "snmalloc", false),
-        (Some(""), "snmalloc", false),
+        (None, "system", false),
+        (Some(""), "system", false),
         (Some("snmalloc"), "snmalloc", false),
         (Some("mimalloc"), "mimalloc", false),
         (Some("system"), "system", false),

@@ -8,12 +8,12 @@ use super::Choice;
 
 fn parse<T: Copy + PartialEq + From<u8>>(value: &[T]) -> Option<Choice> {
     let is = |name: &[u8]| value.iter().copied().eq(name.iter().copied().map(T::from));
-    if value.is_empty() || is(b"snmalloc") {
+    if value.is_empty() || is(b"system") {
+        Some(Choice::System)
+    } else if is(b"snmalloc") {
         Some(Choice::Snmalloc)
     } else if is(b"mimalloc") {
         Some(Choice::Mimalloc)
-    } else if is(b"system") {
-        Some(Choice::System)
     } else {
         None
     }
@@ -25,11 +25,13 @@ pub(super) fn read() -> Option<Choice> {
     // readers do not invalidate getenv's result. As with all Unix environment
     // reads, a writer must exclude concurrent readers (std::env::set_var).
     let value = unsafe { libc::getenv(c"RALLOCATOR_DYNAMIC_PERSONALITY".as_ptr()) };
-    if value.is_null() {
-        return Some(Choice::Snmalloc);
-    }
-    // SAFETY: getenv returned a live NUL-terminated value, borrowed only for this lookup.
-    parse(unsafe { std::ffi::CStr::from_ptr(value) }.to_bytes())
+    let value = if value.is_null() {
+        c""
+    } else {
+        // SAFETY: getenv returned a live NUL-terminated value, borrowed only for this lookup.
+        unsafe { std::ffi::CStr::from_ptr(value) }
+    };
+    parse(value.to_bytes())
 }
 
 #[cfg(windows)]

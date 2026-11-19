@@ -36,13 +36,13 @@ Add the dependency:
 rallocator = "0.4"
 ```
 
-Call [`rallocator!`][__link1] once in your executable. `rallocator::rallocator!();` uses the default personality.
+Call [`rallocator!`][__link1] once in your executable. `rallocator!()` selects snmalloc.
 
-|Personality|Macro call|Allocator|
-|-----------|----------|---------|
-|`snmalloc` (default)|`rallocator::rallocator!(backend = snmalloc);`|Rust port of [snmalloc][__link2]|
-|`mimalloc`|`rallocator::rallocator!(backend = mimalloc);`|Experimental Rust port of [mimalloc][__link3]|
-|`dynamic`|`rallocator::rallocator!(backend = dynamic);`|Selected at startup|
+|Personality|Allocator|
+|-----------|---------|
+|`rallocator!(backend = snmalloc)`|Rust port of [snmalloc][__link2]|
+|`rallocator!(backend = mimalloc)`|Experimental Rust port of [mimalloc][__link3]|
+|`rallocator!(backend = dynamic)`|Selected at startup|
 
 Only `dynamic` reads the variable below. Set it before launch. The first allocation fixes the choice for the process.
 
@@ -51,8 +51,7 @@ Only `dynamic` reads the variable below. Set it before launch. The first allocat
 |`snmalloc`|Rust snmalloc|
 |`mimalloc`|Rust mimalloc|
 |`system`|System allocator|
-|Unset or empty|Rust snmalloc (default)|
-|Any other value|Rust snmalloc, with a warning on standard error|
+|Unset or empty|System allocator (default)|
 
 ## Recording
 
@@ -72,7 +71,7 @@ A resize keeps one view-local lifetime in Seismograph instead of adding a new al
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbd8hLAJ0OUVkbJ6RpUtk3AVEbN-2nMZGlpQMb9opOo9Y4DsFhZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbqOZ00JKYaL4bdkSCxXYE-_EbkXYKJscKc-YbxObn0TU3P7FhZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
  [__link1]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html
  [__link2]: https://github.com/microsoft/snmalloc
