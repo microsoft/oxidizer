@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
@@ -66,7 +67,7 @@ impl Driver for RelocationIoDriver {
 #[test]
 fn relocating_context_leaves_shared_source_clones_on_the_source_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -124,7 +125,7 @@ impl ThreadAware for ReturnedProbe {
 #[test]
 fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -165,14 +166,14 @@ fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
         (
             Runtime::builder()
-                .monitor(arty::runtime::MonitorPolicy::disabled())
+                .monitor(arty::runtime::policy::MonitorPolicy::disabled())
                 .build()
                 .unwrap(),
             1,
         ),
         (
             Runtime::builder()
-                .monitor(arty::runtime::MonitorPolicy::disabled())
+                .monitor(arty::runtime::policy::MonitorPolicy::disabled())
                 .workers(WorkersPolicy::exactly(2))
                 .build()
                 .unwrap(),
@@ -219,7 +220,7 @@ fn spawn_anywhere_relocates_results_on_the_source_worker() {
 #[test]
 fn spawn_at_relocates_results_to_the_source_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -265,7 +266,7 @@ fn spawn_at_relocates_results_to_the_source_worker() {
 #[test]
 fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -291,7 +292,7 @@ fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
 #[test]
 fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -325,7 +326,7 @@ fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
 #[test]
 fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -359,7 +360,7 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
     }
 
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -413,7 +414,7 @@ struct RelocationObservation {
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(policy)
         .build()
@@ -550,7 +551,7 @@ fn relocating_context_uses_same_pool_when_shared() {
 #[test]
 fn relocated_context_initializes_io_on_the_destination_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -596,12 +597,12 @@ fn relocated_context_initializes_io_on_the_destination_worker() {
 #[test]
 fn foreign_owner_relocation_preserves_runtime_binding() {
     let source_runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let destination_runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -636,7 +637,7 @@ fn repeated_spawn_after_relocation_uses_destination() {
     const SPAWN_COUNT: usize = 100;
 
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -660,12 +661,12 @@ fn repeated_spawn_after_relocation_uses_destination() {
 #[test]
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
     let source_runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let destination_runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();

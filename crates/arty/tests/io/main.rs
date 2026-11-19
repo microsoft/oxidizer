@@ -22,7 +22,8 @@ use std::{fmt, thread};
 
 use arty::core::{Thread, ThreadAware};
 use arty::io::Io;
-use arty::runtime::{Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, RuntimeBuilder};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -561,7 +562,7 @@ impl<M: Marker> Driver for TestDriver<M> {
 
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(workers))
         .build()
         .unwrap()

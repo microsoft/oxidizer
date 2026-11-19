@@ -9,8 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
+use arty::runtime::Runtime;
 use arty::runtime::hook::Panic;
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use thread_aware::Unaware;
 
 struct SelfWakePanic {
@@ -45,10 +46,10 @@ impl Drop for SelfWakePanic {
 fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     let repetitions = if cfg!(miri) { 2 } else { 32 };
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .on(Panic::IGNORE)
+        .on(Panic::ignore())
         .build()
         .unwrap();
     let polls = Arc::new(AtomicUsize::new(0));

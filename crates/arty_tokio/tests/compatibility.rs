@@ -194,7 +194,7 @@ fn shutdown_during_submission_is_a_typed_init_error() {
     let error = runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.control().request_stop();
+            cx.control().shutdown();
             arty_tokio::init(&cx, tokio.handle()).await.unwrap_err()
         })
         .unwrap();
@@ -240,7 +240,7 @@ fn shutdown_after_an_installer_is_ready_returns_a_typed_error() {
         std::thread::yield_now();
     }
 
-    context.control().request_stop();
+    context.control().shutdown();
     blocker_release.send(()).unwrap();
     futures::executor::block_on(blocker).unwrap();
     let error = initialization.join().unwrap().unwrap_err();

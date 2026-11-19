@@ -9,15 +9,16 @@ mod support;
 
 use std::time::Duration;
 
+use arty::runtime::Runtime;
 use arty::runtime::hook::Panic;
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
 use support::JoinHandleExt as _;
 use tick::ClockControl;
 
 #[test]
 fn validation_checks_the_base_name() {
     Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .name("requests")
         .build()
         .unwrap()
@@ -25,7 +26,7 @@ fn validation_checks_the_base_name() {
         .unwrap();
     assert_eq!(
         Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .name("invalid\0name")
             .build()
             .unwrap_err()
@@ -38,7 +39,7 @@ fn validation_checks_the_base_name() {
 fn custom_clock_ok() {
     let clock_control = ClockControl::new();
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .clock(clock_control.clone())
         .build()
         .unwrap();
@@ -54,7 +55,7 @@ fn custom_clock_ok() {
 #[test]
 fn maximum_worker_count_replaces_exact_count() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .workers(WorkersPolicy::at_most(1))
         .build()
@@ -74,7 +75,7 @@ fn maximum_worker_count_replaces_exact_count() {
 fn zero_worker_policies_can_be_replaced_before_building() {
     for policy in [WorkersPolicy::exactly(0), WorkersPolicy::at_most(0)] {
         let runtime = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .workers(policy)
             .workers(WorkersPolicy::at_most(1))
             .build()
@@ -94,7 +95,7 @@ fn zero_worker_policies_can_be_replaced_before_building() {
 #[test]
 fn automatic_worker_selection_replaces_exact_count() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .workers(WorkersPolicy::default())
         .build()
@@ -113,7 +114,7 @@ fn automatic_worker_selection_replaces_exact_count() {
 #[test]
 fn default_policy_starts_shutdown() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -126,8 +127,8 @@ fn default_policy_starts_shutdown() {
 #[test]
 fn ignore_policy_keeps_the_runtime_running() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .on(Panic::IGNORE)
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .on(Panic::ignore())
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -138,31 +139,36 @@ fn ignore_policy_keeps_the_runtime_running() {
 }
 
 #[test]
-fn panic_hook_replaces_the_default() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .on(Panic::SHUTDOWN)
-        .on(Panic::IGNORE)
-        .build()
-        .unwrap();
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+fn last_panic_hook_to_set_a_response_wins() {
+    for (first, last, shuts_down) in [
+        (Panic::shutdown(), Panic::ignore(), false),
+        (Panic::ignore(), Panic::shutdown(), true),
+    ] {
+        let runtime = Runtime::builder()
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+            .on(first)
+            .on(last)
+            .build()
+            .unwrap();
+        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
 
-    assert!(
-        scheduler
-            .spawn(async |_| panic!("replacement policy"))
-            .join()
-            .unwrap_err()
-            .is_panic()
-    );
-    assert_eq!(scheduler.spawn(async |_| 42).join().unwrap(), 42);
-    runtime.stop().unwrap();
+        assert!(scheduler.spawn(async |_| panic!("task panic")).join().unwrap_err().is_panic());
+        let next = scheduler.spawn(async |_| 42).join();
+        if shuts_down {
+            assert!(next.unwrap_err().is_shutdown());
+            assert!(runtime.stop().is_err());
+        } else {
+            assert_eq!(next.unwrap(), 42);
+            runtime.stop().unwrap();
+        }
+    }
 }
 
 #[test]
 fn build_and_stop_inside_futures_executor() {
     futures::executor::block_on(async {
         let runtime = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .workers(WorkersPolicy::exactly(1))
             .build()
             .unwrap();

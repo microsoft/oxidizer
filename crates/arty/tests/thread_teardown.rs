@@ -13,7 +13,8 @@ use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use arty::runtime::{Runtime, RuntimeControl, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, RuntimeControl};
 use arty::task::{JoinHandle, Scheduler};
 use support::JoinHandleExt as _;
 
@@ -38,14 +39,14 @@ struct ShutdownGuard(RuntimeControl);
 
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
-        self.0.request_stop();
+        self.0.shutdown();
     }
 }
 
 #[test]
 fn external_spawn_survives_scheduler_slot_teardown() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -75,7 +76,7 @@ fn external_spawn_survives_scheduler_slot_teardown() {
 #[test]
 fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -84,7 +85,7 @@ fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
         .block_on(async |cx| {
             let control = cx.control().clone();
             // Publish dispatcher shutdown without stopping this worker's executor in this poll.
-            std::thread::spawn(move || control.request_stop()).join().unwrap();
+            std::thread::spawn(move || control.shutdown()).join().unwrap();
             let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
             matches!(
@@ -102,7 +103,7 @@ fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
 fn thread_local_shutdown_guard_survives_worker_slot_teardown() {
     std::thread::spawn(|| {
         let runtime = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .workers(WorkersPolicy::exactly(1))
             .build()
             .unwrap();

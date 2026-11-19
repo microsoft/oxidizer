@@ -15,7 +15,8 @@
 /// # Examples
 ///
 /// ```no_run
-/// use arty::runtime::{MonitorPolicy, Runtime};
+/// use arty::runtime::Runtime;
+/// use arty::runtime::policy::MonitorPolicy;
 ///
 /// let runtime = Runtime::builder()
 ///     .monitor(MonitorPolicy::enabled())

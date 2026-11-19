@@ -96,7 +96,7 @@ impl Context {
     /// Returns runtime-wide control available to this task.
     ///
     /// Use [`RuntimeControl::workers`] to list the runtime's workers.
-    /// Use [`RuntimeControl::request_stop`] to request shutdown without waiting.
+    /// Use [`RuntimeControl::shutdown`] to request shutdown without waiting.
     #[must_use]
     #[inline]
     pub fn control(&self) -> &RuntimeControl {

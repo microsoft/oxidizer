@@ -111,7 +111,8 @@ pub(crate) fn classify_join(error: arty::task::JoinError) -> InitError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use arty::runtime::{Runtime, WorkersPolicy};
+    use arty::runtime::Runtime;
+    use arty::runtime::policy::WorkersPolicy;
 
     use super::*;
 
@@ -143,7 +144,7 @@ mod tests {
 
         let invalid = futures::executor::block_on(context.scheduler().spawn_at(&foreign, (), |()| async {})).unwrap_err();
         let panic = futures::executor::block_on(context.scheduler().spawn(async |_| panic!("installer panic classification"))).unwrap_err();
-        context.control().request_stop();
+        context.control().shutdown();
         let shutdown = futures::executor::block_on(context.scheduler().spawn(async |_| ())).unwrap_err();
 
         assert!(has_source::<InvalidDestinationError>(&classify_join(invalid)));

@@ -18,7 +18,7 @@ use std::thread;
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::Runtime;
 #[cfg(not(miri))]
-use arty::runtime::WorkersPolicy;
+use arty::runtime::policy::WorkersPolicy;
 #[cfg(feature = "macros")]
 use arty::task::Context;
 use arty::task::Scheduler;
@@ -37,8 +37,8 @@ fn assert_send_sync() {
 #[test]
 fn spawned_future_preserves_mutable_self_borrows_across_polls() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -109,8 +109,8 @@ async fn spawn_some_tasks(cx: Context) {
 #[test]
 fn local_factory_runs_once_and_preserves_future_borrows() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     runtime
@@ -185,8 +185,8 @@ fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
     };
 
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     runtime
@@ -225,7 +225,7 @@ fn test_worker_affinity() {
         return;
     }
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(6))
         .build()
         .unwrap();
@@ -250,7 +250,7 @@ fn test_worker_affinity() {
 #[test]
 fn remote_factories_create_non_send_futures_on_the_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .unwrap();
     let (created, polled, associated) = runtime
@@ -284,8 +284,8 @@ fn queued_factory_outlives_its_submitting_thread_and_accepts_non_unpin_captures(
     static_assertions::assert_impl_all!(Capture: Send);
     static_assertions::assert_not_impl_any!(Capture: Unpin);
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::at_most(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(1))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -341,7 +341,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
     }
 
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .unwrap();
     let (source, destination, worker, executed_on) = runtime
@@ -377,8 +377,8 @@ fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
     static_assertions::assert_impl_all!(ResultValue: Send);
     static_assertions::assert_not_impl_any!(ResultValue: Sync, ThreadAware);
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::at_most(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(1))
         .build()
         .unwrap();
     let result = runtime
@@ -455,8 +455,8 @@ async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving
 #[test]
 fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::at_most(2))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(2))
         .build()
         .unwrap();
     let (scheduler, control) = runtime
@@ -464,7 +464,7 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
         .spawn_anywhere((), |cx, ()| async move { (cx.scheduler().clone(), cx.control().clone()) })
         .join()
         .unwrap();
-    control.request_stop();
+    control.shutdown();
     let tasks: Vec<_> = control
         .workers()
         .into_iter()
@@ -491,8 +491,8 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     }
 
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let (scheduler, control) = runtime
@@ -500,8 +500,8 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .block_on(async |cx| (cx.scheduler().clone(), cx.control().clone()))
         .unwrap();
     let other = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let destination = other

@@ -28,7 +28,7 @@
 //!
 //! [`RuntimeBuilder`] collects configuration before any worker starts.
 //! [`RuntimeBuilder::build`] rejects invalid configuration and starts the runtime.
-//! The policy types describe each choice and its use of threads and memory.
+//! The [`policy`] module groups the worker, blocking pool, and monitoring policies.
 //!
 //! ## Defaults
 //!
@@ -37,14 +37,14 @@
 //! - The runtime name is `arty`. Async threads use `arty-async-<index>`.
 //!   Shared blocking pools use `arty-blocking-<thread index>`. Per-worker pools
 //!   also include the async worker index before the thread index.
-//! - [`WorkersPolicy::default`] starts one async worker.
+//! - [`policy::WorkersPolicy::default`] starts one async worker.
 //! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
 //!   overrides this default.
-//! - [`BlockingPoolPolicy::default`] creates one shared blocking pool. Its
-//!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
+//! - [`policy::BlockingPoolPolicy::default`] creates one shared blocking pool. Its
+//!   default thread limits can change. Use [`policy::BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] starts a local Seismograph monitor when the
+//! - [`policy::MonitorPolicy::default`] starts a local Seismograph monitor when the
 //!   `monitor` feature is present. Task collection runs on request. This does
 //!   not enable event recording.
 //! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
@@ -60,7 +60,7 @@
 //! A monitor is a local connection through which the Seismograph CLI can
 //! collect diagnostics. Each enabled runtime owns one connection and removes it
 //! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
-//! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
+//! Use [`policy::MonitorPolicy::disabled`] to run without this connection or task inspection.
 //!
 //! Collection reads live async tasks and queued or running blocking functions
 //! from their native storage. Each request limits the number of tasks per worker.
@@ -79,10 +79,10 @@
 //!
 //! ## Configuration types
 //!
-//! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
-//! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
+//! - [`policy::WorkersPolicy`] selects how many async workers run and which processors they use.
+//! - [`policy::BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
-//! - [`MonitorPolicy`] selects the monitoring configuration.
+//! - [`policy::MonitorPolicy`] selects the monitoring configuration.
 //! - [`hook`] provides panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
@@ -94,7 +94,8 @@
 //! with up to four threads:
 //!
 //! ```
-//! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+//! use arty::runtime::Runtime;
+//! use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let runtime = Runtime::builder()
@@ -115,7 +116,7 @@
 //! and [`test`](crate::test) for the supported syntax and defaults.
 //!
 //! Use [`RuntimeBuilder`] for custom names, clocks, blocking pools, stack sizes,
-//! or [`WorkersPolicy::at_most`].
+//! or [`policy::WorkersPolicy::at_most`].
 //! Use the builder to receive configuration errors and choose when to stop the runtime.
 //!
 //! # Runtime services
@@ -131,8 +132,8 @@
 //!
 //! [`Runtime`] owns the workers.
 //! Schedulers and [`Context`](crate::task::Context) values do not keep the runtime running.
-//! [`RuntimeControl::request_stop`]
-//! requests shutdown without waiting. [`Runtime::stop`] takes ownership of the runtime,
+//! [`RuntimeControl::shutdown`] requests shutdown without waiting.
+//! [`Runtime::stop`] takes ownership of the runtime,
 //! waits for every worker, and reports shutdown failures. Dropping the `Runtime` value
 //! also requests shutdown and waits, but it cannot return an error.
 //!
@@ -149,8 +150,7 @@
 //!
 //! Keep the `Runtime` value on a thread that is not an Arty worker.
 //! Stopping or dropping it in an Arty task or on a blocking worker panics.
-//! Worker code must use
-//! [`RuntimeControl::request_stop`].
+//! Worker code must use [`RuntimeControl::shutdown`].
 
 mod bootstrap;
 mod builder;
@@ -161,6 +161,7 @@ mod error;
 mod handle;
 pub mod hook;
 pub(crate) mod monitoring;
+pub mod policy;
 mod shutdown;
 mod shutdown_cause;
 #[cfg(test)]
@@ -170,8 +171,6 @@ mod workers;
 
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
-#[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]

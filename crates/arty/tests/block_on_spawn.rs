@@ -12,7 +12,7 @@ fn capture_by_value() {
     #[expect(clippy::useless_vec, reason = "using a vec to test with a type using pointers on the inside")]
     let vec = vec![10, 11];
     let result = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .expect("Failed to create runtime")
         .scheduler()
@@ -26,7 +26,7 @@ fn move_and_spawn() {
     #[expect(clippy::useless_vec, reason = "using a vec to test with a type using pointers on the inside")]
     let vec = vec![10, 11];
     let result = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .expect("Failed to create runtime")
         .scheduler()
@@ -42,7 +42,7 @@ fn move_and_spawn() {
 fn capture_reference() {
     let vec = vec![10, 11];
     let result = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .expect("Failed to create runtime")
         .scheduler()
@@ -58,7 +58,7 @@ fn capture_reference() {
 fn capture_mut_reference() {
     let mut vec = vec![10, 11];
     let result = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .build()
         .expect("Failed to create runtime")
         .scheduler()

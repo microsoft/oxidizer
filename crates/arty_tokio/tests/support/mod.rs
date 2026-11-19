@@ -4,7 +4,8 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 

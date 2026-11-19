@@ -7,10 +7,11 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{RuntimeConfig, RuntimeName};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 use crate::runtime::hook::{Hook, HookFn};
+use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
 /// Configures workers and clocks before starting a runtime.
 ///
@@ -26,7 +27,8 @@ use crate::runtime::hook::{Hook, HookFn};
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+/// use arty::runtime::Runtime;
+/// use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 ///
 /// let runtime = Runtime::builder()
 ///     .workers(WorkersPolicy::at_most(4))
@@ -73,7 +75,7 @@ impl RuntimeBuilder {
     /// use arty::runtime::Runtime;
     /// use arty::runtime::hook::Panic;
     ///
-    /// let builder = Runtime::builder().on(Panic::IGNORE);
+    /// let builder = Runtime::builder().on(Panic::ignore());
     /// ```
     #[must_use]
     pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self
@@ -96,7 +98,8 @@ impl RuntimeBuilder {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{MonitorPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::MonitorPolicy;
     ///
     /// let builder = Runtime::builder().monitor(MonitorPolicy::enabled());
     /// ```
@@ -117,7 +120,8 @@ impl RuntimeBuilder {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::WorkersPolicy;
     ///
     /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
     /// ```
@@ -163,7 +167,8 @@ impl RuntimeBuilder {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::BlockingPoolPolicy;
     ///
     /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```

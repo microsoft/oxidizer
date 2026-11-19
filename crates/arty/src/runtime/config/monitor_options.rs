@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::runtime::config::MonitorPolicy;
+use crate::runtime::policy::MonitorPolicy;
 
 /// Worker-owned monitoring configuration derived from the runtime policy.
 #[derive(Clone, Debug)]

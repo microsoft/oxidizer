@@ -93,12 +93,12 @@ impl Args {
         let workers = self.workers.as_ref().map(|value| worker_policy(value, runtime_path)).transpose()?;
         let workers = workers.map(|policy| quote!(.workers(#policy)));
         let monitor = monitor.map(|monitor| match monitor {
-            MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::enabled())),
-            MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
+            MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::policy::MonitorPolicy::enabled())),
+            MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::policy::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::SHUTDOWN)),
-            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::IGNORE)),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::shutdown())),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::ignore())),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
@@ -169,12 +169,12 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
         && !count.base10_digits().starts_with('-')
         && matches!(count.suffix(), "" | "usize")
     {
-        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::exactly(#count)));
+        return Ok(quote!(#runtime_path::runtime::policy::WorkersPolicy::exactly(#count)));
     }
     if let Expr::Path(syn::ExprPath { qself: None, path, .. }) = value
         && path.is_ident("all")
     {
-        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::all()));
+        return Ok(quote!(#runtime_path::runtime::policy::WorkersPolicy::all()));
     }
     Err(syn::Error::new_spanned(
         value,
@@ -363,7 +363,7 @@ mod tests {
         });
         assert_eq!(
             worker_policy(&grouped, &quote!(::arty)).unwrap().to_string(),
-            quote!(::arty::runtime::WorkersPolicy::exactly(3usize)).to_string()
+            quote!(::arty::runtime::policy::WorkersPolicy::exactly(3usize)).to_string()
         );
     }
 
@@ -423,7 +423,7 @@ mod tests {
         #[::core::prelude::v1::test]
         fn fails() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
+                .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -452,8 +452,8 @@ mod tests {
         let expected = quote! {
             pub fn run() -> AppResult {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::exactly(4usize))
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .workers(::arty::runtime::policy::WorkersPolicy::exactly(4usize))
+                    .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -477,7 +477,7 @@ mod tests {
         let expected_main = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::all())
+                    .workers(::arty::runtime::policy::WorkersPolicy::all())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -496,8 +496,8 @@ mod tests {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .workers(::arty::runtime::policy::WorkersPolicy::all())
+                    .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -525,8 +525,8 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .workers(::arty::runtime::policy::WorkersPolicy::all())
+                    .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -564,8 +564,8 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::exactly(1))
-                    .monitor(::arty::runtime::MonitorPolicy::enabled())
+                    .workers(::arty::runtime::policy::WorkersPolicy::exactly(1))
+                    .monitor(::arty::runtime::policy::MonitorPolicy::enabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -601,7 +601,7 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -635,7 +635,7 @@ mod tests {
             let expected = quote! {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .monitor(::arty::runtime::MonitorPolicy::#policy())
+                        .monitor(::arty::runtime::policy::MonitorPolicy::#policy())
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -665,7 +665,7 @@ mod tests {
                 #[::core::prelude::v1::test]
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .monitor(::arty::runtime::MonitorPolicy::#policy())
+                        .monitor(::arty::runtime::policy::MonitorPolicy::#policy())
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn main_panic_settings_are_forwarded_exactly() {
-        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
+        for policy in [quote!(shutdown), quote!(ignore)] {
             let expansion = main(
                 quote!(panic = #policy),
                 quote! {
@@ -694,7 +694,7 @@ mod tests {
             let expected = quote! {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .on(::arty::runtime::hook::Panic::#constant)
+                        .on(::arty::runtime::hook::Panic::#policy())
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -713,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_panic_settings_are_forwarded_exactly() {
-        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
+        for policy in [quote!(shutdown), quote!(ignore)] {
             let expansion = test(
                 quote!(panic = #policy),
                 quote! {
@@ -724,8 +724,8 @@ mod tests {
                 #[::core::prelude::v1::test]
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .monitor(::arty::runtime::MonitorPolicy::disabled())
-                        .on(::arty::runtime::hook::Panic::#constant)
+                        .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
+                        .on(::arty::runtime::hook::Panic::#policy())
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -792,8 +792,11 @@ mod tests {
     #[test]
     fn worker_policy_unwraps_nested_expression_groups() {
         for (mut value, expected) in [
-            (parse_quote!(4usize), quote!(::arty::runtime::WorkersPolicy::exactly(4usize))),
-            (parse_quote!(all), quote!(::arty::runtime::WorkersPolicy::all())),
+            (
+                parse_quote!(4usize),
+                quote!(::arty::runtime::policy::WorkersPolicy::exactly(4usize)),
+            ),
+            (parse_quote!(all), quote!(::arty::runtime::policy::WorkersPolicy::all())),
         ] {
             for _ in 0..2 {
                 value = Expr::Group(syn::ExprGroup {

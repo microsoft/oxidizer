@@ -71,7 +71,7 @@
 //! - `rt`: Enables the runtime, task, and I/O APIs.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
 //! - `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
-//!   [`MonitorPolicy`](crate::runtime::MonitorPolicy) starts a local connection for
+//!   [`MonitorPolicy`](crate::runtime::policy::MonitorPolicy) starts a local connection for
 //!   the Seismograph CLI. Task collection runs on request. Event recording stays
 //!   off until an application or the CLI enables it. This feature also forwards
 //!   monitoring support for `performables` when `performables` is enabled.
@@ -115,7 +115,7 @@ use arty_io_core as _;
 ///
 /// The worker count does not limit threads that run blocking functions.
 /// Without `workers`, the runtime uses
-/// [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// [`WorkersPolicy::default`](crate::runtime::policy::WorkersPolicy::default).
 /// The default is one worker, for both applications and tests.
 /// Each worker uses an operating-system thread and its configured stack.
 /// Large counts can exceed operating-system thread or memory limits.

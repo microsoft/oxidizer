@@ -29,7 +29,7 @@ fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>
 fn stop_via_runtime() {
     execute_or_abandon(|| {
         let runtime = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .build()
             .unwrap();
 
@@ -50,7 +50,7 @@ fn stop_via_runtime() {
 fn stop_via_async_task() {
     execute_or_abandon(|| {
         let runtime = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .build()
             .unwrap();
 
@@ -64,7 +64,7 @@ fn stop_via_async_task() {
         runtime
             .scheduler()
             .spawn_anywhere(Unaware(requested), |cx, Unaware(requested)| async move {
-                cx.control().request_stop();
+                cx.control().shutdown();
                 requested.send(());
             });
 
@@ -81,7 +81,7 @@ fn stop_via_async_task() {
 fn stop_scoped() {
     execute_or_abandon(move || {
         _ = Runtime::builder()
-            .monitor(arty::runtime::MonitorPolicy::disabled())
+            .monitor(arty::runtime::policy::MonitorPolicy::disabled())
             .build()
             .unwrap();
     })
@@ -97,7 +97,7 @@ fn stop_in_run() {
 
         move || {
             Runtime::builder()
-                .monitor(arty::runtime::MonitorPolicy::disabled())
+                .monitor(arty::runtime::policy::MonitorPolicy::disabled())
                 .build()
                 .unwrap()
                 .scheduler()

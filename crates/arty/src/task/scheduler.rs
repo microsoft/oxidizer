@@ -317,7 +317,7 @@ impl Scheduler {
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Uses this scheduler's worker pool. Configure sharing and limits with
-    /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+    /// [`BlockingPoolPolicy`](crate::runtime::policy::BlockingPoolPolicy).
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.
     /// Functions that already run cannot be interrupted and can finish.
@@ -393,8 +393,8 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
-            .monitor(crate::runtime::MonitorPolicy::disabled())
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .monitor(crate::runtime::policy::MonitorPolicy::disabled())
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let registered = runtime
@@ -425,8 +425,8 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .monitor(crate::runtime::MonitorPolicy::disabled())
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .monitor(crate::runtime::policy::MonitorPolicy::disabled())
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let (started_tx, started_rx) = mpsc::channel();

@@ -169,7 +169,7 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker.spawn(async move |_| completed.send(()).unwrap());
     let result = completion.recv_timeout(DRIVER_PROGRESS_TIMEOUT);
     if let Err(error) = result {
-        control.request_stop();
+        control.shutdown();
         scenario.wake_driver_interrupts();
         runtime.stop().unwrap();
         panic!("new runtime work did not interrupt the primary wait: {error}");
@@ -214,7 +214,7 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
 fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
     let control = tick::ClockControl::new();
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()

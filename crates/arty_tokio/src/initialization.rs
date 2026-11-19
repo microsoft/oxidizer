@@ -314,7 +314,8 @@ mod tests {
     use std::future::pending;
     use std::sync::Arc;
 
-    use arty::runtime::{Runtime as ArtyRuntime, WorkersPolicy};
+    use arty::runtime::Runtime as ArtyRuntime;
+    use arty::runtime::policy::WorkersPolicy;
     use performables::sync::channel::oneshot;
     use tokio::runtime::{Builder, Runtime};
 

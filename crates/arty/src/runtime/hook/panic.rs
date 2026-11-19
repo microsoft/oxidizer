@@ -12,10 +12,14 @@ use super::hook_fn::HookFn;
 /// panic returns through its join handle without creating this event or
 /// stopping the runtime.
 ///
-/// The default response is shutdown. Call [`ignore`](Self::ignore) from the
-/// callback to keep the runtime available. Call [`shutdown`](Self::shutdown) to
-/// select shutdown explicitly. The failed task returns
-/// [`JoinError`](crate::task::JoinError) with either response.
+/// Each event starts with shutdown selected. Arty calls all registered hooks
+/// in order on the same event, then applies the final response. A callback
+/// that only reads the event leaves the response unchanged.
+///
+/// Register [`Panic::ignore`] to keep the runtime running. A later hook can
+/// select shutdown again. Custom callbacks can use [`set_ignore`](Self::set_ignore)
+/// or [`set_shutdown`](Self::set_shutdown) to choose a response for this panic.
+/// The failed task returns [`JoinError`](crate::task::JoinError) with either response.
 ///
 /// Arty does not catch a panic from the callback. You must make sure that the
 /// callback completes without a panic. Arty also cannot repair application
@@ -28,11 +32,19 @@ pub struct Panic {
 }
 
 impl Panic {
-    /// Stops the runtime after a contained panic.
-    pub const SHUTDOWN: HookFn<Self, ()> = HookFn::new((), |event, ()| event.shutdown());
+    /// Creates a hook that selects runtime shutdown for each contained task panic.
+    ///
+    /// Shutdown is the default. Register this hook to override an earlier ignore response.
+    #[must_use]
+    pub const fn shutdown() -> HookFn<Self, ()> {
+        HookFn::new((), |event, ()| event.set_shutdown())
+    }
 
-    /// Keeps the runtime running after a contained panic.
-    pub const IGNORE: HookFn<Self, ()> = HookFn::new((), |event, ()| event.ignore());
+    /// Creates a hook that asks Arty to keep running after a contained task panic.
+    #[must_use]
+    pub const fn ignore() -> HookFn<Self, ()> {
+        HookFn::new((), |event, ()| event.set_ignore())
+    }
 
     pub(crate) const fn new(payload: TaskPanicPayload) -> Self {
         Self {
@@ -51,13 +63,13 @@ impl Panic {
         self.payload.as_ref()
     }
 
-    /// Keeps the runtime running after this contained panic.
-    pub fn ignore(&mut self) {
+    /// Selects continued operation for this panic.
+    pub fn set_ignore(&mut self) {
         self.action = PanicAction::Ignore;
     }
 
-    /// Stops the runtime after this contained panic.
-    pub fn shutdown(&mut self) {
+    /// Selects runtime shutdown for this panic.
+    pub fn set_shutdown(&mut self) {
         self.action = PanicAction::Shutdown;
     }
 }

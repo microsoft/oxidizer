@@ -13,8 +13,9 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
+use arty::runtime::Runtime;
 use arty::runtime::hook::{HookFn, Panic};
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
 use support::JoinHandleExt as _;
 
 #[derive(Clone)]
@@ -120,7 +121,7 @@ async fn panic_with_payload(payload: u8) {
 fn panic_hook_covers_async_user_panics_only() {
     let count = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(
             PanicProbe {
@@ -131,7 +132,7 @@ fn panic_hook_covers_async_user_panics_only() {
                 assert_eq!(data.destination, Some(std::thread::current().id()));
                 assert_eq!(event.payload().downcast_ref::<&str>(), Some(&"async panic"));
                 data.count.fetch_add(1, Ordering::SeqCst);
-                event.ignore();
+                event.set_ignore();
             },
         ))
         .build()
@@ -161,11 +162,11 @@ fn panic_hook_covers_async_user_panics_only() {
 #[test]
 fn panic_hook_selects_shutdown_from_the_payload() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new((), |event, ()| {
             if event.payload().downcast_ref::<u32>() != Some(&2) {
-                event.ignore();
+                event.set_ignore();
             }
         }))
         .build()
@@ -195,7 +196,7 @@ fn panic_hook_selects_shutdown_from_the_payload() {
 #[test]
 fn control_appends_panic_hooks_in_registration_order() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -210,7 +211,7 @@ fn control_appends_panic_hooks_in_registration_order() {
         },
         |event, data| {
             data.log.push("ignore");
-            event.ignore();
+            event.set_ignore();
         },
     ));
     installation.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -233,7 +234,7 @@ fn control_appends_panic_hooks_in_registration_order() {
         },
         |event, data| {
             data.log.push("shutdown");
-            event.shutdown();
+            event.set_shutdown();
         },
     ));
     installation.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -252,7 +253,7 @@ fn control_appends_panic_hooks_in_registration_order() {
 #[test]
 fn control_registration_applies_before_local_spawn() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -261,7 +262,7 @@ fn control_registration_applies_before_local_spawn() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.control().on(Panic::IGNORE);
+            cx.control().on(Panic::ignore());
             cx.control()
                 .on(HookFn::<Panic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
                     data.0.fetch_add(1, Ordering::SeqCst);
@@ -279,7 +280,7 @@ fn control_registration_applies_before_local_spawn() {
 #[test]
 fn worker_registration_relocates_and_runs_on_every_worker() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .build()
         .unwrap();
@@ -311,7 +312,7 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
                             .is_ok(),
                         "the test retains the observation receiver until both callbacks run"
                     );
-                    event.ignore();
+                    event.set_ignore();
                 },
             ));
             (workers, source, cx.scheduler().clone())
@@ -346,17 +347,17 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
 fn panic_callbacks_share_one_borrowed_event() {
     let addresses = EventAddresses(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
-            event.ignore();
+            event.set_ignore();
         }))
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
-            event.ignore();
+            event.set_ignore();
         }))
         .build()
         .unwrap();
@@ -379,14 +380,14 @@ fn panic_callbacks_share_one_borrowed_event() {
 #[test]
 fn control_ignores_registration_after_shutdown_starts() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
 
-    control.request_stop();
+    control.shutdown();
     control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
 
     assert_eq!(clones.load(Ordering::SeqCst), 0);

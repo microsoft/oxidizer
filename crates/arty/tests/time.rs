@@ -11,7 +11,8 @@ use std::task::{Context as PollContext, Poll, Wake, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 use arty::task::Context;
 use tick::{ClockControl, FutureExt};
 
@@ -109,7 +110,7 @@ fn controlled_timer_callback_submission_wakes_bound_worker() {
 
     let control = ClockControl::new();
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .monitor(arty::runtime::policy::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()

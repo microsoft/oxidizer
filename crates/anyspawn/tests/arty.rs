@@ -12,8 +12,9 @@ use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use anyspawn::{JoinHandle, Spawner};
+use arty::runtime::Runtime;
 use arty::runtime::hook::Panic;
-use arty::runtime::{MonitorPolicy, Runtime, WorkersPolicy};
+use arty::runtime::policy::{MonitorPolicy, WorkersPolicy};
 use futures::future::join_all;
 use thread_aware::{Thread, ThreadAware};
 
@@ -156,7 +157,7 @@ fn arty_task_panics_return_join_errors() {
     let runtime = Runtime::builder()
         .monitor(MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
-        .on(Panic::IGNORE)
+        .on(Panic::ignore())
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
