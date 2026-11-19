@@ -185,6 +185,37 @@ fn owned_custom_runtime_supports_tokio_tasks() {
 }
 
 #[test]
+fn independent_arty_runtimes_use_independent_tokio_runtimes() {
+    let first_tokio = Builder::new_multi_thread().worker_threads(1).build().unwrap();
+    let first_tokio_id = first_tokio.handle().id().to_string();
+    let first = Runtime::builder()
+        .tokio_compat_with(arty_tokio::TokioHandle::from(first_tokio))
+        .build()
+        .unwrap();
+
+    let second_tokio = Builder::new_multi_thread().worker_threads(1).build().unwrap();
+    let second_tokio_id = second_tokio.handle().id().to_string();
+    let second = Runtime::builder()
+        .tokio_compat_with(arty_tokio::TokioHandle::from(second_tokio))
+        .build()
+        .unwrap();
+
+    let first_result = first
+        .scheduler()
+        .block_on(async |_| (Handle::current().id().to_string(), tokio::spawn(async { 21 }).await.unwrap()))
+        .unwrap();
+    let second_result = second
+        .scheduler()
+        .block_on(async |_| (Handle::current().id().to_string(), tokio::spawn(async { 42 }).await.unwrap()))
+        .unwrap();
+
+    assert_eq!(first_result, (first_tokio_id, 21));
+    assert_eq!(second_result, (second_tokio_id, 42));
+    stop_bounded(first);
+    stop_bounded(second);
+}
+
+#[test]
 fn runtime_control_supports_tokio_on_every_worker() {
     let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();

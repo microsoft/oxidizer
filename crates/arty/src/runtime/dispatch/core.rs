@@ -267,13 +267,36 @@ impl DispatcherCore {
             return;
         }
 
+        let hook = if hook.is_retained() {
+            let delivery = hook.clone();
+            if !self.retain_hook(hook) {
+                return;
+            }
+            delivery
+        } else {
+            hook
+        };
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        let mut remote = self
+            .worker_endpoints
+            .iter()
+            .filter(|endpoint| source.as_ref().is_none_or(|source| source != &endpoint.thread))
+            .peekable();
         if let Some(source) = &source {
+            if remote.peek().is_none() {
+                LocalWorker::install_hook(hook, Some(source));
+                return;
+            }
             LocalWorker::install_hook(hook.clone(), Some(source));
         }
-        for endpoint in &self.worker_endpoints {
-            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
-                continue;
+        while let Some(endpoint) = remote.next() {
+            if remote.peek().is_none() {
+                _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
+                    hook,
+                    source: source.clone(),
+                });
+                endpoint.waker.wake_by_ref();
+                break;
             }
             _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
                 hook: hook.clone(),
@@ -281,16 +304,15 @@ impl DispatcherCore {
             });
             endpoint.waker.wake_by_ref();
         }
-        self.retain_hook(hook);
     }
 
-    fn retain_hook(&self, hook: HookRegistration) {
-        if !hook.is_retained() {
-            return;
-        }
+    fn retain_hook(&self, hook: HookRegistration) -> bool {
         let mut retained = self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS);
         if matches!(self.shutdown().state(), ShutdownState::Running) {
             retained.push(hook);
+            true
+        } else {
+            false
         }
     }
 
@@ -490,7 +512,7 @@ mod tests {
         assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
 
         dispatcher.stop_inner(ShutdownCause::default());
-        dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {})));
+        assert!(!dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {}))));
         assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
         dispatcher.release_retained_hooks();
         assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());

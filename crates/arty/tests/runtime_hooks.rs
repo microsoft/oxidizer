@@ -7,14 +7,14 @@
 
 mod support;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::hook::{HookFn, Panic, WorkerInit};
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{Runtime, RuntimeControl, WorkersPolicy};
 use arty::task::Context;
 use support::JoinHandleExt as _;
 
@@ -145,6 +145,32 @@ impl Clone for CloneCount {
 }
 
 impl ThreadAware for CloneCount {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct ShutdownDuringRegistration {
+    control: RuntimeControl,
+    original_dropped: Option<Arc<AtomicBool>>,
+}
+
+impl Clone for ShutdownDuringRegistration {
+    fn clone(&self) -> Self {
+        Self {
+            control: self.control.clone(),
+            original_dropped: None,
+        }
+    }
+}
+
+impl Drop for ShutdownDuringRegistration {
+    fn drop(&mut self) {
+        if let Some(original_dropped) = &self.original_dropped {
+            original_dropped.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl ThreadAware for ShutdownDuringRegistration {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -343,6 +369,27 @@ fn control_registration_applies_before_local_spawn() {
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
+}
+
+#[test]
+fn local_worker_init_retains_original_before_callback_starts_shutdown() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let original_dropped = Arc::new(AtomicBool::new(false));
+
+    let result = runtime.scheduler().block_on(async |cx| {
+        cx.control().on(HookFn::<WorkerInit, _>::new(
+            ShutdownDuringRegistration {
+                control: cx.control().clone(),
+                original_dropped: Some(Arc::clone(&original_dropped)),
+            },
+            |_event, data| data.control.request_stop(),
+        ));
+        assert!(!original_dropped.load(Ordering::SeqCst));
+    });
+
+    assert!(result.is_ok());
+    runtime.stop().unwrap();
+    assert!(original_dropped.load(Ordering::SeqCst));
 }
 
 #[test]
