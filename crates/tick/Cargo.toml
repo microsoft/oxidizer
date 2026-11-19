@@ -31,7 +31,7 @@ all-features = true
 [features]
 default = []
 # Allows Stopwatch::new_fast to use lower-overhead, lower-precision instants
-fast-stopwatch = ["dep:libc", "dep:windows-sys"]
+fast-time = ["dep:libc", "dep:windows-sys"]
 # Enables additional test-specific APIs
 test-util = []
 # Serialization support for serde
@@ -110,7 +110,7 @@ harness = false
 [[bench]]
 name = "tick_instant"
 harness = false
-required-features = ["fast-stopwatch"]
+required-features = ["fast-time"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

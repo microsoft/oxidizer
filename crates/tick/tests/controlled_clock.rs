@@ -210,7 +210,7 @@ fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
     assert_eq!(watch.elapsed(), Duration::from_secs(2));
 }
 
-#[cfg(feature = "fast-stopwatch")]
+#[cfg(feature = "fast-time")]
 #[test]
 fn fast_stopwatch_observes_controlled_time() {
     let control = ClockControl::new();

@@ -9,7 +9,7 @@ use crate::SimpleClock;
 ///
 /// Create a `Stopwatch` from [`Clock::stopwatch()`][crate::Clock::stopwatch],
 /// [`SimpleClock::stopwatch()`], or [`Stopwatch::new()`]. With the
-/// `fast-stopwatch` feature, [`Stopwatch::new_fast()`] uses a lower-precision
+/// `fast-time` feature, [`Stopwatch::new_fast()`] uses a lower-precision
 /// source with lower overhead.
 ///
 /// # Examples
@@ -36,7 +36,7 @@ enum StopwatchSource {
         clock: SimpleClock,
         start: Instant,
     },
-    #[cfg(any(feature = "fast-stopwatch", test))]
+    #[cfg(any(feature = "fast-time", test))]
     Fast {
         start: crate::fast_stopwatch::Timestamp,
     },
@@ -92,7 +92,7 @@ impl Stopwatch {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "fast-stopwatch")] {
+    /// # #[cfg(feature = "fast-time")] {
     /// use tick::{SimpleClock, Stopwatch};
     ///
     /// let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
@@ -100,7 +100,7 @@ impl Stopwatch {
     /// # let _ = elapsed;
     /// # }
     /// ```
-    #[cfg(any(feature = "fast-stopwatch", test))]
+    #[cfg(any(feature = "fast-time", test))]
     #[must_use]
     pub fn new_fast(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
@@ -124,7 +124,7 @@ impl Stopwatch {
     pub fn elapsed(&self) -> Duration {
         match &self.source {
             StopwatchSource::Clock { clock, start } => clock.instant().saturating_duration_since(*start),
-            #[cfg(any(feature = "fast-stopwatch", test))]
+            #[cfg(any(feature = "fast-time", test))]
             StopwatchSource::Fast { start } => crate::fast_stopwatch::now().elapsed_since(*start),
         }
     }
@@ -160,7 +160,7 @@ impl Stopwatch {
                 *start = now;
                 elapsed
             }
-            #[cfg(any(feature = "fast-stopwatch", test))]
+            #[cfg(any(feature = "fast-time", test))]
             StopwatchSource::Fast { start } => {
                 let now = crate::fast_stopwatch::now();
                 let elapsed = now.elapsed_since(*start);

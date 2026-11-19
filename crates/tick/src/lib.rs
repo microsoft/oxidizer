@@ -251,7 +251,7 @@
 //!   `dev-dependencies`.
 //! - `serde` adds serialization through [serde](https://serde.rs/).
 //! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
-//! - `fast-stopwatch` adds [`Stopwatch::new_fast`]. This constructor uses a
+//! - `fast-time` adds [`Stopwatch::new_fast`]. This constructor uses a
 //!   lower-overhead, lower-precision instant source on Linux and Windows.
 //!   Other platforms use [`std::time::Instant::now`].
 //!
@@ -263,7 +263,7 @@
 //!
 //! ```
 //! # fn main() {
-//! # #[cfg(feature = "fast-stopwatch")] {
+//! # #[cfg(feature = "fast-time")] {
 //! use tick::{SimpleClock, Stopwatch};
 //!
 //! let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
@@ -283,7 +283,7 @@ mod clock;
 mod clock_control;
 mod delay;
 mod error;
-#[cfg(any(feature = "fast-stopwatch", test))]
+#[cfg(any(feature = "fast-time", test))]
 mod fast_stopwatch;
 
 #[cfg(any(feature = "fmt", test))]

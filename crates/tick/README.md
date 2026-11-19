@@ -232,7 +232,7 @@ You can enable these features in `Cargo.toml`:
   `dev-dependencies`.
 * `serde` adds serialization through [serde][__link41].
 * `fmt` adds the [`fmt`][__link42] module and formats such as ISO 8601 and RFC 2822.
-* `fast-stopwatch` adds [`Stopwatch::new_fast`][__link43]. This constructor uses a
+* `fast-time` adds [`Stopwatch::new_fast`][__link43]. This constructor uses a
   lower-overhead, lower-precision instant source on Linux and Windows.
   Other platforms use [`std::time::Instant::now`][__link44].
 
@@ -260,7 +260,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbXqrEIYZMYTYbVN9FnzOFuOMbO9Oy5obUAmsbyG47RXnsoTFhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbehBquRh93cIbUw7GY0cBi68b8sN-SccPSzAbRpW1xecOVXthZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
  [__link0]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.9.1/tick/?search=Error
