@@ -119,7 +119,7 @@ impl Stopwatch {
         }
     }
 
-    /// Returns the elapsed time since the stopwatch was created.
+    /// Returns the elapsed time since the stopwatch started or last restarted.
     #[must_use]
     pub fn elapsed(&self) -> Duration {
         match &self.source {

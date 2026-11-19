@@ -29,8 +29,8 @@ use crate::timers::TimerKey;
 /// - [`Stopwatch`][super::Stopwatch] provides monotonic relative time. Use it
 ///   to measure elapsed time within a process.
 /// - [`SystemTime`] provides an absolute UTC time. Use it across process
-///   boundaries or with other APIs that accept `SystemTime`. The `fmt` feature
-///   adds output formats.
+///   boundaries or with other APIs that accept `SystemTime`. Use
+///   [Jiff](https://docs.rs/jiff) to parse or format this value.
 ///
 /// Absolute time is not monotonic. A system clock change can move it backward.
 /// Use [`Stopwatch`][super::Stopwatch] when you do not need an absolute time.
