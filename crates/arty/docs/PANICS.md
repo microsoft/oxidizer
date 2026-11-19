@@ -23,10 +23,15 @@ let runtime = Runtime::builder()
 ```
 
 Shutdown is the initial response for each panic, not a hook that runs first.
-Arty runs all callbacks in registration order before it acts on the response.
-For example, `.on(Panic::shutdown()).on(Panic::ignore())` keeps the runtime
-running. Reversing the order selects shutdown. A callback that only reads the
-panic payload does not change the response.
+The worker runs its panic hooks in the order it installed them. The last hook
+to set a response decides whether the runtime stops. A callback that only reads
+the panic payload does not change the response.
+
+Each worker installs builder hooks in registration order. For example,
+`.on(Panic::shutdown()).on(Panic::ignore())` keeps the runtime running.
+Reversing the order selects shutdown. When a worker calls `RuntimeControl::on`
+for its own runtime, it installs the hook locally and queues it for the other
+workers. Workers can therefore install the same hooks in different orders.
 
 A blocking function panic does not create a `Panic` event or stop the
 runtime. Its join handle still returns the original panic payload.

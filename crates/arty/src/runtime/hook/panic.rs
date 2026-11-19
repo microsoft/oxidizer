@@ -12,9 +12,14 @@ use super::hook_fn::HookFn;
 /// panic returns through its join handle without creating this event or
 /// stopping the runtime.
 ///
-/// Each event starts with shutdown selected. Arty calls all registered hooks
-/// in order on the same event, then applies the final response. A callback
-/// that only reads the event leaves the response unchanged.
+/// Each event starts with shutdown selected. The worker runs its panic hooks
+/// on the same event in the order it installed them, then applies the final
+/// response. A callback that only reads the event leaves the response unchanged.
+///
+/// Each worker installs builder hooks in registration order. When a worker calls
+/// [`RuntimeControl::on`](crate::runtime::RuntimeControl::on) for its own runtime,
+/// it installs the hook locally and queues it for the other workers. A worker can install a
+/// local hook before an earlier queued hook, so the order can differ between workers.
 ///
 /// Register [`Panic::ignore`] to keep the runtime running. A later hook can
 /// select shutdown again. Custom callbacks can use [`set_ignore`](Self::set_ignore)

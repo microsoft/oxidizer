@@ -7,11 +7,12 @@
 
 mod support;
 
+use std::error::Error as _;
 use std::time::Duration;
 
-use arty::runtime::Runtime;
 use arty::runtime::hook::Panic;
 use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, ShutdownCause};
 use support::JoinHandleExt as _;
 use tick::ClockControl;
 
@@ -125,8 +126,14 @@ fn last_panic_hook_to_set_a_response_wins() {
         assert!(scheduler.spawn(async |_| panic!("task panic")).join().unwrap_err().is_panic());
         let next = scheduler.spawn(async |_| 42).join();
         if shuts_down {
-            assert!(next.unwrap_err().is_shutdown());
-            assert!(runtime.stop().is_err());
+            let rejected = next.unwrap_err();
+            assert!(rejected.is_shutdown());
+            assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
+            let stop = runtime.stop().unwrap_err();
+            assert_eq!(
+                stop.source().unwrap().source().unwrap().to_string(),
+                "runtime shutdown was caused by a task panic: task panic"
+            );
         } else {
             assert_eq!(next.unwrap(), 42);
             runtime.stop().unwrap();
