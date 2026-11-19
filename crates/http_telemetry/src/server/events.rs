@@ -225,6 +225,8 @@ pub(crate) struct ActiveRequests {
 pub(crate) struct RouteParameters<'a>(pub(crate) Option<(&'a [RouteParameter], RouteHit<'a, 'a>)>);
 
 impl VisitFields for RouteParameters<'_> {
+    const CONTAINS_METRICS: bool = false;
+
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         if let Some((parameters, hit)) = &self.0 {
             for parameter in *parameters {
@@ -243,6 +245,8 @@ impl VisitFields for RouteParameters<'_> {
 pub(crate) struct Headers<'a>(pub(crate) Option<&'a HeaderValues>);
 
 impl VisitFields for Headers<'_> {
+    const CONTAINS_METRICS: bool = false;
+
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         if let Some(headers) = self.0 {
             // The values of one header are next to each other, so each chunk holds the values of one header.

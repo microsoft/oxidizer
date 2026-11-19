@@ -947,6 +947,8 @@ fn flatten_visits_inner_fields() {
     struct Tags<'a>(&'a [(FieldDescriptor, i64)]);
 
     impl VisitFields for Tags<'_> {
+        const CONTAINS_METRICS: bool = false;
+
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             for (descriptor, count) in self.0 {
                 visitor(descriptor, &|_| Value::from(*count))?;

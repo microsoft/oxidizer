@@ -43,11 +43,17 @@ pub trait Event: VisitFields + Send + Sync {
     const DESCRIPTION: EventDescription;
 }
 
-/// Visits the fields of an [`Event`] or a [`DynEvent`](crate::interop::DynEvent).
+/// Visits the fields of an [`Event`], or of a value in a field marked `#[flatten]`.
 ///
 /// An [`event`](macro@crate::event) can get fields whose names are known only at run time from a field marked
 /// `#[flatten]`.
 pub trait VisitFields {
+    /// Whether the visited fields can include metric measurements.
+    ///
+    /// For an [`event`](macro@crate::event) with a `#[flatten]` field of this type,
+    /// [`EventDescription::contains_metrics`] is `true` when this value is `true`.
+    const CONTAINS_METRICS: bool;
+
     /// Lazily visits all fields.
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`](crate::metadata::FieldDescriptor) and a getter

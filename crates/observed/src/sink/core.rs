@@ -660,12 +660,6 @@ mod tests {
 
     struct DummyDyn;
 
-    impl crate::VisitFields for DummyDyn {
-        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
-        }
-    }
-
     impl crate::interop::DynEvent for DummyDyn {
         fn name(&self) -> &'static str {
             "dummy"
@@ -682,6 +676,9 @@ mod tests {
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
         }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
         fn description(&self) -> EventDescription {
             EventDescription::new("dummy", None, None, None, false, false)
         }
@@ -690,12 +687,6 @@ mod tests {
     #[derive(Default)]
     struct DescriptionCountingDyn {
         description_calls: AtomicUsize,
-    }
-
-    impl crate::VisitFields for DescriptionCountingDyn {
-        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
-        }
     }
 
     impl crate::interop::DynEvent for DescriptionCountingDyn {
@@ -713,6 +704,9 @@ mod tests {
         }
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
+        }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
         }
         fn description(&self) -> EventDescription {
             self.description_calls.fetch_add(1, Ordering::Relaxed);
@@ -1087,6 +1081,8 @@ mod tests {
         struct ProbeEvent;
 
         impl crate::VisitFields for ProbeEvent {
+            const CONTAINS_METRICS: bool = false;
+
             fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
                 ControlFlow::Continue(())
             }

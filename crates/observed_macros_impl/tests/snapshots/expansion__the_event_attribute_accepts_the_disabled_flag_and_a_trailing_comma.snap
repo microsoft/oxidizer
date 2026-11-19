@@ -12,6 +12,8 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
+            .contains_metrics();
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -41,6 +43,8 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
+            .contains_metrics();
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -70,6 +74,8 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
+            .contains_metrics();
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -99,6 +105,8 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
+            .contains_metrics();
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

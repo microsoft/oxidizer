@@ -10,6 +10,8 @@ struct Ignored {
 }
 const _: () = {
     impl ::observed::VisitFields for Ignored {
+        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
+            .contains_metrics();
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

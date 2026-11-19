@@ -1085,7 +1085,12 @@ fn generate_event_impls(def: &EventDef<'_>) -> TokenStream {
         quote! { ::core::option::Option::None }
     };
 
-    let has_field_metrics = def.fields.iter().any(|f| f.metric_value.is_some());
+    // A flattened value decides its own fields, so its type tells whether they can include measurements.
+    let direct_field_metrics = def.fields.iter().any(|f| f.metric_value.is_some());
+    let flattened_types = def.fields.iter().filter(|f| f.flatten).map(|f| f.ty);
+    let has_field_metrics = quote! {
+        #direct_field_metrics #(|| <#flattened_types as ::observed::VisitFields>::CONTAINS_METRICS)*
+    };
     let disabled = def.disabled;
     let has_log = def.log.is_some();
 
@@ -1094,6 +1099,8 @@ fn generate_event_impls(def: &EventDef<'_>) -> TokenStream {
     quote! {
         const _: () = {
             impl #impl_generics ::observed::VisitFields for #struct_ident #ty_generics #where_clause {
+                const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION.contains_metrics();
+
                 fn visit_fields(
                     &self,
                     visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

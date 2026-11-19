@@ -79,15 +79,6 @@ pub(crate) enum EvaluatedEvent<'a, T: Event> {
     Dyn(&'a dyn DynEvent),
 }
 
-impl<T: Event> VisitFields for EvaluatedEvent<'_, T> {
-    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        match self {
-            Self::Typed(event, _) => event.visit_fields(visitor),
-            Self::Dyn(event) => event.visit_fields(visitor),
-        }
-    }
-}
-
 impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
     fn name(&self) -> &'static str {
         match self {
@@ -127,6 +118,13 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
         }
     }
 
+    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        match self {
+            Self::Typed(event, _) => event.visit_fields(visitor),
+            Self::Dyn(event) => event.visit_fields(visitor),
+        }
+    }
+
     fn description(&self) -> EventDescription {
         match self {
             Self::Typed(_, _) => T::DESCRIPTION,
@@ -143,6 +141,8 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
 pub(crate) struct NoopEvent;
 
 impl VisitFields for NoopEvent {
+    const CONTAINS_METRICS: bool = false;
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         unreachable!("NoopEvent should never have its fields accessed")
@@ -167,6 +167,8 @@ mod tests {
     struct TestEvent;
 
     impl VisitFields for TestEvent {
+        const CONTAINS_METRICS: bool = false;
+
         fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

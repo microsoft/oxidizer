@@ -326,7 +326,8 @@ fn a_raw_identifier_field_is_reported_under_its_domain_name() {
 #[test]
 fn flatten_calls_visit_fields() {
     // The `VisitFields` implementation of the value names and routes its own fields, so the macro hands it the visitor. A
-    // type that mentions a type parameter is bound by `VisitFields` instead of a redaction bound.
+    // type that mentions a type parameter is bound by `VisitFields` instead of a redaction bound. The `CONTAINS_METRICS`
+    // of each flattened type joins the metric flag of the description.
     insta::assert_snapshot!(expand_event(
         r#""flattened""#,
         r"
