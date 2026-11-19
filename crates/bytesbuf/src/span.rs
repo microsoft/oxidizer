@@ -198,6 +198,7 @@ unsafe impl Sync for Span {}
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    // Span operations and layout are private and cannot be called through the public API.
     #[test]
     fn gamma_nov4_inclusive_span_end_before_start_returns_none() {
         use core::ops::Bound::{Included, Unbounded};
