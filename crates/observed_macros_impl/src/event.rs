@@ -855,7 +855,7 @@ pub(crate) fn generate_event(
 ) -> Result<TokenStream> {
     let def = parse_event_def(ident, generics, attrs, fields, args)?;
     validate_message_placeholders(&def)?;
-    Ok(generate_event_impls(&def))
+    Ok(generate_event_impl(&def))
 }
 
 /// Returns whether `attr` is a struct-level helper consumed by `#[event]`
@@ -1011,7 +1011,7 @@ fn event_predicates(def: &EventDef<'_>) -> Vec<syn::WherePredicate> {
     predicates
 }
 
-fn generate_event_impls(def: &EventDef<'_>) -> TokenStream {
+fn generate_event_impl(def: &EventDef<'_>) -> TokenStream {
     let struct_ident = &def.ident;
 
     // Event identity comes from the required `#[event("...")]` attribute.
