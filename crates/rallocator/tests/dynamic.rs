@@ -5,6 +5,7 @@
 
 use std::alloc::{GlobalAlloc, Layout};
 use std::process::Command;
+use std::ptr::NonNull;
 
 use seismograph::recorder::event::Event;
 use seismograph::recorder::{Configuration, Policy, without_recording};
@@ -75,26 +76,27 @@ fn exercise(expected: &str) {
     });
     let layout = Layout::from_size_align(83, 64).unwrap();
     let grown = Layout::from_size_align(9001, layout.align()).unwrap();
-    // SAFETY: Both layouts are nonzero and the returned blocks stay with GLOBAL.
-    let old = unsafe { GLOBAL.alloc_zeroed(layout) };
-    assert!(!old.is_null());
-    assert_eq!(old.addr() % layout.align(), 0);
-    // SAFETY: A successful zeroed allocation initializes the whole layout.
-    assert_eq!(unsafe { std::slice::from_raw_parts(old, layout.size()) }, [0; 83]);
-    // SAFETY: The caller owns all the bytes of this live block.
-    unsafe { old.write_bytes(0xb7, layout.size()) };
+    // SAFETY: The layout is valid and nonzero.
+    let old = NonNull::new(unsafe { GLOBAL.alloc_zeroed(layout) }).unwrap();
+    let old_address = old.addr().get();
+    assert_eq!(old_address % layout.align(), 0);
+    // SAFETY: This test exclusively owns all layout.size() initialized bytes.
+    let bytes = unsafe { std::slice::from_raw_parts_mut(old.as_ptr(), layout.size()) };
+    assert_eq!(bytes, &[0; 83]);
+    bytes.fill(0xb7);
     // SAFETY: This valid nonzero size exceeds the supported user address space.
-    assert!(unsafe { GLOBAL.realloc(old, layout, 1 << 62) }.is_null());
+    assert!(unsafe { GLOBAL.realloc(old.as_ptr(), layout, 1 << 62) }.is_null());
     // SAFETY: Failure leaves the original block and its layout live.
-    assert_eq!(unsafe { GLOBAL.realloc(old, layout, layout.size()) }, old);
-    // SAFETY: The unchanged resize kept this block live with its original layout.
-    let new = unsafe { GLOBAL.realloc(old, layout, grown.size()) };
-    assert!(!new.is_null());
-    assert_eq!(new.addr() % grown.align(), 0);
+    let retained = NonNull::new(unsafe { GLOBAL.realloc(old.as_ptr(), layout, layout.size()) }).unwrap();
+    assert_eq!(retained.addr().get(), old_address);
+    // SAFETY: The successful in-place resize transferred ownership to retained.
+    let new = NonNull::new(unsafe { GLOBAL.realloc(retained.as_ptr(), layout, grown.size()) }).unwrap();
+    let new_address = new.addr().get();
+    assert_eq!(new_address % grown.align(), 0);
     // SAFETY: A successful resize preserves all 83 initialized bytes.
-    assert_eq!(unsafe { std::slice::from_raw_parts(new, layout.size()) }, [0xb7; 83]);
+    assert_eq!(unsafe { std::slice::from_raw_parts(new.as_ptr(), layout.size()) }, [0xb7; 83]);
     // SAFETY: Retire the resized block exactly once with its new layout.
-    unsafe { GLOBAL.dealloc(new, grown) };
+    unsafe { GLOBAL.dealloc(new.as_ptr(), grown) };
 
     without_recording(|| {
         let capture = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
@@ -107,9 +109,9 @@ fn exercise(expected: &str) {
             .events
             .iter()
             .filter_map(Event::reallocation)
-            .filter(|resize| resize.old_address.get() == old.addr() as u64)
+            .filter(|resize| resize.old_address.get() == old_address as u64)
             .map(|resize| (resize.new_address.get(), resize.old_size, resize.new_size, resize.alignment))
             .collect();
-        assert_eq!(resizes, [(new.addr() as u64, 83, 9001, 64)]);
+        assert_eq!(resizes, [(new_address as u64, 83, 9001, 64)]);
     });
 }
