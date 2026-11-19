@@ -21,9 +21,6 @@ autobenches = false
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Environment", "Win32_System_IO"] }
-
 [package.metadata.docs.rs]
 default-target = "x86_64-unknown-linux-gnu"
 targets = [
@@ -40,6 +37,9 @@ targets = [
 # Native tests, coverage and cargo careful remain enabled.
 # Mutation testing is excluded by the workspace mutation configurations.
 exclude = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Environment", "Win32_System_IO"] }
 
 [dependencies]
 seismograph.workspace = true

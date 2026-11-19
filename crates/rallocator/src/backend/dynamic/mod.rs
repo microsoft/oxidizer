@@ -28,28 +28,28 @@ enum Choice {
 static SELECTED: AtomicU8 = AtomicU8::new(0);
 
 #[inline]
-fn selected() -> Choice {
+fn selected(cache: &AtomicU8) -> Choice {
     // A single relaxed load replaces a OnceLock readiness check and a separate
     // load of its value. The tag is the only data we publish.
-    match SELECTED.load(Ordering::Relaxed) {
+    match cache.load(Ordering::Relaxed) {
         tag if tag == Choice::Snmalloc as u8 => Choice::Snmalloc,
         tag if tag == Choice::Mimalloc as u8 => Choice::Mimalloc,
         tag if tag == Choice::System as u8 => Choice::System,
-        _ => initialize(),
+        _ => initialize(cache, env::read),
     }
 }
 
 #[cold]
-fn initialize() -> Choice {
-    let configured = env::read();
+fn initialize(cache: &AtomicU8, read: impl FnOnce() -> Option<Choice>) -> Choice {
+    let configured = read();
     let choice = configured.unwrap_or(Choice::Snmalloc);
     // Racing first callers can read the environment, but only the winner's
     // choice can ever own a block. No caller waits for another initializer.
-    if SELECTED
+    if cache
         .compare_exchange(0, choice as u8, Ordering::Relaxed, Ordering::Relaxed)
         .is_err()
     {
-        return selected();
+        return selected(cache);
     }
     if configured.is_none() {
         env::warn_invalid();
@@ -69,7 +69,7 @@ unsafe impl Operations for Dynamic {
     unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
         // SAFETY: All three allocators receive the caller's valid nonzero layout.
         unsafe {
-            match selected() {
+            match selected(&SELECTED) {
                 Choice::Snmalloc => Snmalloc.allocate::<ZEROED>(layout),
                 Choice::Mimalloc => Mimalloc.allocate::<ZEROED>(layout),
                 Choice::System => System.allocate::<ZEROED>(layout),
@@ -81,7 +81,7 @@ unsafe impl Operations for Dynamic {
     unsafe fn deallocate(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: Selection is immutable, so the live block returns to its creator.
         unsafe {
-            match selected() {
+            match selected(&SELECTED) {
                 Choice::Snmalloc => Snmalloc.deallocate(ptr, layout),
                 Choice::Mimalloc => Mimalloc.deallocate(ptr, layout),
                 Choice::System => System.dealloc(ptr, layout),
@@ -93,7 +93,7 @@ unsafe impl Operations for Dynamic {
     unsafe fn reallocate(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         // SAFETY: The creating backend receives the original layout and valid new size.
         unsafe {
-            match selected() {
+            match selected(&SELECTED) {
                 Choice::Snmalloc => Snmalloc.reallocate(ptr, layout, new_size),
                 Choice::Mimalloc => Mimalloc.reallocate(ptr, layout, new_size),
                 Choice::System => System.reallocate(ptr, layout, new_size),
@@ -104,7 +104,7 @@ unsafe impl Operations for Dynamic {
     unsafe fn reallocate_recorded(&self, ptr: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
         // SAFETY: The creating backend handles the full resize, including retirement after the callback.
         unsafe {
-            match selected() {
+            match selected(&SELECTED) {
                 Choice::Snmalloc => Snmalloc.reallocate_recorded(ptr, layout, new_size, record),
                 Choice::Mimalloc => Mimalloc.reallocate_recorded(ptr, layout, new_size, record),
                 Choice::System => System.reallocate_recorded(ptr, layout, new_size, record),
@@ -113,7 +113,7 @@ unsafe impl Operations for Dynamic {
     }
 
     fn publish_state(&self) {
-        match selected() {
+        match selected(&SELECTED) {
             Choice::Snmalloc => Snmalloc.publish_state(),
             Choice::Mimalloc => Mimalloc.publish_state(),
             Choice::System => {}
@@ -145,4 +145,22 @@ unsafe impl Operations for System {
     }
 
     fn publish_state(&self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn losing_initializer_uses_the_backend_published_during_its_lookup() {
+        let cache = AtomicU8::new(0);
+        let loser = initialize(&cache, || {
+            // Another caller finishes initialization before this lookup returns.
+            let winner = initialize(&cache, || Some(Choice::Mimalloc));
+            assert!(matches!(winner, Choice::Mimalloc));
+            Some(Choice::System)
+        });
+        assert!(matches!(loser, Choice::Mimalloc));
+        assert!(matches!(selected(&cache), Choice::Mimalloc));
+    }
 }

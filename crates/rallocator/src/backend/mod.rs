@@ -59,9 +59,10 @@ pub(crate) mod sealed {
         ///
         /// Both old and replacement storage stay live on success. The default
         /// moves the block when its size changes. A backend can resize in place.
+        /// If the new size and alignment cannot form a layout, return null and leave the old block live.
         ///
         /// # Safety
-        /// The pointer and requested size satisfy the same resize contract.
+        /// The pointer is live for this exact layout and backend. The new size is nonzero.
         unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
             if new_size == layout.size() {
                 return ptr;

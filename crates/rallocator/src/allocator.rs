@@ -175,7 +175,9 @@ mod tests {
         }
 
         unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            let new_layout = Layout::from_size_align(new_size, layout.align()).unwrap();
+            let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+                return std::ptr::null_mut();
+            };
             // SAFETY: The checked nonzero layout creates separate live storage.
             let replacement = unsafe { System.alloc(new_layout) };
             assert!(!replacement.is_null());
@@ -189,6 +191,25 @@ mod tests {
             assert_eq!(self.0.get(), Phase::Released);
             self.0.set(Phase::Published);
         }
+    }
+
+    #[test]
+    fn system_resize_preparation_rejects_alignment_overflow_without_retiring_the_block() {
+        let layout = Layout::new::<u64>();
+        // SAFETY: The layout has nonzero size.
+        let ptr = unsafe { System.alloc(layout) };
+        assert!(!ptr.is_null());
+        // SAFETY: The allocation owns at least one writable byte.
+        unsafe { ptr.write(0x5a) };
+
+        // SAFETY: This private preparation step accepts a nonzero size and checks
+        // the replacement layout. Rounding isize::MAX up to u64 alignment exceeds it.
+        let replacement = unsafe { System.prepare_reallocation(ptr, layout, isize::MAX as usize) };
+        assert!(replacement.is_null());
+        // SAFETY: Failed preparation leaves the initialized byte live.
+        assert_eq!(unsafe { ptr.read() }, 0x5a);
+        // SAFETY: The original System allocation still has its original layout.
+        unsafe { System.dealloc(ptr, layout) };
     }
 
     #[test]
