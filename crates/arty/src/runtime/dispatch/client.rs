@@ -114,12 +114,16 @@ impl DispatcherClient {
         self.core.access_io(worker_index, access)
     }
 
-    pub(crate) fn register_hook(&self, hook: &HookRegistration) {
+    pub(crate) fn register_hook(&self, hook: HookRegistration) {
         self.core.register_hook(hook);
     }
 
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
+    }
+
+    pub(crate) fn release_retained_hooks(&self) {
+        self.core.release_retained_hooks();
     }
 }
 
@@ -189,7 +193,7 @@ mod tests {
             Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
         );
         let shutdown = Shutdown::default();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown.clone()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
         let runtime = IoRuntime::new(Sink::noop());
         let expected = format!("Io {{ runtime: {runtime:?}, dispatcher: {dispatcher:?}, thread: {thread:?} }}");
         let io = Io::new(runtime, dispatcher, thread);
@@ -219,7 +223,11 @@ mod tests {
             test_threads(1).pop().unwrap(),
             Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
         );
-        let client = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
+        let client = DispatcherClient::new(DispatcherCore::new(
+            nonempty::NonEmpty::new(worker),
+            Shutdown::default(),
+            Vec::new(),
+        ));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -251,7 +259,7 @@ mod tests {
             ),
         ])
         .unwrap();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(endpoints, Shutdown::default()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(endpoints, Shutdown::default(), Vec::new()));
         let io = Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher.clone(), threads[0].clone());
         let mut context = Context::new(dispatcher, tick::Clock::new_frozen(), io, threads[0].clone());
         let source = context.clone();
@@ -297,6 +305,7 @@ mod tests {
             ])
             .unwrap(),
             Shutdown::default(),
+            Vec::new(),
         );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -347,6 +356,7 @@ mod tests {
             ])
             .unwrap(),
             Shutdown::default(),
+            Vec::new(),
         );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -412,7 +422,11 @@ mod tests {
             threads[0].clone(),
             Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
         );
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            nonempty::NonEmpty::new(worker),
+            Shutdown::default(),
+            Vec::new(),
+        ));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
     }

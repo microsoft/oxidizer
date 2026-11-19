@@ -44,15 +44,16 @@
 //!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] starts a local Seismograph monitor when the
-//!   `monitor` feature is present. Task collection runs on request. This does
-//!   not enable event recording.
+//! - [`MonitorPolicy::default`] uses [`MonitorPolicy::auto`]. It disables
+//!   monitoring for tests, doctests, documentation examples, and Miri. It
+//!   enables monitoring in other environments when the `monitor` feature is
+//!   present. The exact automatic selection can change in future releases.
+//!   Task collection runs on request. This does not enable event recording.
 //! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
 //!   stopping the runtime.
 //!
-//! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
 //! ## Monitoring
@@ -60,7 +61,8 @@
 //! A monitor is a local connection through which the Seismograph CLI can
 //! collect diagnostics. Each enabled runtime owns one connection and removes it
 //! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
-//! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
+//! Use [`MonitorPolicy::enabled`] or [`MonitorPolicy::disabled`] to override the
+//! automatic selection.
 //!
 //! Collection reads live async tasks and queued or running blocking functions
 //! from their native storage. Each request limits the number of tasks per worker.
@@ -83,7 +85,7 @@
 //! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
 //! - [`MonitorPolicy`] selects the monitoring configuration.
-//! - [`hook`] provides panic hooks.
+//! - [`hook`] provides worker initialization and panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.
@@ -184,7 +186,7 @@ pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
 pub use workers::Workers;
 
-/// Implementation details for the runtime entry-point macros.
+/// Internal API for the runtime entry-point macros.
 #[cfg(feature = "macros")]
 #[doc(hidden)]
 pub mod __private {
@@ -193,11 +195,13 @@ pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
 
-    /// Preserves an entry point's return type while reporting root-task failure.
+    /// Preserves the return type of an entry point and reports a root-task failure.
     ///
     /// # Panics
     ///
-    /// Resumes a captured root-task panic or starts an unwind carrying the runtime failure.
+    /// Resumes a captured root-task panic.
+    ///
+    /// For another runtime failure, starts an unwind with a diagnostic message.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) if error.is_panic() => {

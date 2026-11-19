@@ -33,7 +33,7 @@ pub async fn main_with_panic_shutdown(cx: Context) -> Result<(), arty::task::Joi
 }
 
 /// This compile-pass fixture sets the ignore panic policy and other options.
-#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+#[arty::main(panic = ignore, workers = 1)]
 pub async fn main_with_panic_ignore(cx: Context) -> Result<(), arty::task::JoinError> {
     assert!(
         cx.scheduler()
@@ -125,7 +125,7 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     assert_eq!(workers.len(), 3);
 }
 
-#[arty::main(monitor = disabled)]
+#[arty::main]
 #[::core::prelude::v1::test]
 async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx

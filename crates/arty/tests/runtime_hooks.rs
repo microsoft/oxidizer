@@ -13,9 +13,78 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
-use arty::runtime::hook::{HookFn, Panic};
+use arty::runtime::hook::{HookFn, Panic, WorkerInit};
 use arty::runtime::{Runtime, WorkersPolicy};
+use arty::task::Context;
 use support::JoinHandleExt as _;
+
+#[derive(Clone)]
+struct WorkerInitProbe {
+    destination: Option<ThreadId>,
+    observed: mpsc::Sender<WorkerInitObservation>,
+}
+
+impl ThreadAware for WorkerInitProbe {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.destination = Some(destination.id());
+    }
+}
+
+struct WorkerInitObservation {
+    callback: ThreadId,
+    event: ThreadId,
+    relocated: ThreadId,
+}
+
+#[test]
+fn worker_init_runs_once_per_worker() {
+    let (observed, observations) = mpsc::channel();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .on(HookFn::<WorkerInit, _>::new(
+            WorkerInitProbe {
+                destination: None,
+                observed,
+            },
+            |event, data| {
+                data.observed
+                    .send(WorkerInitObservation {
+                        callback: std::thread::current().id(),
+                        event: event.thread().id(),
+                        relocated: data.destination.unwrap(),
+                    })
+                    .unwrap();
+            },
+        ))
+        .build()
+        .unwrap();
+
+    let observations = (0..2).map(|_| observations.try_recv().unwrap()).collect::<Vec<_>>();
+    assert_eq!(observations.len(), 2);
+    assert_ne!(observations[0].event, observations[1].event);
+    for observation in observations {
+        assert_eq!(observation.callback, observation.event);
+        assert_eq!(observation.relocated, observation.event);
+    }
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn builder_retains_worker_init_data_until_shutdown() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let lifetime = Arc::downgrade(&calls);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .on(HookFn::<WorkerInit, _>::new(PanicCount(calls), |_event, data| {
+            data.0.fetch_add(1, Ordering::SeqCst);
+        }))
+        .build()
+        .unwrap();
+
+    assert_eq!(lifetime.upgrade().unwrap().load(Ordering::SeqCst), 2);
+    runtime.stop().unwrap();
+    assert!(lifetime.upgrade().is_none());
+}
 
 #[derive(Clone)]
 struct SharedLog(Arc<Mutex<Vec<&'static str>>>);
@@ -53,6 +122,16 @@ impl ThreadAware for RegistrationLog {
 struct PanicCount(Arc<AtomicUsize>);
 
 impl ThreadAware for PanicCount {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[derive(Clone)]
+struct InitSignal {
+    calls: PanicCount,
+    initialized: mpsc::Sender<()>,
+}
+
+impl ThreadAware for InitSignal {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -120,7 +199,6 @@ async fn panic_with_payload(payload: u8) {
 fn panic_hook_covers_async_user_panics_only() {
     let count = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(
             PanicProbe {
@@ -161,7 +239,6 @@ fn panic_hook_covers_async_user_panics_only() {
 #[test]
 fn panic_hook_selects_shutdown_from_the_payload() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new((), |event, ()| {
             if event.payload().downcast_ref::<u32>() != Some(&2) {
@@ -194,11 +271,7 @@ fn panic_hook_selects_shutdown_from_the_payload() {
 
 #[test]
 fn control_appends_panic_hooks_in_registration_order() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
 
     let order = SharedLog(Arc::new(Mutex::new(Vec::new())));
@@ -251,11 +324,7 @@ fn control_appends_panic_hooks_in_registration_order() {
 
 #[test]
 fn control_registration_applies_before_local_spawn() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
 
     runtime
@@ -278,11 +347,7 @@ fn control_registration_applies_before_local_spawn() {
 
 #[test]
 fn worker_registration_relocates_and_runs_on_every_worker() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(2))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (installed, installations) = mpsc::channel();
     let (observed, observations) = mpsc::channel();
 
@@ -346,7 +411,6 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
 fn panic_callbacks_share_one_borrowed_event() {
     let addresses = EventAddresses(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
@@ -377,12 +441,136 @@ fn panic_callbacks_share_one_borrowed_event() {
 }
 
 #[test]
-fn control_ignores_registration_after_shutdown_starts() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
+fn control_worker_init_runs_once_on_every_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (initialized, initialization) = mpsc::channel();
+
+    control.on(HookFn::<WorkerInit, _>::new(
+        InitSignal {
+            calls: PanicCount(Arc::clone(&calls)),
+            initialized,
+        },
+        |_event, data| {
+            data.calls.0.fetch_add(1, Ordering::SeqCst);
+            data.initialized.send(()).unwrap();
+        },
+    ));
+    for _ in control.workers() {
+        initialization.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    runtime.stop().unwrap();
+}
+
+#[derive(Clone)]
+struct RetainedContext {
+    context: Context,
+    _lifetime: Arc<()>,
+}
+
+impl Drop for RetainedContext {
+    fn drop(&mut self) {
+        self.context.control().on(HookFn::<WorkerInit, _>::new((), |_event, ()| {}));
+    }
+}
+
+impl ThreadAware for RetainedContext {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.context.relocate(source, destination);
+    }
+}
+
+struct BlockingDrop {
+    retained: bool,
+    started: mpsc::Sender<()>,
+    release: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+impl Clone for BlockingDrop {
+    fn clone(&self) -> Self {
+        Self {
+            retained: false,
+            started: self.started.clone(),
+            release: Arc::clone(&self.release),
+        }
+    }
+}
+
+#[expect(clippy::unwrap_used, reason = "test fixture failures use unwrap for concise backtraces")]
+impl Drop for BlockingDrop {
+    fn drop(&mut self) {
+        if self.retained {
+            self.started.send(()).unwrap();
+            self.release.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+    }
+}
+
+impl ThreadAware for BlockingDrop {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[test]
+fn retained_worker_init_data_is_released_during_shutdown() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let lifetime = Arc::new(());
+    let weak = Arc::downgrade(&lifetime);
+
+    runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            cx.control().on(HookFn::<WorkerInit, _>::new(
+                RetainedContext {
+                    context: cx.clone(),
+                    _lifetime: lifetime,
+                },
+                |_event, _data| {},
+            ));
+        })
         .unwrap();
+
+    assert!(weak.upgrade().is_some());
+    runtime.stop().unwrap();
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn request_stop_does_not_drop_retained_hook_data() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let (started, drop_started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let control = runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            cx.control().on(HookFn::<WorkerInit, _>::new(
+                BlockingDrop {
+                    retained: true,
+                    started,
+                    release: Arc::new(Mutex::new(released)),
+                },
+                |_event, _data| {},
+            ));
+            cx.control().clone()
+        })
+        .unwrap();
+
+    control.request_stop();
+    assert!(drop_started.try_recv().is_err());
+
+    let (stopped, stop_result) = mpsc::sync_channel(1);
+    let stop = std::thread::spawn(move || stopped.send(runtime.stop()).unwrap());
+    drop_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    release.send(()).unwrap();
+    stop_result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+    stop.join().unwrap();
+}
+
+#[test]
+fn control_ignores_registration_after_shutdown_starts() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
 
