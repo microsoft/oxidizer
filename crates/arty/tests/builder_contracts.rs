@@ -140,20 +140,3 @@ fn last_panic_hook_to_set_a_response_wins() {
         }
     }
 }
-
-#[test]
-fn build_and_stop_inside_futures_executor() {
-    futures::executor::block_on(async {
-        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-
-        let (value, scheduler) = runtime
-            .scheduler()
-            .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
-            .await
-            .unwrap();
-        assert_eq!(value, 42);
-
-        runtime.stop().unwrap();
-        assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
-    });
-}

@@ -16,15 +16,10 @@ fn redact_to_string(redactor: &SimpleRedactor, data_class: &DataClass, value: &s
 }
 
 #[test]
-fn new_should_create_default_redactor() {
-    let redactor = SimpleRedactor::new();
-    assert_eq!(*redactor.mode(), SimpleRedactorMode::Replace('*'));
-}
-
-#[test]
 fn default_should_be_same_as_new() {
     let r1 = SimpleRedactor::new();
     let r2 = SimpleRedactor::default();
+    assert_eq!(*r1.mode(), SimpleRedactorMode::Replace('*'));
     assert_eq!(r1.mode(), r2.mode());
 }
 

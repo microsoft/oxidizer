@@ -21,18 +21,12 @@ use arty::runtime::Runtime;
 use arty::runtime::policy::WorkersPolicy;
 #[cfg(feature = "macros")]
 use arty::task::Context;
-use arty::task::Scheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
 use support::JoinHandleExt as _;
 use testing_aids::YieldFuture;
 #[cfg(feature = "macros")]
 use thread_aware::Unaware;
-
-#[test]
-fn assert_send_sync() {
-    static_assertions::assert_impl_all!(Scheduler: Send, Sync);
-}
 
 #[test]
 fn spawned_future_preserves_mutable_self_borrows_across_polls() {

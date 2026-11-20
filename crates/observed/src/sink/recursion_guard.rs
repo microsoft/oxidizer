@@ -62,20 +62,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn guard_allows_single_acquisition() {
-        assert!(try_acquire_reentrancy_guard().is_some());
-    }
-
-    #[test]
-    fn guard_blocks_reentrancy() {
-        let _guard = try_acquire_reentrancy_guard().expect("should acquire guard");
-        assert!(try_acquire_reentrancy_guard().is_none(), "should block reentrancy");
-    }
-
-    #[test]
     fn guard_allows_after_drop() {
+        assert!(try_acquire_reentrancy_guard().is_some());
         {
             let _guard = try_acquire_reentrancy_guard().expect("should acquire guard");
+            assert!(try_acquire_reentrancy_guard().is_none(), "should block reentrancy");
         }
         assert!(try_acquire_reentrancy_guard().is_some(), "should allow after drop");
     }

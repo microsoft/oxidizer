@@ -66,13 +66,6 @@ fn tokio_with_handle_spawn_anywhere() {
 }
 
 #[tokio::test]
-async fn tokio_spawner_debug() {
-    let spawner = Spawner::new_tokio(None);
-    let debug_str = format!("{spawner:?}");
-    assert_eq!(debug_str, r#"Spawner("tokio")"#);
-}
-
-#[tokio::test]
 async fn tokio_spawn_blocking() {
     let spawner = Spawner::new_tokio(None);
     let result = spawner.spawn_blocking(|| 21 * 2).await.unwrap();

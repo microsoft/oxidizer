@@ -140,21 +140,14 @@ fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
 fn default_worker_names_use_arty() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
 
+    let names = worker_names(&runtime);
     assert_eq!(
-        worker_names(&runtime),
+        names,
         vec![
             ("arty-async-0".to_owned(), "arty-blocking-0".to_owned()),
             ("arty-async-1".to_owned(), "arty-blocking-0".to_owned()),
         ]
     );
-    runtime.stop().unwrap();
-}
-
-#[test]
-fn default_runtime_shares_blocking_pool() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
-
-    let names = worker_names(&runtime);
     assert_eq!(names[0].1, names[1].1);
     runtime.stop().unwrap();
 }

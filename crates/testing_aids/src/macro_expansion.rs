@@ -77,20 +77,11 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    #[should_panic(expected = "the expansion parses as a Rust file")]
-    fn an_expansion_that_is_not_a_file_fails_the_test() {
-        // The point of the strict helper: a macro that emits unparsable tokens must fail
-        // here rather than reach a snapshot as raw token text, where it would look like a
-        // formatting change and be refreshed away.
-        _ = render_expansion(&not_a_file());
-    }
-
-    #[test]
-    #[serial_test::serial]
     fn the_panic_message_carries_the_offending_tokens() {
         let panic = std::panic::catch_unwind(|| render_expansion(&not_a_file())).expect_err("rendering a non-file panics");
         let message = panic.downcast_ref::<String>().expect("the panic payload is a formatted string");
 
+        assert!(message.contains("the expansion parses as a Rust file"));
         assert!(message.contains("1 + 1"), "the tokens are reported: {message}");
     }
 
