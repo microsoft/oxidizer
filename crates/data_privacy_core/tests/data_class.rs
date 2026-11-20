@@ -45,8 +45,8 @@ fn valid_identifiers() {
 #[test]
 fn invalid_identifiers() {
     for identifier in ["", "1abc", "a-b", "a b"] {
-        assert!(std::panic::catch_unwind(|| DataClass::new(identifier, "name")).is_err());
-        assert!(std::panic::catch_unwind(|| DataClass::new("taxonomy", identifier)).is_err());
+        std::panic::catch_unwind(|| DataClass::new(identifier, "name")).unwrap_err();
+        std::panic::catch_unwind(|| DataClass::new("taxonomy", identifier)).unwrap_err();
     }
 }
 
