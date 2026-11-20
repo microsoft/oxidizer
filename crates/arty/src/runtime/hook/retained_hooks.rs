@@ -106,7 +106,7 @@ mod tests {
     use std::cell::Cell;
     use std::sync::atomic::AtomicUsize;
 
-    use thread_aware::{Thread, ThreadAware};
+    use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 
     use super::*;
     use crate::runtime::hook::{HookFn, TaskPanic, registration};
@@ -138,11 +138,12 @@ mod tests {
         let spawn_calls = Arc::new(AtomicUsize::new(0));
         let worker_spawn_calls = Arc::new(AtomicUsize::new(0));
         let hooks = RetainedHooks::new(Vec::new());
+        let target = ThreadBuilder::default().build(std::thread::current().id());
         assert!(!hooks.has_task_spawn());
         let created = Cell::new(false);
         drop(hooks.execute_task_spawn(|| {
             created.set(true);
-            TaskSpawn::new(None)
+            TaskSpawn::new(None, target.clone())
         }));
         assert!(!created.get());
 
@@ -151,7 +152,7 @@ mod tests {
             hooks
                 .execute_task_spawn(|| {
                     created.set(true);
-                    TaskSpawn::new(None)
+                    TaskSpawn::new(None, target.clone())
                 })
                 .is_none()
         );
@@ -180,8 +181,8 @@ mod tests {
                 calls.0.fetch_add(1, Ordering::Relaxed);
             },
         ))));
-        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None)));
-        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None)));
+        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone())));
+        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone())));
         assert_eq!(hooks.len(), 2);
         drop(hooks.clear());
         assert!(!hooks.has_task_spawn());
@@ -192,7 +193,7 @@ mod tests {
         assert_eq!(hooks.len(), 0);
         drop(hooks.execute_task_spawn(|| {
             created.set(true);
-            TaskSpawn::new(None)
+            TaskSpawn::new(None, target)
         }));
 
         assert_eq!(spawn_calls.load(Ordering::Relaxed), 2);

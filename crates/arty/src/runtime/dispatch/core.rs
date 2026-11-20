@@ -371,21 +371,22 @@ impl DispatcherCore {
             drop(future_factory);
             return join_handle;
         }
-        let options = options.observed_by(self.submission_observers());
+        let target = &self.worker_endpoints[usize::from(worker_index)].thread;
+        let options = options.observed_by(self.submission_observers(target));
         let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, options);
         self.send_prepared(worker_index, future_factory);
         join_handle
     }
 
-    fn submission_observers(&self) -> Option<TaskObservers> {
+    fn submission_observers(&self, target: &Thread) -> Option<TaskObservers> {
         // #[gamma::skip(cond.always_false, reason = "This guard only avoids hook discovery; the empty hook snapshot also returns no observers.")]
         if !self.retained_hooks.has_task_spawn() {
             return None;
         }
         if LocalWorker::current_thread().is_some_and(|thread| self.owns(&thread)) {
-            LocalWorker::on_spawn()
+            LocalWorker::on_spawn(target)
         } else {
-            self.retained_hooks.execute_task_spawn(|| TaskSpawn::new(None))
+            self.retained_hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone()))
         }
     }
 

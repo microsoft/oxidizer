@@ -106,18 +106,18 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_spawn() -> Option<TaskObservers> {
-        let thread = Self::with_scheduler(|current| {
+    pub(crate) fn on_spawn(target: &Thread) -> Option<TaskObservers> {
+        let origin = Self::with_scheduler(|current| {
             let current = current?;
             current.has_spawn_hooks.get().then(|| current.thread.clone())
         })?;
-        Self::execute_spawn_hooks(&thread)
+        Self::execute_spawn_hooks(&origin, target)
     }
 
-    fn execute_spawn_hooks(thread: &Thread) -> Option<TaskObservers> {
+    fn execute_spawn_hooks(origin: &Thread, target: &Thread) -> Option<TaskObservers> {
         let hooks = SPAWN_HOOKS.with_borrow(|hooks| Arc::clone(hooks.as_ref().expect("a running worker retains its installed hooks")));
         debug_assert!(!hooks.is_empty(), "the scheduler flag tracks installed spawn hooks");
-        let mut event = TaskSpawn::new(Some(thread.clone()));
+        let mut event = TaskSpawn::new(Some(origin.clone()), target.clone());
         for hook in hooks.iter() {
             hook.execute(&mut event);
         }
@@ -296,7 +296,7 @@ impl SchedulerContext {
         F::Output: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let observers = LocalWorker::execute_spawn_hooks(&self.thread);
+        let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         TaskSpawnOptions::new::<F>()
             .observed_by(observers)
@@ -348,9 +348,9 @@ mod tests {
     }
 
     impl ThreadAware for ReentrantSpawnProbe {
-        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+        fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
             self.relocation_saw_no_observers
-                .store(LocalWorker::on_spawn().is_none(), Ordering::Release);
+                .store(LocalWorker::on_spawn(destination).is_none(), Ordering::Release);
         }
     }
 
@@ -369,8 +369,9 @@ mod tests {
     #[test]
     fn no_spawn_hooks_skip_event_creation_without_a_scheduler() {
         let _guard = LOCAL_SPAWN_HOOK.initialize();
+        let target = ThreadBuilder::default().build(std::thread::current().id());
 
-        assert!(LocalWorker::on_spawn().is_none());
+        assert!(LocalWorker::on_spawn(&target).is_none());
     }
 
     #[derive(Clone)]
@@ -486,13 +487,13 @@ mod tests {
             );
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher, clock, io, thread.clone());
-            let executor = Executor::builder().thread(thread).build();
+            let executor = Executor::builder().thread(thread.clone()).build();
             let relocation_saw_no_observers = Arc::new(AtomicBool::new(false));
             let callbacks = Arc::new(AtomicUsize::new(0));
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            assert!(LocalWorker::on_spawn().is_none());
+            assert!(LocalWorker::on_spawn(&thread).is_none());
             LocalWorker::install_hook(
                 registration(HookFn::<TaskSpawn, _>::new(
                     ReentrantSpawnProbe {
@@ -505,7 +506,7 @@ mod tests {
                 )),
                 None,
             );
-            assert!(LocalWorker::on_spawn().is_none());
+            assert!(LocalWorker::on_spawn(&thread).is_none());
 
             LocalWorker::clear_scheduler();
             (

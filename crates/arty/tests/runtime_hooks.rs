@@ -112,7 +112,7 @@ impl ThreadAware for SharedLog {
 
 #[derive(Clone)]
 struct SpawnSourceProbe {
-    events: mpsc::Sender<Option<ThreadId>>,
+    events: mpsc::Sender<(Option<ThreadId>, ThreadId)>,
     observers: mpsc::Sender<(Option<ThreadId>, ThreadId, ThreadId)>,
 }
 
@@ -146,6 +146,7 @@ impl TaskObserver for SpawnSourceObserver {
 struct SpawnLifecycle {
     callback: Option<ThreadId>,
     source: Option<ThreadId>,
+    target: Option<ThreadId>,
     relocation: Option<(Option<ThreadId>, ThreadId)>,
     poll_starts: Vec<ThreadId>,
     poll_ends: Vec<(ThreadId, Poll<()>)>,
@@ -456,7 +457,7 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
             },
             |event, probe| {
                 let source = event.origin().map(Thread::id);
-                probe.events.send(source).unwrap();
+                probe.events.send((source, event.target().id())).unwrap();
                 event.observe(SpawnSourceObserver {
                     source,
                     destination: None,
@@ -487,9 +488,9 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
         .join()
         .unwrap();
 
-    let sources: Vec<_> = (0..2).map(|_| observations.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
-    assert!(sources.contains(&None));
-    assert!(sources.contains(&Some(destination.id())));
+    let submissions: Vec<_> = (0..2).map(|_| observations.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
+    assert!(submissions.contains(&(None, destination.id())));
+    assert!(submissions.contains(&(Some(destination.id()), target.id())));
     let relocated: Vec<_> = (0..2)
         .map(|_| observer_observations.recv_timeout(Duration::from_secs(5)).unwrap())
         .collect();
@@ -517,6 +518,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
                     let mut lifecycle = probe.lifecycle.lock().unwrap();
                     lifecycle.callback = Some(thread::current().id());
                     lifecycle.source = event.origin().map(Thread::id);
+                    lifecycle.target = Some(event.target().id());
                 }
                 event.observe(LifecyclePoll(Arc::clone(&probe.lifecycle)));
             },
@@ -560,6 +562,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
         (
             lifecycle.callback,
             lifecycle.source,
+            lifecycle.target,
             lifecycle.relocation,
             lifecycle.poll_starts.as_slice(),
             lifecycle.poll_ends.as_slice(),
@@ -567,6 +570,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
         (
             Some(source.id()),
             Some(source.id()),
+            Some(destination.id()),
             Some((Some(source.id()), destination.id())),
             [destination.id()].as_slice(),
             [(destination.id(), Poll::Ready(()))].as_slice(),

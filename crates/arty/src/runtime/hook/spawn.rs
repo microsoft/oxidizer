@@ -31,6 +31,7 @@ pub trait TaskObserver: ThreadAware + 'static {
 /// Reports that Arty is submitting an async task.
 ///
 /// Arty creates this event before it sends the task to its selected worker.
+/// The event reports the optional origin worker and the required target worker.
 /// On a runtime worker, Arty uses that worker's hook instance. Outside runtime
 /// workers, Arty uses a worker-neutral hook instance. The event covers tasks submitted through
 /// [`RuntimeScheduler`](crate::task::RuntimeScheduler) and
@@ -40,13 +41,18 @@ pub trait TaskObserver: ThreadAware + 'static {
 #[derive(derive_more::Debug)]
 pub struct TaskSpawn {
     pub(super) origin: Option<Thread>,
+    pub(super) target: Thread,
     #[debug(ignore)]
     pub(super) observers: Option<TaskObservers>,
 }
 
 impl TaskSpawn {
-    pub(crate) fn new(origin: Option<Thread>) -> Self {
-        Self { observers: None, origin }
+    pub(crate) fn new(origin: Option<Thread>, target: Thread) -> Self {
+        Self {
+            origin,
+            target,
+            observers: None,
+        }
     }
 
     pub(crate) fn into_observers(self) -> Option<TaskObservers> {
@@ -59,6 +65,12 @@ impl TaskSpawn {
     #[must_use]
     pub fn origin(&self) -> Option<&Thread> {
         self.origin.as_ref()
+    }
+
+    /// Returns the worker selected to run the task.
+    #[must_use]
+    pub const fn target(&self) -> &Thread {
+        &self.target
     }
 
     /// Adds a poll observer to the task.
@@ -232,19 +244,19 @@ mod tests {
 
     #[test]
     fn into_single_returns_only_observer() {
-        let mut event = TaskSpawn::new(None);
-        event.observe(OneBytePoll(1));
         let worker = ThreadBuilder::default().build(std::thread::current().id());
+        let mut event = TaskSpawn::new(None, worker.clone());
+        event.observe(OneBytePoll(1));
 
         let _observer = event.into_observers().unwrap().relocate_to(&worker).into_single().unwrap();
     }
 
     #[test]
     fn into_single_returns_original_collection_for_multiple_observers() {
-        let mut event = TaskSpawn::new(None);
+        let worker = ThreadBuilder::default().build(std::thread::current().id());
+        let mut event = TaskSpawn::new(None, worker.clone());
         event.observe(OneBytePoll(1));
         event.observe(OneBytePoll(2));
-        let worker = ThreadBuilder::default().build(std::thread::current().id());
         let observers = event.into_observers().unwrap().relocate_to(&worker);
 
         let Err(observers) = observers.into_single() else {
@@ -258,7 +270,7 @@ mod tests {
         let source = ThreadBuilder::default().build(std::thread::current().id());
         let destination = ThreadBuilder::default().build(std::thread::current().id());
         let observed = Arc::new(Mutex::new(RelocationSource::NotRelocated));
-        let mut event = TaskSpawn::new(Some(source.clone()));
+        let mut event = TaskSpawn::new(Some(source.clone()), destination.clone());
         event.observe(RelocationProbe(Arc::clone(&observed)));
 
         let _observer = event.into_observers().unwrap().relocate_to(&destination).into_single().unwrap();
@@ -273,7 +285,7 @@ mod tests {
         {
             let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
             for value in 0..MEASURED_OPERATIONS {
-                let mut event = TaskSpawn::new(Some(worker.clone()));
+                let mut event = TaskSpawn::new(Some(worker.clone()), worker.clone());
                 for observer in 0..observer_count {
                     event.observe(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()));
                 }
