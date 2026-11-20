@@ -76,6 +76,18 @@ impl TaskSpawn {
         &self.target
     }
 
+    /// Adds a relocatable poll observer to the task.
+    ///
+    /// Arty relocates `observer` to the target worker before task registration.
+    /// Use [`observe_with`](Self::observe_with) when the observer itself cannot
+    /// move between threads.
+    pub fn observe<O>(&mut self, observer: O)
+    where
+        O: TaskObserver + ThreadAware,
+    {
+        self.observe_with(observer, std::convert::identity);
+    }
+
     /// Adds a poll observer that Arty creates on the target worker.
     ///
     /// Arty relocates `data` from [`origin`](Self::origin) to
@@ -385,7 +397,7 @@ mod tests {
     fn into_single_returns_only_observer() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
         let mut event = TaskSpawn::new(None, worker.clone());
-        event.observe_with(OneBytePoll(1), std::convert::identity);
+        event.observe(OneBytePoll(1));
 
         let _observer = event.into_observers().unwrap().relocate_to(&worker).into_single().unwrap();
     }
@@ -394,8 +406,8 @@ mod tests {
     fn into_single_returns_original_collection_for_multiple_observers() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
         let mut event = TaskSpawn::new(None, worker.clone());
-        event.observe_with(OneBytePoll(1), std::convert::identity);
-        event.observe_with(OneBytePoll(2), std::convert::identity);
+        event.observe(OneBytePoll(1));
+        event.observe(OneBytePoll(2));
         let observers = event.into_observers().unwrap().relocate_to(&worker);
 
         let Err(observers) = observers.into_single() else {
@@ -410,7 +422,7 @@ mod tests {
         let destination = ThreadBuilder::default().build(std::thread::current().id());
         let observed = Arc::new(Mutex::new(RelocationSource::NotRelocated));
         let mut event = TaskSpawn::new(Some(source.clone()), destination.clone());
-        event.observe_with(RelocationProbe(Arc::clone(&observed)), std::convert::identity);
+        event.observe(RelocationProbe(Arc::clone(&observed)));
 
         let _observer = event.into_observers().unwrap().relocate_to(&destination).into_single().unwrap();
 
@@ -472,7 +484,7 @@ mod tests {
             for value in 0..MEASURED_OPERATIONS {
                 let mut event = TaskSpawn::new(Some(worker.clone()), worker.clone());
                 for observer in 0..observer_count {
-                    event.observe_with(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()), std::convert::identity);
+                    event.observe(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()));
                 }
                 black_box(event.into_observers().unwrap().relocate_to(&worker));
             }
