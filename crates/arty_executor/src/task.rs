@@ -700,4 +700,12 @@ mod tests {
 
         assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
+
+    #[test]
+    fn payload_slot_drops_an_occupied_payload() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        drop(PayloadSlot::new(DropCountingFuture(Arc::clone(&drops))));
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
 }
