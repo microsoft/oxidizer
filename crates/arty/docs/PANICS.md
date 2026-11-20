@@ -8,8 +8,8 @@ Arty can then catch panics from these user operations:
 - Running a blocking function on a separate thread.
 
 Arty reports these panics through `JoinError` when possible. By default, an
-async task panic shuts down the runtime. Register `Panic` and call
-`Panic::ignore` in its callback to keep the runtime running:
+async task panic shuts down the runtime. Register `TaskPanic::IGNORE` to keep
+the runtime running:
 
 ```rust
 use arty::runtime::Runtime;
@@ -22,7 +22,7 @@ let runtime = Runtime::builder()
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-A blocking function panic does not create a `Panic` event or stop the
+A blocking function panic does not create a `TaskPanic` event or stop the
 runtime. Its join handle still returns the original panic payload.
 
 `JoinError::is_panic()` identifies the task that panicked.
