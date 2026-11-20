@@ -389,6 +389,8 @@ unsafe impl Codec for ZstdDecompress {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Native contexts, codec steps, uninitialized output and mappings are private.
+// Constructor-only cases also rely on lib.rs's cfg(test) zstd selection without features.
 mod tests {
     #[test]
     fn gamma_round2_pledged_source_size_mismatch_returns_a_codec_error() {

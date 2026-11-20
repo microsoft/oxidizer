@@ -63,6 +63,8 @@ impl Redactor for xxH3Redactor {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// The stored secret bytes and lengths are private. Hash outputs do not replace
+// these exact field assertions, including the 136-byte and 256-byte boundaries.
 mod tests {
     #[test]
     fn test_with_secret_creates_redactor_with_custom_secret() {

@@ -86,6 +86,8 @@ impl Debug for RedactionEngineInner {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Map lengths, retained capacity and resolve's None result have no public accessor.
+// Redactor::redacts behavior is covered through RedactionEngine in integration tests.
 mod tests {
     use data_privacy_macros::taxonomy;
     use rustc_hash::FxBuildHasher;
@@ -159,39 +161,5 @@ mod tests {
         inner.suppress(TestTaxonomy::Sensitive);
         assert_eq!(inner.len(), 1);
         assert!(inner.resolve(&TestTaxonomy::Sensitive.data_class()).is_none());
-    }
-
-    #[test]
-    fn test_redacts_returns_true_for_unknown_class() {
-        let inner = RedactionEngineInner::default();
-        assert!(inner.redacts(&TestTaxonomy::Sensitive.data_class()));
-    }
-
-    #[test]
-    fn test_redacts_returns_true_for_registered_redactor() {
-        let mut inner = RedactionEngineInner::default();
-        inner.insert(TestTaxonomy::Sensitive, SimpleRedactor::new());
-        assert!(inner.redacts(&TestTaxonomy::Sensitive.data_class()));
-    }
-
-    #[test]
-    fn test_redacts_returns_false_for_suppressed_class() {
-        let mut inner = RedactionEngineInner::default();
-        inner.suppress(TestTaxonomy::Sensitive);
-        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
-    }
-
-    #[test]
-    fn test_redacts_returns_false_for_passthrough_redactor() {
-        let mut inner = RedactionEngineInner::default();
-        inner.insert(TestTaxonomy::Sensitive, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
-        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
-    }
-
-    #[test]
-    fn test_redacts_returns_false_for_passthrough_fallback() {
-        let mut inner = RedactionEngineInner::default();
-        inner.set_fallback(SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
-        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
     }
 }

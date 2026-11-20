@@ -387,6 +387,8 @@ impl FormatLimits {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// These assertions inspect private resolved bounds, synthetic counts, or cfg(test)'s
+// 1 MiB output cap. Public APIs expose neither FormatLimits nor the reduced cap.
 mod tests {
     use super::*;
 

@@ -131,6 +131,8 @@ impl Wrapper {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Wrapper and its native engines are private. These cases inspect requested window bits,
+// native progress/counts, framing-reset predicates and the internal level mapping.
 mod tests {
     std::thread_local! {
         pub(super) static LAST_GZIP_WINDOW_BITS: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };

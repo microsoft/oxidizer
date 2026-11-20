@@ -6,6 +6,11 @@
 //! These tests exist to keep the abstraction honest. Every format goes through the same scenarios.
 //! A format that differs from its siblings fails here. An abstraction that fits only the deflate
 //! family also fails here.
+// Each per-format case is selected by cfg(any(test, feature = "...")) below.
+// Public-only cases still need backends that lib.rs exposes without features only
+// under cfg(test). Moving them loses the original no-feature selection.
+// Other cases need sealed push/pull mechanics, private counters or step outcomes.
+// Cross-format cases require all five cfg(test) variants, not just enabled features.
 
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::OnceLock;

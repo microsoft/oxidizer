@@ -325,6 +325,10 @@ where
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Public behavior cases use gzip or Format::ALL with all five backends. lib.rs exposes
+// those backends and this adapter under cfg(test), including no-feature test builds.
+// Moving them behind feature gates loses that selection. Other cases assert private
+// adapter fields/budgets or inject outcomes through sealed CompressionInternal fixtures.
 mod tests {
     use std::num::{NonZeroU64, NonZeroUsize};
     use std::pin::pin;
