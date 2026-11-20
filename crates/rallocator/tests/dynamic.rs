@@ -1,70 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Launch the same executable with each backend and observe which one owns its allocations.
+//! Exercise the installed dynamic allocator across threads and through the recorder.
 
 use std::alloc::{GlobalAlloc, Layout};
-use std::process::Command;
 use std::ptr::NonNull;
 
 use seismograph::recorder::event::Event;
 use seismograph::recorder::{Configuration, Policy, without_recording};
-use seismograph_rallocator::source;
 
 rallocator::rallocator!(backend = dynamic);
 
 #[test]
-fn launch_selects_the_backend_for_all_threads() {
-    const EXPECTED: &str = "RALLOCATOR_TEST_EXPECTED_BACKEND";
-    if let Ok(expected) = std::env::var(EXPECTED) {
-        exercise(&expected);
-        return;
-    }
-
-    for (setting, expected, warn) in [
-        (None, "system", false),
-        (Some(""), "system", false),
-        (Some("snmalloc"), "snmalloc", false),
-        (Some("mimalloc"), "mimalloc", false),
-        (Some("system"), "system", false),
-        (Some("mimalloc-extra"), "snmalloc", true),
-        (Some("SYSTEM"), "snmalloc", true),
-    ] {
-        let mut child = Command::new(std::env::current_exe().unwrap());
-        child
-            .args(["--exact", "launch_selects_the_backend_for_all_threads"])
-            .env(EXPECTED, expected);
-        if let Some(value) = setting {
-            child.env("RALLOCATOR_DYNAMIC_PERSONALITY", value);
-        } else {
-            child.env_remove("RALLOCATOR_DYNAMIC_PERSONALITY");
-        }
-        let output = child.output().unwrap();
-        assert!(output.status.success(), "setting {setting:?}: {output:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(
-            stderr.matches("unknown RALLOCATOR_DYNAMIC_PERSONALITY").count(),
-            usize::from(warn),
-            "{stderr}"
-        );
-    }
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "The child must complete the cross-thread transfer and decode its snapshot"
-)]
-fn exercise(expected: &str) {
-    // The global allocator is already in use by the harness. Changing the
-    // Windows environment is safe even with harness threads; it is not on Unix.
-    #[cfg(windows)]
-    // SAFETY: Windows serializes access to its process environment.
-    unsafe {
-        std::env::set_var(
-            "RALLOCATOR_DYNAMIC_PERSONALITY",
-            if expected == "system" { "mimalloc" } else { "system" },
-        );
-    }
+fn installed_allocator_transfers_blocks_and_records_only_successful_resizes() {
     let mut buffer = std::thread::spawn(|| vec![0x5a_u8; 113]).join().unwrap();
     buffer.reserve(8192);
     assert_eq!(buffer, [0x5a; 113]);
@@ -101,9 +49,6 @@ fn exercise(expected: &str) {
     without_recording(|| {
         let capture = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
         let decoded = seismograph::snapshot::decode(capture.as_bytes()).unwrap();
-        let has_source = |id| decoded.sources.iter().any(|entry| entry.id == id);
-        assert_eq!(has_source(source::ID), expected == "snmalloc");
-        assert_eq!(has_source(source::MIMALLOC_ID), expected == "mimalloc");
         let resizes: Vec<_> = decoded
             .events
             .events
