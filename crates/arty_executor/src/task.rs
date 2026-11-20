@@ -324,7 +324,9 @@ where
     fn retire_payload(maybe_payload: &mut Option<Payload<F, T, I>>) {
         // The future is retired and the completion target has been transferred.
         // Diagnostic captures must not prevent delivery of that terminal outcome.
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(maybe_payload.take()))) {
+        // SAFETY: maybe_payload remains pinned with Task. Pin::set drops the
+        // existing payload in place before it writes None.
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| unsafe { Pin::new_unchecked(maybe_payload) }.set(None))) {
             discard_task_panic_payload(panic);
         }
     }
