@@ -409,6 +409,18 @@ fn bound_recording_never_evaluates_unbound_field_getters() {
 
 #[test]
 fn runtime_field_inventory_determines_metric_presence() {
+    struct MetricInterest;
+    impl EventProcessor for MetricInterest {
+        fn is_interested(&self, description: &EventDescription) -> bool {
+            description.contains_metrics()
+        }
+        fn process(&self, _: &EventView<'_>) {
+            panic!("an interest query must not deliver an event")
+        }
+        fn flush(&self) -> Result<(), FlushError> {
+            panic!("an interest query must not flush a processor")
+        }
+    }
     const FIELDS: &[FieldDescriptor] = &event_fields([
         field_descriptor("label", Some(log_field("label")), None),
         field_descriptor("region", None, Some(metric_field("region", None))),
@@ -427,6 +439,19 @@ fn runtime_field_inventory_determines_metric_presence() {
     assert_eq!(description.fields().len(), 3);
     assert_eq!(description.fields()[2].field_index(), Some(2));
     assert!(!event_description(name, None, None, None, false, &FIELDS[..2]).contains_metrics());
+
+    let sink = Sink::builder("runtime.metadata")
+        .processors(vec![Arc::new(MetricInterest)])
+        .clock(SimpleClock::new_frozen())
+        .build();
+    for (fields, flattened_metrics, expected) in [(&FIELDS[..2], false, false), (&FIELDS[..2], true, true), (FIELDS, false, true)] {
+        let description = observed::__private::with_field_metrics(
+            event_description(name, None, None, None, false, fields),
+            std::hint::black_box(flattened_metrics),
+        );
+        assert_eq!(sink.is_interested(&description), expected);
+        assert_eq!(description.fields().len(), fields.len());
+    }
 }
 
 #[test]
