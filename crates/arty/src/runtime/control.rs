@@ -38,10 +38,10 @@ impl RuntimeControl {
     /// let tasks: Vec<_> = cx
     ///     .control()
     ///     .workers()
-    ///     .into_iter()
+    ///     .iter()
     ///     .map(|worker| {
     ///         cx.scheduler()
-    ///             .spawn_at(worker, (), |()| async { std::thread::current().id() })
+    ///             .spawn_at(&worker, (), |()| async { std::thread::current().id() })
     ///     })
     ///     .collect();
     /// for task in tasks {

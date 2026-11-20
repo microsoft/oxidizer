@@ -63,10 +63,10 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
                     let tasks: Vec<_> = cx
                         .control()
                         .workers()
-                        .into_iter()
+                        .iter()
                         .map(|worker| {
                             cx.scheduler().spawn_at(
-                                worker,
+                                &worker,
                                 (cx.clone(), Unaware((Arc::clone(&polls), Arc::clone(&drops)))),
                                 |(child, Unaware((polls, drops)))| SelfWakePanic {
                                     polls,
@@ -83,8 +83,8 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
                     let tasks: Vec<_> = cx
                         .control()
                         .workers()
-                        .into_iter()
-                        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { 42 }))
+                        .iter()
+                        .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { 42 }))
                         .collect();
                     for task in tasks {
                         assert_eq!(task.await.unwrap(), 42);
