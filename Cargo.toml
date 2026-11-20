@@ -73,6 +73,7 @@ allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-fe
 anyhow = { version = "1.0.100", default-features = false }
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.11.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.7.0" }
+arc-swap = { version = "1.9.5", default-features = false }
 argh = { version = "0.1.13", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }
 arty = { path = "crates/arty", default-features = false, version = "0.6.1" }

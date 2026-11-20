@@ -207,6 +207,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "argh"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -244,6 +253,8 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 name = "arty"
 version = "0.6.1"
 dependencies = [
+ "alloc_tracker",
+ "arc-swap",
  "arty_executor",
  "arty_io_core",
  "arty_io_host",
@@ -267,6 +278,7 @@ dependencies = [
  "seismograph",
  "seismograph_protocol",
  "seismograph_runtime",
+ "smallvec",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -281,13 +293,10 @@ version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "data_privacy",
  "derive_more",
  "gungraun",
  "metabench",
  "nm",
- "observed",
- "observed_testing",
  "ohno 0.5.4",
  "performables",
  "pin-project",

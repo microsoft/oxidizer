@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{ShutdownCause, TaskBuilder, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
+use arty_executor::{ShutdownCause, TaskBuilder, TaskCompletion, TaskInstrumentation, TaskPanicPayload, discard_task_panic_payload};
 
 pub(crate) enum TaskOutcome<R> {
     Completed(R),
@@ -93,10 +93,11 @@ pub(crate) trait TaskBuilderExt<R> {
     fn register_test(self) -> CompletionHandle<R>;
 }
 
-impl<F> TaskBuilderExt<F::Output> for TaskBuilder<'_, F>
+impl<F, I> TaskBuilderExt<F::Output> for TaskBuilder<'_, F, I>
 where
     F: IntoFuture + 'static,
     F::Output: 'static,
+    I: TaskInstrumentation,
 {
     fn register_test(self) -> CompletionHandle<F::Output> {
         let state = Rc::new(RefCell::new(CompletionState {

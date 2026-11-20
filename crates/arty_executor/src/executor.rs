@@ -1,27 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(feature = "inspection")]
-use std::collections::HashSet;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
-#[cfg(feature = "inspection")]
 use std::ops::ControlFlow;
-#[cfg(feature = "inspection")]
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::task;
 use std::thread::ThreadId;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
-use observed::Sink;
 use tick::{SimpleClock, Stopwatch};
 
 use crate::{
-    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, TypeErasedTask, executor_context,
+    CycleOutcome, ExecutorBuilder, ExecutorShared, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskHandle,
+    TaskList, TaskPtr, TaskSet, TaskState, TypeErasedTask, discard_task_panic_payload, executor_context,
 };
-#[cfg(feature = "inspection")]
-use crate::{InspectionError, InspectionStatus, PollObserver, TaskPtr, TaskState, discard_task_panic_payload};
 
 /// An async task executor that runs on one thread.
 ///
@@ -92,10 +86,9 @@ impl ObservePoll for () {
     }
 }
 
-#[cfg(feature = "inspection")]
 impl ObservePoll for &dyn PollObserver {
     fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
-        let mut observed = false;
+        let mut observed = 0_usize;
         let mut in_callback = false;
         let description = catch_unwind(AssertUnwindSafe(|| {
             task.inspect(TaskState::Running, &mut |description| {
@@ -103,7 +96,7 @@ impl ObservePoll for &dyn PollObserver {
                 self.poll_started(description);
                 // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
                 in_callback = false;
-                observed = true;
+                observed = observed.saturating_add(1);
             });
         }));
         match description {
@@ -113,14 +106,14 @@ impl ObservePoll for &dyn PollObserver {
                 // Observer failures propagate; inspector and description-drop failures
                 // cancel the observation before the task itself is polled.
                 // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                observed = false;
+                observed = 0;
                 discard_task_panic_payload(panic);
-                self.inspection_failed(InspectionError::Panicked);
+                self.inspection_failed();
             }
         }
         let outcome = task.poll(shared);
-        if observed {
-            self.poll_finished(outcome.is_ready());
+        for _ in 0..observed {
+            self.poll_finished();
         }
         outcome
     }
@@ -133,8 +126,8 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
-        let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
+    pub(crate) fn new(owner_waker: task::Waker, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
+        let shared = ExecutorShared::new(owner_waker, thread_id, panic_policy);
         let stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
         // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
@@ -197,7 +190,6 @@ impl Executor {
     /// Observer panics propagate. An inspector panic is reported through
     /// [`PollObserver::inspection_failed`](crate::PollObserver::inspection_failed)
     /// and does not prevent the affected task from running.
-    #[cfg(feature = "inspection")]
     #[must_use]
     pub fn execute_cycle_observed(&mut self, observer: &dyn PollObserver) -> CycleOutcome {
         self.execute_cycle_with(observer)
@@ -225,7 +217,6 @@ impl Executor {
     ///
     /// Returns an error for a zero limit, borrowed submission storage, or a panic
     /// from a task inspector or the visitor.
-    #[cfg(feature = "inspection")]
     #[expect(
         clippy::needless_pass_by_ref_mut,
         reason = "exclusive owner access prevents inspection from overlapping a poll"

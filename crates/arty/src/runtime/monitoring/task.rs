@@ -6,7 +6,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use arty_executor::{ShutdownCause, TaskCompletion, TaskPanicPayload, TaskPlacement, TaskSet, TaskState};
+use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet, TaskState};
 use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
@@ -23,7 +23,7 @@ pub(crate) fn current_events() -> Option<EventContext> {
     EVENTS.with(Cell::get)
 }
 
-pub(super) fn set_events(events: Option<EventContext>) {
+pub(crate) fn set_events(events: Option<EventContext>) {
     EVENTS.with(|slot| slot.set(events));
 }
 
@@ -50,16 +50,9 @@ pub(crate) fn enter_current(task: TaskId) -> CurrentTask {
     CurrentTask(CURRENT.with(|slot| slot.replace(Some(task))))
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "descriptions are transient stack values; boxing snapshots would allocate during native inspection"
-)]
-pub(super) enum Description {
-    Snapshot(Task),
-    Poll(TaskId),
-}
+pub(crate) struct PollTask(pub(crate) TaskId);
 
-fn descriptor<T: 'static>() -> TypeDescriptorId {
+pub(crate) fn descriptor<T: 'static>() -> TypeDescriptorId {
     TYPES.with_borrow_mut(|types| {
         *types
             .entry(TypeId::of::<T>())
@@ -191,8 +184,8 @@ struct AsyncTaskInfo {
 }
 
 impl AsyncTaskInfo {
-    fn new<T: 'static>(events: EventContext, parent: Option<TaskId>, body_size: usize) -> Self {
-        let spawn = events.spawned_with(descriptor::<T>, parent, body_size);
+    fn new(describe_type: fn() -> TypeDescriptorId, events: EventContext, parent: Option<TaskId>, body_size: usize) -> Self {
+        let spawn = events.spawned_with(describe_type, parent, body_size);
         Self {
             events,
             parent,
@@ -205,8 +198,8 @@ impl AsyncTaskInfo {
         *self.identity.get_or_init(seismograph_runtime::allocate_task_id)
     }
 
-    fn describe<T: 'static>(&self, state: TaskActivityState, body_size: usize) -> Task {
-        let mut task = Task::new(self.id(), descriptor::<T>(), state);
+    fn describe(&self, descriptor: TypeDescriptorId, state: TaskActivityState, body_size: usize) -> Task {
+        let mut task = Task::new(self.id(), descriptor, state);
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
         task.future_size_bytes = Some(u64::try_from(body_size).expect("a task body fits the platform address space"));
@@ -222,130 +215,148 @@ impl AsyncTaskInfo {
 }
 
 #[derive(Debug)]
-struct Completion<T> {
-    target: T,
+struct TaskMonitor<I> {
+    instrumentation: I,
     info: AsyncTaskInfo,
+    describe_type: fn() -> TypeDescriptorId,
+    body_size: usize,
 }
 
-impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
-    fn completed(self, result: R) {
+impl<I> TaskInstrumentation for TaskMonitor<I>
+where
+    I: TaskInstrumentation,
+{
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+        match state {
+            TaskState::Ready | TaskState::Waiting => {
+                let activity = if state == TaskState::Ready {
+                    TaskActivityState::Ready
+                } else {
+                    TaskActivityState::Waiting
+                };
+                let task =
+                    seismograph::recorder::without_recording(|| self.info.describe((self.describe_type)(), activity, self.body_size));
+                visitor(&task);
+            }
+            TaskState::Running => {
+                let task = seismograph::recorder::without_recording(|| PollTask(self.info.id()));
+                visitor(&task);
+            }
+        }
+    }
+
+    fn poll_start(&mut self) {
+        self.instrumentation.poll_start();
+    }
+
+    fn poll_end(&mut self, outcome: std::task::Poll<()>) {
+        self.instrumentation.poll_end(outcome);
+    }
+
+    fn completed(&mut self) {
         if let Some(id) = self.info.terminal_id() {
             self.info.events.completed(id);
         }
-        self.target.completed(result);
+        self.instrumentation.completed();
     }
 
-    fn panicked(self, panic: TaskPanicPayload, cause: Option<ShutdownCause>) {
+    fn panicked(&mut self) {
         if let Some(id) = self.info.terminal_id() {
             self.info.events.panicked(id);
         }
-        self.target.panicked(panic, cause);
+        self.instrumentation.panicked();
     }
 
-    fn cancelled(self, cause: ShutdownCause) {
+    fn cancelled(&mut self) {
         if let Some(id) = self.info.terminal_id() {
             self.info.events.canceled(id);
         }
-        self.target.cancelled(cause);
+        self.instrumentation.cancelled();
     }
 }
 
-pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
+pub(crate) fn register_monitored<F, T, I>(
     tasks: &TaskSet,
     future: F,
-    placement: TaskPlacement,
     completion: T,
+    instrumentation: I,
     parent: Option<TaskId>,
-    body_size: S,
+    describe_type: fn() -> TypeDescriptorId,
+    body_size: usize,
 ) where
-    Body: 'static,
-    F: IntoFuture<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-    S: Fn() -> usize + 'static,
+    F: IntoFuture + 'static,
+    F::Output: 'static,
+    T: TaskCompletion<F::Output>,
+    I: TaskInstrumentation,
 {
     let Some(events) = current_events() else {
-        tasks.task(future).placement(placement).register(completion);
+        tasks.task(future).instrument(instrumentation).register(completion);
         return;
     };
-    let completion = Completion {
-        target: completion,
-        info: AsyncTaskInfo::new::<Body>(events, parent, body_size()),
+    let monitor = TaskMonitor {
+        instrumentation,
+        info: AsyncTaskInfo::new(describe_type, events, parent, body_size),
+        describe_type,
+        body_size,
     };
-    tasks
-        .task(future)
-        .placement(placement)
-        .register_with_inspection(completion, move |_, completion, state| {
-            let info = &completion.info;
-            Some(seismograph::recorder::without_recording(|| match state {
-                TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready, body_size())),
-                TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting, body_size())),
-                TaskState::Running => Description::Poll(info.id()),
-            }))
-        });
+    tasks.task(future).instrument(monitor).register(completion);
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::error::Error as _;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-    use arty_executor::{ShutdownCause, ShutdownError, TaskCompletion};
+    use arty_executor::TaskInstrumentation;
     use seismograph_runtime::RuntimeMetadata;
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 
-    use super::{AsyncTaskInfo, Completion, TaskInfo, current_task, enter_current};
-    use crate::runtime::shutdown::{Shutdown, ShutdownState};
-    use crate::task::handle::JoinHandlePool;
+    use super::{AsyncTaskInfo, TaskInfo, TaskMonitor, current_task, enter_current};
 
-    #[test]
-    fn monitored_panic_preserves_the_payload_and_executor_shutdown_cause() {
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("panic-forwarding", 1));
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    struct Recorder(Rc<RefCell<Vec<&'static str>>>);
 
-        for stopping in [false, true] {
-            let pool = JoinHandlePool::new(Shutdown::default());
-            let (handle, target) = pool.handle::<u32>();
-            let cause = stopping.then(|| ShutdownCause::panic(&42_u32));
-            let expected = cause.as_ref().and_then(ShutdownCause::as_error).cloned();
-            let completion = Completion {
-                target,
-                info: AsyncTaskInfo::new::<()>(worker.handle().task_events(), None, 0),
-            };
+    impl TaskInstrumentation for Recorder {
+        fn poll_start(&mut self) {
+            self.0.borrow_mut().push("start");
+        }
 
-            completion.panicked(Box::new(42_u32), cause);
+        fn poll_end(&mut self, _outcome: std::task::Poll<()>) {
+            self.0.borrow_mut().push("end");
+        }
 
-            if let Some(expected) = expected {
-                assert!(std::ptr::addr_eq(pool.shutdown().error().unwrap().inner(), expected.inner()));
-            } else {
-                assert_eq!(pool.shutdown().state(), ShutdownState::Running);
-            }
-            assert_eq!(*handle.join().unwrap_err().into_panic().unwrap().downcast::<u32>().unwrap(), 42);
+        fn completed(&mut self) {
+            self.0.borrow_mut().push("completed");
+        }
+
+        fn panicked(&mut self) {
+            self.0.borrow_mut().push("panicked");
+        }
+
+        fn cancelled(&mut self) {
+            self.0.borrow_mut().push("cancelled");
         }
     }
 
     #[test]
-    fn monitored_cancellation_delivers_the_executor_shutdown_cause() {
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("cancellation-forwarding", 1));
+    fn task_monitor_forwards_instrumentation_callbacks() {
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("instrumentation-forwarding", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        let pool = JoinHandlePool::new(Shutdown::default());
-        let (handle, target) = pool.handle::<u32>();
-        let cause = ShutdownCause::panic(&"executor failure");
-        let expected = cause.as_error().unwrap().clone();
-        let completion = Completion {
-            target,
-            info: AsyncTaskInfo::new::<()>(worker.handle().task_events(), None, 0),
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut monitor = TaskMonitor {
+            instrumentation: Recorder(Rc::clone(&calls)),
+            info: AsyncTaskInfo::new(super::descriptor::<()>, worker.handle().task_events(), None, 0),
+            describe_type: super::descriptor::<()>,
+            body_size: 0,
         };
 
-        completion.cancelled(cause);
-        let error = handle.join().unwrap_err();
+        monitor.poll_start();
+        monitor.poll_end(std::task::Poll::Pending);
+        monitor.completed();
+        monitor.panicked();
+        monitor.cancelled();
 
-        assert!(error.is_shutdown());
-        let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
-        assert!(std::ptr::addr_eq(source.inner(), expected.inner()));
-        assert!(std::ptr::addr_eq(pool.shutdown().error().unwrap().inner(), expected.inner()));
+        assert_eq!(*calls.borrow(), ["start", "end", "completed", "panicked", "cancelled"]);
     }
 
     #[test]
@@ -406,7 +417,7 @@ mod tests {
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
 
-        super::add_task_with_metadata::<(), _, _, _, _>(&executor.tasks(), future, arty_executor::TaskPlacement::Any, sender, None, || 0);
+        super::register_monitored(&executor.tasks(), future, sender, (), None, super::descriptor::<()>, 0);
         let _ = executor.execute_cycle();
 
         assert!(ran.get());

@@ -17,7 +17,7 @@ use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
 use arty::runtime::Runtime;
-use arty::runtime::hook::Panic;
+use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty::time::Clock;
@@ -426,7 +426,7 @@ fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
     let caller = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(Panic::ignore())
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let retained = worker_scheduler(&target);

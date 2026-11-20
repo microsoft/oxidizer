@@ -401,7 +401,7 @@ mod tests {
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::ignore())
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -454,7 +454,7 @@ mod tests {
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::ignore())
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();

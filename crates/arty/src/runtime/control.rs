@@ -3,7 +3,7 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{Hook, HookFn, registration};
+use crate::runtime::hook::{Hook, HookFn, RegisterHook, registration};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -58,14 +58,14 @@ impl RuntimeControl {
 
     /// Registers a runtime hook on every live async worker.
     ///
-    /// Arty clones the hook data for each worker and relocates it before the
-    /// callback can run. On a runtime worker, Arty applies the hook to that
-    /// worker before this method returns. Arty sends registration to other
-    /// workers through their normal command queues. A worker applies the hook
-    /// when it processes that command. If runtime shutdown has started, Arty
-    /// ignores the registration.
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run there. Task-spawn hooks also keep a worker-neutral instance.
+    /// On a runtime worker, Arty applies the hook before this method returns.
+    /// Arty sends registration to other workers through their normal command
+    /// queues. A worker applies the hook when it processes that command. If
+    /// runtime shutdown has started, Arty ignores the registration.
     ///
-    /// [`WorkerInit`](crate::runtime::hook::WorkerInit) runs once on each live
+    /// [`WorkerSpawn`](crate::runtime::hook::WorkerSpawn) runs once on each live
     /// worker. The runtime keeps that registration for workers that start
     /// later and releases it during shutdown. Each worker discards its
     /// callback after it runs.
@@ -77,19 +77,23 @@ impl RuntimeControl {
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::Panic;
+    /// use arty::runtime::hook::TaskPanic;
     ///
     /// let runtime = Runtime::new()?;
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.on(Panic::ignore());
+    /// control.on(TaskPanic::ignore());
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[expect(
+        private_bounds,
+        reason = "RegisterHook applies hook-specific data bounds to the sealed Hook implementations"
+    )]
     pub fn on<H, D>(&self, hook: impl Into<HookFn<H, D>>)
     where
-        H: Hook,
+        H: Hook + RegisterHook<D>,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
         let hook = registration(hook.into());

@@ -49,7 +49,7 @@
 //!   enables monitoring in other environments when the `monitor` feature is
 //!   present. The exact automatic selection can change in future releases.
 //!   Task collection runs on request. This does not enable event recording.
-//! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
+//! - Without a [`TaskPanic`](hook::TaskPanic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
 //!   stopping the runtime.

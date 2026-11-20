@@ -90,7 +90,10 @@ fn prepare_workers<W>(
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
     let stack_size = select_stack_size(processor_config.stack_size, environment);
     let monitor_options = processor_config.monitor_options;
-    let hook_registrations = processor_config.hook_registrations;
+    let hook_registrations = processor_config
+        .hook_registrations
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
@@ -181,7 +184,7 @@ mod tests {
                     stack_size: NonZero::new(16_384).unwrap(),
                     blocking_pool_policy: BlockingPoolPolicy::shared(),
                     monitor_options: MonitorPolicy::enabled().into(),
-                    hook_registrations: Vec::new(),
+                    hook_registrations: std::sync::Mutex::new(Vec::new()),
                 },
                 &InactiveClock::new_isolated(),
                 &ThreadBuilder::default(),
@@ -211,7 +214,7 @@ mod tests {
                     stack_size: NonZero::new(16_385).unwrap(),
                     blocking_pool_policy: BlockingPoolPolicy::shared(),
                     monitor_options: MonitorOptions::default(),
-                    hook_registrations: Vec::new(),
+                    hook_registrations: std::sync::Mutex::new(Vec::new()),
                 },
                 &InactiveClock::new_isolated(),
                 &ThreadBuilder::default(),
@@ -447,7 +450,7 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
-                hook_registrations: Vec::new(),
+                hook_registrations: std::sync::Mutex::new(Vec::new()),
             },
             &InactiveClock::new_isolated(),
             &ThreadBuilder::default(),
