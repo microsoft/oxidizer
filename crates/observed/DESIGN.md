@@ -23,11 +23,12 @@ Rust services and libraries need structured telemetry that is:
 ## Requirements
 
 1. **Typed, compile-time validated events/enrichment.** Every telemetry event is a Rust struct.
-   Field names and types are checked at compile time. No string-based, unvalidated telemetry.
+   Field types are checked at compile time. Field names are checked at compile time too, except
+   the names that a hand-written `VisitFields` implementation gives to the fields of a
+   `#[flatten]` field. Those names can come from configuration, but not from user input,
+   because each name stays in memory until the process ends. No string-based, unvalidated telemetry.
    NOTE: We decided to limit v1 to typed events/enrichment only, without allowing arbitrary
-   key-value pairs. If there is demand for it, we can add it later. A field marked `#[flatten]`
-   can add fields whose names are known only at run time, through a hand-written `VisitFields`
-   implementation of its type.
+   key-value pairs. If there is demand for it, we can add it later.
 
 1. **Single call for all signals.** One `emit!()` call can emit a structured log record,
    record a metric observation, and participate in a trace span
