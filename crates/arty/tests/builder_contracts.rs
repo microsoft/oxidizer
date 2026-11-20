@@ -46,13 +46,7 @@ fn maximum_worker_count_replaces_exact_count() {
         .build()
         .unwrap();
 
-    assert_eq!(
-        runtime
-            .scheduler()
-            .block_on(async |cx| cx.control().workers().into_iter().count())
-            .unwrap(),
-        1
-    );
+    assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
     runtime.stop().unwrap();
 }
 
@@ -65,13 +59,7 @@ fn zero_worker_policies_can_be_replaced_before_building() {
             .build()
             .unwrap();
 
-        assert_eq!(
-            runtime
-                .scheduler()
-                .block_on(async |cx| cx.control().workers().into_iter().count())
-                .unwrap(),
-            1
-        );
+        assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
         runtime.stop().unwrap();
     }
 }
@@ -84,13 +72,7 @@ fn automatic_worker_selection_replaces_exact_count() {
         .build()
         .unwrap();
 
-    assert_eq!(
-        runtime
-            .scheduler()
-            .block_on(async |cx| cx.control().workers().into_iter().count())
-            .unwrap(),
-        1
-    );
+    assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
     runtime.stop().unwrap();
 }
 

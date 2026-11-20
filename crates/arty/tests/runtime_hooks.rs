@@ -455,7 +455,7 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
     let (workers, source, scheduler) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers: Vec<_> = cx.control().workers().into_iter().cloned().collect();
+            let workers: Vec<_> = cx.control().workers().iter().collect();
             let source = cx.thread().id();
             cx.control().on(HookFn::<Panic, _>::new(
                 RemotePanicProbe {
@@ -558,7 +558,7 @@ fn control_worker_init_runs_once_on_every_worker() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers() {
+    for _ in control.workers().iter() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 

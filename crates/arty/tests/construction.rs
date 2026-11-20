@@ -25,9 +25,9 @@ fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> 
     let names = runtime
         .scheduler()
         .block_on(async |cx| {
-            let worker = cx.control().workers().into_iter().nth(2).unwrap();
+            let worker = cx.control().workers().iter().nth(2).unwrap();
             cx.scheduler()
-                .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
+                .spawn_at(&worker, cx.scheduler().clone(), |scheduler| async move {
                     let async_name = thread::current().name().unwrap().to_owned();
                     let gate = Arc::new((Mutex::new(false), Condvar::new()));
                     let release = scopeguard::guard(Arc::clone(&gate), |gate| {
@@ -108,10 +108,10 @@ fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
         .scheduler()
         .block_on(async |cx| {
             let mut names = Vec::new();
-            for worker in cx.control().workers() {
+            for worker in cx.control().workers().iter() {
                 let pair = cx
                     .scheduler()
-                    .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
+                    .spawn_at(&worker, cx.scheduler().clone(), |scheduler| async move {
                         let async_name = thread::current()
                             .name()
                             .expect("Arty async worker threads always have names")
@@ -231,12 +231,46 @@ fn default_runtime_construction_uses_one_worker() {
         runtime
             .scheduler()
             .block_on(async |cx| {
-                let workers: Vec<_> = cx.control().workers().into_iter().collect();
-                assert_eq!(workers, vec![cx.thread()]);
+                assert_eq!(cx.control().workers().len(), 1);
+                let workers: Vec<_> = cx.control().workers().iter().collect();
+                assert_eq!(workers, vec![cx.thread().clone()]);
             })
             .unwrap();
         runtime.stop().unwrap();
     }
+}
+
+#[test]
+fn worker_iteration_returns_owned_handles_in_worker_order() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let workers: Vec<arty::core::Thread> = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let workers = cx.control().workers();
+            assert_eq!(workers.len(), 2);
+            let mut iter = workers.iter();
+            let first = iter.next().unwrap();
+            let last = iter.next().unwrap();
+            assert!(iter.next().is_none());
+            assert_ne!(first.id(), last.id());
+            assert_eq!(workers.iter().collect::<Vec<_>>(), vec![first.clone(), last.clone()]);
+            vec![first, last]
+        })
+        .unwrap();
+
+    for worker in &workers {
+        let actual = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                cx.scheduler()
+                    .spawn_at(worker, (), |()| async { thread::current().id() })
+                    .await
+                    .unwrap()
+            })
+            .unwrap();
+        assert_eq!(actual, worker.id());
+    }
+    runtime.stop().unwrap();
 }
 
 #[test]
