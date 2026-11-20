@@ -482,11 +482,11 @@ fn spawn_hook_covers_runtime_local_relocating_and_specific_worker_submissions() 
         .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
         .unwrap();
     let baseline = calls.load(Ordering::SeqCst);
-    let destination = control.workers().into_iter().next().unwrap();
+    let destination = control.workers().iter().next().unwrap();
 
     scheduler.spawn(async |_| {}).join().unwrap();
     scheduler.spawn_anywhere((), |()| async {}).join().unwrap();
-    scheduler.spawn_at(destination, (), |()| async {}).join().unwrap();
+    scheduler.spawn_at(&destination, (), |()| async {}).join().unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst) - baseline, 3);
     runtime.stop().unwrap();
@@ -519,8 +519,8 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
         .scheduler()
         .block_on(async |cx| {
             let workers = cx.control().workers();
-            let destination = workers.into_iter().find(|worker| worker.id() != cx.thread().id()).unwrap().clone();
-            let target = workers.into_iter().find(|worker| worker.id() == cx.thread().id()).unwrap().clone();
+            let destination = workers.iter().find(|worker| worker.id() != cx.thread().id()).unwrap();
+            let target = workers.iter().find(|worker| worker.id() == cx.thread().id()).unwrap();
             (cx.scheduler().clone(), destination, target)
         })
         .unwrap();
@@ -579,10 +579,9 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
             let destination = cx
                 .control()
                 .workers()
-                .into_iter()
+                .iter()
                 .find(|worker| worker.id() != cx.thread().id())
-                .unwrap()
-                .clone();
+                .unwrap();
             (cx.scheduler().clone(), cx.thread().clone(), destination)
         })
         .unwrap();
@@ -710,13 +709,7 @@ fn detached_scheduler_relocates_and_starts_observer_before_factory() {
         .scheduler()
         .block_on(async |cx| {
             let source = cx.thread().id();
-            let destination = cx
-                .control()
-                .workers()
-                .into_iter()
-                .find(|worker| worker.id() != source)
-                .unwrap()
-                .clone();
+            let destination = cx.control().workers().iter().find(|worker| worker.id() != source).unwrap();
             cx.control().on(HookFn::<TaskSpawn, _>::new(
                 NeutralSpawnProbe {
                     factory_created: Arc::clone(&factory_created),
@@ -800,14 +793,14 @@ fn control_registration_precedes_later_task_submissions() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers() {
+    for _ in control.workers().iter() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at(worker, (), |()| async {}))
+        .iter()
+        .map(|worker| scheduler.spawn_at(&worker, (), |()| async {}))
         .collect();
     for task in tasks {
         task.join().unwrap();
