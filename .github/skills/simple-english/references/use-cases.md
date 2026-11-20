@@ -32,7 +32,7 @@ STE bans hedges such as "may have impacted". The report states what is known and
 
 Mode: imperative subject line, descriptive body. The convention already matches STE. Apply the word swaps and the 25-word limit to the body. Delete "this PR aims to".
 
-## API changelogs and release notes
+## API change records and release notes
 
 Mode: descriptive. One entry, one change, one sentence where possible. A "Breaking:" entry follows the warning pattern, command first: "Update your calls to `v2/users`. The `name` field split into `first_name` and `last_name`."
 

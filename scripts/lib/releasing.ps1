@@ -24,14 +24,12 @@
         in-release packages fall into the "modified-but-unreleased" bucket (the core
         "unreleased workspace dependency" analysis).
 
-    It has no top-level param() block and no side effects beyond declaring script-scope
-    caches & compiled regexes.
+    It has no top-level param() block and no side effects beyond declaring
+    script-scope caches and compiled regexes.
 #>
 
 # --- COMPILED REGEX PATTERNS ---
 
-$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
-$script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
 # Strict SemVer 2.0 grammar from https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
 # Anchored. Disallows leading zeros in numeric components AND in pre-release
 # numeric identifiers. Allows optional pre-release (-...) and build (+...)
@@ -49,7 +47,6 @@ $script:SemanticVersionRegex = [regex]'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)
 #   - Group 1: prefix up to (and including) the opening quote.
 #   - Group 2: the version literal itself.
 $script:CargoPackageVersionRegex = [regex]'(?m)(^\[package\](?:\r?\n(?!\[)[^\n]*)*?\r?\n[ \t]*version[ \t]*=[ \t]*")([^"]+)'
-$script:GitHubRepoRegex = [regex]'github\.com[/:]([\w.-]+/[\w.-]+)'
 $script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
 
 # --- SAFE GIT WRAPPER ---
@@ -99,30 +96,6 @@ function Test-GitRef {
 
     $null = Invoke-Git -Arguments @('rev-parse', '--verify', '-q', "$Ref^{commit}") -RepoRoot $RepoRoot -AllowFailure
     return ($LASTEXITCODE -eq 0)
-}
-
-# --- FILE I/O HELPERS ---
-
-# Detects the dominant line-ending convention ("`r`n" or "`n") used by the
-# file at -Path so callers can preserve it on write. Useful when the script
-# is used across repos that may not all enforce LF line endings via
-# .gitattributes. Returns "`n" when the file is missing, empty, or has no
-# detectable line endings (the modern default).
-function Get-FileLineEnding {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) { return "`n" }
-    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8
-    if ([string]::IsNullOrEmpty($raw)) { return "`n" }
-
-    $crlf = ([regex]::Matches($raw, "`r`n")).Count
-    # Count lone LFs (LFs not immediately preceded by CR) to avoid double-counting CRLF pairs.
-    $lf   = ([regex]::Matches($raw, "(?<!`r)`n")).Count
-
-    if ($crlf -gt $lf) { return "`r`n" }
-    return "`n"
 }
 
 # --- VERSION HELPERS ---
@@ -1599,9 +1572,9 @@ function Get-PackagesWithVersionChanges {
 #
 # New packages not present at $BaseRef are NOT included — they have no "base version"
 # to compare against, and the rest of the script's flow treats them as fresh
-# releases anyway (Invoke-PackageRelease writes the initial Cargo.toml + changelog
-# entry). Only packages that genuinely have a prior committed version with a
-# different on-disk version qualify as "pending" in the cross-invocation sense.
+# releases anyway. Only packages that genuinely have a prior committed version
+# with a different on-disk version qualify as "pending" in the
+# cross-invocation sense.
 #
 # Sorted ascending by Folder for deterministic output (the announcement order
 # must be stable across runs / hosts / etc.).
@@ -1700,7 +1673,7 @@ function New-ResolvedReleaseSetFromBaseRef {
 #       queue. Honored via the optional -ModifiedSnapshot parameter: when
 #       callers capture the modifications set BEFORE the primary release
 #       runs and pass it in, cascade-only targets (those whose only
-#       modification is the cascade-written Cargo.toml / CHANGELOG.md) never
+#       modification is the cascade-written Cargo.toml) never
 #       enter the snapshot and so cannot surface as findings on later
 #       iterations.
 #   (B) A release-set member whose cascade-applied change type is below the

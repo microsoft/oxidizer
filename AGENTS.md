@@ -32,11 +32,6 @@ from the directory name.
 
 The spell checker dictionary is in the `.spelling` file, one word per line in arbitrary order.
 
-## Changelogs
-
-The changelogs are updated by `scripts/release-packages.ps1` at release time, based on Git history. It is not necessary to make manual edits
-to the changelogs, though you are permitted to do so if explicitly instructed.
-
 ## Releasing Packages
 
 See [docs/releasing.md](docs/releasing.md) for the release tooling
