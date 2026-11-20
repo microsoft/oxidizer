@@ -162,10 +162,13 @@ fn monitored_tasks_forward_poll_observers() {
         .on(TaskPanic::ignore())
         .on(HookFn::<TaskSpawn, _>::new(PollObservation(observed), |event, observed| {
             if event.origin().is_some() {
-                event.observe(MonitoredPollObserver {
-                    destination: None,
-                    observed: observed.clone(),
-                });
+                event.observe_with(
+                    MonitoredPollObserver {
+                        destination: None,
+                        observed: observed.clone(),
+                    },
+                    std::convert::identity,
+                );
             }
         }))
         .build()

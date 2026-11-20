@@ -45,8 +45,8 @@ mod hook_fn;
 mod local_hook;
 mod registry;
 mod retained_hooks;
-mod spawn;
 mod task_panic;
+mod task_spawn;
 mod worker_spawn;
 
 pub(crate) use hook_fn::ErasedHookFn;
@@ -54,9 +54,9 @@ pub use hook_fn::HookFn;
 pub(crate) use local_hook::{LocalHook, LocalHookGuard, LocalHookStorage};
 pub(crate) use registry::{HookRegistration, registration};
 pub(crate) use retained_hooks::RetainedHooks;
-pub(crate) use spawn::TaskObservers;
-pub use spawn::{TaskObserver, TaskSpawn};
 pub use task_panic::TaskPanic;
+pub(crate) use task_spawn::TaskObservers;
+pub use task_spawn::{TaskObserver, TaskSpawn};
 pub use worker_spawn::WorkerSpawn;
 
 /// Marks an event that can be registered as a runtime hook.

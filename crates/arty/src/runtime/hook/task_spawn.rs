@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::task::Poll;
 
 use smallvec::SmallVec;
@@ -10,14 +12,14 @@ use super::hook_fn::ErasedHookFn;
 
 /// Observes each top-level poll of an async task.
 ///
-/// The handler runs on one async worker. Arty relocates it to that worker
-/// before the task can run.
+/// The handler runs on one async worker. [`TaskSpawn::observe_with`] relocates
+/// its input data to that worker, then creates the observer there.
 ///
 /// The scope includes the first poll, wake-driven polls, completion, and task
 /// panics. It excludes blocking functions and nested future polls inside one
 /// top-level task poll. Implementations must not panic. Arty does not catch
 /// panics from these methods.
-pub trait TaskObserver: ThreadAware + 'static {
+pub trait TaskObserver: 'static {
     /// Runs immediately before Arty polls the task.
     fn poll_start(&mut self);
 
@@ -73,14 +75,21 @@ impl TaskSpawn {
         &self.target
     }
 
-    /// Adds a poll observer to the task.
+    /// Adds a poll observer that Arty creates on the target worker.
     ///
-    /// The first observer is the outermost observer. Arty relocates `observer`
-    /// on the selected worker before it registers the task. The first two
-    /// observers allocate only their boxed trait objects. They do not allocate
-    /// a separate collection buffer.
-    pub fn observe<O: TaskObserver>(&mut self, observer: O) {
-        let observer = Box::new(observer) as Box<dyn TaskObserver>;
+    /// Arty relocates `data` from [`origin`](Self::origin) to
+    /// [`target`](Self::target), then calls `create` on the target worker. The
+    /// created observer does not move between threads and does not need to be
+    /// `Send`.
+    ///
+    /// The first observer is the outermost observer. The first two registrations
+    /// use inline collection storage.
+    pub fn observe_with<D, O>(&mut self, data: D, create: fn(D) -> O)
+    where
+        D: ThreadAware + 'static,
+        O: TaskObserver,
+    {
+        let observer = Box::new(ObserverSlot::Pending { data, create }) as Box<dyn TaskObserverSlot>;
         self.observers = Some(match self.observers.take() {
             Some(observers) => observers.push(observer),
             None => TaskObservers::new(self.origin.clone(), observer),
@@ -88,21 +97,91 @@ impl TaskSpawn {
     }
 }
 
+/// Type-erased storage that crosses threads only before observer activation.
+///
+/// Arty relocates the pending data, activates the observer on the target
+/// worker, and calls the poll methods only after activation.
+trait TaskObserverSlot: ThreadAware {
+    /// Creates the target-local observer from the relocated data.
+    fn activate(&mut self);
+
+    /// Forwards the start callback to the active observer.
+    fn poll_start(&mut self);
+
+    /// Forwards the end callback to the active observer.
+    fn poll_end(&mut self, outcome: Poll<()>);
+}
+
+enum ObserverSlot<D, O> {
+    Pending { data: D, create: fn(D) -> O },
+    Activating,
+    Active(O),
+}
+
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "O is created only after the private slot reaches its target worker and is then held behind a non-Send wrapper"
+)]
+// SAFETY: An ObserverSlot crosses threads only in the Pending state, which
+// contains D and a function pointer. D is Send through ThreadAware. activate()
+// creates O on the target worker, after which the private slot is held only by
+// non-Send PollObservers or by the target executor's task instrumentation.
+unsafe impl<D, O> Send for ObserverSlot<D, O> where D: ThreadAware {}
+
+impl<D, O> ThreadAware for ObserverSlot<D, O>
+where
+    D: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        let Self::Pending { data, .. } = self else {
+            unreachable!("observer data relocates before target activation");
+        };
+        data.relocate(source, destination);
+    }
+}
+
+impl<D, O> TaskObserverSlot for ObserverSlot<D, O>
+where
+    D: ThreadAware + 'static,
+    O: TaskObserver,
+{
+    fn activate(&mut self) {
+        let Self::Pending { data, create } = std::mem::replace(self, Self::Activating) else {
+            unreachable!("an observer slot activates exactly once");
+        };
+        *self = Self::Active(create(data));
+    }
+
+    fn poll_start(&mut self) {
+        let Self::Active(observer) = self else {
+            unreachable!("task polling starts after observer activation");
+        };
+        observer.poll_start();
+    }
+
+    fn poll_end(&mut self, outcome: Poll<()>) {
+        let Self::Active(observer) = self else {
+            unreachable!("task polling ends after observer activation");
+        };
+        observer.poll_end(outcome);
+    }
+}
+
 #[derive(derive_more::Debug)]
 pub(crate) struct TaskObservers {
     source: Option<Thread>,
     #[debug(ignore)]
-    observers: SmallVec<[Box<dyn TaskObserver>; 2]>,
+    observers: SmallVec<[Box<dyn TaskObserverSlot>; 2]>,
 }
 
 impl TaskObservers {
-    fn new(source: Option<Thread>, observer: Box<dyn TaskObserver>) -> Self {
+    fn new(source: Option<Thread>, observer: Box<dyn TaskObserverSlot>) -> Self {
         let mut observers = SmallVec::new();
         observers.push(observer);
         Self { source, observers }
     }
 
-    fn push(mut self, observer: Box<dyn TaskObserver>) -> Self {
+    fn push(mut self, observer: Box<dyn TaskObserverSlot>) -> Self {
         self.observers.push(observer);
         self
     }
@@ -110,42 +189,60 @@ impl TaskObservers {
     pub(crate) fn relocate_to(mut self, destination: &Thread) -> PollObservers {
         for observer in &mut self.observers {
             observer.relocate(self.source.as_ref(), destination);
+            observer.activate();
         }
-        PollObservers(self.observers)
+        PollObservers {
+            observers: self.observers,
+            _not_send: PhantomData,
+        }
     }
 }
 
 #[derive(derive_more::Debug)]
-pub(crate) struct PollObservers(#[debug(ignore)] SmallVec<[Box<dyn TaskObserver>; 2]>);
+pub(crate) struct PollObservers {
+    #[debug(ignore)]
+    observers: SmallVec<[Box<dyn TaskObserverSlot>; 2]>,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+#[derive(derive_more::Debug)]
+pub(crate) struct SingleObserver {
+    #[debug(ignore)]
+    observer: Box<dyn TaskObserverSlot>,
+    _not_send: PhantomData<Rc<()>>,
+}
 
 impl PollObservers {
-    pub(crate) fn into_single(mut self) -> Result<Box<dyn TaskObserver>, Self> {
-        if self.0.len() == 1 {
-            return Ok(self.0.pop().expect("observer count was exactly one"));
+    pub(crate) fn into_single(mut self) -> Result<SingleObserver, Self> {
+        if self.observers.len() == 1 {
+            return Ok(SingleObserver {
+                observer: self.observers.pop().expect("observer count was exactly one"),
+                _not_send: PhantomData,
+            });
         }
         Err(self)
     }
 
     pub(crate) fn poll_start(&mut self) {
-        for observer in &mut self.0 {
+        for observer in &mut self.observers {
             observer.poll_start();
         }
     }
 
     pub(crate) fn poll_end(&mut self, outcome: Poll<()>) {
-        for observer in self.0.iter_mut().rev() {
+        for observer in self.observers.iter_mut().rev() {
             observer.poll_end(outcome);
         }
     }
 }
 
-impl arty_executor::TaskInstrumentation for Box<dyn TaskObserver> {
+impl arty_executor::TaskInstrumentation for SingleObserver {
     fn poll_start(&mut self) {
-        TaskObserver::poll_start(self.as_mut());
+        self.observer.poll_start();
     }
 
     fn poll_end(&mut self, outcome: Poll<()>) {
-        TaskObserver::poll_end(self.as_mut(), outcome);
+        self.observer.poll_end(outcome);
     }
 }
 
@@ -181,13 +278,19 @@ mod tests {
     #[cfg(not(miri))]
     use std::alloc::System;
     use std::hint::black_box;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     #[cfg(not(miri))]
     use alloc_tracker::{Allocator, Session};
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
     use thread_aware::ThreadBuilder;
 
     use super::*;
+
+    assert_impl_all!(TaskObservers: Send);
+    assert_not_impl_any!(PollObservers: Send);
+    assert_not_impl_any!(SingleObserver: Send);
 
     #[cfg(not(miri))]
     #[global_allocator]
@@ -205,6 +308,39 @@ mod tests {
     impl TaskObserver for OneBytePoll {
         fn poll_start(&mut self) {
             black_box(self.0);
+        }
+
+        fn poll_end(&mut self, _outcome: Poll<()>) {}
+    }
+
+    struct LocalPollData(Arc<AtomicUsize>);
+
+    impl ThreadAware for LocalPollData {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    struct LocalPoll {
+        calls: Arc<AtomicUsize>,
+        created_on: std::thread::ThreadId,
+        _not_send: Rc<()>,
+    }
+
+    assert_not_impl_any!(LocalPoll: Send);
+
+    impl LocalPoll {
+        fn create(data: LocalPollData) -> Self {
+            Self {
+                calls: data.0,
+                created_on: std::thread::current().id(),
+                _not_send: Rc::new(()),
+            }
+        }
+    }
+
+    impl TaskObserver for LocalPoll {
+        fn poll_start(&mut self) {
+            assert_eq!(self.created_on, std::thread::current().id());
+            self.calls.fetch_add(1, Ordering::Relaxed);
         }
 
         fn poll_end(&mut self, _outcome: Poll<()>) {}
@@ -253,7 +389,7 @@ mod tests {
     fn into_single_returns_only_observer() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
         let mut event = TaskSpawn::new(None, worker.clone());
-        event.observe(OneBytePoll(1));
+        event.observe_with(OneBytePoll(1), std::convert::identity);
 
         let _observer = event.into_observers().unwrap().relocate_to(&worker).into_single().unwrap();
     }
@@ -262,14 +398,14 @@ mod tests {
     fn into_single_returns_original_collection_for_multiple_observers() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
         let mut event = TaskSpawn::new(None, worker.clone());
-        event.observe(OneBytePoll(1));
-        event.observe(OneBytePoll(2));
+        event.observe_with(OneBytePoll(1), std::convert::identity);
+        event.observe_with(OneBytePoll(2), std::convert::identity);
         let observers = event.into_observers().unwrap().relocate_to(&worker);
 
         let Err(observers) = observers.into_single() else {
             panic!("multiple observers cannot become one observer");
         };
-        assert_eq!(observers.0.len(), 2);
+        assert_eq!(observers.observers.len(), 2);
     }
 
     #[test]
@@ -278,11 +414,24 @@ mod tests {
         let destination = ThreadBuilder::default().build(std::thread::current().id());
         let observed = Arc::new(Mutex::new(RelocationSource::NotRelocated));
         let mut event = TaskSpawn::new(Some(source.clone()), destination.clone());
-        event.observe(RelocationProbe(Arc::clone(&observed)));
+        event.observe_with(RelocationProbe(Arc::clone(&observed)), std::convert::identity);
 
         let _observer = event.into_observers().unwrap().relocate_to(&destination).into_single().unwrap();
 
         assert_eq!(*observed.lock().unwrap(), RelocationSource::Worker(source.id()));
+    }
+
+    #[test]
+    fn observe_with_creates_a_non_send_observer_on_the_target() {
+        let target = ThreadBuilder::default().build(std::thread::current().id());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut event = TaskSpawn::new(None, target.clone());
+        event.observe_with(LocalPollData(Arc::clone(&calls)), LocalPoll::create);
+
+        let mut observer = event.into_observers().unwrap().relocate_to(&target).into_single().unwrap();
+        arty_executor::TaskInstrumentation::poll_start(&mut observer);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
     #[cfg(not(miri))]
@@ -295,9 +444,9 @@ mod tests {
             for value in 0..MEASURED_OPERATIONS {
                 let mut event = TaskSpawn::new(Some(worker.clone()), worker.clone());
                 for observer in 0..observer_count {
-                    event.observe(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()));
+                    event.observe_with(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()), std::convert::identity);
                 }
-                black_box(event.into_observers());
+                black_box(event.into_observers().unwrap().relocate_to(&worker));
             }
         }
 

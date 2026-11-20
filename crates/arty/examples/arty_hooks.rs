@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::task::{Context, JoinError};
 use arty::time::Clock;
-use thread_aware::ThreadAware;
 
-#[derive(ThreadAware)]
 struct MeasurePoll {
     clock: Clock,
-    #[thread_aware(skip)]
     started: Option<Instant>,
+}
+
+fn create_observer(clock: Clock) -> MeasurePoll {
+    MeasurePoll { clock, started: None }
 }
 
 impl TaskObserver for MeasurePoll {
@@ -33,10 +34,7 @@ impl TaskObserver for MeasurePoll {
 #[arty::main]
 async fn main(cx: Context) -> Result<(), JoinError> {
     cx.control().on(HookFn::<TaskSpawn, _>::new(cx.clock().clone(), |event, clock| {
-        event.observe(MeasurePoll {
-            clock: clock.clone(),
-            started: None,
-        });
+        event.observe_with(clock.clone(), create_observer);
     }));
 
     cx.scheduler()

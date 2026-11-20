@@ -213,23 +213,29 @@ fn spawn_hook_brackets_the_complete_task_poll_in_registration_order() {
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<TaskSpawn, _>::new(log.clone(), |event, log| {
             log.push("outer spawn");
-            event.observe(PollRecorder {
-                before: "outer before",
-                after: "outer after",
-                outcome: Poll::Ready(()),
-                destination: None,
-                log: log.clone(),
-            });
+            event.observe_with(
+                PollRecorder {
+                    before: "outer before",
+                    after: "outer after",
+                    outcome: Poll::Ready(()),
+                    destination: None,
+                    log: log.clone(),
+                },
+                std::convert::identity,
+            );
         }))
         .on(HookFn::<TaskSpawn, _>::new(log.clone(), |event, log| {
             log.push("inner spawn");
-            event.observe(PollRecorder {
-                before: "inner before",
-                after: "inner after",
-                outcome: Poll::Ready(()),
-                destination: None,
-                log: log.clone(),
-            });
+            event.observe_with(
+                PollRecorder {
+                    before: "inner before",
+                    after: "inner after",
+                    outcome: Poll::Ready(()),
+                    destination: None,
+                    log: log.clone(),
+                },
+                std::convert::identity,
+            );
         }))
         .build()
         .unwrap();
@@ -264,13 +270,16 @@ fn poll_hook_scope_completes_when_the_task_panics() {
         .workers(WorkersPolicy::exactly(1))
         .on(TaskPanic::ignore())
         .on(HookFn::<TaskSpawn, _>::new(log.clone(), |event, log| {
-            event.observe(PollRecorder {
-                before: "before",
-                after: "after",
-                outcome: Poll::Ready(()),
-                destination: None,
-                log: log.clone(),
-            });
+            event.observe_with(
+                PollRecorder {
+                    before: "before",
+                    after: "after",
+                    outcome: Poll::Ready(()),
+                    destination: None,
+                    log: log.clone(),
+                },
+                std::convert::identity,
+            );
         }))
         .build()
         .unwrap();
@@ -303,7 +312,9 @@ impl TaskObserver for PanickingPoll {
 fn poll_hook_panic_fails_the_worker_instead_of_the_task() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<TaskSpawn, _>::new((), |event, ()| event.observe(PanickingPoll)))
+        .on(HookFn::<TaskSpawn, _>::new((), |event, ()| {
+            event.observe_with(PanickingPoll, std::convert::identity);
+        }))
         .build()
         .unwrap();
 
@@ -363,7 +374,7 @@ fn task_observer_receives_each_poll_outcome() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<TaskSpawn, _>::new(outcomes.clone(), |event, outcomes| {
-            event.observe(outcomes.clone());
+            event.observe_with(outcomes.clone(), std::convert::identity);
         }))
         .build()
         .unwrap();
@@ -394,7 +405,9 @@ fn task_observer_receives_each_poll_outcome() {
 fn poll_hook_scope_is_removed_before_the_next_poll() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<TaskSpawn, _>::new((), |event, ()| event.observe(ScopedPoll)))
+        .on(HookFn::<TaskSpawn, _>::new((), |event, ()| {
+            event.observe_with(ScopedPoll, std::convert::identity);
+        }))
         .build()
         .unwrap();
 
@@ -458,11 +471,14 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
             |event, probe| {
                 let source = event.origin().map(Thread::id);
                 probe.events.send((source, event.target().id())).unwrap();
-                event.observe(SpawnSourceObserver {
-                    source,
-                    destination: None,
-                    observations: probe.observers.clone(),
-                });
+                event.observe_with(
+                    SpawnSourceObserver {
+                        source,
+                        destination: None,
+                        observations: probe.observers.clone(),
+                    },
+                    std::convert::identity,
+                );
             },
         ))
         .build()
@@ -520,7 +536,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
                     lifecycle.source = event.origin().map(Thread::id);
                     lifecycle.target = Some(event.target().id());
                 }
-                event.observe(LifecyclePoll(Arc::clone(&probe.lifecycle)));
+                event.observe_with(LifecyclePoll(Arc::clone(&probe.lifecycle)), std::convert::identity);
             },
         ))
         .build()
@@ -678,11 +694,14 @@ fn detached_scheduler_relocates_and_starts_observer_before_factory() {
                 |event, probe| {
                     assert!(event.origin().is_none());
                     probe.factory_created.store(false, Ordering::Release);
-                    event.observe(RelocatedPoll {
-                        factory_created: Arc::clone(&probe.factory_created),
-                        relocation: Arc::clone(&probe.relocation),
-                        began: Arc::clone(&probe.began),
-                    });
+                    event.observe_with(
+                        RelocatedPoll {
+                            factory_created: Arc::clone(&probe.factory_created),
+                            relocation: Arc::clone(&probe.relocation),
+                            began: Arc::clone(&probe.began),
+                        },
+                        std::convert::identity,
+                    );
                 },
             ));
             (cx.scheduler().clone(), destination)
