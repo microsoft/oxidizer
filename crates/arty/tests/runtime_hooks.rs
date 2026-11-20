@@ -787,7 +787,7 @@ fn control_registration_precedes_later_task_submissions() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(destinations.lock().unwrap().iter().copied().collect::<HashSet<_>>().len(), 2);
 
-    control.request_stop();
+    control.shutdown();
     assert!(scheduler.spawn(async |_| {}).join().unwrap_err().is_shutdown());
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     runtime.stop().unwrap();
@@ -1195,7 +1195,7 @@ fn local_worker_spawn_retains_original_before_callback_starts_shutdown() {
                 control: cx.control().clone(),
                 original_dropped: Some(Arc::clone(&original_dropped)),
             },
-            |_event, data| data.control.request_stop(),
+            |_event, data| data.control.shutdown(),
         ));
         assert!(!original_dropped.load(Ordering::SeqCst));
     });
@@ -1398,7 +1398,7 @@ fn retained_worker_spawn_data_is_released_during_shutdown() {
 }
 
 #[test]
-fn request_stop_does_not_drop_retained_hook_data() {
+fn shutdown_does_not_drop_retained_hook_data() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let (started, drop_started) = mpsc::channel();
     let (release, released) = mpsc::channel();
@@ -1417,7 +1417,7 @@ fn request_stop_does_not_drop_retained_hook_data() {
         })
         .unwrap();
 
-    control.request_stop();
+    control.shutdown();
     assert!(drop_started.try_recv().is_err());
 
     let (stopped, stop_result) = mpsc::sync_channel(1);
@@ -1434,7 +1434,7 @@ fn control_ignores_registration_after_shutdown_starts() {
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
 
-    control.request_stop();
+    control.shutdown();
     control.on(HookFn::<TaskPanic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
 
     assert_eq!(clones.load(Ordering::SeqCst), 0);

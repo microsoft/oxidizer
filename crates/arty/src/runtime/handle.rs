@@ -33,7 +33,7 @@ use crate::task::RuntimeScheduler;
 /// Dropping this value in an Arty task or on a blocking worker panics.
 /// Keep it on a thread that is not an Arty worker.
 /// From worker code, use
-/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
+/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown).
 ///
 /// Schedulers and [`Context`](crate::task::Context) values do not keep
 /// the runtime running after this value is dropped.
@@ -172,7 +172,7 @@ impl Runtime {
     /// # Panics
     ///
     /// Panics if called from an Arty task or blocking worker. Use
-    /// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
+    /// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown)
     /// to request shutdown from worker code.
     ///
     /// # Examples
@@ -182,7 +182,7 @@ impl Runtime {
     ///
     /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     cx.control().request_stop();
+    ///     cx.control().shutdown();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await
@@ -280,7 +280,7 @@ fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> 
 #[inline(never)]
 #[expect(clippy::panic, reason = "runtime ownership on a worker is a programming error")]
 fn panic_shutdown_from_worker(operation: &str) -> ! {
-    panic!("{operation} cannot run on an Arty worker; use RuntimeControl::request_stop")
+    panic!("{operation} cannot run on an Arty worker; use RuntimeControl::shutdown")
 }
 
 #[cfg(test)]
@@ -548,7 +548,7 @@ mod tests {
             .or_else(|| panic.downcast_ref::<&str>().copied())
             .expect("runtime ownership panic uses a string payload");
         assert!(message.contains(operation));
-        assert!(message.contains("RuntimeControl::request_stop"));
+        assert!(message.contains("RuntimeControl::shutdown"));
     }
 
     fn worker_scheduler(runtime: &Runtime) -> crate::task::Scheduler {

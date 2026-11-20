@@ -389,7 +389,7 @@ fn dropping_a_runtime_on_a_blocking_worker_panics() {
 fn repeated_stop_requests_do_not_break_shutdown() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
-    control.request_stop();
-    control.request_stop();
+    control.shutdown();
+    control.shutdown();
     runtime.stop().unwrap();
 }

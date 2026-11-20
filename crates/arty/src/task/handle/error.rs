@@ -46,7 +46,7 @@ use crate::runtime::ShutdownCause;
 ///
 /// let runtime = Runtime::builder().build()?;
 /// let error = runtime.scheduler().block_on(async |cx| {
-///     cx.control().request_stop();
+///     cx.control().shutdown();
 ///     cx.scheduler()
 ///         .spawn(async |_| 42)
 ///         .await
@@ -103,7 +103,7 @@ impl JoinError {
     ///
     /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     cx.control().request_stop();
+    ///     cx.control().shutdown();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await

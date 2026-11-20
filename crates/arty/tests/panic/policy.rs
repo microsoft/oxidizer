@@ -191,7 +191,7 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool) {
 
     impl Wake for StopOnWake {
         fn wake(self: Arc<Self>) {
-            self.control.request_stop();
+            self.control.shutdown();
             self.notified.send(()).unwrap();
         }
     }
@@ -347,7 +347,7 @@ fn panic_during_started_shutdown_keeps_the_first_shutdown_cause() {
     started_rx.recv().unwrap();
     let control = support::runtime_control(&runtime);
 
-    control.request_stop();
+    control.shutdown();
     release_tx.send(()).unwrap();
 
     assert!(task.join().unwrap_err().is_panic());

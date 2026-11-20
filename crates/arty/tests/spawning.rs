@@ -448,7 +448,7 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
         .spawn_anywhere((), |cx, ()| async move { (cx.scheduler().clone(), cx.control().clone()) })
         .join()
         .unwrap();
-    control.request_stop();
+    control.shutdown();
     let tasks: Vec<_> = control
         .workers()
         .into_iter()

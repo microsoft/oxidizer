@@ -78,7 +78,7 @@ fn poll_panic_racing_repeated_stop_always_completes_one_join_and_drop() {
         let stopper = std::thread::spawn(move || {
             stop_barrier.wait();
             for _ in 0..8 {
-                control.request_stop();
+                control.shutdown();
             }
         });
         let panic_barrier = Arc::clone(&barrier);

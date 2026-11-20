@@ -134,7 +134,7 @@
 //!
 //! [`Runtime`] owns the workers.
 //! Schedulers and [`Context`](crate::task::Context) values do not keep the runtime running.
-//! [`RuntimeControl::request_stop`] requests shutdown without waiting.
+//! [`RuntimeControl::shutdown`] requests shutdown without waiting.
 //! [`Runtime::stop`] takes ownership of the runtime,
 //! waits for every worker, and reports shutdown failures. Dropping the `Runtime` value
 //! also requests shutdown and waits, but it cannot return an error.
@@ -152,7 +152,7 @@
 //!
 //! Keep the `Runtime` value on a thread that is not an Arty worker.
 //! Stopping or dropping it in an Arty task or on a blocking worker panics.
-//! Worker code must use [`RuntimeControl::request_stop`].
+//! Worker code must use [`RuntimeControl::shutdown`].
 
 mod bootstrap;
 mod builder;

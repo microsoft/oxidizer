@@ -7,7 +7,7 @@ use thread_aware::Thread;
 /// [^worker-spawn-retention]
 ///
 /// Do not request runtime shutdown from this callback, including through
-/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
+/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown).
 /// Worker initialization callbacks must finish their setup and return normally.
 ///
 /// [^worker-spawn-retention]: Arty retains each registered callback. The callback runs once on every

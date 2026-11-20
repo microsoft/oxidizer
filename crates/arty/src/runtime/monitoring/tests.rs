@@ -486,7 +486,7 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -561,7 +561,7 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -1041,7 +1041,7 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         .unwrap()
         .id;
 
-    control.request_stop();
+    control.shutdown();
     let stopping = capture(&runtime).state;
     release.send(()).unwrap();
     runtime.stop().unwrap();

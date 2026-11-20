@@ -86,7 +86,7 @@ fn gamma_survivor_suspend_requires_suspend_outcome_and_unexhausted_batch() {
 /// 4. Dead: The worker completed shutdown and its thread terminated.
 ///
 /// A running worker stops after
-/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop),
+/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown),
 /// `Runtime::stop`, or `Runtime` destruction.
 ///
 /// # Thread safety
@@ -2039,7 +2039,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
         worker.tasks.add_test(async move {
-            control.request_stop();
+            control.shutdown();
         });
         worker.tasks.add_test(async move {
             invoked_by_task.store(true, Ordering::Release);
