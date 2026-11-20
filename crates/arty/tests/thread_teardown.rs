@@ -13,7 +13,8 @@ use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use arty::runtime::{Runtime, RuntimeControl, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, RuntimeControl};
 use arty::task::{JoinHandle, Scheduler};
 use support::JoinHandleExt as _;
 
@@ -38,7 +39,7 @@ struct ShutdownGuard(RuntimeControl);
 
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
-        self.0.request_stop();
+        self.0.shutdown();
     }
 }
 
@@ -76,7 +77,7 @@ fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
         .block_on(async |cx| {
             let control = cx.control().clone();
             // Publish dispatcher shutdown without stopping this worker's executor in this poll.
-            std::thread::spawn(move || control.request_stop()).join().unwrap();
+            std::thread::spawn(move || control.shutdown()).join().unwrap();
             let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
             matches!(

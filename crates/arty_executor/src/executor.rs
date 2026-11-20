@@ -12,11 +12,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::task;
 use std::thread::ThreadId;
-use std::time::Instant;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
-use tick::SimpleClock;
+use tick::{SimpleClock, Stopwatch};
 
 use crate::{
     CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, TypeErasedTask, executor_context,
@@ -79,8 +78,7 @@ pub struct Executor {
     shared: ExecutorShared,
     active: VecDeque<TaskHandle>,
     pending: TaskList,
-    clock: SimpleClock,
-    last_cycle_ended: Option<Instant>,
+    stopwatch: Stopwatch,
 }
 
 /// Selects ordinary or observed polling at monomorphization, not inside the poll loop.
@@ -137,15 +135,14 @@ impl Executor {
     #[must_use]
     pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
         let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
-        let clock = SimpleClock::new_system().with_fast_instant(true);
+        let stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
         // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
         Self {
             shared,
             active: VecDeque::new(),
             pending: TaskList::default(),
-            clock,
-            last_cycle_ended: None,
+            stopwatch,
         }
     }
 
@@ -208,13 +205,13 @@ impl Executor {
 
     fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
-        let cycle_started = self.start_cycle();
+        self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
         self.poll_active_tasks(observer);
         self.cancel_if_shutting_down();
         let outcome = self.cycle_outcome();
-        self.finish_cycle(cycle_started);
+        self.finish_cycle();
         outcome
     }
 
@@ -287,22 +284,20 @@ impl Executor {
         }
     }
 
-    fn start_cycle(&self) -> Instant {
-        let started = self.clock.instant();
-        if let Some(last_ended) = self.last_cycle_ended {
+    fn start_cycle(&mut self) {
+        if self.stopwatch.is_running() {
             CYCLE_GAP_MILLIS.with(|event| {
-                event.observe_millis(started.saturating_duration_since(last_ended));
+                event.observe_millis(self.stopwatch.elapsed());
             });
         }
-        started
+        self.stopwatch.restart();
     }
 
-    fn finish_cycle(&mut self, started: Instant) {
-        let ended = self.clock.instant();
-        self.last_cycle_ended = Some(ended);
+    fn finish_cycle(&mut self) {
         CYCLE_DURATION_MILLIS.with(|event| {
-            event.observe_millis(ended.saturating_duration_since(started));
+            event.observe_millis(self.stopwatch.elapsed());
         });
+        self.stopwatch.restart();
         EXECUTOR_PUSHER.with(MetricsPusher::push);
     }
 
@@ -547,9 +542,9 @@ mod gamma_round2_tests {
     }
 
     #[test]
-    fn gamma_round2_new_executor_selects_the_fast_system_instant_source() {
+    fn gamma_round2_new_executor_uses_a_coarse_stopwatch() {
         let executor = Executor::builder().build();
-        assert_eq!(format!("{:?}", executor.clock), "SimpleClock(SystemFast)");
+        assert!(format!("{:?}", executor.stopwatch).contains("Coarse"));
     }
 
     #[test]
@@ -668,7 +663,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_accept_poll_reactivate_and_abort_each_report_exact_task_totals() {
         let mut executor = Executor::builder().build();
-        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor
@@ -713,7 +708,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_shutdown_during_poll_counts_and_cancels_every_remaining_task() {
         let mut executor = Executor::builder().build();
-        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let shutdown = executor.shutdown();
         executor
             .tasks()
@@ -741,7 +736,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_executor_drop_flushes_abort_metrics_without_counting_them_as_normal_drops() {
         let mut executor = Executor::builder().build();
-        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         executor.tasks().task(std::future::pending()).register(Completion);
         executor.tasks().task(std::future::pending()).register(Completion);
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -754,23 +749,27 @@ mod gamma_round2_tests {
     }
 
     #[test]
-    fn gamma_round2_finish_cycle_records_the_exact_frozen_end_instant() {
+    fn gamma_round2_finish_cycle_records_time_advanced_by_a_polled_task() {
         let control = tick::ClockControl::new_at(SystemTime::UNIX_EPOCH);
         let mut executor = Executor::builder().build();
-        executor.clock = control.to_simple_clock();
+        executor.stopwatch = Stopwatch::new(control.to_simple_clock());
+        let task_control = control.clone();
+        executor
+            .tasks()
+            .task(async move {
+                task_control.advance(Duration::from_millis(5));
+            })
+            .register(Completion);
         let duration = metric(&CYCLE_DURATION_MILLIS);
         let gap = metric(&CYCLE_GAP_MILLIS);
-        assert!(executor.last_cycle_ended.is_none());
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
-        assert_eq!(executor.last_cycle_ended, Some(control.to_simple_clock().instant()));
-        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 0);
+        assert!(executor.stopwatch.is_running());
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 5);
         assert_delta(&CYCLE_GAP_MILLIS, gap, 0, 0);
         assert_all_observations_pushed();
         control.advance(Duration::from_millis(7));
-        let expected = control.to_simple_clock().instant();
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
-        assert_eq!(executor.last_cycle_ended, Some(expected));
-        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 0);
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 5);
         assert_delta(&CYCLE_GAP_MILLIS, gap, 1, 7);
         assert_all_observations_pushed();
     }
@@ -778,7 +777,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_abort_preparation_clears_queued_wakes_before_task_retirement() {
         let mut executor = Executor::builder().build();
-        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor
@@ -825,7 +824,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_remote_only_wakes_keep_the_executor_runnable() {
         let mut executor = Executor::builder().build();
-        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor

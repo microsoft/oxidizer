@@ -287,6 +287,7 @@ unsafe impl Sync for SpanBuilder {}
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    // SpanBuilder operations and layout are private and cannot be called through the public API.
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
 

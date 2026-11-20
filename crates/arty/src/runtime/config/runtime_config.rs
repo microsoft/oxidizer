@@ -3,8 +3,9 @@
 
 use std::num::NonZeroUsize;
 
-use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{MonitorOptions, RuntimeName};
 use crate::runtime::hook::HookRegistration;
+use crate::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 
 /// Resource settings validated during runtime construction.
 #[derive(Debug)]

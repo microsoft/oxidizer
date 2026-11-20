@@ -11,6 +11,7 @@ use arty_executor::{ShutdownCause, TaskPlacement};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use performables::arc::Arc;
+use performables::sync::mutex::Mutex;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::hook::HookRegistration;
@@ -22,6 +23,8 @@ use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_remote;
+
+const ERR_POISONED_HOOKS: &str = "runtime hook lock is poisoned by a prior panic";
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -65,6 +68,8 @@ pub(crate) struct DispatcherCore {
     // cached index. IDs come only from registered workers, so a non-cryptographic hasher fits.
     worker_indices: HashMap<ThreadId, WorkerIndex>,
 
+    retained_hooks: Mutex<Vec<HookRegistration>>,
+
     // Minimal effort round-robin scheduling of async tasks.
     next_async_worker_index: AtomicUsize,
 
@@ -74,7 +79,11 @@ pub(crate) struct DispatcherCore {
 }
 
 impl DispatcherCore {
-    pub(crate) fn new(worker_endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<Self> {
+    pub(crate) fn new(
+        worker_endpoints: NonEmpty<WorkerEndpoint>,
+        shutdown: Shutdown,
+        hook_registrations: Vec<HookRegistration>,
+    ) -> Arc<Self> {
         // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
         assert!(
@@ -103,6 +112,7 @@ impl DispatcherCore {
             worker_endpoints,
             workers,
             worker_indices,
+            retained_hooks: Mutex::new(hook_registrations.into_iter().filter(HookRegistration::is_retained).collect()),
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
             #[cfg(any(test, feature = "monitor"))]
@@ -156,6 +166,13 @@ impl DispatcherCore {
             endpoint.waker.wake_by_ref();
         }
         cause
+    }
+
+    pub(crate) fn release_retained_hooks(&self) {
+        let hooks = std::mem::take(&mut *self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS));
+        // Hook data can hold a Context or register hooks from its destructor.
+        // Runtime shutdown calls this only after every worker has stopped.
+        drop(hooks);
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -245,24 +262,59 @@ impl DispatcherCore {
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
 
-    pub(crate) fn register_hook(&self, hook: &HookRegistration) {
+    pub(crate) fn register_hook(&self, hook: HookRegistration) {
         if matches!(self.shutdown().state(), ShutdownState::Started) {
             return;
         }
 
+        // Clone before taking the retention lock because application Clone code
+        // can register another hook.
+        let delivery = hook.clone();
+        // Retain the caller's original before a callback runs or a command can
+        // reach another worker. retain_hook releases the lock before delivery.
+        if hook.is_retained() && !self.retain_hook(hook) {
+            return;
+        }
+        let hook = delivery;
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        let mut remote = self
+            .worker_endpoints
+            .iter()
+            .filter(|endpoint| source.as_ref().is_none_or(|source| source != &endpoint.thread))
+            .peekable();
         if let Some(source) = &source {
+            if remote.peek().is_none() {
+                LocalWorker::install_hook(hook, Some(source));
+                return;
+            }
             LocalWorker::install_hook(hook.clone(), Some(source));
         }
-        for endpoint in &self.worker_endpoints {
-            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
-                continue;
+        while let Some(endpoint) = remote.next() {
+            // The prepared clone becomes the final worker's data. Earlier
+            // workers receive clones, so application Clone runs once per worker.
+            if remote.peek().is_none() {
+                _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
+                    hook,
+                    source: source.clone(),
+                });
+                endpoint.waker.wake_by_ref();
+                break;
             }
             _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
                 hook: hook.clone(),
                 source: source.clone(),
             });
             endpoint.waker.wake_by_ref();
+        }
+    }
+
+    fn retain_hook(&self, hook: HookRegistration) -> bool {
+        let mut retained = self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS);
+        if matches!(self.shutdown().state(), ShutdownState::Running) {
+            retained.push(hook);
+            true
+        } else {
+            false
         }
     }
 
@@ -366,6 +418,7 @@ mod tests {
     use super::*;
     use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
+    use crate::runtime::hook::{HookFn, Panic, WorkerInit, registration};
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
     use crate::runtime::worker::blocking::Pool;
 
@@ -390,7 +443,11 @@ mod tests {
         first.waker = Waker::from(std::sync::Arc::clone(&counter));
         let (second, _second_rx) = endpoint(&threads[1]);
         let (third, _third_rx) = endpoint(&threads[2]);
-        let core = DispatcherCore::new(NonEmpty::from_vec(vec![first, second, third]).unwrap(), Shutdown::default());
+        let core = DispatcherCore::new(
+            NonEmpty::from_vec(vec![first, second, third]).unwrap(),
+            Shutdown::default(),
+            Vec::new(),
+        );
         let selected: Vec<_> = (0..7).map(|_| usize::from(core.next_worker_index())).collect();
         assert_eq!(selected, [0, 1, 2, 0, 1, 2, 0]);
         core.access_io(WorkerIndex(0), Box::new(|_| {})).unwrap();
@@ -414,6 +471,83 @@ mod tests {
     }
 
     #[test]
+    fn dispatcher_retains_only_hooks_that_require_retention() {
+        let threads = test_threads(1);
+        let (worker, _worker_rx) = endpoint(&threads[0]);
+        let worker_init = registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {}));
+        let panic = registration(HookFn::<Panic, _>::new((), |_event, ()| {}));
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), vec![worker_init.clone(), panic.clone()]);
+
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 1);
+        dispatcher.register_hook(worker_init.clone());
+        dispatcher.register_hook(panic);
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
+        dispatcher.register_hook(worker_init);
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 3);
+    }
+
+    struct RegisterOnClone(Arc<DispatcherCore>);
+
+    impl Clone for RegisterOnClone {
+        fn clone(&self) -> Self {
+            self.0
+                .register_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {})));
+            Self(self.0.clone())
+        }
+    }
+
+    impl ThreadAware for RegisterOnClone {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    struct StopOnClone(Arc<DispatcherCore>);
+
+    impl Clone for StopOnClone {
+        fn clone(&self) -> Self {
+            self.0.stop_inner(ShutdownCause::default());
+            Self(self.0.clone())
+        }
+    }
+
+    impl ThreadAware for StopOnClone {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    #[test]
+    fn retained_hook_allows_registration_from_clone() {
+        let threads = test_threads(1);
+        let (worker, _worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        let hook = registration(HookFn::<WorkerInit, _>::new(
+            RegisterOnClone(dispatcher.clone()),
+            |_event, _data| {},
+        ));
+
+        dispatcher.register_hook(hook);
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
+
+        dispatcher.stop_inner(ShutdownCause::default());
+        assert!(!dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {}))));
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
+        dispatcher.release_retained_hooks();
+        assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shutdown_from_clone_prevents_retention_and_delivery() {
+        let threads = test_threads(1);
+        let (worker, worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        let hook = registration(HookFn::<WorkerInit, _>::new(StopOnClone(dispatcher.clone()), |_event, _data| {}));
+
+        dispatcher.register_hook(hook);
+
+        assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+        assert!(matches!(worker_rx.system_receiver().try_recv().unwrap(), SystemCommand::Shutdown));
+        worker_rx.system_receiver().try_recv().unwrap_err();
+    }
+
+    #[test]
     #[should_panic(expected = "same runtime owner")]
     fn dispatcher_rejects_mixed_runtime_owners() {
         let first = test_threads(1).remove(0);
@@ -422,6 +556,7 @@ mod tests {
         DispatcherCore::new(
             NonEmpty::from_vec(vec![endpoint(&first).0, endpoint(&second).0]).unwrap(),
             Shutdown::default(),
+            Vec::new(),
         );
     }
 
@@ -432,7 +567,7 @@ mod tests {
         let threads = test_threads(1);
         let (worker, worker_rx) = endpoint(&threads[0]);
 
-        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
 
         dispatcher.spawn(
             |_| async move { unreachable!("we do not expect the task to be executed") },
@@ -457,7 +592,7 @@ mod tests {
         let (worker1, worker1_rx) = endpoint(&threads[0]);
         let (worker2, worker2_rx) = endpoint(&threads[1]);
 
-        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default(), Vec::new());
 
         dispatcher.spawn(
             |_| async move { unreachable!("we do not expect the task to be executed") },
@@ -479,7 +614,7 @@ mod tests {
         let (worker1, worker1_rx) = endpoint(&threads[0]);
         let (worker2, worker2_rx) = endpoint(&threads[1]);
 
-        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default(), Vec::new());
 
         for _ in 0..4 {
             dispatcher.spawn(
@@ -497,7 +632,7 @@ mod tests {
         let threads = test_threads(2);
         let (first, first_rx) = endpoint(&threads[0]);
         let (second, second_rx) = endpoint(&threads[1]);
-        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![first, second]).unwrap(), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![first, second]).unwrap(), Shutdown::default(), Vec::new());
 
         let index = dispatcher.worker_index(threads[1].id()).unwrap();
         dispatcher.spawn_on_worker(index, |_| async {});
@@ -508,7 +643,7 @@ mod tests {
     #[test]
     fn unregistered_thread_has_no_worker_index() {
         let threads = test_threads(2);
-        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default(), Vec::new());
 
         assert!(dispatcher.worker_index(threads[1].id()).is_none());
     }
@@ -516,7 +651,7 @@ mod tests {
     #[test]
     fn shutdown_state_is_shared_with_dispatcher_client() {
         let threads = test_threads(1);
-        let core = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default());
+        let core = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default(), Vec::new());
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
 
@@ -529,7 +664,7 @@ mod tests {
     fn io_access_after_shutdown_is_rejected() {
         let threads = test_threads(1);
         let (worker, rx) = endpoint(&threads[0]);
-        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
         dispatcher.stop_inner(ShutdownCause::default());
         let invoked = Arc::new(AtomicBool::new(false));
 
@@ -553,7 +688,7 @@ mod tests {
     #[test]
     fn worker_failure_is_attached_to_rejected_task_joins() {
         let threads = test_threads(1);
-        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default(), Vec::new());
         dispatcher.stop_inner(ShutdownError::new(Error::worker_panicked()).into());
 
         let mut join = pin!(dispatcher.spawn(|_| async {}, TaskMonitoring::capture()));
@@ -575,7 +710,7 @@ mod tests {
         let (worker1, worker1_rx) = endpoint(&threads[0]);
         let (worker2, worker2_rx) = endpoint(&threads[1]);
 
-        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default(), Vec::new());
 
         assert_eq!(drain_system(&worker1_rx).len(), 0);
         assert_eq!(drain_system(&worker2_rx).len(), 0);
@@ -601,7 +736,7 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
         let threads = test_threads(1);
         let (worker, _worker_rx) = endpoint(&threads[0]);
-        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
         let client = DispatcherClient::new(core);
         client.set_diagnostics(None);
         client.set_diagnostics(Some(runtime.handle()));
@@ -624,7 +759,7 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-worker-channel", 1));
         let threads = test_threads(1);
         let (endpoint, receiver) = endpoint(&threads[0]);
-        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default(), Vec::new());
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         dispatcher.register_task_provider(threads[0].id(), &worker.handle());
         drop(receiver);
@@ -642,7 +777,7 @@ mod tests {
         let threads = test_threads(1);
         let (worker, command_rx) = endpoint(&threads[0]);
 
-        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
 
         dispatcher.stop_inner(ShutdownCause::default());
 
@@ -665,7 +800,7 @@ mod tests {
     fn shutdown_dispatcher() -> (Arc<DispatcherCore>, DispatcherClient, Shutdown) {
         let thread = test_threads(1).remove(0);
         let shutdown = Shutdown::default();
-        let core = DispatcherCore::new(NonEmpty::new(endpoint(&thread).0), shutdown.clone());
+        let core = DispatcherCore::new(NonEmpty::new(endpoint(&thread).0), shutdown.clone(), Vec::new());
         let client = DispatcherClient::new(Arc::clone(&core));
         (core, client, shutdown)
     }

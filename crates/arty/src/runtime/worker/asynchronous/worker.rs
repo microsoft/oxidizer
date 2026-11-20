@@ -86,7 +86,7 @@ fn gamma_survivor_suspend_requires_suspend_outcome_and_unexhausted_batch() {
 /// 4. Dead: The worker completed shutdown and its thread terminated.
 ///
 /// A running worker stops after
-/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop),
+/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown),
 /// `Runtime::stop`, or `Runtime` destruction.
 ///
 /// # Thread safety
@@ -438,6 +438,7 @@ mod tests {
                 tail: vec![endpoint(destination.clone())],
             },
             shutdown,
+            Vec::new(),
         ));
         let wakes = StdArc::new(DriverWake::default());
         let (clock, driver) = InactiveClock::new_isolated().activate(Waker::from(StdArc::clone(&wakes)));
@@ -467,6 +468,7 @@ mod tests {
                 Arc::clone(&blocking.0),
             )),
             Shutdown::default(),
+            Vec::new(),
         ));
         let worker = test_worker(
             (commands, receiver),
@@ -774,8 +776,9 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::runtime::config::{MonitorPolicy, RuntimeName};
+    use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::DispatcherCore;
+    use crate::runtime::policy::MonitorPolicy;
     use crate::runtime::testing::worker_endpoint;
     use crate::runtime::worker::asynchronous::{QueuedFactory, QueuedIoAccess};
     use crate::task::preparation::RemoteFutureFactory;
@@ -915,7 +918,7 @@ mod tests {
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint =
             crate::runtime::testing::worker_endpoint(command_tx, Signal::waker(&signal), thread.clone(), Arc::clone(&blocking_worker));
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new()));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {
@@ -1998,7 +2001,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
         worker.tasks.add_test(async move {
-            control.request_stop();
+            control.shutdown();
         });
         worker.tasks.add_test(async move {
             invoked_by_task.store(true, Ordering::Release);

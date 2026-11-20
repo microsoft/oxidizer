@@ -23,7 +23,8 @@ use crate::runtime::error::Error;
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{Runtime, WorkersPolicy};
+/// use arty::runtime::Runtime;
+/// use arty::runtime::policy::WorkersPolicy;
 ///
 /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
 /// ```
@@ -45,7 +46,8 @@ impl WorkersPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::WorkersPolicy;
     ///
     /// let builder = Runtime::builder().workers(WorkersPolicy::exactly(4));
     /// ```
@@ -64,7 +66,8 @@ impl WorkersPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::WorkersPolicy;
     ///
     /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
     /// ```
@@ -80,7 +83,8 @@ impl WorkersPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::WorkersPolicy;
     ///
     /// let builder = Runtime::builder().workers(WorkersPolicy::all());
     /// ```

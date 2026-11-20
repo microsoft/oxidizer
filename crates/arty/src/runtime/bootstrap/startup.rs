@@ -39,6 +39,7 @@ fn build_with_processors(
         NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         prepared.shutdown,
+        prepared.hook_registrations,
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
     #[cfg(any(test, feature = "monitor"))]
@@ -66,6 +67,7 @@ fn build_with_processors(
 struct PreparedWorkers<W> {
     workers: Vec<W>,
     shutdown: Shutdown,
+    hook_registrations: Vec<crate::runtime::hook::HookRegistration>,
     #[cfg(any(test, feature = "monitor"))]
     diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
@@ -119,6 +121,7 @@ fn prepare_workers<W>(
     Ok(PreparedWorkers {
         workers,
         shutdown,
+        hook_registrations,
         #[cfg(any(test, feature = "monitor"))]
         diagnostics,
     })
@@ -260,7 +263,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::MonitorOptions;
-    use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+    use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };

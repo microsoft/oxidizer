@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use tick::fmt::Iso8601;
+use jiff::Timestamp;
 use tick::{Clock, FutureExt, Timer};
 
 #[tokio::main]
@@ -56,7 +56,7 @@ impl MyApi {
         println!(
             "Work done. Elapsed: {}ms, Timestamp: {}",
             watch.elapsed().as_millis(),
-            self.clock.system_time_as::<Iso8601>()
+            self.clock.system_time_as::<Timestamp>()
         );
 
         Ok(())

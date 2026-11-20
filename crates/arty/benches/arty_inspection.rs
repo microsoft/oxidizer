@@ -32,7 +32,8 @@ use std::task::{Context as PollContext, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{BlockingPoolPolicy, MonitorPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 use arty::task::JoinHandle;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 #[cfg(feature = "monitor")]

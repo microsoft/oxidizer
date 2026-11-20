@@ -36,7 +36,8 @@ use std::pin::Pin;
 use std::task::{Context as PollContext, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]

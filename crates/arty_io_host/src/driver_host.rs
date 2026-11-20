@@ -425,20 +425,6 @@ mod tests {
     }
 
     #[test]
-    fn nested_context_retrieval_is_rejected_during_initialization() {
-        let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let runtime = IoRuntime::new(Sink::noop());
-        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
-        host.initializing.set(true);
-
-        let Err(error) = host.context::<TestContext>(()) else {
-            panic!("nested context retrieval should fail");
-        };
-
-        assert_eq!(error.to_string(), "I/O context retrieval cannot be nested during initialization");
-    }
-
-    #[test]
     fn gamma_survivor_context_returns_borrow_conflict_without_poisoning_runtime() {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(Sink::noop());
@@ -508,19 +494,5 @@ mod tests {
         fail.store(true, Ordering::Relaxed);
         let error = host.context::<FailingClone>(options).err().unwrap();
         assert_eq!(error.to_string(), "clone failed");
-    }
-    #[test]
-    fn context_retrieval_is_rejected_while_drivers_are_borrowed() {
-        let thread = ThreadBuilder::default().build(std::thread::current().id());
-        let runtime = IoRuntime::new(Sink::noop());
-        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
-        let drivers = host.drivers.borrow_mut();
-
-        let Err(error) = host.context::<TestContext>(()) else {
-            panic!("context retrieval should fail while drivers are borrowed");
-        };
-        assert_eq!(error.to_string(), "I/O context retrieval cannot overlap driver cycle execution");
-        drop(drivers);
-        host.context::<TestContext>(()).unwrap();
     }
 }

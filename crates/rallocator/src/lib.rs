@@ -15,7 +15,7 @@
 //! Built-in Seismograph integration can record allocation events and expose
 //! allocator state for diagnosing memory use. Enable recording through
 //! [`seismograph::recorder()`](https://docs.rs/seismograph/latest/seismograph/fn.recorder.html)
-//! when diagnostics are needed.
+//! when diagnostics are needed. Only snmalloc and mimalloc provide allocator state snapshots.
 //!
 //! # Usage
 //!
@@ -26,7 +26,12 @@
 //! rallocator = "0.4"
 //! ```
 //!
-//! Call [`rallocator!`] once in your executable. `rallocator!()` selects snmalloc.
+//! Call [`rallocator!`] once in your executable:
+//!
+//! ```rust
+//! # #![forbid(unsafe_code)]
+//! rallocator::rallocator!(); // Uses snmalloc by default.
+//! ```
 //!
 //! | Personality | Allocator |
 //! | --- | --- |
@@ -42,18 +47,6 @@
 //! | `mimalloc` | Rust mimalloc |
 //! | `system` | System allocator |
 //! | Unset or empty | System allocator (default) |
-//!
-//! # Recording
-//!
-//! Only snmalloc and mimalloc provide Seismograph state snapshots.
-//! State observations can be incomplete or stale. Allocator capacity is not application-live memory.
-//!
-//! With allocation recording enabled, [`Rallocator`] records allocations, successful
-//! resizes, and frees. A resize is one event with the previous and new addresses
-//! and requested sizes. In-place size changes also produce this event.
-//! Failed resizes and calls that keep both the address and size produce no event.
-//! For a move, recording completes before the old block becomes reusable.
-//! A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
