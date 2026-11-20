@@ -382,7 +382,7 @@ const _: () = {
                                                 return ::core::option::Option::Some(
                                                     ::routerama::codegen_helpers::route_hit(
                                                         const {
-                                                            &::routerama::codegen_helpers::Cow::Borrowed(
+                                                            &::routerama::codegen_helpers::RouteTemplate::Static(
                                                                 "/shelves/{shelf.id}",
                                                             )
                                                         },

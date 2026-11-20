@@ -166,9 +166,9 @@
 //!
 //! # `no_std`
 //!
-//! This crate is `#![no_std]` (it requires `alloc`). The generated resolvers run
-//! on bare-metal targets; the `#[resolver]` macro expansion runs on the host and
-//! requires `std`.
+//! This crate is `#![no_std]` (it requires `alloc` and pointer-width
+//! atomics). The generated resolvers run on bare-metal targets; the
+//! `#[resolver]` macro expansion runs on the host and requires `std`.
 //!
 //! [`FromStr`]: core::str::FromStr
 
@@ -249,7 +249,7 @@ mod walk;
 pub use configuration_error::ConfigurationError;
 pub use resolve_error::ResolveError;
 pub use resolver::Resolver;
-pub use route_table::{RouteHit, RouteTable};
+pub use route_table::{RouteHit, RouteTable, RouteTemplate};
 
 /// Runtime support for generated resolvers.
 #[doc(hidden)]

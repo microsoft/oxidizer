@@ -105,7 +105,7 @@ pub(crate) fn generate_route_table(routes: &[Route], runtime: &TokenStream) -> T
         let captures = leaf.vars.iter().map(var_slice_expr);
         quote! {
             return ::core::option::Option::Some(#runtime::route_hit(
-                const { &#runtime::Cow::Borrowed(#text) },
+                const { &#runtime::RouteTemplate::Static(#text) },
                 const { &[#(#runtime::Cow::Borrowed(#names)),*] },
                 &[#(#captures),*],
             ));

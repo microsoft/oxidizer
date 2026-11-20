@@ -57,6 +57,16 @@ fn template_reports_template_text() {
 }
 
 #[test]
+fn template_displays_template_text() {
+    let resolver = table(&[("GET", "/books/{book}")]);
+
+    assert_eq!(
+        resolver.match_route("GET", "/books/rust").unwrap().template().to_string(),
+        "/books/{book}"
+    );
+}
+
+#[test]
 fn parameter_finds_value_by_template_name() {
     let resolver = table(&[
         ("GET", "/v1/{a}/{b}/{c}/{d}/{e}"),

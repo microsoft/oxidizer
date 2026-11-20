@@ -15,7 +15,7 @@ use smallvec::SmallVec;
 use crate::captures::materialize;
 use crate::codegen_helpers::{ScannedPath, scan_path, split_verb};
 use crate::raw_match::{INLINE_CAPTURES, RawMatch};
-use crate::route_table::{RouteHit, RouteTable};
+use crate::route_table::{RouteHit, RouteTable, RouteTemplate};
 use crate::rt_node::RtNode;
 use crate::walk::Walk;
 
@@ -44,7 +44,7 @@ pub struct RawResolver<T = ()> {
 
 /// The route template and the parameter names of one registered route.
 struct RouteRecord {
-    template: Cow<'static, str>,
+    template: RouteTemplate,
     parameters: Box<[Cow<'static, str>]>,
 }
 
@@ -82,7 +82,7 @@ impl<T> RawResolver<T> {
             .map(|route| {
                 let template = route.template();
                 RouteRecord {
-                    template: Cow::Owned(template.to_string()),
+                    template: RouteTemplate::Shared(template.to_string().into()),
                     parameters: capture_field_names(template.segments())
                         .iter()
                         .map(|name| Cow::Owned(name.join(".")))

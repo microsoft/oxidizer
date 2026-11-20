@@ -167,9 +167,9 @@ specific environment. Take these precautions:
 
 ## `no_std`
 
-This crate is `#![no_std]` (it requires `alloc`). The generated resolvers run
-on bare-metal targets; the `#[resolver]` macro expansion runs on the host and
-requires `std`.
+This crate is `#![no_std]` (it requires `alloc` and pointer-width
+atomics). The generated resolvers run on bare-metal targets; the
+`#[resolver]` macro expansion runs on the host and requires `std`.
 
 
 <hr/>
@@ -177,7 +177,7 @@ requires `std`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAGu7Oy6YGRIbwwqT87U4ouEbTIDgxq_eZDcbepbj-sYdCDRhZIGCaXJvdXRlcmFtYWUwLjMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHOi8QcR7GzUbWNQ2_S3ygncb4N9E3BpA5FAbBPdYPdGfr2NhZIGCaXJvdXRlcmFtYWUwLjMuMQ
  [__link0]: macro@resolver
  [__link1]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver
  [__link2]: https://docs.rs/routerama/0.3.1/routerama/?search=RouteTable

@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 use alloc::borrow::Cow;
+use alloc::sync::Arc;
+use core::fmt;
 
 use smallvec::SmallVec;
 
@@ -34,7 +36,7 @@ use crate::raw_match::INLINE_CAPTURES;
 /// let hit = resolver
 ///     .match_route("GET", "/books/rust")
 ///     .expect("a route matches");
-/// assert_eq!(hit.template(), "/books/{book}");
+/// assert_eq!(hit.template().as_str(), "/books/{book}");
 /// assert_eq!(hit.parameter("book"), Some("rust"));
 /// ```
 pub trait RouteTable {
@@ -49,21 +51,52 @@ pub trait RouteTable {
     fn match_route<'p>(&self, method: &str, path: &'p str) -> Option<RouteHit<'_, 'p>>;
 }
 
+/// The template of a route, such as `/books/{book}`.
+///
+/// A clone does not copy the text, so a caller can keep the template of a match.
+#[derive(Clone, Debug)]
+pub enum RouteTemplate {
+    /// The template of a route that [`#[resolver]`](macro@crate::resolver) generates.
+    Static(&'static str),
+    /// The template of a route that is added at run time. All matches of the route share it.
+    Shared(Arc<str>),
+}
+
+impl RouteTemplate {
+    /// Returns the text of the template.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Static(text) => text,
+            Self::Shared(text) => text,
+        }
+    }
+}
+
+impl AsRef<str> for RouteTemplate {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for RouteTemplate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A route that matches a request, with the values of its parameters.
 #[derive(Clone, Debug)]
 pub struct RouteHit<'r, 'p> {
-    pub(crate) template: &'r Cow<'static, str>,
+    pub(crate) template: &'r RouteTemplate,
     pub(crate) names: &'r [Cow<'static, str>],
     pub(crate) captures: SmallVec<[&'p str; INLINE_CAPTURES]>,
 }
 
 impl<'r, 'p> RouteHit<'r, 'p> {
     /// Returns the template of the route, such as `/books/{book}`.
-    ///
-    /// A route that `#[resolver]` generates borrows its template for
-    /// `'static`. A route that is added at run time owns its template.
     #[must_use]
-    pub const fn template(&self) -> &'r Cow<'static, str> {
+    pub const fn template(&self) -> &'r RouteTemplate {
         self.template
     }
 
@@ -82,11 +115,7 @@ impl<'r, 'p> RouteHit<'r, 'p> {
 /// Builds the [`RouteHit`] that a generated resolver returns.
 #[inline]
 #[must_use]
-#[expect(
-    clippy::ptr_arg,
-    reason = "a `&str` loses that a generated template is `'static`, which lets the caller keep it without a copy"
-)]
-pub fn route_hit<'r, 'p>(template: &'r Cow<'static, str>, names: &'r [Cow<'static, str>], captures: &[&'p str]) -> RouteHit<'r, 'p> {
+pub fn route_hit<'r, 'p>(template: &'r RouteTemplate, names: &'r [Cow<'static, str>], captures: &[&'p str]) -> RouteHit<'r, 'p> {
     RouteHit {
         template,
         names,

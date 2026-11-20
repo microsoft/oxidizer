@@ -3,7 +3,6 @@
 
 //! The drop guard that emits the event of one request.
 
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use http::uri::{Authority, PathAndQuery};
@@ -15,6 +14,7 @@ use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use ohno::{ErrorLabel, Labeled};
 use parking_lot::Mutex;
+use routerama::RouteTemplate;
 use smallvec::SmallVec;
 use tick::Stopwatch;
 
@@ -168,8 +168,8 @@ impl TelemetryDropGuard {
             );
             (
                 route.as_ref().map(|(_, route_hit)| match route_hit.template() {
-                    Cow::Borrowed(template) => Text::from(*template),
-                    Cow::Owned(template) => Text::from(Arc::<str>::from(template.as_str())),
+                    RouteTemplate::Static(template) => Text::from(*template),
+                    RouteTemplate::Shared(template) => Text::from(Arc::clone(template)),
                 }),
                 RouteParameters(route),
             )
