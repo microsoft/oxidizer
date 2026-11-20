@@ -9,7 +9,7 @@ use observed::Sink;
 use observed::context::{Transfer, TransferGuard};
 use thread_aware::ThreadAware;
 
-/// Configures Observed support for an Arty runtime.
+/// Configures Observed sink integration for an Arty runtime.
 ///
 /// This type is non-exhaustive so later releases can add configuration without
 /// changing [`ObservedExt::enable_observed`].
@@ -39,16 +39,17 @@ impl From<Sink> for ObservedOptions {
     }
 }
 
-/// Adds Observed enrichment transfer to an Arty runtime.
+/// Adds Observed sink integration to an Arty runtime.
 ///
 /// The implementation for [`RuntimeBuilder`] registers the task-spawn hook
 /// before startup. The implementation for a [`RuntimeControl`] reference
-/// registers it on a live runtime.
+/// registers it on a live runtime. The current integration transfers sink
+/// enrichment into each task.
 pub trait ObservedExt: private::Sealed {
-    /// The result of enabling Observed support.
+    /// The result of enabling Observed sink integration.
     type Output;
 
-    /// Transfers the current sink enrichment into each task submitted later.
+    /// Enables the configured sink integration for each task submitted later.
     fn enable_observed(self, options: impl Into<ObservedOptions>) -> Self::Output;
 }
 

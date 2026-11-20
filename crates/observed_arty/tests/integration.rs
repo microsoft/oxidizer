@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests enrichment transfer through the public extension API.
+//! Tests sink integration through the public extension API.
 
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 

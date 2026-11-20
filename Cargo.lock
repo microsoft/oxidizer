@@ -3727,6 +3727,9 @@ version = "0.1.0"
 dependencies = [
  "alloc_tracker",
  "arty",
+ "criterion",
+ "futures",
+ "metabench",
  "observed",
  "static_assertions",
  "testing_aids",

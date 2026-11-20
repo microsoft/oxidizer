@@ -5,11 +5,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-//! Transfers Observed enrichment into Arty tasks.
+//! Integrates an Observed sink with the Arty runtime.
 //!
 //! Call [`ObservedExt::enable_observed`] with an [`observed::Sink`] before you
-//! submit a task. The integration captures the enrichment at submission time.
-//! It restores that enrichment for each task poll and removes it after the poll.
+//! submit a task. The first integration feature transfers enrichment into Arty
+//! tasks. It captures the enrichment at submission time, restores it for each
+//! task poll, and removes it after the poll.
 //!
 //! Enable the integration on a runtime builder:
 //!
