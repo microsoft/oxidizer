@@ -32,8 +32,8 @@ Workers can share application data.
 `RuntimeScheduler` lets the runtime choose a worker for new tasks.
 `Scheduler` sends tasks to one worker.
 A task factory is a function that creates a future.
-Factories and values sent between threads must meet the trait requirements
-of the scheduling method.
+Factories and values sent between threads must implement the traits that the
+scheduling method requires.
 
 Relocation updates a value's state for a selected worker.
 `ThreadAware` provides the method that makes this update.
@@ -45,12 +45,13 @@ A waker tells a worker that a task is ready to run again.
 A cloned waker sends this request to the task's assigned worker.
 It does not move the task or run it on the calling thread.
 Keeping a clone does not keep the task or runtime alive.
-After the task completes, panics, or is cancelled, calling or cloning the waker
-is safe and has no effect. The same applies after runtime shutdown.
+After the task completes, panics, or is cancelled, you can call or clone the
+waker safely. The operation has no effect. The same rule applies after runtime
+shutdown.
 
 ## Supporting services
 
-The runtime has three supporting service groups:
+The runtime has four supporting service groups:
 
 - Blocking pools run blocking functions outside async workers. The runtime can
   use one shared pool or one pool per worker. A running function can delay
@@ -60,15 +61,21 @@ The runtime has three supporting service groups:
   The [I/O guide](IO.md) describes driver roles, access rules, failures, and
   shutdown.
 - Worker clocks wake tasks when their timers expire.
+- Monitoring owns one Seismograph connection and runtime registration per enabled
+  runtime. Workers collect live tasks from native storage on request. Event
+  recording is process-wide and separate from each runtime's connection.
+  The [runtime API documentation](https://docs.rs/arty/latest/arty/runtime/index.html)
+  describes collection and recording.
 
 ## Shutdown and failure
 
 The first shutdown request records why the runtime stops. Later requests do not
-replace that reason. Shutdown rejects new tasks, cancels pending async tasks, and discards
-queued blocking functions.
+replace that reason. Shutdown rejects new tasks and cancels pending async tasks.
+It also discards queued blocking functions.
 
 Worker code requests shutdown without waiting.
 Calling `Runtime::stop` or dropping the `Runtime` value waits for workers to stop.
+The runtime then closes its monitoring connection and stops its registration.
 If a runtime failure caused shutdown, runtime and task errors retain it.
 Use `Error::source` to read that underlying failure.
 

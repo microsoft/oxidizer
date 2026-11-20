@@ -28,3 +28,58 @@ fn source_payload_survives_capture() {
         }]
     );
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "tests native filesystem output and write errors")]
+fn snapshot_file_persistence_uses_the_caller_path() {
+    use std::error::Error;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("snapshot.bin");
+    let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+
+    encoded.write_file(&path).unwrap();
+
+    assert_eq!(std::fs::read(&path).unwrap(), encoded.as_bytes());
+
+    let missing_parent = directory.path().join("missing").join("snapshot.bin");
+    let error = encoded.write_file(&missing_parent).unwrap_err();
+    let source = error.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        error.to_string(),
+        format!("failed to write seismograph snapshot to {}: {source}", missing_parent.display())
+    );
+}
+
+#[test]
+#[cfg(feature = "test-util")]
+fn invalid_utf8_source_name_is_rejected() {
+    use seismograph::recorder::event::{EventClock, Events};
+    use seismograph::snapshot::{DecodedSnapshot, test_util};
+
+    let fixture = DecodedSnapshot {
+        events: Events {
+            clock: EventClock::CURRENT,
+            ..Events::default()
+        },
+        sources: vec![SourceSnapshot {
+            id: SourceId::new(1),
+            name: "source".to_owned(),
+            schema_version: 1,
+            data: b"captured".to_vec(),
+        }],
+        ..DecodedSnapshot::default()
+    };
+    let encoded = test_util::encode(&fixture).unwrap();
+    let mut bytes = encoded.as_bytes().to_vec();
+    assert_eq!(snapshot::decode(&bytes).unwrap().sources, fixture.sources);
+
+    let name_offset = bytes.windows(b"source".len()).rposition(|value| value == b"source").unwrap();
+    bytes[name_offset] = 0xff;
+
+    assert_eq!(
+        snapshot::decode(&bytes).unwrap_err().to_string(),
+        "the seismograph snapshot is malformed or unsupported"
+    );
+}

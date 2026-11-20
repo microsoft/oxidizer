@@ -13,7 +13,7 @@ use observed::processing::{EventProcessor, EventView, FieldValueFn};
 /// Prints the name, the severity, the message and the log fields of each event. Then it prints
 /// each metric value with the name, the unit and the dimensions of its metric.
 #[derive(Default)]
-pub(crate) struct PrintProcessor(RedactionEngine);
+pub(crate) struct PrintProcessor(pub(crate) RedactionEngine);
 
 impl EventProcessor for PrintProcessor {
     fn is_interested(&self, _: &EventDescription) -> bool {

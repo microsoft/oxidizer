@@ -68,6 +68,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn an_expansion_is_rendered_as_formatted_source() {
         let rendered = render_expansion(&tokenize("struct S { a: u8 }"));
 
@@ -75,6 +76,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     #[should_panic(expected = "the expansion parses as a Rust file")]
     fn an_expansion_that_is_not_a_file_fails_the_test() {
         // The point of the strict helper: a macro that emits unparsable tokens must fail
@@ -84,6 +86,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn the_panic_message_carries_the_offending_tokens() {
         let panic = std::panic::catch_unwind(|| render_expansion(&not_a_file())).expect_err("rendering a non-file panics");
         let message = panic.downcast_ref::<String>().expect("the panic payload is a formatted string");
@@ -92,11 +95,13 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn lossy_rendering_falls_back_to_the_raw_tokens() {
         assert_eq!(render_tokens_lossy(&not_a_file()), "1 + 1");
     }
 
     #[test]
+    #[serial_test::serial]
     fn lossy_rendering_still_formats_what_does_parse() {
         assert_eq!(render_tokens_lossy(&tokenize("struct S { a: u8 }")), "struct S {\n    a: u8,\n}\n");
     }

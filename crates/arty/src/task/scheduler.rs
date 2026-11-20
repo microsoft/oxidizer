@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::TaskPlacement;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -148,11 +147,11 @@ impl Scheduler {
         self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory)
     }
 
-    fn spawn_on_current_worker<FF, F, R>(&self, future_factory: FF) -> Result<JoinHandle<R>, FF>
+    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF) -> Result<JoinHandle<F::Output>, FF>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
+        F: Future + 'static,
+        F::Output: Send + 'static,
     {
         asynchronous::LocalWorker::with_scheduler(|current| {
             let Some(current) = current else {
@@ -161,7 +160,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let handle = current.spawn(future_factory, TaskPlacement::SameThread);
+            let handle = current.spawn(future_factory);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -311,12 +310,13 @@ impl Scheduler {
     /// Use this for synchronous I/O or blocking library calls.
     /// These calls can prevent an async worker from running other tasks and
     /// processing timers. The function runs on a separate pool thread.
-    /// A panic in this function returns an error through [`JoinHandle`] and
-    /// follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// A panic in this function returns an error through [`JoinHandle`].
+    /// It does not invoke the configured [`TaskPanic`](crate::runtime::hook::TaskPanic)
+    /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Uses this scheduler's worker pool. Configure sharing and limits with
-    /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+    /// [`BlockingPoolPolicy`](crate::runtime::policy::BlockingPoolPolicy).
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.
     /// Functions that already run cannot be interrupted and can finish.
@@ -363,6 +363,7 @@ impl Scheduler {
 }
 
 impl ThreadAware for Scheduler {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; the binding and destination determine relocation.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.binding.thread == *destination {
             return;
@@ -381,37 +382,17 @@ impl AsRef<Self> for Scheduler {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public APIs cannot inspect scheduler-registration TLS before and after teardown.
 mod tests {
-    use std::cell::RefCell;
-    use std::future::Future as _;
-    use std::pin::pin;
     use std::sync::mpsc;
-    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
-    use arty_executor::ShutdownCause;
-
     use super::*;
-
-    thread_local! {
-        static SPAWN_ON_DROP: RefCell<Option<SpawnOnDrop>> = const { RefCell::new(None) };
-    }
-
-    struct SpawnOnDrop {
-        scheduler: Scheduler,
-        spawned: mpsc::Sender<JoinHandle<()>>,
-    }
-
-    impl Drop for SpawnOnDrop {
-        fn drop(&mut self) {
-            self.spawned.send(self.scheduler.spawn(async |_| {})).unwrap();
-        }
-    }
 
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let registered = runtime
@@ -423,29 +404,6 @@ mod tests {
             .unwrap();
 
         assert!(registered);
-        runtime.stop().unwrap();
-    }
-
-    #[test]
-    fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
-        let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let rejected = runtime
-            .scheduler()
-            .block_on(async |cx| {
-                _ = cx.scheduler().dispatcher.stop(ShutdownCause::default());
-                let mut task = pin!(cx.scheduler().spawn(async |_| 42));
-
-                matches!(
-                    task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
-                    Poll::Ready(Err(error)) if error.is_shutdown()
-                )
-            })
-            .unwrap();
-
-        assert!(rejected);
         runtime.stop().unwrap();
     }
 
@@ -465,7 +423,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let (started_tx, started_rx) = mpsc::channel();
@@ -486,34 +444,5 @@ mod tests {
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         runtime.stop().unwrap();
         assert_eq!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap(), (true, true));
-    }
-
-    #[test]
-    fn external_spawn_survives_scheduler_slot_teardown() {
-        let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .build()
-            .unwrap();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-        let (spawned, received) = mpsc::channel();
-
-        std::thread::spawn(move || {
-            SPAWN_ON_DROP.with(|owner| {
-                assert!(
-                    owner
-                        .replace(Some(SpawnOnDrop {
-                            scheduler: scheduler.clone(),
-                            spawned,
-                        }))
-                        .is_none()
-                );
-            });
-            scheduler.spawn(async |_| {}).join().unwrap();
-        })
-        .join()
-        .unwrap();
-
-        received.recv_timeout(Duration::from_secs(5)).unwrap().join().unwrap();
-        runtime.stop().unwrap();
     }
 }

@@ -95,7 +95,6 @@ impl FixedBlockMemory {
 }
 
 impl Memory for FixedBlockMemory {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }
@@ -124,41 +123,5 @@ impl FixedBlockMemoryInner {
         let blocks = iter::repeat_with(|| std_alloc_block::allocate(self.block_size)).take(blocks_required);
 
         BytesBuf::from_blocks(blocks)
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use new_zealand::nz;
-    use static_assertions::assert_impl_all;
-
-    use super::*;
-    use crate::BytesView;
-    use crate::mem::MemoryShared;
-
-    assert_impl_all!(FixedBlockMemory: MemoryShared, ThreadAware);
-
-    #[test]
-    fn byte_by_byte() {
-        let memory = FixedBlockMemory::new(nz!(1));
-
-        let buf = memory.reserve(0);
-        assert_eq!(buf.len(), 0);
-        assert_eq!(buf.capacity(), 0);
-
-        let mut data = BytesView::copied_from_slice(b"Hello, world", &memory);
-        assert_eq!(data, b"Hello, world");
-
-        assert_eq!(data.first_slice().len(), 1);
-
-        let mut chunks_encountered: usize = 0;
-
-        data.consume_all_slices(|chunk| {
-            chunks_encountered = chunks_encountered.saturating_add(1);
-            assert_eq!(chunk.len(), 1);
-        });
-
-        assert_eq!(chunks_encountered, 12);
     }
 }

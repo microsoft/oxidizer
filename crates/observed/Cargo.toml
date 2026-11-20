@@ -33,7 +33,7 @@ all-features = true
 
 [features]
 default = []
-seismograph = ["performables/seismograph", "tick/seismograph"]
+seismograph = ["performables/seismograph"]
 test-util = []
 
 [dependencies]
@@ -53,15 +53,17 @@ tick = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 metabench = { path = "../metabench" }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
-opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
+[[test]]
+name = "gamma_round2_context"
+required-features = ["test-util"]
 
 [[bench]]
 name = "observed_benchmarks"

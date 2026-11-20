@@ -752,6 +752,8 @@ mod origin {
             "https://exa_mple",
             "https://[v1.alpha]",
             "https://127.1",
+            "https://1.2.3.4.5",
+            "https://1.2.3.4.5.6",
             "https://192.168.001.1",
             "https://[2001:0db8::1]",
             "https://[2001:DB8::1]",

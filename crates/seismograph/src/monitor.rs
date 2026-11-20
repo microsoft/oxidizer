@@ -54,10 +54,26 @@ pub struct Monitor {
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ListenerThread>,
     _directory: Directory,
     #[cfg(any(test, feature = "test-util"))]
     _fixture: Option<seismograph_protocol::testing::Directory>,
+}
+
+enum ListenerThread {
+    Native(JoinHandle<()>),
+    #[cfg(test)]
+    Injected(fn() -> thread::Result<()>),
+}
+
+impl ListenerThread {
+    fn join(self) -> thread::Result<()> {
+        match self {
+            Self::Native(thread) => thread.join(),
+            #[cfg(test)]
+            Self::Injected(join) => join(),
+        }
+    }
 }
 
 impl Monitor {
@@ -120,14 +136,24 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         self.active_clients.shutdown_all();
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
+        finish_listener_thread(self.thread.take(), ListenerThread::join, || {
             eprintln!("seismograph: monitor listener thread panicked");
-        }
+        });
         if let Err(error) = self.io.remove_descriptor(&self.descriptor_path) {
             eprintln!("seismograph: failed to remove monitor descriptor: {error}");
         }
+    }
+}
+
+fn listener_join_failed(result: &thread::Result<()>) -> bool {
+    result.is_err()
+}
+
+fn finish_listener_thread<T>(thread: Option<T>, join: impl FnOnce(T) -> thread::Result<()>, report: impl FnOnce()) {
+    if let Some(thread) = thread
+        && listener_join_failed(&join(thread))
+    {
+        report();
     }
 }
 
@@ -236,13 +262,11 @@ impl Builder {
         let instance_id = io.instance_id().map_err(StartupFailure::Protocol)?;
         #[cfg(any(test, feature = "test-util"))]
         let fixture = self.isolated.then(seismograph_protocol::testing::Directory::new);
-        #[cfg(any(test, feature = "test-util"))]
-        let directory = match &fixture {
-            Some(fixture) => fixture.open(),
-            None => Directory::current(&io).map_err(StartupFailure::Protocol)?,
-        };
-        #[cfg(not(any(test, feature = "test-util")))]
-        let directory = Directory::current(&io).map_err(StartupFailure::Protocol)?;
+        let directory = monitor_directory(
+            &io,
+            #[cfg(any(test, feature = "test-util"))]
+            fixture.as_ref(),
+        )?;
         let process_id = io.process_id();
         let owner = directory.owner().clone();
         let descriptor = MonitorDescriptor {
@@ -285,12 +309,24 @@ impl Builder {
             stop,
             active_clients,
             last_error,
-            thread: Some(thread),
+            thread: Some(ListenerThread::Native(thread)),
             _directory: directory,
             #[cfg(any(test, feature = "test-util"))]
             _fixture: fixture,
         })
     }
+}
+
+// #[gamma::skip(parameter.default_shadow, reason = "native fixture adapter: a present fixture owns a real protected directory and can only be constructed with filesystem I/O; mocked MonitorIo cannot represent this native fixture")]
+fn monitor_directory(
+    io: &MonitorIo,
+    #[cfg(any(test, feature = "test-util"))] fixture: Option<&seismograph_protocol::testing::Directory>,
+) -> Result<Directory, StartupFailure> {
+    #[cfg(any(test, feature = "test-util"))]
+    if let Some(fixture) = fixture {
+        return Ok(fixture.open());
+    }
+    Directory::current(io).map_err(StartupFailure::Protocol)
 }
 
 fn default_application_name(io: &MonitorIo) -> Result<String, StartupFailure> {
@@ -389,9 +425,7 @@ fn run_listener(
                 let registration = match active_clients.register(&stream) {
                     Ok(Some(registration)) => registration,
                     Ok(None) => {
-                        if let Err(error) = stream.close() {
-                            set_last_error(last_error, &error);
-                        }
+                        close_rejected_client(&stream, last_error);
                         continue;
                     }
                     Err(error) => {
@@ -417,6 +451,12 @@ fn run_listener(
 
 const fn listener_accept_should_retry(kind: io::ErrorKind) -> bool {
     matches!(kind, io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted)
+}
+
+fn close_rejected_client(stream: &Connection, last_error: &Mutex<Option<String>>) {
+    if let Err(error) = stream.close() {
+        set_last_error(last_error, &error);
+    }
 }
 
 fn spawn_listener_thread(
@@ -485,7 +525,7 @@ fn handle_client_with_timeouts(
     handshake_timeout: Duration,
     idle_timeout: Duration,
 ) -> Result<(), ClientError> {
-    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
+    configure_client_stream(&stream)?;
 
     let (request_id, request) = read_request_with_timeout(io, &mut stream, stop, handshake_timeout, ReadTimeout::Handshake)?;
     let Request::Hello = request else {
@@ -503,6 +543,7 @@ fn handle_client_with_timeouts(
                 configuration.arc_dereferences,
                 configuration.runtime_tasks,
                 configuration.io,
+                configuration.cache,
                 configuration.event_capacity_per_thread.get(),
             ),
         },
@@ -511,6 +552,7 @@ fn handle_client_with_timeouts(
 
     loop {
         if stop.load(Ordering::Acquire) {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         let (request_id, request) = match read_request_with_timeout(io, &mut stream, stop, idle_timeout, ReadTimeout::Idle) {
@@ -523,6 +565,11 @@ fn handle_client_with_timeouts(
         seismograph_protocol::write_response(&mut writer, request_id, &response.response).map_err(ClientError::Protocol)?;
     }
     Ok(())
+}
+
+// #[gamma::skip(fn_value.ok, tag = "timeout", reason = "November 4 SARIF mutant 4e1d496201c5 timed out after removing the client stream deadlines")]
+fn configure_client_stream(stream: &Connection) -> Result<(), ClientError> {
+    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)
 }
 
 struct DeadlineWriter<'a> {
@@ -600,8 +647,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
                 };
             };
             ConnectedResponse {
-                response: crate::recorder::clear_buffers()
-                    .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+                response: acknowledgement_response(crate::recorder::clear_buffers()),
                 _snapshot_guard: None,
             }
         }
@@ -610,8 +656,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
             _snapshot_guard: None,
         },
         Request::SetRecording(configuration) => ConnectedResponse {
-            response: apply_recording_configuration(*configuration)
-                .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+            response: acknowledgement_response(apply_recording_configuration(*configuration)),
             _snapshot_guard: None,
         },
         Request::SetCacheRecording(policy) => {
@@ -664,16 +709,19 @@ fn apply_recording_configuration(configuration: RecordingConfiguration) -> Resul
     let event_capacity_per_thread = crate::recorder::EventBufferCapacity::new(
         usize::try_from(configuration.event_capacity_per_thread).expect("Seismograph requires a target whose usize can represent u32"),
     );
-    let current = crate::recorder::configuration();
     crate::recorder::try_configure(crate::recorder::Configuration {
         allocations: recorder_policy(configuration.allocations),
         general_events: recorder_policy(configuration.general_events),
         arc_dereferences: recorder_policy(configuration.arc_dereferences),
         runtime_tasks: recorder_policy(configuration.runtime_tasks),
         io: recorder_policy(configuration.io),
-        cache: current.cache,
+        cache: recorder_policy(configuration.cache),
         event_capacity_per_thread,
     })
+}
+
+fn acknowledgement_response(result: Result<(), crate::Error>) -> Response {
+    result.map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
 }
 
 fn recorder_statistics_response() -> Response {
@@ -698,8 +746,7 @@ fn recorder_activity_response_from(result: Result<crate::recorder::Activity, cra
         Err(error) => return Response::Error(error.to_string()),
     };
     let [allocations, general_events, arc_dereferences, runtime_tasks, io, cache] = activity.class_events;
-    let mut statistics = protocol_recorder_statistics(activity.statistics);
-    statistics.recording.cache = protocol_recording_policy(activity.statistics.recording.cache);
+    let statistics = protocol_recorder_statistics(activity.statistics);
     Response::RecorderActivity(RecorderActivity {
         statistics,
         session_id: activity.session_id,
@@ -741,6 +788,8 @@ fn protocol_recorder_statistics(statistics: crate::recorder::Statistics) -> Reco
             statistics.recording.arc_dereferences,
             statistics.recording.runtime_tasks,
             statistics.recording.io,
+            statistics.recording.cache,
+            // #[gamma::skip(expr.decrement, reason = "recorder statistics derive capacity from EventBufferCapacity, whose maximum 1048576 fits every supported usize; the fallback is unreachable")]
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
     }
@@ -769,6 +818,7 @@ fn protocol_recording_configuration(
     arc_dereferences: crate::recorder::Policy,
     runtime_tasks: crate::recorder::Policy,
     io: crate::recorder::Policy,
+    cache: crate::recorder::Policy,
     event_capacity_per_thread: usize,
 ) -> RecordingConfiguration {
     RecordingConfiguration {
@@ -777,7 +827,7 @@ fn protocol_recording_configuration(
         arc_dereferences: protocol_recording_policy(arc_dereferences),
         runtime_tasks: protocol_recording_policy(runtime_tasks),
         io: protocol_recording_policy(io),
-        cache: seismograph_protocol::message::RecordingPolicy::default(),
+        cache: protocol_recording_policy(cache),
         event_capacity_per_thread: u32::try_from(event_capacity_per_thread).unwrap_or(u32::MAX),
     }
 }
@@ -786,7 +836,10 @@ fn protocol_recording_policy(policy: crate::recorder::Policy) -> seismograph_pro
     seismograph_protocol::message::RecordingPolicy {
         enabled: policy.enabled,
         capture_backtraces: policy.capture_backtraces,
-        sampling_one_in: u32::try_from(policy.event_sampling.get()).unwrap_or(u32::MAX),
+        sampling_one_in: u32::try_from(policy.event_sampling.get()).unwrap_or(
+            // #[gamma::skip(expr.decrement, tag = "unreachable", reason = "EventSampling bounds the denominator to 1048576, so conversion to u32 always succeeds and never uses this fallback")]
+            u32::MAX,
+        ),
     }
 }
 
@@ -820,7 +873,10 @@ impl io::Read for DeadlineReader<'_> {
         if remaining.is_zero() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor frame read timed out"));
         }
-        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.set_read_timeout(
+            // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            Some(remaining),
+        )?;
         io::Read::read(self.stream, buf)
     }
 }
@@ -949,6 +1005,90 @@ mod io_tests;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov6_monitor_drop_joins_its_listener_once_before_removing_the_descriptor() {
+        thread_local! {
+            static JOINS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        let (io, control) = MonitorIo::new_mocked();
+        let directory = Directory::current(&io).unwrap();
+        let instance_id = InstanceId::from_bytes([29; 16]);
+        let owner = directory.owner().clone();
+        let descriptor = MonitorDescriptor {
+            name: "drop-without-thread".into(),
+            instance: None,
+            process_id: io.process_id(),
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, io.process_id(), instance_id),
+            owner,
+        };
+        let descriptor_path = io.publish_descriptor(&directory, &descriptor).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        JOINS.set(0);
+        drop(Monitor {
+            descriptor,
+            descriptor_path,
+            io,
+            stop: Arc::clone(&stop),
+            active_clients: Arc::new(ActiveClients::new()),
+            last_error: Arc::new(Mutex::new(None)),
+            thread: Some(ListenerThread::Injected(|| {
+                JOINS.set(JOINS.get() + 1);
+                Ok(())
+            })),
+            _directory: directory,
+            _fixture: None,
+        });
+        assert_eq!(JOINS.get(), 1);
+        assert!(stop.load(Ordering::Acquire));
+        assert!(
+            control
+                .operations()
+                .contains(&seismograph_protocol::io::IoOperation::RemoveDescriptor)
+        );
+    }
+
+    #[test]
+    fn november_listener_join_policy_consumes_each_owner_once_and_reports_only_an_actual_join_failure_without_threads() {
+        for failed in [false, true] {
+            let events = std::cell::RefCell::new(Vec::new());
+            finish_listener_thread(
+                Some(17),
+                |owner| {
+                    assert_eq!(owner, 17);
+                    events.borrow_mut().push("join");
+                    if failed { Err(Box::new("listener panic")) } else { Ok(()) }
+                },
+                || events.borrow_mut().push("report"),
+            );
+            assert_eq!(*events.borrow(), if failed { vec!["join", "report"] } else { vec!["join"] });
+        }
+        finish_listener_thread(
+            None::<()>,
+            |()| panic!("no owner may be joined"),
+            || panic!("no missing owner may be reported"),
+        );
+    }
+
+    #[test]
+    fn november_public_monitor_start_preserves_directory_failure_before_any_listener_or_thread_is_created() {
+        let (io, control) = MonitorIo::new_mocked();
+        control.fail_next(
+            seismograph_protocol::io::IoOperation::CreateDirectory,
+            std::io::Error::from_raw_os_error(5),
+        );
+        let error = Monitor::builder().name("deterministic").io(io).start().unwrap_err();
+        let mut source: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = source.downcast_ref::<std::io::Error>() {
+                assert_eq!(error.raw_os_error(), Some(5));
+                break;
+            }
+            source = source.source().expect("public startup error must preserve the injected I/O source");
+        }
+        assert!(!control.operations().contains(&seismograph_protocol::io::IoOperation::Bind));
+    }
+
     use std::io::{Read as _, Write as _};
 
     use super::*;
@@ -1332,6 +1472,7 @@ mod tests {
                     enabled: true,
                     ..Default::default()
                 },
+                cache: cache_policy,
                 event_capacity_per_thread: 64,
                 ..Default::default()
             }),
@@ -1354,12 +1495,9 @@ mod tests {
         });
 
         seismograph_protocol::write_request(&mut stream, 5, &Request::ReadRecorderStatistics).unwrap();
-        let response = seismograph_protocol::read_response(&mut stream).unwrap();
-        assert!(matches!(response, (5, Response::RecorderStatistics(_))));
-        let mut before = RecorderStatistics::default();
-        if let (5, Response::RecorderStatistics(statistics)) = response {
-            before = statistics;
-        }
+        let (request_id, response) = seismograph_protocol::read_response(&mut stream).unwrap();
+        assert_eq!(request_id, 5);
+        let before = recorder_statistics(&response);
 
         seismograph_protocol::write_request(
             &mut stream,
@@ -1479,12 +1617,45 @@ mod tests {
                             configuration.arc_dereferences,
                             configuration.runtime_tasks,
                             configuration.io,
+                            configuration.cache,
                             configuration.event_capacity_per_thread.get(),
                         )
                     },
                 }
             )
         );
+    }
+
+    #[test]
+    fn a_failed_hello_response_write_preserves_the_protocol_error() {
+        use seismograph_protocol::io::IoOperation;
+
+        let (io, control) = MonitorIo::new_mocked();
+        let owner = io.current_owner().unwrap();
+        let process_id = io.process_id();
+        let instance_id = io.instance_id().unwrap();
+        let descriptor = MonitorDescriptor {
+            name: "test".into(),
+            instance: None,
+            process_id,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(Path::new("mock-registry"), &owner, process_id, instance_id),
+            owner,
+        };
+        let (mut client, server) = control.connected_pair();
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
+        control.fail_next(
+            IoOperation::Write,
+            io::Error::new(io::ErrorKind::PermissionDenied, "scripted hello write failure"),
+        );
+
+        let result = handle_client(&io, server, &descriptor, &AtomicBool::new(true));
+
+        assert!(matches!(
+            result,
+            Err(ClientError::Protocol(seismograph_protocol::Error::Io(error)))
+                if error.kind() == io::ErrorKind::PermissionDenied && error.to_string() == "scripted hello write failure"
+        ));
     }
 
     #[test]
@@ -1751,6 +1922,60 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_client_identifiers_reject_registration() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (_peer, stream) = control.connected_pair();
+        let clients = Arc::new(ActiveClients::new());
+        clients.state.lock().unwrap().next_id = u64::MAX;
+
+        let error = clients.register(&stream).err().unwrap();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(error.to_string().contains("identifier"));
+        assert!(clients.state.lock().unwrap().streams.is_empty());
+    }
+
+    #[test]
+    fn rejected_client_close_failure_is_reported() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (_peer, stream) = control.connected_pair();
+        control.fail_next(
+            seismograph_protocol::io::IoOperation::Close,
+            io::Error::new(io::ErrorKind::PermissionDenied, "close denied"),
+        );
+        let last_error = Mutex::new(None);
+
+        close_rejected_client(&stream, &last_error);
+
+        assert_eq!(last_error.lock().unwrap().as_deref(), Some("close denied"));
+    }
+
+    #[test]
+    fn rejected_client_close_preserves_previous_error() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (mut peer, stream) = control.connected_pair();
+        let last_error = Mutex::new(Some("previous error".to_owned()));
+
+        close_rejected_client(&stream, &last_error);
+
+        assert_eq!(peer.write(b"rejected").unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(last_error.lock().unwrap().as_deref(), Some("previous error"));
+    }
+
+    #[test]
+    fn unrepresentable_read_timeout_is_rejected() {
+        let (io, control) = MonitorIo::new_mocked();
+        let (_peer, mut stream) = control.connected_pair();
+
+        let error = read_request_with_timeout(&io, &mut stream, &AtomicBool::new(false), Duration::MAX, ReadTimeout::Idle).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::Io(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
     fn active_client_limit_rejects_excess_connections() {
         let clients = Arc::new(ActiveClients::new());
@@ -1780,7 +2005,7 @@ mod tests {
             capture_backtraces: true,
             event_sampling: crate::recorder::EventSampling::one_in(7).unwrap(),
         };
-        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, usize::MAX);
+        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, policy, usize::MAX);
         assert_eq!(configuration.event_capacity_per_thread, u32::MAX);
         assert_eq!(configuration.allocations.sampling_one_in, 7);
         assert_eq!(recorder_policy(configuration.allocations), policy);

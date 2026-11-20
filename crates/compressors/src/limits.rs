@@ -372,7 +372,6 @@ impl FormatLimits {
     // offers the engine without changing which bytes are produced or where `check` rejects, so
     // every drain loop needs one step per byte and mutation testing records a timeout instead of a
     // verdict. `check` is what enforces the bound, and its mutants are caught.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn remaining_output(self, output_len: u64) -> Option<u64> {
         self.output_len.map(|maximum| maximum.saturating_sub(output_len))
     }
@@ -390,6 +389,23 @@ impl FormatLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_survivor_ratio_and_stream_limit_diagnostics_keep_counts() {
+        let output = RATIO_FLOOR_BYTES + 17;
+        let input = output / 3;
+        let ratio = FormatLimits::new(Some(2), None, None).check(input, output, 0).unwrap_err();
+        assert_eq!(
+            ratio.to_string(),
+            format!("decompressed output reached {output} bytes from {input} compressed bytes, exceeding the expansion limit of 2x")
+        );
+        let limits = FormatLimits::new(None, None, Some(2));
+        limits.check(0, 0, 2).unwrap();
+        assert_eq!(
+            limits.check(0, 0, 3).unwrap_err().to_string(),
+            "decoded stream count reached 3, exceeding the limit of 2"
+        );
+    }
 
     #[test]
     fn the_shared_defaults_are_the_documented_values() {

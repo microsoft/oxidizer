@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::FutureExt as _;
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
-use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Timer};
+use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Stopwatch, Timer};
 
 #[derive(Debug)]
 struct WakeCounter(AtomicUsize);
@@ -124,13 +124,6 @@ fn new_at_accepts_system_time_and_format_values() {
     let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(222);
     let direct = ClockControl::new_at(system_time).to_clock();
     assert_eq!(direct.system_time(), system_time);
-
-    #[cfg(feature = "fmt")]
-    {
-        let timestamp = tick::fmt::UnixSeconds::from_secs(333).unwrap();
-        let formatted = ClockControl::new_at(timestamp).to_clock();
-        assert_eq!(formatted.system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(333));
-    }
 }
 
 #[test]
@@ -186,23 +179,93 @@ fn simple_clock_observes_controlled_time() {
     assert_eq!(clock.system_time(), start + Duration::from_secs(5));
 }
 
-#[cfg(feature = "fast-instant")]
-#[test]
-fn controlled_simple_clock_ignores_fast_instant_configuration() {
-    let control = ClockControl::new();
-    let clock = control.to_simple_clock();
-    let configured = clock.clone().with_fast_instant(true);
-
-    control.advance(Duration::from_secs(1));
-
-    assert_eq!(configured.instant(), clock.instant());
-}
-
 #[test]
 fn controlled_simple_clock_stopwatch_observes_controlled_time() {
     let control = ClockControl::new();
     let clock = control.to_simple_clock();
     let watch = clock.stopwatch();
+
+    control.advance(Duration::from_secs(1));
+
+    assert_eq!(watch.elapsed(), Duration::from_secs(1));
+}
+
+#[test]
+fn stopwatch_lifecycle_matches_cumulative_interval_semantics() {
+    let control = ClockControl::new();
+    let mut watch = Stopwatch::new(control.to_simple_clock());
+
+    assert!(!watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    watch.start();
+    assert!(watch.is_running());
+    control.advance(Duration::from_secs(2));
+    watch.start();
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::from_secs(3));
+
+    watch.stop();
+    assert!(!watch.is_running());
+    control.advance(Duration::from_secs(4));
+    watch.stop();
+    assert_eq!(watch.elapsed(), Duration::from_secs(3));
+
+    watch.start();
+    control.advance(Duration::from_secs(5));
+    watch.stop();
+    assert_eq!(watch.elapsed(), Duration::from_secs(8));
+
+    watch.reset();
+    assert!(!watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+}
+
+#[test]
+fn stopwatch_restart_resets_starts_and_rebases_after_backward_time() {
+    let control = ClockControl::new_at(SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+    let mut watch = Stopwatch::new(control.to_simple_clock());
+    watch.start();
+
+    control.advance(Duration::from_secs(2));
+    assert_eq!(watch.elapsed(), Duration::from_secs(2));
+
+    watch.restart();
+    assert!(watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    control.set_time(SystemTime::UNIX_EPOCH + Duration::from_secs(5));
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    watch.restart();
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::from_secs(1));
+}
+
+#[test]
+fn stopwatch_start_and_stop_do_not_read_when_state_is_unchanged() {
+    let duration = Duration::from_secs(1);
+    let control = ClockControl::new().auto_advance(duration);
+    let clock = control.to_simple_clock();
+    let mut watch = Stopwatch::new(&clock);
+
+    watch.start();
+    watch.start();
+    assert_eq!(clock.system_time(), SystemTime::UNIX_EPOCH + duration);
+
+    watch.stop();
+    watch.stop();
+    assert_eq!(clock.system_time(), SystemTime::UNIX_EPOCH + duration * 3);
+}
+
+#[cfg(feature = "coarse-time")]
+#[test]
+fn coarse_stopwatch_observes_controlled_time() {
+    let control = ClockControl::new();
+    let mut watch = Stopwatch::new_coarse(control.to_simple_clock());
+    watch.start();
 
     control.advance(Duration::from_secs(1));
 

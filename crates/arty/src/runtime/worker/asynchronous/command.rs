@@ -7,7 +7,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
 use performables::sync::channel;
+use thread_aware::Thread;
 
+use crate::runtime::hook::HookRegistration;
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
 
@@ -69,6 +71,15 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(any(test, feature = "monitor"))]
+    #[debug("Inspect")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
+
+    /// Registers or executes one runtime hook on this worker.
+    #[debug("RegisterHook")]
+    RegisterHook { hook: HookRegistration, source: Option<Thread> },
+
     /// Starts shutdown on this worker.
     ///
     /// The worker stops accepting new tasks and discards all queued submissions,
@@ -126,15 +137,30 @@ pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public submission cannot separately close or drain the worker command queues.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
-    use arty_executor::{Executor, TaskPlacement};
+    use arty_executor::Executor;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_private_commands_keep_distinct_debug_labels() {
+        assert_eq!(format!("{:?}", SystemCommand::Shutdown), "Shutdown");
+        assert_eq!(
+            format!(
+                "{:?}",
+                SystemCommand::AccessIo {
+                    access: QueuedClosure::new(Box::new(|_| {}))
+                }
+            ),
+            "AccessIo"
+        );
+    }
     use crate::task::preparation::prepare_remote;
 
     struct PanicWake(AtomicBool);
@@ -144,6 +170,26 @@ mod tests {
             self.0.store(true, Ordering::Release);
             panic!("queued join cancellation notification");
         }
+    }
+
+    #[test]
+    fn gamma_survivor_queued_closure_disposes_panicking_capture_payload_without_unwinding() {
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("queued capture panic payload");
+            }
+        }
+        struct Capture(Arc<AtomicUsize>);
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                std::panic::panic_any(Payload(Arc::clone(&self.0)));
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        std::panic::catch_unwind(|| drop(QueuedClosure::new(Capture(Arc::clone(&drops))))).unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     struct PanicOnDrop(Arc<AtomicUsize>);
@@ -158,7 +204,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let context = runtime.scheduler().block_on(async |context| context).unwrap();
@@ -169,7 +215,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        let _registered = QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
+        QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -178,7 +224,11 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            &result_pool,
+            |_| std::future::ready(42),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<i32>>(),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

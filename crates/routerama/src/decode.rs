@@ -27,9 +27,11 @@ pub(crate) fn decode(input: &str) -> Option<Cow<'_, str>> {
             let hi = hex_value(*tail.first()?)?;
             let lo = hex_value(*tail.get(1)?)?;
             out.push(hi * 16 + lo);
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             rest = &tail[2..];
         } else {
             out.push(byte);
+            // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
             rest = tail;
         }
     }

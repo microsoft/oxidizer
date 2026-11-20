@@ -56,10 +56,10 @@ impl Io {
     ///
     /// # Panics
     ///
-    /// Panics if context access cannot complete, such as during shutdown, from
-    /// another Arty async worker, or if creating the driver fails.
-    /// Panics in the I/O library or code that reports runtime information also
-    /// pass through this method. So do panics from broken internal assumptions.
+    /// Panics if context access cannot complete. This can occur during shutdown,
+    /// when called from another Arty async worker, or when driver creation fails.
+    /// Panics from the I/O library, runtime-reporting code, or broken internal
+    /// assumptions also pass through this method.
     #[must_use]
     pub fn context<C>(&self, options: &C::ContextOptions) -> C
     where
@@ -126,13 +126,11 @@ impl Io {
         let io = self.clone();
         let access = Box::new(move |_: &Context| {
             let result = RuntimeDriverHost::try_context_current(&io.runtime, &io.thread, &options)
-                .unwrap_or_else(|| Err(Error::io_outside_worker()));
+                .expect("the dispatcher invokes I/O access on its assigned worker before uninstalling that worker's driver host");
             _ = result_tx.send(result);
         });
         self.dispatcher.access_io(worker_index, access)?;
-        result_rx
-            .recv()
-            .map_err(|disconnected| runtime_error(&self.dispatcher).unwrap_or_else(|| Error::new(disconnected)))?
+        receive_context(&result_rx, &self.dispatcher)
     }
 }
 
@@ -145,11 +143,18 @@ impl fmt::Debug for Io {
 }
 
 impl ThreadAware for Io {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source coordinate is deliberately unused; relocation resolves ownership from the destination.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.dispatcher.owns(destination) {
             self.thread = destination.clone();
         }
     }
+}
+
+fn receive_context<C>(receiver: &channel::Receiver<Result<C, Error>>, dispatcher: &DispatcherClient) -> Result<C, Error> {
+    receiver
+        .recv()
+        .map_err(|disconnected| runtime_error(dispatcher).unwrap_or_else(|| Error::new(disconnected)))?
 }
 
 pub(super) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
@@ -172,8 +177,10 @@ fn panic_context(error: &Error) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// This teardown check installs a private worker marker on an otherwise external thread.
 mod tests {
     use std::cell::RefCell;
+    use std::error::Error as _;
     use std::sync::mpsc;
     use std::task::Waker;
 
@@ -235,8 +242,40 @@ mod tests {
     }
 
     #[test]
+    fn abandoned_context_access_preserves_shutdown_or_channel_error() {
+        for stopped in [false, true] {
+            let thread = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
+            let dispatcher = DispatcherClient::for_test(&thread);
+            let cause = arty_executor::ShutdownError::new(std::io::Error::other("context worker stopped"));
+            if stopped {
+                dispatcher.stop(cause.clone());
+            }
+            let (sender, receiver) = channel::unbounded::<Result<TestContext, Error>>();
+            drop(sender);
+
+            let error = receive_context(&receiver, &dispatcher).err().unwrap();
+
+            if stopped {
+                let shutdown = error
+                    .source()
+                    .unwrap()
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<arty_executor::ShutdownError>()
+                    .unwrap();
+                assert!(std::ptr::eq(
+                    shutdown.inner().downcast_ref::<std::io::Error>().unwrap(),
+                    cause.inner().downcast_ref::<std::io::Error>().unwrap(),
+                ));
+            } else {
+                assert!(error.source().unwrap().downcast_ref::<performables::Error>().unwrap().is_closed());
+            }
+        }
+    }
+
+    #[test]
     fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
-        let runtime = crate::runtime::Runtime::new().unwrap();
+        let runtime = crate::runtime::Runtime::builder().build().unwrap();
         let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = context.scheduler().clone();
         let io = context.io().clone();

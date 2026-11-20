@@ -44,7 +44,6 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     // Guard mutations can invoke unchecked indexing with invalid synthetic
     // offsets; valid and invalid ranges are covered directly below.
-    #[cfg_attr(test, mutants::skip)]
     pub fn segment(&self, index: usize) -> Option<&'p str> {
         if index >= self.count || index >= self.capacity {
             return None;
@@ -61,7 +60,6 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a capture spanning the inclusive segment range `first..=last`.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn capture(&self, first: usize, last: usize) -> Option<&'p str> {
         if first > last || last >= self.count || last >= self.capacity {
             return None;
@@ -78,11 +76,11 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a capture from `first` through the end of the path.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn rest(&self, first: usize) -> Option<&'p str> {
         if first == self.count {
             return Some("");
         }
+        // #[gamma::skip(relational.gt_to_ge, reason = "The immediately preceding first == count branch already returns Some(empty), so equality cannot reach this comparison")]
         if first > self.count {
             return None;
         }
@@ -99,7 +97,6 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a segment capture after removing literal prefix and suffix bytes.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn affix(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<&'p str> {
         if index >= self.count || index >= self.capacity {
             return None;
@@ -153,13 +150,16 @@ pub fn with_scanned_path<'p, R>(
 ) -> Result<R, InvalidPath> {
     const INLINE_SEGMENTS: usize = 16;
 
+    // #[gamma::skip(literal.int_increment, reason = "Scanning overwrites every exposed start offset and ScannedPath hides all unwritten slots")]
     let mut inline_starts = [0_usize; INLINE_SEGMENTS];
+    // #[gamma::skip(literal.int_increment, reason = "Scanning overwrites every exposed end offset and ScannedPath hides all unwritten slots")]
     let mut inline_ends = [0_usize; INLINE_SEGMENTS];
     let inline_capacity = max_segments.min(INLINE_SEGMENTS);
     let path = scan_path(body, &mut inline_starts[..inline_capacity], &mut inline_ends[..inline_capacity]);
     if !path.is_valid() {
         return Err(InvalidPath);
     }
+    // #[gamma::skip(logical.or_remove_left, relational.le_to_lt, reason = "The fallback scan uses min(count,max_segments) slots, exposing the identical bounded offset prefix and count; these checks only avoid a heap allocation and rescan")]
     if max_segments <= INLINE_SEGMENTS || path.count() <= INLINE_SEGMENTS {
         return Ok(resolve(&path));
     }

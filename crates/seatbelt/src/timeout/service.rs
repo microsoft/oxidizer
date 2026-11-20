@@ -100,7 +100,6 @@ where
 {
     type Out = Out;
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
@@ -157,7 +156,6 @@ where
         self.inner.poll_ready(cx)
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn call(&mut self, req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);

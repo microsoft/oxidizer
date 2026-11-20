@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "addr2line"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e567177890eb1617b1f774005b66b26b2377afd138a2ca37aae7d8f0c81429d4"
+dependencies = [
+ "gimli",
+]
+
+[[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -90,15 +105,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c880a97d28a3681c0267bd29cff89621202715b065127cd445fa0f0fe0aa2880"
 
 [[package]]
-name = "android_system_properties"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -171,7 +177,7 @@ dependencies = [
  "many_cpus",
  "observed",
  "observed_testing",
- "ohno",
+ "ohno 0.5.4",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -198,6 +204,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "arc-swap"
+version = "1.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -238,6 +253,8 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 name = "arty"
 version = "0.6.1"
 dependencies = [
+ "alloc_tracker",
+ "arc-swap",
  "arty_executor",
  "arty_io_core",
  "arty_io_host",
@@ -251,15 +268,17 @@ dependencies = [
  "gungraun",
  "many_cpus",
  "metabench",
- "mutants",
  "nonempty",
  "observed",
- "ohno",
+ "ohno 0.5.4",
  "performables",
  "pin-project",
- "plurality",
+ "plurality 0.2.4",
  "scopeguard",
  "seismograph",
+ "seismograph_protocol",
+ "seismograph_runtime",
+ "smallvec",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -274,18 +293,14 @@ version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "data_privacy",
  "derive_more",
  "gungraun",
  "metabench",
- "mutants",
  "nm",
- "observed",
- "observed_testing",
- "ohno",
+ "ohno 0.5.4",
  "performables",
  "pin-project",
- "plurality",
+ "plurality 0.2.4",
  "static_assertions",
  "thread_aware",
  "thread_aware_core",
@@ -319,7 +334,6 @@ name = "arty_macros"
 version = "0.6.1"
 dependencies = [
  "arty_macros_impl",
- "mutants",
 ]
 
 [[package]]
@@ -341,10 +355,9 @@ version = "0.2.1"
 dependencies = [
  "arty",
  "derive_more",
- "futures",
- "ohno",
- "performables",
  "static_assertions",
+ "testing_aids",
+ "thread_aware",
  "tokio",
 ]
 
@@ -612,6 +625,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "backtrace"
+version = "0.3.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f4220217f3288537b83684130f42fad43320b1c3b805f1910d683d52ded24f"
+dependencies = [
+ "addr2line",
+ "cfg-if",
+ "libc",
+ "miniz_oxide",
+ "object",
+ "rustc-demangle",
+ "windows-link",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,11 +892,10 @@ dependencies = [
  "criterion",
  "gungraun",
  "libc",
- "mutants",
  "new_zealand",
  "nm",
  "performables",
- "plurality",
+ "plurality 0.2.4",
  "seismograph",
  "seismograph_io",
  "smallvec",
@@ -886,9 +913,8 @@ dependencies = [
  "future_assert",
  "futures",
  "futures-core",
- "mutants",
  "new_zealand",
- "ohno",
+ "ohno 0.5.4",
  "testing_aids",
  "trait-variant",
 ]
@@ -935,8 +961,7 @@ dependencies = [
  "criterion",
  "foldhash 0.2.0",
  "moka",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "performables",
  "thread_aware",
  "tokio",
@@ -956,7 +981,7 @@ name = "cachet_tier"
 version = "0.6.1"
 dependencies = [
  "dynosaur",
- "ohno",
+ "ohno 0.5.4",
  "parking_lot 0.13.0",
  "recoverable",
  "tick",
@@ -1011,27 +1036,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "chrono"
-version = "0.4.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
-dependencies = [
- "iana-time-zone",
- "num-traits",
- "windows-link",
-]
-
-[[package]]
-name = "chrono-tz"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
-dependencies = [
- "chrono",
- "phf",
 ]
 
 [[package]]
@@ -1199,7 +1203,6 @@ dependencies = [
  "futures",
  "futures-core",
  "metabench",
- "mutants",
  "performables",
  "pin-project-lite",
  "recoverable",
@@ -1281,7 +1284,7 @@ checksum = "f5e1271b0cf819fdcb002ac5d2d60e1d6e2010ccc52c040541051d9c0bd1a43c"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno",
+ "ohno 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1465,7 +1468,6 @@ dependencies = [
  "data_privacy_macros",
  "derive_more",
  "insta",
- "mutants",
  "once_cell",
  "rapidhash",
  "rustc-hash",
@@ -1479,7 +1481,6 @@ name = "data_privacy_core"
 version = "0.1.3"
 dependencies = [
  "insta",
- "mutants",
  "serde_core",
  "serde_json",
 ]
@@ -1489,7 +1490,7 @@ name = "data_privacy_macros"
 version = "0.13.2"
 dependencies = [
  "data_privacy_macros_impl",
- "mutants",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -1536,37 +1537,6 @@ name = "deadpool-runtime"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
-
-[[package]]
-name = "defmt"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
-dependencies = [
- "bitflags 1.3.2",
- "defmt-macros",
-]
-
-[[package]]
-name = "defmt-macros"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
-dependencies = [
- "defmt-parser",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "defmt-parser"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
-dependencies = [
- "thiserror",
-]
 
 [[package]]
 name = "der-parser"
@@ -1752,7 +1722,7 @@ version = "0.5.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a528948601e05cc2312f16c46b175487eff75191bdae39b957dd2bbb069a4b17"
 dependencies = [
- "plurality",
+ "plurality 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1761,7 +1731,6 @@ version = "0.2.4"
 dependencies = [
  "fakeable_impl",
  "mockall",
- "mutants",
 ]
 
 [[package]]
@@ -1828,12 +1797,12 @@ dependencies = [
  "hyper-util",
  "insta",
  "layered",
- "mutants",
  "native-tls",
- "ohno",
+ "observed_destination_core",
+ "observed_destination_stdout",
+ "ohno 0.5.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "rustls",
@@ -1872,7 +1841,6 @@ dependencies = [
  "futures",
  "http",
  "layered",
- "mutants",
  "tick",
  "tokio",
 ]
@@ -1896,9 +1864,8 @@ dependencies = [
  "hyper-util",
  "insta",
  "layered",
- "mutants",
  "native-tls",
- "ohno",
+ "ohno 0.5.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1923,7 +1890,6 @@ version = "0.2.5"
 dependencies = [
  "http",
  "insta",
- "mutants",
  "static_assertions",
 ]
 
@@ -1934,9 +1900,8 @@ dependencies = [
  "base64 0.23.1",
  "http",
  "insta",
- "mutants",
  "native-tls",
- "ohno",
+ "ohno 0.5.4",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1961,7 +1926,7 @@ dependencies = [
  "http-body-util",
  "http_extensions",
  "observed",
- "ohno",
+ "ohno 0.5.4",
  "tick",
  "tokio",
 ]
@@ -1987,12 +1952,11 @@ dependencies = [
  "hyper-util",
  "layered",
  "mockall",
- "mutants",
  "observed",
  "observed_testing",
- "ohno",
+ "ohno 0.5.4",
  "performables",
- "plurality",
+ "plurality 0.2.4",
  "quinn",
  "rcgen",
  "recoverable",
@@ -2123,7 +2087,6 @@ name = "fundle_macros"
 version = "0.4.1"
 dependencies = [
  "fundle_macros_impl",
- "mutants",
 ]
 
 [[package]]
@@ -2131,7 +2094,6 @@ name = "fundle_macros_impl"
 version = "0.4.1"
 dependencies = [
  "insta",
- "mutants",
  "proc-macro2",
  "quote",
  "syn 3.0.9",
@@ -2293,6 +2255,12 @@ dependencies = [
  "rand_core 0.10.1",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "gimli"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 
 [[package]]
 name = "glob"
@@ -2547,8 +2515,7 @@ dependencies = [
  "http_extensions",
  "layered",
  "mime",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "seatbelt",
  "smallvec",
  "tokio",
@@ -2572,9 +2539,9 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "jiff",
  "layered",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "pin-project",
  "recoverable",
  "serde",
@@ -2592,6 +2559,7 @@ dependencies = [
 name = "http_headers"
 version = "0.1.2"
 dependencies = [
+ "alloc_tracker",
  "argh",
  "axum",
  "base64 0.23.1",
@@ -2607,7 +2575,6 @@ dependencies = [
  "idna",
  "itoa",
  "metabench",
- "mutants",
  "pastey",
  "serde",
  "serde_json",
@@ -2633,7 +2600,6 @@ version = "0.2.3"
 dependencies = [
  "criterion",
  "gungraun",
- "mutants",
 ]
 
 [[package]]
@@ -2656,7 +2622,10 @@ dependencies = [
  "metabench",
  "observed",
  "observed_testing",
- "ohno",
+ "ohno 0.5.4",
+ "parking_lot 0.13.0",
+ "routerama",
+ "smallvec",
  "templated_uri",
  "tick",
  "tokio",
@@ -2743,30 +2712,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "iana-time-zone"
-version = "0.1.65"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
-dependencies = [
- "android_system_properties",
- "core-foundation-sys",
- "iana-time-zone-haiku",
- "js-sys",
- "log",
- "wasm-bindgen",
- "windows-core",
-]
-
-[[package]]
-name = "iana-time-zone-haiku"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -2938,7 +2883,6 @@ dependencies = [
  "lasso",
  "loom",
  "metabench",
- "mutants",
  "parking_lot 0.13.0",
  "rustc-hash",
  "serde",
@@ -2955,7 +2899,6 @@ name = "internity_macros"
 version = "0.3.1"
 dependencies = [
  "internity_macros_impl",
- "mutants",
  "syn 3.0.9",
 ]
 
@@ -3009,11 +2952,10 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
-version = "0.2.39"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ac703058abac89e5c39b0b879dce2b6b14a4ba36600c7e7e3d0c60a6883ef3c"
+checksum = "ed5d126d72eb017f10b302e73bdeca446bea405ee449af4d9e7866d6b082d83e"
 dependencies = [
- "defmt",
  "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
@@ -3026,37 +2968,36 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.2"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aee43309eb53bafb8c36d35d6e444769c8f8e6206a9fbf7546f5db9d7d4a0e93"
+checksum = "b6b46a105a9874634dd96231021526bf24ca04955a5998c59a9c7666e634b7b8"
 dependencies = [
- "defmt",
  "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.39"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dc32470c67eb7d0e9ccb74303fa925313dc04cecb1aa048beaa6f391e36a93d"
+checksum = "c0127e9bde3c6130d6169e7d8d68676e4be69c4bf7573c308b6f960a5089c428"
 dependencies = [
  "jiff-core",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
 name = "jiff-tzdb"
-version = "0.1.9"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
 
 [[package]]
 name = "jiff-tzdb-platform"
-version = "0.1.3"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+checksum = "dc65b284afcfa8f6cf189c7274c805505314a7ab975c60e1f548bff56525420e"
 dependencies = [
  "jiff-tzdb",
 ]
@@ -3160,9 +3101,8 @@ dependencies = [
  "benchmarking",
  "criterion",
  "futures",
- "mutants",
  "pin-project-lite",
- "plurality",
+ "plurality 0.2.4",
  "static_assertions",
  "tokio",
  "tower",
@@ -3385,9 +3325,8 @@ dependencies = [
  "jiff",
  "libc",
  "metabench_macros",
- "mutants",
  "nix 0.31.3",
- "ohno",
+ "ohno 0.5.4",
  "regex",
  "serde",
  "serde_json",
@@ -3402,7 +3341,6 @@ name = "metabench_macros"
 version = "0.3.0"
 dependencies = [
  "metabench_macros_impl",
- "mutants",
  "tempfile",
 ]
 
@@ -3459,6 +3397,15 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+dependencies = [
+ "adler2",
+]
 
 [[package]]
 name = "mio"
@@ -3530,8 +3477,7 @@ name = "msvc_spectre_libs_build"
 version = "0.1.3"
 dependencies = [
  "cc",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
 ]
 
 [[package]]
@@ -3560,7 +3506,6 @@ dependencies = [
  "metabench",
  "mimalloc",
  "multitude_macros",
- "mutants",
  "ptr_meta",
  "serde",
  "serde_json",
@@ -3573,7 +3518,6 @@ name = "multitude_macros"
 version = "0.14.0"
 dependencies = [
  "multitude_macros_impl",
- "mutants",
  "syn 3.0.9",
 ]
 
@@ -3586,12 +3530,6 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
-
-[[package]]
-name = "mutants"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
 name = "native-tls"
@@ -3743,6 +3681,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "object-pool"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3758,11 +3705,9 @@ dependencies = [
  "criterion",
  "data_privacy",
  "metabench",
- "mutants",
  "observed_macros",
- "ohno",
+ "ohno 0.5.4",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "pin-project",
@@ -3788,6 +3733,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "observed_destination_memory"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "derive_more",
+ "log",
+ "observed_destination_core",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "static_assertions",
+]
+
+[[package]]
 name = "observed_destination_stdout"
 version = "0.1.1"
 dependencies = [
@@ -3796,7 +3754,6 @@ dependencies = [
  "log",
  "observed_destination_core",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "scopeguard",
@@ -3807,7 +3764,6 @@ dependencies = [
 name = "observed_macros"
 version = "0.30.1"
 dependencies = [
- "mutants",
  "observed_macros_impl",
 ]
 
@@ -3855,8 +3811,7 @@ version = "0.5.4"
 dependencies = [
  "futures",
  "insta",
- "mutants",
- "ohno_macros",
+ "ohno_macros 0.5.4",
  "regex",
  "testing_aids",
  "tokio",
@@ -3865,11 +3820,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohno"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a800c5ce524851c4e46502ac6a27cbf8f33ea89fb23a35189af7be3a6394b221"
+dependencies = [
+ "ohno_macros 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "typeid",
+]
+
+[[package]]
 name = "ohno_macros"
 version = "0.5.4"
 dependencies = [
- "mutants",
- "ohno_macros_impl",
+ "ohno_macros_impl 0.5.4",
+]
+
+[[package]]
+name = "ohno_macros"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3eabdefe96ef313541d8b89ca4949b6d4279e755d026478dfb6959aabf01bd1"
+dependencies = [
+ "ohno_macros_impl 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3881,6 +3854,17 @@ dependencies = [
  "quote",
  "syn 3.0.9",
  "testing_aids",
+]
+
+[[package]]
+name = "ohno_macros_impl"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99aff4f65c4403fac9a60f00d13dd66a9158dbbce9bbf7d6d42b4b92aed74bcf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -3971,17 +3955,6 @@ name = "opentelemetry-semantic-conventions"
 version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a3cf639fefd3e852869114f9925b578da6dd8e99281a2089bb0e773ead46962"
-
-[[package]]
-name = "opentelemetry-stdout"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2afbc6661934787ce79bef1e35d0ffe9d62e945f07f664dc1283ce83292b908a"
-dependencies = [
- "chrono",
- "opentelemetry",
- "opentelemetry_sdk",
-]
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -4156,7 +4129,6 @@ dependencies = [
  "loom",
  "many_cpus",
  "metabench",
- "mutants",
  "seismograph",
  "seismograph_protocol",
  "serde",
@@ -4178,24 +4150,6 @@ dependencies = [
  "fixedbitset",
  "hashbrown 0.15.5",
  "indexmap",
-]
-
-[[package]]
-name = "phf"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -4252,13 +4206,22 @@ dependencies = [
  "loom",
  "metabench",
  "mimalloc",
- "mutants",
  "object-pool",
  "opool",
  "sharded-slab",
  "slab",
  "slotmap",
  "static_assertions",
+]
+
+[[package]]
+name = "plurality"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01e9a72bf2bc783e1e3ccfbf43f55070bae7f3c8bbcb7e643897f979e1f2250f"
+dependencies = [
+ "allocator-api2 0.4.0",
+ "loom",
 ]
 
 [[package]]
@@ -4627,6 +4590,7 @@ dependencies = [
  "libc",
  "seismograph",
  "seismograph_rallocator",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4786,7 +4750,7 @@ name = "recoverable"
 version = "0.3.1"
 dependencies = [
  "insta",
- "ohno",
+ "ohno 0.5.4",
  "static_assertions",
  "testing_aids",
 ]
@@ -4860,7 +4824,6 @@ dependencies = [
  "http-body-util",
  "http_path_template",
  "layered",
- "mutants",
  "prettyplease 0.3.0",
  "proc-macro2",
  "prost-reflect",
@@ -4968,7 +4931,6 @@ dependencies = [
  "itoa",
  "matchit 0.9.2",
  "metabench",
- "mutants",
  "path-tree",
  "regex",
  "route-recognizer",
@@ -4987,7 +4949,7 @@ version = "0.3.1"
 dependencies = [
  "criterion",
  "http_path_template",
- "mutants",
+ "insta",
  "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -5000,7 +4962,6 @@ dependencies = [
 name = "routerama_macros"
 version = "0.3.1"
 dependencies = [
- "mutants",
  "routerama_build",
 ]
 
@@ -5029,6 +4990,12 @@ dependencies = [
  "syn 2.0.119",
  "unicode-ident",
 ]
+
+[[package]]
+name = "rustc-demangle"
+version = "0.1.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "rustc-hash"
@@ -5200,10 +5167,10 @@ dependencies = [
  "insta",
  "jiff",
  "layered",
- "mutants",
- "ohno",
+ "observed_destination_core",
+ "observed_destination_stdout",
+ "ohno 0.5.4",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "recoverable",
  "rstest",
@@ -5228,8 +5195,7 @@ dependencies = [
  "http",
  "http_extensions",
  "layered",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -5262,9 +5228,10 @@ dependencies = [
 name = "seismograph"
 version = "0.5.0"
 dependencies = [
+ "backtrace",
  "libc",
- "mutants",
  "seismograph_protocol",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
@@ -5272,17 +5239,16 @@ dependencies = [
 name = "seismograph_cli"
 version = "0.5.0"
 dependencies = [
- "chrono",
  "clap",
  "crossterm",
- "mutants",
+ "jiff",
  "performables",
  "ratatui",
- "same-file",
  "seismograph",
  "seismograph_protocol",
  "seismograph_rallocator",
  "seismograph_runtime",
+ "tempfile",
 ]
 
 [[package]]
@@ -5298,7 +5264,6 @@ version = "0.3.0"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
- "mutants",
  "tempfile",
  "windows-sys 0.61.2",
 ]
@@ -5314,7 +5279,6 @@ dependencies = [
 name = "seismograph_runtime"
 version = "0.5.0"
 dependencies = [
- "mutants",
  "seismograph",
  "static_assertions",
  "tick",
@@ -5582,7 +5546,7 @@ checksum = "ffa8a5dbe8b3f0bbe29d4c3225daafaeead63afdc1b65fc4c01a1384166038e6"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot 0.12.5",
- "phf_shared 0.14.0",
+ "phf_shared",
  "precomputed-hash",
 ]
 
@@ -5719,8 +5683,7 @@ dependencies = [
  "data_privacy",
  "gungraun",
  "http",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "serde",
  "serde_json",
  "static_assertions",
@@ -5734,7 +5697,6 @@ dependencies = [
 name = "templated_uri_macros"
 version = "0.7.1"
 dependencies = [
- "mutants",
  "templated_uri_macros_impl",
 ]
 
@@ -5745,8 +5707,7 @@ dependencies = [
  "chumsky",
  "darling",
  "insta",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -5820,7 +5781,6 @@ name = "thread_aware"
 version = "0.12.2"
 dependencies = [
  "futures",
- "mutants",
  "thread_aware_core",
  "thread_aware_macros",
 ]
@@ -5832,7 +5792,6 @@ dependencies = [
  "criterion",
  "gungraun",
  "many_cpus",
- "mutants",
  "performables",
  "thread_aware",
 ]
@@ -5848,7 +5807,6 @@ dependencies = [
 name = "thread_aware_macros"
 version = "0.12.2"
 dependencies = [
- "mutants",
  "syn 3.0.9",
  "thread_aware_macros_impl",
 ]
@@ -5878,24 +5836,17 @@ name = "tick"
 version = "0.9.1"
 dependencies = [
  "alloc_tracker",
- "chrono",
- "chrono-tz",
  "criterion",
  "futures",
  "jiff",
  "libc",
  "metabench",
- "mutants",
- "ohno",
+ "ohno 0.5.4",
  "performables",
  "pin-project-lite",
- "serde",
- "serde_core",
- "serde_json",
  "static_assertions",
  "testing_aids",
  "thread_aware",
- "time",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -6414,8 +6365,8 @@ dependencies = [
  "async-once-cell",
  "criterion",
  "dashmap",
+ "future_assert",
  "futures-util",
- "mutants",
  "performables",
  "static_assertions",
  "thread_aware",

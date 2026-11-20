@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
@@ -155,7 +156,7 @@ fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
 #[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
-        (Runtime::new().unwrap(), 1),
+        (Runtime::builder().build().unwrap(), 1),
         (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
     ] {
         runtime
@@ -450,7 +451,6 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
 ///
 /// The worker-pool policy does not change this behavior. The task runs on the
 /// origin worker before relocation and on the distinct destination worker after it.
-#[cfg_attr(test, mutants::skip)] // This is a test oracle, not production behavior. Assertion mutations invalidate the test.
 fn assert_async_follows_relocation(observation: &RelocationObservation) {
     assert_eq!(
         observation.async_task.before, observation.origin,

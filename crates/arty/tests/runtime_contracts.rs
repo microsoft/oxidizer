@@ -18,7 +18,9 @@ use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Context;
 use arty::task::JoinError;
@@ -322,7 +324,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .panic(PanicPolicy::ignore())
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));
@@ -387,7 +389,7 @@ fn dropping_a_runtime_on_a_blocking_worker_panics() {
 fn repeated_stop_requests_do_not_break_shutdown() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
-    control.request_stop();
-    control.request_stop();
+    control.shutdown();
+    control.shutdown();
     runtime.stop().unwrap();
 }

@@ -655,6 +655,97 @@ mod tests {
     }
 
     #[test]
+    fn gamma_survivor_coherent_running_and_ready_activity_retains_execution_evidence() {
+        let running = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Running,
+            poll_started_at: Some(EventTimestamp::from_ticks(80)),
+            ready_since: None,
+            queued_since: None,
+            poll_worker_id: WorkerId::from_raw(7),
+        };
+        let mut task = TaskBuilder::default();
+        apply_activity(&mut task, Some(running));
+        assert_eq!(task.row.state, "Running");
+        assert_eq!(task.workers, BTreeSet::from([7]));
+        assert_eq!(task.executed, BTreeSet::from([Some(7)]));
+        assert_eq!(task.metrics[&Some(7)].polls, [Interval { start: 80, end: 100 }]);
+        let mut task = TaskBuilder::default();
+        apply_activity(
+            &mut task,
+            Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(0),
+                ..running
+            }),
+        );
+        assert_eq!(task.row.state, "Unknown");
+        assert!(task.workers.is_empty());
+        let ready = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Ready,
+            poll_started_at: None,
+            ready_since: Some(EventTimestamp::from_ticks(70)),
+            queued_since: Some(EventTimestamp::from_ticks(80)),
+            poll_worker_id: None,
+        };
+        apply_activity(&mut task, Some(ready));
+        assert_eq!(task.row.state, "Ready");
+        assert_eq!(task.ready, [Interval { start: 80, end: 100 }]);
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_import_skips_unrelated_events_and_decodes_spawn_size_sentinel() {
+        let mut ignored = event(EventKind::TaskSpawned, None, 1, 0, 0);
+        ignored.payload = EventPayload::Object(seismograph::recorder::event::ObjectId::new(1));
+        let mut first = event(EventKind::TaskSpawned, Some(7), 2, 0, 0);
+        let mut second = event(EventKind::TaskSpawned, Some(7), 3, 0, 1);
+        let mut third = event(EventKind::TaskSpawned, Some(7), 4, 0, 2);
+        if let EventPayload::Runtime(value) = &mut first.payload {
+            value.subject_id = 1;
+        }
+        if let EventPayload::Runtime(value) = &mut second.payload {
+            value.subject_id = 2;
+        }
+        if let EventPayload::Runtime(value) = &mut third.payload {
+            value.subject_id = 3;
+        }
+        let mut worker_only = event(EventKind::TaskPollStarted, Some(8), 5, 0, 0);
+        if let EventPayload::Runtime(value) = &mut worker_only.payload {
+            value.subject_id = 0;
+        }
+        let result = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![ignored, worker_only, first, second, third],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        assert_eq!(
+            result.workers.iter().map(|worker| worker.worker_id).collect::<Vec<_>>(),
+            [Some(7), Some(8)]
+        );
+        assert_eq!(
+            result.workers[0]
+                .tasks
+                .iter()
+                .map(|task| (task.task_id, task.future_size_bytes))
+                .collect::<Vec<_>>(),
+            [(1, None), (2, Some(0)), (3, Some(1))]
+        );
+        let result = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![event(EventKind::TaskPollFinished, Some(7), 0, 0, 0)],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+        assert_eq!(result.workers[0].tasks[0].metrics.poll_samples, [0]);
+        assert!(result.workers[0].tasks[0].metrics.polls.is_empty());
+    }
+
+    #[test]
     fn completed_task_sizes_survive_without_live_source_metadata() {
         let sizes = [0, 1, 16_385].map(|encoded| {
             let events = Events {

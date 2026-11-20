@@ -41,7 +41,6 @@ use proc_macro::TokenStream;
 // The entry points are thin shims a unit test cannot invoke: a `proc_macro::TokenStream` only
 // exists inside a real macro expansion. They are exercised through the `ohno` crate instead.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     ohno_macros_impl::derive_error(input.into()).into()
@@ -51,7 +50,6 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     ohno_macros_impl::enrich_err(args.into(), input.into()).into()
@@ -69,7 +67,6 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
     ohno_macros_impl::error(args.into(), input.into()).into()

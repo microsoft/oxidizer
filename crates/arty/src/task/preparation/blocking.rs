@@ -3,18 +3,17 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{ShutdownCause, TaskCompletion};
+use arty_executor::TaskCompletion;
 
-use crate::runtime::ShutdownStart;
-use crate::runtime::worker::blocking::PanicPolicy;
+use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 
 pub(crate) fn prepare_blocking<F, R>(
     result_pool: &JoinHandlePool,
     body: F,
-    panic_policy: PanicPolicy,
-) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
+    monitoring: BlockingTaskMonitoring,
+) -> (BlockingJob, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -22,14 +21,12 @@ where
     let (handle, result_tx) = result_pool.handle();
     let task = BlockingTask {
         pending: Some((body, result_tx)),
-        panic_policy,
     };
-    (move || task.run(), handle)
+    (monitoring.prepare(task), handle)
 }
 
-struct BlockingTask<F, R: Send + 'static> {
-    pending: Option<(F, Sender<R>)>,
-    panic_policy: PanicPolicy,
+pub(crate) struct BlockingTask<F, R: Send + 'static> {
+    pub(crate) pending: Option<(F, Sender<R>)>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -37,18 +34,15 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    fn run(mut self) {
+    pub(crate) fn run(mut self, monitoring: BlockingTaskEvents<'_>) {
         let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => {
+                monitoring.completed();
                 result_tx.completed(result);
             }
             Err(panic) => {
-                if let PanicPolicy::Shutdown(waker) = &self.panic_policy
-                    && result_tx.shutdown().begin(ShutdownCause::panic(panic.as_ref())) == ShutdownStart::Started
-                {
-                    waker.wake_by_ref();
-                }
+                monitoring.panicked();
                 result_tx.panicked(panic, None);
             }
         }

@@ -8,15 +8,13 @@ use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor, TaskOptions, TaskPlacement};
-use observed::Sink;
-use observed::enrichment::{Enrichment, EnrichmentEntry};
+use arty_executor::{CycleOutcome, Executor};
 
-use crate::support::{TaskOutcome, TaskSetExt as _};
+use super::support::{TaskBuilderExt as _, TaskOutcome};
 
 struct CountingWake(AtomicUsize);
 
@@ -32,16 +30,18 @@ fn remote_wake_burst_notifies_the_owner_once() {
     let mut executor = Executor::builder().owner_waker(Waker::from(Arc::clone(&owner))).build();
     let retained = Rc::new(RefCell::new(Vec::new()));
     for _ in 0..2 {
-        drop(executor.tasks().add_test(
-            poll_fn({
-                let retained = Rc::clone(&retained);
-                move |cx| {
-                    retained.borrow_mut().push(cx.waker().clone());
-                    Poll::<()>::Pending
-                }
-            }),
-            TaskOptions::default(),
-        ));
+        drop(
+            executor
+                .tasks()
+                .task(poll_fn({
+                    let retained = Rc::clone(&retained);
+                    move |cx| {
+                        retained.borrow_mut().push(cx.waker().clone());
+                        Poll::<()>::Pending
+                    }
+                }))
+                .register_test(),
+        );
     }
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     owner.0.store(0, Ordering::Relaxed);
@@ -65,8 +65,9 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
     let polls = Rc::new(RefCell::new(Vec::new()));
     let retained = Rc::new(RefCell::new(Vec::new()));
     let mut handles = std::array::from_fn::<_, 3, _>(|index| {
-        executor.tasks().add_test(
-            poll_fn({
+        executor
+            .tasks()
+            .task(poll_fn({
                 let ready = Rc::clone(&ready);
                 let polls = Rc::clone(&polls);
                 let retained = Rc::clone(&retained);
@@ -79,9 +80,8 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
                         Poll::Pending
                     }
                 }
-            }),
-            TaskOptions::default(),
-        )
+            }))
+            .register_test()
     });
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     polls.borrow_mut().clear();
@@ -107,6 +107,33 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
         ));
     }
     assert!(!executor.has_tasks());
+}
+
+#[test]
+fn completed_task_discards_its_queued_remote_notification() {
+    let mut executor = Executor::builder().build();
+    let polls = Rc::new(Cell::new(0));
+    let mut handle = executor
+        .tasks()
+        .task(poll_fn({
+            let polls = Rc::clone(&polls);
+            move |cx| {
+                polls.set(polls.get() + 1);
+                let waker = cx.waker().clone();
+                std::thread::spawn(move || waker.wake()).join().unwrap();
+                Poll::Ready(42)
+            }
+        }))
+        .register_test();
+
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
+    assert!(matches!(
+        Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(TaskOutcome::Completed(42))
+    ));
+    assert!(!executor.has_tasks());
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+    assert_eq!(polls.get(), 1);
 }
 
 #[test]
@@ -138,17 +165,17 @@ fn remote_consuming_wake_keeps_payload_on_owner_when_notification_panics() {
         owner: std::thread::current().id(),
         dropped: Rc::clone(&dropped),
     };
-    let _task = executor.tasks().add_test(
-        poll_fn({
+    let _task = executor
+        .tasks()
+        .task(poll_fn({
             let retained = Rc::clone(&retained);
             move |cx| {
                 let _probe = &probe;
                 *retained.borrow_mut() = Some(cx.waker().clone());
                 Poll::<()>::Pending
             }
-        }),
-        TaskOptions::default(),
-    );
+        }))
+        .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let waker = retained.borrow_mut().take().unwrap();
 
@@ -167,16 +194,16 @@ fn remote_consuming_wake_keeps_payload_on_owner_when_notification_panics() {
 fn retained_waker_is_noop_after_shutdown() {
     let mut executor = Executor::builder().build();
     let retained = Rc::new(RefCell::new(None));
-    let task = executor.tasks().add_test(
-        poll_fn({
+    let task = executor
+        .tasks()
+        .task(poll_fn({
             let retained = Rc::clone(&retained);
             move |cx| {
                 *retained.borrow_mut() = Some(cx.waker().clone());
                 Poll::Ready(())
             }
-        }),
-        TaskOptions::default(),
-    );
+        }))
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let retained = retained.borrow_mut().take().unwrap();
@@ -212,16 +239,16 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
 
     let mut executor = Executor::builder().owner_waker(Waker::from(Arc::new(PanicWake))).build();
     let retained = Rc::new(RefCell::new(None));
-    let task = executor.tasks().add_test(
-        poll_fn({
+    let task = executor
+        .tasks()
+        .task(poll_fn({
             let retained = Rc::clone(&retained);
             move |cx| {
                 retained.borrow_mut().get_or_insert_with(|| cx.waker().clone());
                 Poll::<()>::Pending
             }
-        }),
-        TaskOptions::default(),
-    );
+        }))
+        .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let retained = retained.borrow_mut().take().unwrap();
 
@@ -234,79 +261,4 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
         .is_err()
     );
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
-}
-
-#[test]
-fn context_restoration_panic_does_not_release_local_payload_to_remote_waker() {
-    struct PanicOnDrop;
-
-    impl data_privacy::RedactedDisplay for PanicOnDrop {
-        fn fmt(&self, _: &dyn data_privacy::Redactor, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            Ok(())
-        }
-    }
-
-    impl Drop for PanicOnDrop {
-        fn drop(&mut self) {
-            panic!("context restoration dropped user enrichment");
-        }
-    }
-
-    struct Entries;
-
-    impl Enrichment for Entries {
-        fn into_entries(self) -> Vec<EnrichmentEntry> {
-            vec![EnrichmentEntry::new("probe", PanicOnDrop)]
-        }
-    }
-
-    struct OwnerOnly {
-        dropped_on: Arc<Mutex<Option<std::thread::ThreadId>>>,
-        _local: Rc<()>,
-    }
-
-    impl Drop for OwnerOnly {
-        fn drop(&mut self) {
-            *self.dropped_on.lock().unwrap() = Some(std::thread::current().id());
-        }
-    }
-
-    // The deliberately forgotten guard retains slot storage, so keep its sink process-lived.
-    static SINK: OnceLock<Sink> = OnceLock::new();
-    let sink = SINK.get_or_init(|| Sink::builder("context-restoration-panic").build());
-    let owner = std::thread::current().id();
-    let mut executor = Executor::builder().build();
-    let retained = Rc::new(RefCell::new(None));
-    let dropped_on = Arc::new(Mutex::new(None));
-    let local = Rc::new(());
-    let probe = OwnerOnly {
-        dropped_on: Arc::clone(&dropped_on),
-        _local: Rc::clone(&local),
-    };
-    let task = executor.tasks().add_test(
-        poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                let _probe = &probe;
-                *retained.borrow_mut() = Some(cx.waker().clone());
-                let transfer = sink.transfer_context().with_enrichment(Entries);
-                std::mem::forget(transfer.apply_current_thread());
-                Poll::<()>::Pending
-            }
-        }),
-        TaskOptions::observed(sink.transfer_context(), TaskPlacement::Any),
-    );
-
-    catch_unwind(AssertUnwindSafe(|| executor.execute_cycle())).unwrap_err();
-    let waker = retained.borrow_mut().take().unwrap();
-    let remote = std::thread::spawn(move || drop(waker));
-    drop(Rc::clone(&local));
-    remote.join().unwrap();
-    let actual = *dropped_on.lock().unwrap();
-
-    drop(task);
-    // Unsupported hook panics need not permit recovery or complete cleanup.
-    let _ = catch_unwind(AssertUnwindSafe(|| drop(executor)));
-    assert!(actual.is_none_or(|thread| thread == owner), "local payload was dropped remotely");
-    assert!(dropped_on.lock().unwrap().is_none_or(|thread| thread == owner));
 }

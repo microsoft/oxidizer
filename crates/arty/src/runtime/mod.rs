@@ -28,7 +28,7 @@
 //!
 //! [`RuntimeBuilder`] collects configuration before any worker starts.
 //! [`RuntimeBuilder::build`] rejects invalid configuration and starts the runtime.
-//! The policy types describe each choice and its use of threads and memory.
+//! The [`policy`] module groups the worker, blocking pool, and monitoring policies.
 //!
 //! ## Defaults
 //!
@@ -37,28 +37,55 @@
 //! - The runtime name is `arty`. Async threads use `arty-async-<index>`.
 //!   Shared blocking pools use `arty-blocking-<thread index>`. Per-worker pools
 //!   also include the async worker index before the thread index.
-//! - [`WorkersPolicy::default`] starts one async worker.
+//! - [`policy::WorkersPolicy::default`] starts one async worker.
 //! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
 //!   overrides this default.
-//! - [`BlockingPoolPolicy::default`] creates one shared blocking pool. Its
-//!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
+//! - [`policy::BlockingPoolPolicy::default`] creates one shared blocking pool. Its
+//!   default thread limits can change. Use [`policy::BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
-//!   This choice does not start a monitor or add task measurements.
-//! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
-//!   while it creates or polls a task, or runs a blocking function.
+//! - [`policy::MonitorPolicy::default`] uses [`policy::MonitorPolicy::auto`]. It disables
+//!   monitoring for tests, doctests, documentation examples, and Miri. It
+//!   enables monitoring in other environments when the `monitor` feature is
+//!   present. The exact automatic selection can change in future releases.
+//!   Task collection runs on request. This does not enable event recording.
+//! - Without a [`TaskPanic`](hook::TaskPanic) hook, the runtime stops after Arty
+//!   catches a panic while it creates or polls an async task.
+//! - A blocking function panic returns through its join handle without
+//!   stopping the runtime.
 //!
-//! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
-//! ## Policy types
+//! ## Monitoring
 //!
-//! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
-//! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
+//! A monitor is a local connection through which the Seismograph CLI can
+//! collect diagnostics. Each enabled runtime owns one connection and removes it
+//! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
+//! Use [`policy::MonitorPolicy::enabled`] or [`policy::MonitorPolicy::disabled`] to override the
+//! automatic selection.
+//!
+//! Collection reads live async tasks and queued or running blocking functions
+//! from their native storage. Each request limits the number of tasks per worker.
+//! A blocked async worker can time out. The result reports incomplete collection
+//! rather than treating missing tasks as an empty worker.
+//!
+//! Poll timing runs only during a requested measurement interval or event recording.
+//! Completed tasks are not kept in a second task registry.
+//! History that was not recorded stays unknown. A blocking function that started
+//! before observation has no measured start time for that call.
+//!
+//! Monitor connections are separate, but the recorder and diagnostic sources are
+//! process-wide. Recording, clearing event buffers, and snapshot capture through
+//! one connection can affect or include other runtimes in the same process.
+//! Monitor startup does not change recorder configuration or install an allocator.
+//!
+//! ## Configuration types
+//!
+//! - [`policy::WorkersPolicy`] selects how many async workers run and which processors they use.
+//! - [`policy::BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
-//! - [`PanicPolicy`] selects whether the runtime stops after Arty catches a panic.
-//! - [`MonitorPolicy`] selects the monitoring configuration.
+//! - [`policy::MonitorPolicy`] selects the monitoring configuration.
+//! - [`hook`] provides worker initialization and panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.
@@ -69,7 +96,8 @@
 //! with up to four threads:
 //!
 //! ```
-//! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+//! use arty::runtime::Runtime;
+//! use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let runtime = Runtime::builder()
@@ -90,7 +118,7 @@
 //! and [`test`](crate::test) for the supported syntax and defaults.
 //!
 //! Use [`RuntimeBuilder`] for custom names, clocks, blocking pools, stack sizes,
-//! or [`WorkersPolicy::at_most`].
+//! or [`policy::WorkersPolicy::at_most`].
 //! Use the builder to receive configuration errors and choose when to stop the runtime.
 //!
 //! # Runtime services
@@ -106,8 +134,8 @@
 //!
 //! [`Runtime`] owns the workers.
 //! Schedulers and [`Context`](crate::task::Context) values do not keep the runtime running.
-//! [`RuntimeControl::request_stop`]
-//! requests shutdown without waiting. [`Runtime::stop`] takes ownership of the runtime,
+//! [`RuntimeControl::shutdown`] requests shutdown without waiting.
+//! [`Runtime::stop`] takes ownership of the runtime,
 //! waits for every worker, and reports shutdown failures. Dropping the `Runtime` value
 //! also requests shutdown and waits, but it cannot return an error.
 //!
@@ -124,8 +152,7 @@
 //!
 //! Keep the `Runtime` value on a thread that is not an Arty worker.
 //! Stopping or dropping it in an Arty task or on a blocking worker panics.
-//! Worker code must use
-//! [`RuntimeControl::request_stop`].
+//! Worker code must use [`RuntimeControl::shutdown`].
 
 mod bootstrap;
 mod builder;
@@ -134,28 +161,31 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+pub mod hook;
+pub(crate) mod monitoring;
+pub mod policy;
 mod shutdown;
 mod shutdown_cause;
+#[cfg(test)]
+pub(crate) mod testing;
 pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
-#[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
 pub use workers::Workers;
 
-/// Implementation details for the runtime entry-point macros.
+/// Internal API for the runtime entry-point macros.
 #[cfg(feature = "macros")]
 #[doc(hidden)]
 pub mod __private {
@@ -164,11 +194,13 @@ pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
 
-    /// Preserves an entry point's return type while reporting root-task failure.
+    /// Preserves the return type of an entry point and reports a root-task failure.
     ///
     /// # Panics
     ///
-    /// Resumes a captured root-task panic or starts an unwind carrying the runtime failure.
+    /// Resumes a captured root-task panic.
+    ///
+    /// For another runtime failure, starts an unwind with a diagnostic message.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) if error.is_panic() => {
@@ -187,6 +219,7 @@ pub mod __private {
 
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
+    // Public macro calls cannot inject the private errors used by these panic-boundary checks.
     mod tests {
         use std::fmt;
 

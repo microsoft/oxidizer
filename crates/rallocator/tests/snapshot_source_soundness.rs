@@ -67,8 +67,12 @@ fn allocator_backed_capture_recovers_after_source_error_and_panic() {
         .iter()
         .find(|source| source.id == seismograph_rallocator::source::ID)
         .unwrap();
-    assert_eq!(native.schema_version, 4);
-    assert!(seismograph_rallocator::decode(&native.data).unwrap().global.local_limit_bytes > 0);
+    assert_eq!(native.schema_version, seismograph_rallocator::snapshot::SCHEMA_VERSION);
+    let snapshot = seismograph_rallocator::snapshot::decode(&native.data).unwrap();
+    let seismograph_rallocator::snapshot::BackendState::Snmalloc(state) = snapshot.backend else {
+        panic!("snmalloc must publish snmalloc state")
+    };
+    assert!(state.global.local_limit_bytes > 0);
     assert_eq!(CACHE.lock().unwrap().take().unwrap(), vec![0x5a; 16_384]);
     drop(retained);
     seismograph::recorder(seismograph::recorder::Configuration::default());

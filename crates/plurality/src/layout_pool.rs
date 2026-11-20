@@ -165,6 +165,7 @@ impl<A: Allocator> LayoutPoolRef<A> {
     #[inline]
     pub(crate) fn max_chunks(self) -> u32 {
         // The constructor always installs a cap.
+        // #[gamma::skip(expr.decrement, reason = "LayoutPool::new always installs Some(clamp_max_chunks(...)), so this fallback is unreachable.")]
         self.inner().max_chunks.unwrap_or(u32::MAX)
     }
 
@@ -223,6 +224,7 @@ unsafe impl<A: Allocator + Send> Send for LayoutPool<A> {}
 /// count together with that layout, or `None` when not even a one-slot chunk
 /// can be laid out.
 fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> Option<(u32, Layout)> {
+    // #[gamma::skip(literal.int_decrement, reason = "next_power_of_two maps both zero and one to one, so lowering this clamp floor to zero preserves the slot count.")]
     let mut slots = chunk_size.clamp(1, MAX_CHUNK_SIZE_SLOTS).next_power_of_two();
     loop {
         if let Some(layout) = geometry.chunk_layout(slots as usize) {
@@ -275,6 +277,7 @@ fn clamp_max_chunks(chunk_size: u32, max_chunks: Option<u32>) -> u32 {
     // allocate — the same outcome an explicit zero cap produces, and not a new
     // failure mode.
     let requested = max_chunks.map_or(ceiling, u64::from);
+    // #[gamma::skip(expr.decrement, reason = "MAX_POOL_SLOTS is at most u32::MAX and chunk_size is positive, so the bounded quotient always converts to u32.")]
     u32::try_from(requested.min(ceiling)).unwrap_or(u32::MAX)
 }
 

@@ -61,7 +61,6 @@ impl Clock {
     ///
     /// Panics if called outside of a Tokio runtime context.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
         Self::new_tokio_core().0
     }

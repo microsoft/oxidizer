@@ -22,6 +22,22 @@ use thread_aware::ThreadAware;
 
 use crate::builder::InMemoryCacheBuilder;
 
+fn configure_initial_capacity<B>(builder: B, capacity: Option<usize>, configure: impl FnOnce(B, usize) -> B) -> B {
+    if let Some(capacity) = capacity {
+        configure(builder, capacity)
+    } else {
+        builder
+    }
+}
+
+fn configure_removal_listener<B>(builder: B, has_value_listener: bool, has_removal_observers: bool, configure: impl FnOnce(B) -> B) -> B {
+    if has_value_listener || has_removal_observers {
+        configure(builder)
+    } else {
+        builder
+    }
+}
+
 /// A concurrent in-memory cache tier.
 ///
 /// This cache provides:
@@ -126,7 +142,6 @@ where
     ///     .time_to_idle(Duration::from_secs(60))
     ///     .build();
     /// ```
-    #[cfg_attr(test, mutants::skip)] // Default::default() for InMemoryCacheBuilder calls new(), identical behavior
     #[must_use]
     pub fn builder() -> InMemoryCacheBuilder<K, V> {
         InMemoryCacheBuilder::new()
@@ -150,9 +165,10 @@ where
             moka_builder = moka_builder.max_capacity(capacity);
         }
 
-        if let Some(capacity) = builder.initial_capacity {
-            moka_builder = moka_builder.initial_capacity(capacity);
-        }
+        // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Initial capacity only reserves storage; omitting the allocation hint leaves the cache's contents, limits, and expiration policy unchanged.")]
+        moka_builder = configure_initial_capacity(moka_builder, builder.initial_capacity, |builder, capacity| {
+            builder.initial_capacity(capacity)
+        });
 
         if let Some(ttl) = builder.time_to_live {
             moka_builder = moka_builder.time_to_live(ttl);
@@ -168,8 +184,8 @@ where
 
         let value_listener = builder.eviction_listener;
         let removal_observers = builder.removal_observers;
-        if value_listener.is_some() || !removal_observers.is_empty() {
-            moka_builder = moka_builder.eviction_listener(move |key, entry: CacheEntry<V>, moka_cause| {
+        moka_builder = configure_removal_listener(moka_builder, value_listener.is_some(), !removal_observers.is_empty(), |builder| {
+            builder.eviction_listener(move |key, entry: CacheEntry<V>, moka_cause| {
                 let cause = crate::notification::from_moka(moka_cause);
                 for observer in &removal_observers {
                     observer(cause);
@@ -177,8 +193,8 @@ where
                 if let Some(listener) = &value_listener {
                     listener(key, entry.into_value(), cause);
                 }
-            });
-        }
+            })
+        });
 
         Self {
             inner: Arc::from_unaware(
@@ -228,6 +244,7 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
         value.ttl()
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The only defaultable argument is the unused previous-expiry duration; expiration is recomputed exclusively from value.ttl().")]
     fn expire_after_update(
         &self,
         _key: &K,
@@ -239,11 +256,116 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
     }
 }
 
+// These tests inspect private builder fields and backing configuration,
+// intercept private builder calls,
+// or force Moka maintenance. Public counts and notifications are asynchronous,
+// and the cache API exposes no deterministic maintenance operation.
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use super::*;
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_max_capacity_sets_limit() {
+        let expected_max_capacity = 100;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(expected_max_capacity);
+        assert_eq!(builder.max_capacity, Some(expected_max_capacity));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_initial_capacity_sets_initial_capacity() {
+        let expected_initial_capacity = 50;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(expected_initial_capacity);
+        assert_eq!(builder.initial_capacity, Some(50));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_live_sets_ttl() {
+        let expected_ttl = Duration::from_mins(5);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
+        assert_eq!(builder.time_to_live, Some(expected_ttl));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_idle_sets_tti() {
+        let expected_tti = Duration::from_mins(1);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
+        assert_eq!(builder.time_to_idle, Some(expected_tti));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_name_sets_cache_name() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test-cache");
+        assert_eq!(builder.name, Some("test-cache"));
+    }
+
+    #[test]
+    fn gamma_round2_optional_capacity_configuration_forwards_the_exact_request_and_skips_an_absent_one() {
+        for requested in [None, Some(17), Some(131)] {
+            let mut capacities = Vec::new();
+            let result = super::configure_initial_capacity(43, requested, |builder, capacity| {
+                capacities.push(capacity);
+                assert_eq!(builder, 43);
+                47
+            });
+            assert_eq!(capacities, requested.into_iter().collect::<Vec<_>>());
+            assert_eq!(result, if requested.is_some() { 47 } else { 43 });
+        }
+    }
+
+    #[test]
+    fn gamma_round2_absent_removal_observers_do_not_register_an_empty_listener() {
+        assert_eq!(
+            super::configure_removal_listener(43, false, false, |_| panic!(
+                "no callback was requested, so no listener may be registered"
+            )),
+            43
+        );
+        let mut registrations = 0;
+        for (has_listener, has_observers) in [(true, false), (false, true), (true, true)] {
+            assert_eq!(
+                super::configure_removal_listener(43, has_listener, has_observers, |builder| {
+                    registrations += 1;
+                    assert_eq!(builder, 43);
+                    47
+                }),
+                47
+            );
+        }
+        assert_eq!(registrations, 3);
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native tests cover backing cache construction; crossbeam-epoch violates Stacked Borrows"
+    )]
+    fn gamma_round2_builder_name_reaches_the_backing_cache() {
+        let cache = super::InMemoryCache::<u32, u32>::builder()
+            .name("round2 named cache")
+            .build_unchecked();
+        assert_eq!(cache.inner.name(), Some("round2 named cache"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "native tests cover cache removal; crossbeam-epoch violates Stacked Borrows")]
+    async fn gamma_round2_observer_without_value_listener_receives_explicit_removal() {
+        use std::sync::{Arc, Mutex};
+
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&observed);
+        let cache = super::InMemoryCache::<u32, u32>::builder()
+            .with_removal_observer(move |cause| captured.lock().unwrap().push(cause))
+            .build_unchecked();
+        cache.insert(1, cachet_tier::CacheEntry::new(53)).await.unwrap();
+        cache.invalidate(&1).await.unwrap();
+        cache.inner.run_pending_tasks().await;
+        assert_eq!(*observed.lock().unwrap(), [crate::RemovalCause::Explicit]);
+    }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
@@ -285,174 +407,6 @@ mod tests {
 
         let value = cache.get(&"key".to_string()).await.unwrap();
         assert!(value.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_max_capacity_sets_limit() {
-        let expected_max_capacity = 100;
-        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(expected_max_capacity);
-
-        assert_eq!(builder.max_capacity, Some(expected_max_capacity));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_initial_capacity_sets_initial_capacity() {
-        let expected_initial_capacity = 50;
-        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(expected_initial_capacity);
-
-        assert_eq!(builder.initial_capacity, Some(50));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_time_to_live_sets_ttl() {
-        let expected_ttl = Duration::from_mins(5);
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
-
-        assert_eq!(builder.time_to_live, Some(expected_ttl));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_time_to_idle_sets_tti() {
-        let expected_tti = Duration::from_mins(1);
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
-
-        assert_eq!(builder.time_to_idle, Some(expected_tti));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_name_sets_cache_name() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test-cache");
-
-        assert_eq!(builder.name, Some("test-cache"));
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn insert_and_get_returns_value() {
-        let cache = InMemoryCache::<String, i32>::new();
-        cache
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
-        assert_eq!(*value.unwrap().value(), 42);
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn get_returns_none_after_per_entry_ttl() {
-        let cache = InMemoryCache::<String, i32>::new();
-        cache
-            .insert("key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-        assert!(value.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn update_with_per_entry_ttl_expires_entry() {
-        let cache = InMemoryCache::<String, i32>::new();
-        // Insert entry without per-entry TTL (will not expire on its own)
-        cache
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        // Re-insert same key with zero TTL (should expire immediately via expire_after_update)
-        cache
-            .insert("key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
-            .await
-            .expect("Update should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
-        assert!(value.is_none(), "Entry should expire after update with zero TTL");
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn get_returns_none_after_cache_ttl() {
-        let cache = InMemoryCache::<String, i32>::builder()
-            .time_to_live(Duration::ZERO)
-            .build()
-            .expect("Failed to build cache");
-        cache
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-        assert!(value.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn get_returns_none_after_cache_tti() {
-        let cache = InMemoryCache::<String, i32>::builder()
-            .time_to_idle(Duration::ZERO)
-            .build()
-            .expect("Failed to build cache");
-        cache
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-        assert!(value.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn invalidate_removes_entry() {
-        let cache = InMemoryCache::<String, i32>::new();
-        cache
-            .insert("key".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        cache.invalidate(&"key".to_string()).await.expect("Invalidate should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-        assert!(value.is_none());
-    }
-
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[tokio::test]
-    async fn clear_removes_all_entries() {
-        let cache = InMemoryCache::<String, i32>::new();
-        cache
-            .insert("key1".to_string(), CacheEntry::new(42))
-            .await
-            .expect("Insert should succeed");
-        cache
-            .insert("key2".to_string(), CacheEntry::new(43))
-            .await
-            .expect("Insert should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        cache.clear().await.expect("Clear should succeed");
-        cache.inner.run_pending_tasks().await;
-
-        let value1 = cache.get(&"key1".to_string()).await.expect("Get should return none");
-        let value2 = cache.get(&"key2".to_string()).await.expect("Get should return none");
-        assert!(value1.is_none());
-        assert!(value2.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri

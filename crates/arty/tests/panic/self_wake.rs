@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use thread_aware::Unaware;
 
 struct SelfWakePanic {
@@ -46,7 +48,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .panic(PanicPolicy::ignore())
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let polls = Arc::new(AtomicUsize::new(0));

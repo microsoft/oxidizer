@@ -16,6 +16,20 @@ use crate::Read;
 // but for now, we keep it simple because no scenario where that was relevant has appeared yet.
 const PREFERRED_READ_SIZE: usize = 100;
 
+fn read_size(requested: usize, remaining: usize, maximum: Option<NonZero<usize>>) -> usize {
+    requested.min(remaining).min(maximum.map_or(usize::MAX, NonZero::get))
+}
+
+// A public read cannot contain usize::MAX bytes, so test the size planner directly.
+#[test]
+fn gamma_round2_unlimited_fake_read_plan_preserves_the_full_usize_range() {
+    assert_eq!(read_size(usize::MAX, usize::MAX, None), usize::MAX);
+    assert_eq!(read_size(usize::MAX, 17, None), 17);
+    assert_eq!(read_size(11, usize::MAX, None), 11);
+    assert_eq!(read_size(usize::MAX, usize::MAX, NonZero::new(23)), 23);
+    assert_eq!(read_size(0, usize::MAX, None), 0);
+}
+
 /// A [`Read`] that reads from a [`BytesView`].
 ///
 /// This is for test and example purposes only and is not optimized for performance.
@@ -64,17 +78,15 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     #[expect(
         clippy::unused_async,
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn read_at_most_into(&mut self, len: usize, mut into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
-        let bytes_to_read = len
-            .min(self.contents.len())
-            .min(self.max_read_size.map_or(usize::MAX, NonZero::get));
+        let bytes_to_read = read_size(len, self.contents.len(), self.max_read_size);
 
+        // #[gamma::skip(cond.always_false, reason = "A zero-byte range is empty; putting it and advancing by zero preserve the destination and source, then return the same zero count")]
         if bytes_to_read == 0 {
             return Ok((0, into));
         }
@@ -108,7 +120,6 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     pub async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         let previous_len = into.len();
 
@@ -141,6 +152,7 @@ impl FakeRead {
     ///
     /// This call never fails.
     pub async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The inherent read returns Result with the uninhabited Infallible error type")]
         Ok(self.read_at_most_into(PREFERRED_READ_SIZE, BytesBuf::new()).await?.1)
     }
 
@@ -177,17 +189,14 @@ impl FakeRead {
 impl Read for FakeRead {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -195,7 +204,6 @@ impl Read for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -203,7 +211,6 @@ impl Memory for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }
@@ -260,167 +267,5 @@ impl FakeReadBuilder {
             max_read_size: self.max_read_size,
             memory: self.memory,
         }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use bytesbuf::mem::GlobalPool;
-    use new_zealand::nz;
-    use testing_aids::async_test;
-
-    use super::*;
-    use crate::ReadExt;
-
-    #[test]
-    fn smoke_test() {
-        async_test(async || {
-            let memory = GlobalPool::new();
-            let mut buf = memory.reserve(100);
-            buf.put_byte(1);
-            buf.put_byte(2);
-            buf.put_byte(3);
-
-            let contents = buf.consume_all();
-
-            let mut read_stream = FakeRead::new(contents);
-
-            let stream_memory = read_stream.reserve(1234);
-            assert!(stream_memory.capacity() >= 1234);
-
-            let mut payload = read_stream.read_exactly(3).await.unwrap();
-            assert_eq!(payload.len(), 3);
-
-            assert_eq!(payload.get_byte(), 1);
-            assert_eq!(payload.get_byte(), 2);
-            assert_eq!(payload.get_byte(), 3);
-
-            let final_read = read_stream.read_any().await.unwrap();
-            assert_eq!(final_read.len(), 0);
-        });
-    }
-
-    #[test]
-    fn with_max_read_size() {
-        async_test(async || {
-            let memory = GlobalPool::new();
-            let test_data = BytesView::copied_from_slice(b"Hello, world!", &memory);
-            let mut read_stream = FakeRead::builder().contents(test_data).max_read_size(nz!(2)).build();
-
-            // He
-            let mut payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b'H');
-            assert_eq!(payload.get_byte(), b'e');
-
-            // ll
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b'l');
-            assert_eq!(payload.get_byte(), b'l');
-
-            // o,
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b'o');
-            assert_eq!(payload.get_byte(), b',');
-
-            //  w
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b' ');
-            assert_eq!(payload.get_byte(), b'w');
-
-            // or
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b'o');
-            assert_eq!(payload.get_byte(), b'r');
-
-            // ld
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 2);
-            assert_eq!(payload.get_byte(), b'l');
-            assert_eq!(payload.get_byte(), b'd');
-
-            // !
-            payload = read_stream.read_any().await.unwrap().consume_all();
-            assert_eq!(payload.len(), 1);
-            assert_eq!(payload.get_byte(), b'!');
-        });
-    }
-
-    #[test]
-    fn read_more() {
-        async_test(async || {
-            let memory = GlobalPool::new();
-            let test_data = BytesView::copied_from_slice(b"Hello, world!", &memory);
-            let mut read_stream = FakeRead::builder().contents(test_data.clone()).max_read_size(nz!(2)).build();
-
-            let mut payload_buffer = read_stream.reserve(100);
-
-            loop {
-                let previous_len = payload_buffer.len();
-
-                let (bytes_read, new_payload_buffer) = read_stream.read_more_into(payload_buffer).await.unwrap();
-
-                payload_buffer = new_payload_buffer;
-
-                // Sanity check.
-                assert_eq!(previous_len + bytes_read, payload_buffer.len());
-
-                if bytes_read == 0 {
-                    break;
-                }
-            }
-
-            assert_eq!(payload_buffer.len(), test_data.len());
-
-            let mut payload = payload_buffer.consume_all();
-            assert_eq!(payload.len(), test_data.len());
-            assert_eq!(payload.get_byte(), b'H');
-            assert_eq!(payload.get_byte(), b'e');
-            assert_eq!(payload.get_byte(), b'l');
-            assert_eq!(payload.get_byte(), b'l');
-            assert_eq!(payload.get_byte(), b'o');
-            assert_eq!(payload.get_byte(), b',');
-            assert_eq!(payload.get_byte(), b' ');
-            assert_eq!(payload.get_byte(), b'w');
-            assert_eq!(payload.get_byte(), b'o');
-            assert_eq!(payload.get_byte(), b'r');
-            assert_eq!(payload.get_byte(), b'l');
-            assert_eq!(payload.get_byte(), b'd');
-            assert_eq!(payload.get_byte(), b'!');
-            assert_eq!(payload.len(), 0);
-        });
-    }
-
-    #[test]
-    fn memory_returns_configured_provider() {
-        use bytesbuf::mem::testing::TransparentMemory;
-        use bytesbuf::mem::{CallbackMemory, OpaqueMemory};
-
-        // The configured provider adds a distinctive marker offset to every reservation, so we can
-        // confirm the stream returns this provider rather than a default one.
-        const MARKER_OFFSET: usize = 7;
-
-        let custom_memory = OpaqueMemory::new(CallbackMemory::new(TransparentMemory::new(), |inner, min_bytes| {
-            inner.reserve(min_bytes + MARKER_OFFSET)
-        }));
-
-        let memory = GlobalPool::new();
-        let contents = BytesView::copied_from_slice(b"test", &memory);
-        let read_stream = FakeRead::builder().contents(contents).memory(custom_memory).build();
-
-        // Get memory from stream and use it
-        let stream_memory = read_stream.memory();
-        let buf = stream_memory.reserve(10);
-
-        assert_eq!(
-            buf.capacity(),
-            10 + MARKER_OFFSET,
-            "stream should return the configured provider, which applies a marker offset"
-        );
     }
 }

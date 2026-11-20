@@ -19,7 +19,6 @@ use proc_macro::TokenStream;
 use syn::{Path, parse_quote};
 
 #[proc_macro_derive(ThreadAware, attributes(thread_aware))]
-#[cfg_attr(test, mutants::skip)]
 #[expect(missing_docs, reason = "Documented in the thread_aware crate's reexport")]
 pub fn derive_transfer(input: TokenStream) -> TokenStream {
     let root_path: Path = parse_quote!(::thread_aware);

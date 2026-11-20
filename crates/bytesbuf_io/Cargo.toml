@@ -39,7 +39,6 @@ bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
-mutants = { workspace = true }
 new_zealand = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 

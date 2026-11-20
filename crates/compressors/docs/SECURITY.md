@@ -153,7 +153,7 @@ The following tests support these claims:
   producing more than it was given, before those counts are used to mark output
   initialized. See [IMPLEMENTATION.md](IMPLEMENTATION.md).
 - Coverage and mutation. A 100% line-coverage gate runs over two feature
-  configurations. `cargo-mutants` runs on every pull request. The limit
+  configurations. Cargo Gamma runs on every pull request. The limit
   comparisons are mutation-covered, so a bound that stops being enforced will
   fail rather than pass quietly.
 - Fuzzing. `tests/bolero_compressors.rs` is a bounded campaign over the

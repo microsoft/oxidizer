@@ -245,6 +245,7 @@ fn strip_generics(text: &str) -> Option<String> {
             path.truncate(path.len() - 2);
         }
         let end = angle_end(rest, start)?;
+        // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
         rest = &rest[end + 1..];
     }
     path.push_str(rest);
@@ -254,6 +255,27 @@ fn strip_generics(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, symbol_path};
+
+    #[test]
+    fn gamma_survivor_symbol_owners_reject_partial_paths_and_keep_async_blocks() {
+        for symbol in [
+            "",
+            "<app::Type",
+            "< as trait::Trait>::run",
+            "app::!invalid::run",
+            "!bad::app::run",
+            "app::::run",
+        ] {
+            assert_eq!(symbol_path(symbol), None, "{symbol}");
+        }
+        assert_eq!(symbol_path("app::run::{{async_block}}"), Some("app::run::{{async_block}}".into()));
+        assert_eq!(symbol_path("app::run::h0123456789abcdef"), Some("app::run".into()));
+        assert_eq!(
+            symbol_path("app::run::h0123456789abcdeg"),
+            Some("app::run::h0123456789abcdeg".into())
+        );
+        assert_eq!(symbol_path("app::Type<one::Arg>::run::<two::Arg>"), Some("app::Type::run".into()));
+    }
 
     fn classify(includes: &str, excludes: &str, symbols: &[Option<&str>]) -> Match {
         FilterSpec::parse(includes, excludes, false, RuntimeStackMode::Event)

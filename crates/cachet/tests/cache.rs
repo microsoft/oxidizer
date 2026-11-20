@@ -713,6 +713,48 @@ async fn stampede_protection_invalidate_removes_entry() {
     assert!(cache.get(&key).await.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn stampede_protection_converts_factory_panics_to_errors() {
+    let cache = Cache::builder::<String, i32>(Clock::new_frozen())
+        .memory()
+        .stampede_protection()
+        .build();
+
+    assert_panic_source(cache.get_or_insert("key", || async { panic!("simulated panic") }).await);
+    assert_panic_source(cache.get_or_insert_with("key", || async { panic!("simulated panic") }).await);
+    assert_panic_source(
+        cache
+            .try_get_or_insert::<_, std::io::Error, _>("key", || async { panic!("simulated panic") })
+            .await,
+    );
+    assert_panic_source(
+        cache
+            .try_get_or_insert_with::<_, std::io::Error, _>("key", || async { panic!("simulated panic") })
+            .await,
+    );
+    assert_panic_source(cache.optionally_get_or_insert("key", || async { panic!("simulated panic") }).await);
+}
+
+#[tokio::test]
+async fn stampede_protection_converts_invalidation_panics_to_errors() {
+    let storage = MockCache::<String, i32>::new();
+    storage.fail_when(|operation| {
+        if matches!(operation, cachet_tier::CacheOp::Invalidate(_)) {
+            panic!("simulated panic");
+        }
+        false
+    });
+    let cache = Cache::builder(Clock::new_frozen()).storage(storage).stampede_protection().build();
+
+    assert_panic_source(cache.invalidate("key").await);
+}
+
+#[expect(clippy::unwrap_used, reason = "this test helper uses unwrap for assertion failures")]
+fn assert_panic_source<T>(result: Result<T, Error>) {
+    let error = result.err().unwrap();
+    assert_eq!(error.source_as::<uniflight::LeaderPanicked>().unwrap().message(), "simulated panic");
+}
+
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn try_get_or_insert_with_storage_error_propagates() {

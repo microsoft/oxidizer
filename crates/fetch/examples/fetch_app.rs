@@ -9,6 +9,8 @@ use std::sync::Arc;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;
+use observed_destination_core::MeterProviderBuilderExt;
+use observed_destination_stdout::stdout_metrics;
 use ohno::ErrorExt;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rustls::client::danger::ServerCertVerifier;
@@ -68,6 +70,7 @@ async fn main() -> Result<(), ohno::AppError> {
 
 fn initialize_meter_provider() -> SdkMeterProvider {
     SdkMeterProvider::builder()
-        .with_periodic_exporter(opentelemetry_stdout::MetricExporter::default())
+        .register(stdout_metrics())
+        .expect("the stdout metric destination has no fallible configuration")
         .build()
 }

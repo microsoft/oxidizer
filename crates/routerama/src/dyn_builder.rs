@@ -102,7 +102,7 @@ impl<X> DynBuilder<X> {
                 .map(|message| BuildErrorEntry::Conflict { message }),
         );
         if errors.is_empty() {
-            Ok(RawResolver::with_trie(payloads.into_boxed_slice(), trie))
+            Ok(RawResolver::with_trie(&routes, payloads.into_boxed_slice(), trie))
         } else {
             RtNode::discard_source(trie.root);
             Err(ConfigurationError::resolver(errors))
@@ -128,6 +128,7 @@ impl<X> fmt::Debug for DynBuilder<X> {
 }
 
 fn fmt_set(items: &[String]) -> String {
+    // #[gamma::skip(cond.always_false, reason = "For an empty slice the fallthrough performs zero loop iterations and appends the closing brace, returning the identical empty-set text; callers use only that text")]
     if items.is_empty() {
         return "{}".to_string();
     }

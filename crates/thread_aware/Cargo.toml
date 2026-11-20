@@ -44,7 +44,6 @@ thread_aware_macros = { workspace = true, optional = true }
 # `thread_aware_core` and `thread_aware_macros` mirror dependencies activated by optional public
 # surfaces that also compile through `cfg(test)`.
 futures = { workspace = true, features = ["executor"] }
-mutants = { workspace = true }
 thread_aware_core = { path = "../thread_aware_core", features = ["std"] }
 thread_aware_macros = { path = "../thread_aware_macros" }
 
@@ -58,6 +57,10 @@ required-features = ["derive", "std"]
 [[test]]
 name = "transfer_pass"
 required-features = ["derive", "std"]
+
+[[test]]
+name = "gamma_survivor_closures"
+required-features = ["std"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

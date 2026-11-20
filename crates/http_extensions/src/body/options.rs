@@ -65,7 +65,6 @@ impl HttpBodyOptions {
     /// Merges `self` with `other`.
     ///
     /// A value from `self` takes precedence.
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub(crate) fn merge(&self, other: &Self) -> Self {
         Self {
             timeout: self.timeout.or(other.timeout),

@@ -30,7 +30,6 @@ const THREAD_BAR_TRACK: Color = Color::Rgb(12, 16, 22);
 const THREAD_BAR_FILL: Color = Color::Rgb(70, 205, 255);
 const THREAD_BAR_FULL: Color = Color::Rgb(255, 128, 128);
 
-#[cfg_attr(test, mutants::skip)] // Chart scaling and axis formatting are terminal presentation details.
 pub(super) fn draw_activity(frame: &mut ratatui::Frame<'_>, area: Rect, live: &LiveActivity, aggregate: &VecDeque<ActivitySample>) {
     if live.availability != Availability::Supported {
         super::draw_activity(frame, area, aggregate);
@@ -98,7 +97,6 @@ pub(super) fn draw_activity(frame: &mut ratatui::Frame<'_>, area: Rect, live: &L
     );
 }
 
-#[cfg_attr(test, mutants::skip)] // Legend wrapping is width-dependent terminal formatting.
 fn legend(live: &LiveActivity, width: usize) -> Vec<Line<'static>> {
     let rates = (!live.stale).then(|| live.samples.back().map(|sample| sample.rates)).flatten();
     let mut lines = Vec::new();
@@ -118,7 +116,6 @@ fn legend(live: &LiveActivity, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
-#[cfg_attr(test, mutants::skip)] // Row clipping and highlighting are terminal presentation details.
 pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, live: &LiveActivity, selected: usize) {
     let title = if live.stale {
         " Thread activity · stale "
@@ -138,7 +135,6 @@ pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, ar
     frame.render_widget(shell.title_bottom(footer), area);
     let empty = match live.availability {
         Availability::Waiting => Some("Waiting for live recorder counters..."),
-        Availability::Unsupported => Some("Thread/class counters unavailable on this server.\nRebuild the application to enable them."),
         Availability::Supported if live.threads.is_empty() => Some("No recording threads in this session."),
         Availability::Supported => None,
     };
@@ -154,7 +150,6 @@ pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, ar
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn draw_thread(frame: &mut ratatui::Frame<'_>, area: Rect, thread: &ThreadActivity, selected: bool, stale: bool) {
     let stats = &thread.statistics;
     let rate = if stale { None } else { thread.rate };
@@ -210,7 +205,6 @@ fn draw_thread(frame: &mut ratatui::Frame<'_>, area: Rect, thread: &ThreadActivi
     frame.render_widget(Paragraph::new(rate_sparkline(&thread.history, usize::from(history.width))), history);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn rate_sparkline(history: &VecDeque<u64>, width: usize) -> Line<'static> {
     let maximum = history.iter().rev().take(width).copied().max().unwrap_or(0).max(1);
     let glyphs = ["_", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -234,13 +228,102 @@ fn rate_sparkline(history: &VecDeque<u64>, width: usize) -> Line<'static> {
     clippy::cast_precision_loss,
     reason = "chart coordinates and fill ratios are approximate; displayed counters remain exact u64 values"
 )]
-#[cfg_attr(test, mutants::skip)]
 fn chart_value(value: u64) -> f64 {
     value as f64
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_stale_thread_rows_keep_selection_and_hide_old_rates() {
+        use seismograph_protocol::message::ThreadRecorderStatistics;
+
+        use super::super::super::live_activity::{Availability, LiveActivity, ThreadActivity};
+        let mut live = LiveActivity::default();
+        live.availability = Availability::Supported;
+        live.stale = true;
+        live.threads = (1..=3)
+            .map(|id| ThreadActivity {
+                statistics: ThreadRecorderStatistics {
+                    thread_id: id,
+                    name: format!("worker-{id}"),
+                    event_capacity: 10,
+                    retained_events: 5,
+                    ..Default::default()
+                },
+                rate: Some(42),
+                history: [1, 2].into(),
+            })
+            .collect();
+        let mouse = super::MouseRows::default();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 6)).unwrap();
+        terminal
+            .draw(|frame| {
+                mouse.begin(frame.area());
+                super::draw_threads(frame, &mouse, frame.area(), &live, 1);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let output = buffer.content.iter().map(ratatui::buffer::Cell::symbol).collect::<String>();
+        assert!(output.contains("Thread activity · stale"));
+        assert!(output.contains("2/3 threads"));
+        assert!(output.contains("-/s"));
+        assert!(!output.contains("42/s"));
+        assert_eq!(buffer[(1, 2)].bg, ratatui::style::Color::DarkGray);
+        assert_ne!(buffer[(1, 1)].bg, ratatui::style::Color::DarkGray);
+        assert_ne!(buffer[(1, 3)].bg, ratatui::style::Color::DarkGray);
+        terminal
+            .draw(|frame| super::draw_activity(frame, frame.area(), &live, &VecDeque::default()))
+            .unwrap();
+        let output = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(output.contains("Event-class rates · stale"));
+        assert!(output.contains("Allocations -/s"));
+    }
+
+    #[test]
+    fn gamma_survivor_sparkline_scales_only_visible_history() {
+        use std::collections::VecDeque;
+
+        use ratatui::style::Color;
+        let history = VecDeque::from([1000, 2, 4, 8]);
+        let line = super::rate_sparkline(&history, 3);
+        assert_eq!(line.to_string(), "▂▄█");
+        assert!(line.spans.iter().all(|span| span.style.fg == Some(Color::Cyan)));
+        assert_eq!(super::rate_sparkline(&VecDeque::from([0, 0]), 2).to_string(), "__");
+        assert!(super::rate_sparkline(&history, 0).spans.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_activity_legend_wraps_and_reserves_exact_rows_at_the_boundary() {
+        let mut live = LiveActivity::default();
+        live.availability = Availability::Supported;
+        let full = legend(&live, usize::MAX);
+        let width = u16::try_from(full[0].spans[0].width() + full[0].spans[1].width() - 1).unwrap();
+        let expected = legend(&live, usize::from(width));
+        for height in [u16::try_from(expected.len()).unwrap() + 2, 12] {
+            let mut terminal = Terminal::new(TestBackend::new(width + 2, height)).unwrap();
+            terminal
+                .draw(|frame| draw_activity(frame, frame.area(), &live, &VecDeque::new()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            for (index, expected) in expected.iter().enumerate() {
+                let row = (1..=width)
+                    .map(|x| buffer[(x, u16::try_from(index).unwrap() + 1)].symbol())
+                    .collect::<String>();
+                assert_eq!(row.trim_end(), expected.to_string().trim_end());
+            }
+            if height == 12 {
+                assert_eq!(buffer[(1, u16::try_from(expected.len()).unwrap() + 1)].symbol(), "C");
+            }
+        }
+    }
+
     use std::time::{Duration, Instant};
 
     use ratatui::Terminal;
@@ -394,7 +477,7 @@ mod tests {
             .collect::<String>();
         assert!(text.contains("Collecting rate baseline"));
 
-        baseline.availability = Availability::Unsupported;
+        baseline.availability = Availability::Waiting;
         terminal
             .draw(|frame| {
                 let mouse = MouseRows::default();
@@ -409,7 +492,7 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
-        assert!(text.contains("unavailable"));
+        assert!(text.contains("Waiting for live recorder counters"));
 
         let mut released = live();
         released.threads[0].statistics.event_capacity = 0;

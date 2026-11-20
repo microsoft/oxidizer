@@ -85,3 +85,32 @@ runs:
         setup_outcome: ${{ steps.setup.outcome }}
         exit_code: ${{ steps.run.outputs.exit_code }}
         failed_recipe: ${{ steps.run.outputs.failed_recipe }}
+
+    # Preserve available mutation evidence after campaign failures; publication
+    # failures must remain visible, unlike supplemental commit reporting.
+    - name: Upload Gamma reports
+      if: >-
+        always() && (inputs.group == 'pr-mutants' || inputs.group == 'scheduled-exhaustive')
+        && hashFiles('target/cargo-gamma/gamma-report.*', 'target/cargo-gamma/gamma-diagnostics.json', 'target/cargo-gamma/gamma-perf-advice.md') != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: gamma-${{ inputs.group }}-${{ runner.os }}-${{ runner.arch }}-${{ github.run_attempt }}
+        path: |
+          target/cargo-gamma/gamma-report.json
+          target/cargo-gamma/gamma-report.html
+          target/cargo-gamma/gamma-report.sarif
+          target/cargo-gamma/gamma-diagnostics.json
+          target/cargo-gamma/gamma-perf-advice.md
+          gamma-hints.yaml
+        if-no-files-found: error
+        # Bound storage lifetime while keeping reports available for later CI diagnosis.
+        retention-days: 30
+
+    - name: Upload Gamma SARIF
+      if: >-
+        always() && (inputs.group == 'pr-mutants' || inputs.group == 'scheduled-exhaustive')
+        && hashFiles('target/cargo-gamma/gamma-report.sarif') != ''
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      with:
+        sarif_file: target/cargo-gamma/gamma-report.sarif
+        category: cargo-gamma-${{ inputs.group }}-${{ runner.os }}-${{ runner.arch }}

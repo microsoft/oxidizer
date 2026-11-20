@@ -70,12 +70,19 @@
 //!
 //! - `rt`: Enables the runtime, task, and I/O APIs.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Enables the Seismograph monitor dependency. It forwards
-//!   monitoring support for `performables` when `performables` is enabled. It does
-//!   not start monitoring or emit new telemetry.
+//! - `monitor`: Connects runtime workers and tasks to Seismograph. The default
+//!   [`MonitorPolicy`](crate::runtime::policy::MonitorPolicy) disables monitoring for
+//!   tests, doctests, documentation examples, and Miri. It enables monitoring
+//!   in other environments. An enabled policy starts a local connection for the
+//!   Seismograph CLI. Task collection runs on request. Event recording stays off
+//!   until an application or the CLI enables it. This feature also forwards
+//!   monitoring support for `performables` when `performables` is enabled.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
+
+#[cfg(all(test, feature = "macros", not(miri)))]
+extern crate self as arty;
 
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.
@@ -103,13 +110,14 @@ use arty_io_core as _;
 ///   causes runtime construction to fail.
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
-///   is prepared for monitoring. The default is `enabled`.
+///   starts a local Seismograph monitor when the `monitor` feature is present.
+///   The default uses [`MonitorPolicy::auto`](crate::runtime::policy::MonitorPolicy::auto).
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.
 ///
 /// The worker count does not limit threads that run blocking functions.
 /// Without `workers`, the runtime uses
-/// [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// [`WorkersPolicy::default`](crate::runtime::policy::WorkersPolicy::default).
 /// The default is one worker, for both applications and tests.
 /// Each worker uses an operating-system thread and its configured stack.
 /// Large counts can exceed operating-system thread or memory limits.
@@ -144,15 +152,6 @@ use arty_io_core as _;
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
 /// # }
-/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
-/// ```
-///
-/// Disable monitoring for the runtime:
-///
-/// ```
-/// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(monitor = disabled)]
-/// async fn main(_cx: arty::task::Context) {}
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -204,8 +203,9 @@ pub use arty_macros::main;
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
 /// `monitor`, and `panic` options also apply.
-/// By default, a test uses one worker, disables monitoring, and stops its
-/// runtime after Arty catches a task panic.
+/// By default, a test uses one worker and the automatic monitor policy. The
+/// automatic policy disables monitoring in tests. It also works under Miri.
+/// The test runtime stops after Arty catches a task panic.
 /// To test monitoring, use `monitor = enabled`.
 ///
 /// # Simulated time
@@ -259,7 +259,7 @@ pub use arty_macros::main;
 ///
 /// Enable monitoring for a test that exercises monitoring behavior:
 ///
-/// ```test_harness
+/// ```no_run,test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
 /// async fn monitored(_cx: arty::task::Context) {}

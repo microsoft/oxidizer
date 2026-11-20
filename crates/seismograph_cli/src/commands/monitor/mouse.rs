@@ -8,7 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus, TaskHistogram, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus,
+    TaskHistogram, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,7 +68,6 @@ pub(super) struct MouseRows {
     pub(super) native_scroll_limit: Cell<usize>,
 }
 
-#[cfg_attr(test, mutants::skip)]
 impl MouseRows {
     pub(super) fn begin(&self, frame: Rect) {
         *self.frame.borrow_mut() = frame;
@@ -93,7 +93,6 @@ impl MouseRows {
     }
 
     /// Records only the bars and their baselines, not the intervening gaps.
-    #[cfg_attr(test, mutants::skip)] // Pixel-to-column registration is defensive terminal geometry.
     pub(super) fn register_columns(&self, area: Rect, width: u16, gap: u16, count: usize, target: ListTarget) {
         let mut rows = self.rows.borrow_mut();
         let stride = width.saturating_add(gap).max(1);
@@ -129,7 +128,6 @@ impl MouseRows {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 impl App {
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
         let (tab, snapshot) = match &self.screen {
@@ -155,10 +153,18 @@ impl App {
             target,
             ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
         ) {
-            self.heap_view.native.click(target, index);
-            self.heap_view
-                .native
-                .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
+            if self.heap_view.backend(snapshot) == AllocatorBackend::Mimalloc
+                && let Some((_, state)) = snapshot
+                    .and_then(|capture| capture.mimalloc.as_deref())
+                    .and_then(crate::mimalloc_view::parts)
+            {
+                self.heap_view.mimalloc.click(target, index, state);
+            } else {
+                self.heap_view.native.click(target, index);
+                self.heap_view
+                    .native
+                    .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
+            }
             return;
         }
         if target == ListTarget::RuntimeActivity {
@@ -174,7 +180,6 @@ impl App {
         self.activate_selectable_mouse_row(target, index);
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mouse target dispatch is terminal input glue.
     fn activate_selectable_mouse_row(&mut self, target: ListTarget, index: usize) {
         let selected = match target {
             ListTarget::HeapBuckets => {

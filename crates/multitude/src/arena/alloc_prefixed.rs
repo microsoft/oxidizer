@@ -31,7 +31,6 @@ pub(in crate::arena) const PREFIX_BYTES: usize = mem::size_of::<usize>();
 /// Includes the length prefix + payload alignment slack + payload
 /// bytes. Saturates at `usize::MAX` on overflow.
 #[inline]
-#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 pub(in crate::arena) fn worst_case_thin_slice_payload<T>(len: usize) -> usize {
     let elem_size = mem::size_of::<T>();
     let elem_align = mem::align_of::<T>();
@@ -52,6 +51,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     pub(in crate::arena) fn impl_alloc_prefixed_shared_bytes(&self, src: &[u8]) -> Result<NonNull<u8>, AllocError> {
         let payload_bytes = src.len().max(1);
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "A valid byte slice has at most isize::MAX bytes, leaving room for the one-word prefix within usize")]
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         loop {
             if let Some((uninit, chunk_ptr)) = self.current().try_alloc_bytes_with_chunk(total) {
@@ -203,7 +203,6 @@ impl<A: Allocator + Clone> Arena<A> {
 /// the `Arc` layout as the superset). Using `S::block_align` keeps the hint
 /// tight for `Rc`'s sub-4-byte alignments instead of over-budgeting at the
 /// `Arc` 4-byte strong-count floor.
-#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 #[inline]
 pub(crate) fn worst_case_strong_slice_payload<S: thin_dst::Strong, T>(len: usize) -> usize {
     let align = mem::align_of::<T>();
@@ -233,11 +232,46 @@ fn write_prefixed_payload<T: Copy>(base: NonNull<u8>, src: &[T]) -> NonNull<T> {
     unsafe {
         ptr::write_unaligned(base.as_ptr().cast::<usize>(), len);
         let payload_ptr = base.as_ptr().add(PREFIX_BYTES).cast::<T>();
+        // #[gamma::skip(cond.always_false, reason = "The generic non-overlapping copy writes the identical one-byte Copy elements")]
         if const { mem::size_of::<T>() == 1 } {
             copy_bytes_nonoverlapping(src.as_ptr().cast(), payload_ptr.cast(), len);
         } else {
             ptr::copy_nonoverlapping(src.as_ptr(), payload_ptr, len);
         }
         NonNull::new_unchecked(payload_ptr)
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    fn check<T>() {
+        let size = mem::size_of::<T>();
+        let align = mem::align_of::<T>();
+        for len in [0, 1, 2, 7, 8, 255, 4096, usize::MAX / size.max(1), usize::MAX] {
+            let payload = (size as u128) * (len as u128);
+            let thin = (PREFIX_BYTES.max(align) as u128) + payload + (align as u128);
+            assert_eq!(worst_case_thin_slice_payload::<T>(len), usize::try_from(thin).unwrap_or(usize::MAX));
+            let prefix = (4 + mem::size_of::<usize>()).div_ceil(align) * align;
+            for (actual, slack) in [
+                (worst_case_strong_slice_payload::<thin_dst::AtomicStrong, T>(len), align.max(4)),
+                (worst_case_strong_slice_payload::<thin_dst::LocalStrong, T>(len), align),
+            ] {
+                let expected = (prefix as u128) + payload.max(1) + (slack as u128);
+                assert_eq!(actual, usize::try_from(expected).unwrap_or(usize::MAX));
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_exact_slice_prefix_geometry_and_overflow() {
+        check::<()>();
+        check::<u8>();
+        check::<u16>();
+        check::<u32>();
+        check::<u64>();
+        check::<u128>();
+        check::<[u8; 65]>();
     }
 }

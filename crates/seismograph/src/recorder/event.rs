@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use super::alloc::{Allocation, AllocationId};
+use super::alloc::{Allocation, AllocationId, Reallocation};
 use super::io::IoEvent;
 use super::runtime::RuntimeEvent;
 use super::thread::{ThreadId, ThreadLog};
@@ -15,7 +15,7 @@ use super::thread::{ThreadId, ThreadLog};
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum EventClass {
-    /// Allocation and deallocation lifecycle events.
+    /// Allocation, resize, and deallocation lifecycle events.
     Allocation,
     /// Primitive events other than Arc dereferences.
     General,
@@ -103,10 +103,12 @@ impl EventTimestamp {
     #[must_use]
     #[inline]
     pub fn now() -> Self {
-        static ORIGIN: OnceLock<Instant> = OnceLock::new();
+        let elapsed = event_elapsed();
+        Self(Self::saturated_timestamp_ticks(elapsed.as_nanos()))
+    }
 
-        let elapsed = ORIGIN.get_or_init(Instant::now).elapsed();
-        Self(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX))
+    fn saturated_timestamp_ticks(nanos: u128) -> u64 {
+        u64::try_from(nanos).unwrap_or(u64::MAX)
     }
 
     /// Returns the timestamp's clock ticks.
@@ -119,6 +121,45 @@ impl EventTimestamp {
     #[must_use]
     pub fn duration_since(self, earlier: Self) -> Duration {
         Duration::from_nanos(self.0.saturating_sub(earlier.0))
+    }
+}
+
+fn event_elapsed() -> Duration {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    #[cfg(test)]
+    if let Some(elapsed) = TEST_EVENT_ELAPSED.get() {
+        return elapsed;
+    }
+    ORIGIN.get_or_init(Instant::now).elapsed()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_EVENT_ELAPSED: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+mod november_clock_tests {
+    use super::{Duration, EventTimestamp, TEST_EVENT_ELAPSED};
+
+    #[test]
+    fn november_actual_event_clock_preserves_zero_exact_ticks_and_saturates_without_native_clock_observation() {
+        struct Restore(Option<Duration>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_EVENT_ELAPSED.set(self.0);
+            }
+        }
+        let _restore = Restore(TEST_EVENT_ELAPSED.get());
+        for (elapsed, ticks) in [
+            (Duration::ZERO, 0),
+            (Duration::from_nanos(37), 37),
+            (Duration::from_nanos(u64::MAX), u64::MAX),
+            (Duration::from_nanos(u64::MAX) + Duration::from_nanos(1), u64::MAX),
+        ] {
+            TEST_EVENT_ELAPSED.set(Some(elapsed));
+            assert_eq!(EventTimestamp::now().ticks(), ticks);
+        }
     }
 }
 
@@ -295,6 +336,8 @@ pub enum EventKind {
     Allocation,
     /// An allocator released an allocation.
     Deallocation,
+    /// An allocator successfully resized an allocation, in place or by moving it.
+    Reallocation,
     /// A logical I/O read operation began.
     IoReadStarted,
     /// A logical I/O read operation finished.
@@ -381,6 +424,7 @@ impl EventKind {
             Self::ArcDrop => 13,
             Self::Allocation => 14,
             Self::Deallocation => 15,
+            Self::Reallocation => 87,
             Self::ArcRelocate => 16,
             Self::BarrierAccess => 17,
             Self::BarrierContention => 18,
@@ -536,6 +580,7 @@ impl EventKind {
             81 => Some(Self::CachePromotionFailed),
             82 => Some(Self::CacheRefreshSuppressed),
             83 => Some(Self::TaskReady),
+            87 => Some(Self::Reallocation),
             _ => None,
         }
     }
@@ -596,6 +641,8 @@ pub enum EventPayload {
     Numeric(NumericEvent),
     /// Allocator lifecycle fields.
     Allocation(Allocation),
+    /// Old and new storage for one successful allocation resize.
+    Reallocation(Reallocation),
     /// Runtime, worker, task, transfer, or I/O context.
     Runtime(RuntimeEvent),
     /// I/O resource, operation, and buffer context.
@@ -627,6 +674,7 @@ impl Event {
             EventPayload::Object(object_id) => Some(object_id),
             EventPayload::Numeric(payload) => Some(payload.object_id),
             EventPayload::Allocation(allocation) => Some(ObjectId::new(allocation.allocation_id.get())),
+            EventPayload::Reallocation(resize) => Some(ObjectId::new(resize.allocation_id.get())),
             EventPayload::Runtime(_) => None,
             EventPayload::Io(io) => Some(ObjectId::new(io.resource_id.get())),
         }
@@ -641,11 +689,22 @@ impl Event {
         }
     }
 
-    /// Returns allocator fields for allocation lifecycle events.
+    /// Returns allocator fields for allocation and deallocation events.
+    ///
+    /// For resize events, use [`Self::reallocation`].
     #[must_use]
     pub const fn allocation(&self) -> Option<Allocation> {
         match self.payload {
             EventPayload::Allocation(allocation) => Some(allocation),
+            _ => None,
+        }
+    }
+
+    /// Returns old and new storage for a successful allocation resize.
+    #[must_use]
+    pub const fn reallocation(&self) -> Option<Reallocation> {
+        match self.payload {
+            EventPayload::Reallocation(resize) => Some(resize),
             _ => None,
         }
     }
@@ -674,7 +733,7 @@ impl EventKind {
     #[must_use]
     pub const fn class(self) -> EventClass {
         match self {
-            Self::Allocation | Self::Deallocation => EventClass::Allocation,
+            Self::Allocation | Self::Reallocation | Self::Deallocation => EventClass::Allocation,
             Self::ArcDeref => EventClass::ArcDereference,
             Self::RuntimeCreated
             | Self::RuntimeStopping
@@ -803,6 +862,17 @@ impl Record {
         Self::allocation_lifecycle(EventKind::Deallocation, allocation)
     }
 
+    /// Creates a successful resize event before the old storage is retired.
+    #[must_use]
+    pub fn reallocation(resize: Reallocation) -> Self {
+        Self {
+            timestamp: EventTimestamp::now(),
+            kind: EventKind::Reallocation,
+            payload: EventPayload::Reallocation(resize),
+            backtrace: BacktraceCapture::Configured,
+        }
+    }
+
     /// Creates a runtime lifecycle or scheduling event.
     ///
     /// Use a runtime event `kind` and a timestamp from [`EventTimestamp`].
@@ -847,6 +917,7 @@ impl Record {
             EventPayload::Object(object_id) => object_id,
             EventPayload::Numeric(payload) => payload.object_id,
             EventPayload::Allocation(allocation) => ObjectId::new(AllocationId::get(allocation.allocation_id)),
+            EventPayload::Reallocation(resize) => ObjectId::new(resize.allocation_id.get()),
             EventPayload::Runtime(runtime) => ObjectId::new(runtime.subject_id),
             EventPayload::Io(io) => ObjectId::new(io.resource_id.get()),
         }
@@ -856,6 +927,13 @@ impl Record {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_timestamp_saturation_preserves_the_full_u64_boundary() {
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(37), 37);
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(u128::from(u64::MAX)), u64::MAX);
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(u128::from(u64::MAX) + 1), u64::MAX);
+    }
     use crate::recorder::alloc::{EventThreadId, HeapId, HeapKind};
     use crate::recorder::runtime::RuntimeId;
 
@@ -933,7 +1011,7 @@ mod tests {
 
     #[test]
     fn every_event_kind_round_trips_its_stable_wire_value() {
-        for value in (1..=49).chain(54..=86) {
+        for value in (1..=49).chain(54..=87) {
             let kind = EventKind::from_wire_value(value).unwrap();
             assert_eq!(kind.wire_value(), value);
         }

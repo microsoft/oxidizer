@@ -107,3 +107,16 @@ impl<S: BuildHasher> crate::ThreadedLexicon<S> {
         T::deserialize_in(&mut self.clone(), deserializer)
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::cautious_capacity;
+
+    #[test]
+    fn gamma_survivor_zero_sized_capacity_is_bounded_without_dividing_by_zero() {
+        assert_eq!(cautious_capacity::<()>(None), 0);
+        assert_eq!(cautious_capacity::<()>(Some(7)), 7);
+        assert_eq!(cautious_capacity::<()>(Some(usize::MAX)), 1024 * 1024);
+        assert_eq!(cautious_capacity::<[u8; 16]>(Some(usize::MAX)), 65536);
+    }
+}

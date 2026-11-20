@@ -39,13 +39,13 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
+    // #[gamma::skip(parameter.default_shadow, reason = "A null source ignores the requested byte count and always returns the input buffer unchanged")]
     pub async fn read_at_most_into(&mut self, _len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         Ok((0, into))
     }
@@ -55,7 +55,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -71,7 +70,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -87,7 +85,6 @@ impl Null {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
@@ -137,17 +134,15 @@ impl Default for Null {
 impl Read for Null {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
+    // #[gamma::skip(parameter.default_shadow, reason = "The forwarded count is ignored by the inherent null-source read")]
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -157,7 +152,6 @@ impl Read for Null {
 impl Write for Null {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn write(&mut self, _sequence: BytesView) -> impl Future<Output = Result<(), Infallible>> {
         ready(Ok(()))
     }
@@ -165,7 +159,6 @@ impl Write for Null {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for Null {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }
@@ -173,7 +166,6 @@ impl HasMemory for Null {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for Null {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -206,83 +198,5 @@ impl NullBuilder {
     #[must_use]
     pub fn build(self) -> Null {
         Null { memory: self.memory }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use bytesbuf::mem::CallbackMemory;
-    use testing_aids::execute_or_terminate_process;
-
-    use super::*;
-
-    #[test]
-    fn smoke_test() {
-        execute_or_terminate_process(|| {
-            futures::executor::block_on(async {
-                let mut s = Null::new();
-
-                let buffer = s.reserve(1000);
-                assert!(buffer.remaining_capacity() >= 1000);
-
-                let (bytes_read, buffer) = s.read_at_most_into(100, buffer).await.unwrap();
-                assert_eq!(bytes_read, 0);
-                assert_eq!(buffer.len(), 0);
-
-                let (bytes_read, buffer) = s.read_more_into(buffer).await.unwrap();
-                assert_eq!(bytes_read, 0);
-                assert_eq!(buffer.len(), 0);
-
-                let mut buffer = s.read_any().await.unwrap();
-                assert_eq!(buffer.len(), 0);
-
-                s.write(buffer.consume_all()).await.unwrap();
-            });
-        });
-    }
-
-    #[test]
-    fn default_returns_working_instance() {
-        execute_or_terminate_process(|| {
-            futures::executor::block_on(async {
-                let mut s = Null::default();
-
-                // Verify it can reserve memory
-                let buffer = s.reserve(100);
-                assert!(buffer.remaining_capacity() >= 100);
-
-                // Verify read operations work
-                let (bytes_read, _) = s.read_at_most_into(10, BytesBuf::new()).await.unwrap();
-                assert_eq!(bytes_read, 0);
-
-                // Verify write operations work
-                let empty_view = BytesView::default();
-                s.write(empty_view).await.unwrap();
-            });
-        });
-    }
-
-    #[test]
-    fn memory_returns_configured_provider() {
-        // The configured provider adds a distinctive marker offset to every reservation, so we can
-        // confirm the stream returns this provider rather than a default one.
-        const MARKER_OFFSET: usize = 7;
-
-        let custom_memory = OpaqueMemory::new(CallbackMemory::new(TransparentMemory::new(), |inner, min_bytes| {
-            inner.reserve(min_bytes + MARKER_OFFSET)
-        }));
-
-        let null_stream = Null::builder().memory(custom_memory).build();
-
-        // Get memory from stream and use it
-        let stream_memory = null_stream.memory();
-        let buf = stream_memory.reserve(10);
-
-        assert_eq!(
-            buf.capacity(),
-            10 + MARKER_OFFSET,
-            "stream should return the configured provider, which applies a marker offset"
-        );
     }
 }

@@ -542,15 +542,15 @@ provokes them. A branch that no input reaches is dead code and is removed. Every
 case runs the whole pipeline, so a change to attribute syntax moves expansion
 snapshots.
 
-`cargo mutants` matters most on validation and on `#[display(...)]` lowering,
+`cargo gamma` matters most on validation and on `#[display(...)]` lowering,
 where the rules live and where a surviving mutant means a rule is unenforced.
 
-One class of mutant survives by construction without meaning a rule is
-unenforced. The three entry points in `crates/ohno_macros/src/lib.rs` cannot be
-called from a unit test at all — a proc-macro crate's own tests do not get the
-bridge — so only `crates/ohno/tests/` kills them, and they carry
-`#[cfg_attr(test, mutants::skip)]`. They hold nothing but delegation, which is
-why that is the only untestable part.
+The three entry points in `crates/ohno_macros/src/lib.rs` delegate to the
+implementation crate. A proc-macro crate's own unit tests cannot call them.
+The integration tests in `crates/ohno/tests/` exercise those entry points.
+Do not add mutation suppressions in advance.
+Review actual Gamma findings before adding a narrow, compiler-checked directive
+beside the source with a reason.
 
 The template scanner is driven by an iterator rather than by an index it
 increments, so a mutant that corrupts its arithmetic produces a wrong segment a

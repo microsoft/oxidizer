@@ -12,7 +12,9 @@ use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use anyspawn::{JoinHandle, Spawner};
-use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::WorkersPolicy;
 use futures::future::join_all;
 use thread_aware::{Thread, ThreadAware};
 
@@ -138,7 +140,7 @@ fn arty_spawn_blocking_returns_output() {
 fn arty_task_panics_return_join_errors() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .panic(PanicPolicy::ignore())
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -202,7 +204,7 @@ fn arty_spawner_debug_names_the_runtime() {
 
     let debug = format!("{spawner:?}");
 
-    assert!(debug.contains("arty"));
+    assert_eq!(debug, "Spawner(\"arty\")");
     runtime.stop().unwrap();
 }
 

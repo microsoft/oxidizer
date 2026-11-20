@@ -215,8 +215,9 @@ builds. The pattern is documented in
 Neither package has instrumented code on every platform. The facade contains
 re-exports, and the implementation does not compile off Windows. Coverage tools
 can treat an empty result as a failed measurement. Each package therefore keeps
-one tested coverage anchor for an otherwise empty platform build. Platform
-mutation exclusions use file or crate globs and function patterns. See
+one tested coverage anchor for an otherwise empty platform build.
+Gamma evaluates platform conditions during mutation discovery.
+Shared fixture exclusions live in the root `gamma.toml`. See
 [`docs/design/README.md`](../../../docs/design/README.md) for the current policy.
 
 The integration tests are split by concern rather than by protocol version, so

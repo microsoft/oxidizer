@@ -66,10 +66,14 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogProcessor, LoggerProviderBuilder, SdkLogRecord};
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use opentelemetry_stdout::MetricExporter;
-use scopeguard::ScopeGuard;
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, Temporality};
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn stdout_writer() -> std::io::StdoutLock<'static> {
+    stdout().lock()
+}
 
 /// Creates a log destination that writes to stdout.
 ///
@@ -128,11 +132,6 @@ impl StdoutLogDestination {
 
 impl LogDestination for StdoutLogDestination {
     fn register(self, builder: LoggerProviderBuilder) -> DestinationResult<LoggerProviderBuilder> {
-        #[cfg_attr(coverage_nightly, coverage(off))]
-        fn stdout_writer() -> std::io::StdoutLock<'static> {
-            stdout().lock()
-        }
-
         Ok(self.register_with_output(builder, stdout_writer))
     }
 }
@@ -266,9 +265,9 @@ where
 
 /// Creates a metric destination that writes to stdout.
 ///
-/// The underlying implementation is the `opentelemetry_stdout` crate's
-/// `MetricExporter`, which is intended for debugging and development purposes,
-/// with an output format that can change.
+/// Writes cumulative metric batches in a readable debug format. The output
+/// includes resource data, instrumentation scopes, attributes, and measurements.
+/// This destination is for debugging and development. Its output format can change.
 ///
 /// Metrics are exported periodically, every 60 seconds by default. Set
 /// `OTEL_METRIC_EXPORT_INTERVAL` to configure the interval (in milliseconds). Recording a
@@ -276,8 +275,7 @@ where
 /// pending measurements before exit; `shutdown` flushes pending measurements
 /// and stops the periodic reader.
 ///
-/// A stdout write error panics the thread performing the export, including
-/// the periodic export worker.
+/// Write errors return to the `OpenTelemetry` SDK, which reports export failures.
 ///
 /// # Examples
 ///
@@ -321,7 +319,7 @@ impl StdoutMetricDestination {
 
 impl MetricDestination for StdoutMetricDestination {
     fn register(self, builder: MeterProviderBuilder) -> DestinationResult<MeterProviderBuilder> {
-        Ok(Self::register_with_exporter(builder, MetricExporter::default()))
+        Ok(Self::register_with_exporter(builder, StdoutMetricExporter::new(stdout_writer)))
     }
 }
 
@@ -330,6 +328,51 @@ impl<S: stdout_metric_destination_builder::IsComplete> IntoMetricDestination for
 
     fn into_metric_destination(self) -> StdoutMetricDestination {
         self.build()
+    }
+}
+
+#[derive(derive_more::Debug)]
+struct StdoutMetricExporter<F> {
+    is_shutdown: AtomicBool,
+    #[debug(ignore)]
+    make_writer: F,
+}
+
+impl<F> StdoutMetricExporter<F> {
+    fn new(make_writer: F) -> Self {
+        Self {
+            is_shutdown: AtomicBool::new(false),
+            make_writer,
+        }
+    }
+}
+
+impl<F, W> PushMetricExporter for StdoutMetricExporter<F>
+where
+    F: Fn() -> W + Send + Sync + 'static,
+    W: Write,
+{
+    async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(OTelSdkError::AlreadyShutdown);
+        }
+        writeln!((self.make_writer)(), "{metrics:#?}").map_err(|error| OTelSdkError::InternalFailure(error.to_string()))
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        (self.make_writer)()
+            .flush()
+            .map_err(|error| OTelSdkError::InternalFailure(error.to_string()))
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        self.is_shutdown.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    // #[gamma::skip(fn_value.default, reason = "The SDK implements Default for Temporality as Cumulative, so this mutation returns the same value.")]
+    fn temporality(&self) -> Temporality {
+        Temporality::Cumulative
     }
 }
 
@@ -347,7 +390,7 @@ mod tests {
     use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
@@ -377,7 +420,11 @@ mod tests {
 
     impl Write for RecordingWriter {
         fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-            self.0.lock().bytes.write(buf)
+            let mut state = self.0.lock();
+            if state.fail_write {
+                return Err(ErrorKind::BrokenPipe.into());
+            }
+            state.bytes.write(buf)
         }
 
         fn flush(&mut self) -> IoResult<()> {
@@ -396,6 +443,7 @@ mod tests {
         bytes: Vec<u8>,
         flushes: usize,
         fail_flush: bool,
+        fail_write: bool,
     }
 
     #[test]
@@ -634,6 +682,47 @@ mod tests {
         assert_eq!(error_message, "broken pipe");
     }
 
+    fn export_now(exporter: &impl PushMetricExporter, metrics: &ResourceMetrics) -> OTelSdkResult {
+        let export = std::pin::pin!(exporter.export(metrics));
+        let std::task::Poll::Ready(result) = export.poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) else {
+            panic!("a synchronous stdout export must finish on its first poll");
+        };
+        result
+    }
+
+    #[test]
+    fn metric_exporter_stops_writing_after_shutdown() {
+        let output = RecordingWriter::default();
+        let exporter = StdoutMetricExporter::new(output.clone().into_factory());
+        let metrics = ResourceMetrics::default();
+
+        export_now(&exporter, &metrics).unwrap();
+        exporter.force_flush().unwrap();
+        let before_shutdown = output.contents();
+        exporter.shutdown_with_timeout(Duration::ZERO).unwrap();
+
+        assert!(matches!(export_now(&exporter, &metrics), Err(OTelSdkError::AlreadyShutdown)));
+        assert_eq!(output.contents(), before_shutdown);
+        assert!(!before_shutdown.is_empty());
+        assert_eq!(output.0.lock().flushes, 1);
+        assert_eq!(exporter.temporality(), Temporality::Cumulative);
+    }
+
+    #[test]
+    fn metric_exporter_reports_write_and_flush_errors() {
+        let output = RecordingWriter::default();
+        output.0.lock().fail_write = true;
+        output.0.lock().fail_flush = true;
+        let exporter = StdoutMetricExporter::new(output.into_factory());
+
+        for result in [export_now(&exporter, &ResourceMetrics::default()), exporter.force_flush()] {
+            let OTelSdkError::InternalFailure(message) = result.unwrap_err() else {
+                panic!("writer failures must reach the SDK");
+            };
+            assert_eq!(message, Error::from(ErrorKind::BrokenPipe).to_string());
+        }
+    }
+
     #[test]
     // Flushing must export pending measurements.
     #[cfg_attr(
@@ -686,7 +775,11 @@ mod tests {
         )
         .build();
 
-        provider.meter(SCOPE_NAME).u64_counter(METRIC_NAME).build().add(2, &[]);
+        provider
+            .meter(SCOPE_NAME)
+            .u64_counter(METRIC_NAME)
+            .build()
+            .add(2, &[KeyValue::new("route", "/orders")]);
 
         provider.shutdown().unwrap();
 
@@ -696,5 +789,15 @@ mod tests {
             metrics.iter().any(matches_expected_batch),
             "exported metrics did not match expected batch"
         );
+
+        let output = RecordingWriter::default();
+        let exporter = StdoutMetricExporter::new(output.clone().into_factory());
+        for batch in &metrics {
+            export_now(&exporter, batch).unwrap();
+        }
+        let rendered = output.contents();
+        for expected in [SERVICE_NAME, SCOPE_NAME, METRIC_NAME, "route", "/orders", "value: 2"] {
+            assert!(rendered.contains(expected), "missing {expected} in {rendered}");
+        }
     }
 }

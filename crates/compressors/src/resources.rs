@@ -58,6 +58,7 @@ pub struct Resources {
 }
 
 impl Resources {
+    // #[gamma::skip(fn_value.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Draws output buffers from `memory`, recycling engine state between messages.
     ///
     /// Clones of the returned value share its engine pool. Separately constructed values have

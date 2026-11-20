@@ -359,6 +359,7 @@ fn parse_if_range_with(value: FieldValueRef<'_>, mode: crate::DecodeMode) -> Res
 /// HTTP-date either. Anything else, including a truncated quoted tag, is left
 /// to the date parser, which rejects it with the same error.
 fn parse_if_range_date_with(value: FieldValueRef<'_>, mode: crate::DecodeMode) -> Result<IfRangeValueView<'_>, DecodeError> {
+    // #[gamma::skip(cond.always_false, string.starts_with_to_ends_with, tag = "equivalent", reason = "Neither strict nor relaxed HTTP-date grammar can start or end with W-slash; the date parser independently rejects weak validators with the same IfRange InvalidSyntax")]
     if value.as_bytes().starts_with(b"W/") {
         return Err(crate::headers::invalid_syntax(&FieldName::IfRange));
     }

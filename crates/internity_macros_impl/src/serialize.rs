@@ -207,6 +207,7 @@ pub(crate) fn expand_serialize_tuple(
     }
 
     if container.transparent {
+        // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "Transparent tuple validation requires exactly one field, so the first and last plan are identical.")]
         let plan = plans.first().expect("transparent tuple validation requires one field");
         if plan.attrs.skip_serializing || is_phantom_data(&plan.ty) {
             return Err(Error::new_spanned(

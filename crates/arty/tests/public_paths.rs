@@ -10,9 +10,9 @@ use std::fmt::Debug;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::{
-    BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers, WorkersPolicy,
-};
+use arty::runtime::hook::{Hook, HookFn, TaskPanic, TaskSpawn, WorkerSpawn};
+use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+use arty::runtime::{Error, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers};
 use arty::task::{Context, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
@@ -37,25 +37,33 @@ assert_not_impl_any!(RuntimeScheduler: Clone, ThreadAware);
 assert_impl_all!(BlockingPoolPolicy: Clone, Debug);
 assert_impl_all!(MonitorPolicy: Clone, Debug, Default);
 assert_not_impl_any!(MonitorPolicy: Copy);
-assert_impl_all!(PanicPolicy: Clone, Debug, Default);
-assert_not_impl_any!(PanicPolicy: Copy);
+assert_impl_all!(TaskPanic: Debug, Hook);
+assert_impl_all!(TaskSpawn: Debug, Hook);
+assert_impl_all!(WorkerSpawn: Debug, Hook);
+assert_impl_all!(HookFn<TaskPanic, ()>: Clone, Sync, ThreadAware);
+assert_impl_all!(HookFn<TaskSpawn, ()>: Clone, Sync, ThreadAware);
+assert_impl_all!(HookFn<WorkerSpawn, ()>: Clone, Sync, ThreadAware);
+assert_not_impl_any!(TaskPanic: Clone, Copy);
+assert_not_impl_any!(TaskSpawn: Clone, Copy);
+assert_not_impl_any!(WorkerSpawn: Clone, Copy);
+assert_not_impl_any!(HookFn<TaskPanic, ()>: Copy);
+assert_not_impl_any!(HookFn<TaskSpawn, ()>: Copy);
+assert_not_impl_any!(HookFn<WorkerSpawn, ()>: Copy);
 assert_impl_all!(WorkersPolicy: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
 
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::exactly;
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::at_most;
+const _: fn() -> MonitorPolicy = MonitorPolicy::auto;
 const _: fn() -> MonitorPolicy = MonitorPolicy::enabled;
 const _: fn() -> MonitorPolicy = MonitorPolicy::disabled;
-const _: fn() -> PanicPolicy = PanicPolicy::shutdown;
-const _: fn() -> PanicPolicy = PanicPolicy::ignore;
-const _: fn(RuntimeBuilder, PanicPolicy) -> RuntimeBuilder = RuntimeBuilder::panic;
 const _: fn(&JoinError) -> Option<ShutdownCause> = JoinError::shutdown_cause;
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&Context) -> &RuntimeControl = Context::control;
-const _: fn(&RuntimeControl) = RuntimeControl::request_stop;
+const _: fn(&RuntimeControl) = RuntimeControl::shutdown;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

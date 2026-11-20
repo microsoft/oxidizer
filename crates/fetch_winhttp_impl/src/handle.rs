@@ -41,6 +41,16 @@ impl fmt::Debug for RawHandle {
     }
 }
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    #[test]
+    fn gamma_survivor_raw_handle_debug_preserves_pointer_value() {
+        let handle = crate::mocks::raw_handle(0x1234);
+        assert_eq!(format!("{handle:?}"), format!("{:p}", handle.as_ptr()));
+        assert!(!format!("{handle:?}").is_empty());
+    }
+}
+
 // SAFETY: RawHandle is an opaque WinHTTP token. Rust never dereferences the
 // pointer, and WinHTTP permits handles to be passed between threads.
 unsafe impl Send for RawHandle {}

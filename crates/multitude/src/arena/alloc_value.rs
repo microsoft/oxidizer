@@ -23,10 +23,26 @@ use crate::{Alloc, AllocError};
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
 /// a chunk: value bytes + alignment padding.
-#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
 const fn worst_case_payload<T>() -> usize {
     mem::size_of::<T>().saturating_add(mem::align_of::<T>())
+}
+
+fn tag_refill_hint<T>() -> usize {
+    worst_case_payload::<T>()
+}
+
+#[test]
+fn gamma_round2_zero_sized_shared_tag_refill_plan_is_exactly_one_byte() {
+    assert_eq!(tag_refill_hint::<()>(), 1);
+}
+
+#[test]
+fn gamma_nov4_tag_refill_hint_retains_the_alignment_of_zero_sized_values() {
+    #[repr(align(8192))]
+    struct WideZst;
+
+    assert_eq!(tag_refill_hint::<WideZst>(), 8192);
 }
 
 /// Worst-case bytes consumed by a single strong-prefixed value allocation
@@ -36,7 +52,6 @@ const fn worst_case_payload<T>() -> usize {
 /// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
 /// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` is
 /// not strong-prefixed — it allocates through the separate non-prefixed path.)
-#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
 fn worst_case_strong_payload<S: thin_dst::Strong, T>() -> usize {
     let align = mem::align_of::<T>();
@@ -884,7 +899,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// adoption). Split out so the single `S::adopt` lives in
     /// [`Self::impl_alloc_smart_prefixed_with`].
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn alloc_smart_prefixed_with_raw<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<u8>, AllocError> {
         if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
@@ -918,7 +932,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// chunk, which would break the header-recovery mask used by the
     /// smart pointers' `Drop` impls.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn impl_alloc_smart_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<T>, AllocError> {
         if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
@@ -933,7 +946,10 @@ impl<A: Allocator + Clone> Arena<A> {
             // a 1-byte tag so each such handout advances the cursor,
             // bounding per-chunk handouts to the chunk capacity.
             if const { mem::size_of::<T>() == 0 } && self.current().try_alloc(1, 1).is_none() {
-                self.refill(worst_case_payload::<T>())?;
+                self.refill(
+                    // #[gamma::skip(expr.decrement, reason = "For alignment at least two the hint plus chunk header is even, so subtracting one cannot cross a power-of-two size class; alignment one stays below the minimum 512-byte class, and lowering the request preserves the normal-request bound")]
+                    tag_refill_hint::<T>(),
+                )?;
                 continue;
             }
             if let Some((uninit, chunk_ptr)) = self.try_reserve_shared::<T>() {
@@ -1012,5 +1028,78 @@ pub(crate) fn acquire_chunk_ref<A: Allocator + Clone>(chunk_ptr: NonNull<Chunk<A
     unsafe {
         chunk_ptr.as_ref().inc_ref();
         ChunkRef::<A>::adopt(chunk_ptr)
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_box_unit_tag_is_committed_before_first_handout() {
+        let arena = Arena::builder().byte_budget(512).with_capacity(512).build();
+        let first = arena.try_alloc_box(()).unwrap();
+        let second = arena.try_alloc_box(()).unwrap();
+        assert_eq!(second.as_ptr().addr(), first.as_ptr().addr() + 1);
+        let word = mem::size_of::<usize>();
+        let header = 5 * word + if cfg!(feature = "stats") { mem::size_of::<u32>() } else { 0 };
+        assert_eq!(first.as_ptr().addr() % word, (header + 1) % word);
+        assert_eq!(arena.local_shared_count.get(), 2);
+    }
+
+    #[derive(Clone, Copy)]
+    #[repr(align(32))]
+    struct Align32([u8; 32]);
+
+    #[derive(Clone, Copy)]
+    #[repr(align(64))]
+    struct Align64([u8; 64]);
+
+    #[test]
+    fn gamma_survivor_lowered_alignment_guards_with_nonzero_sized_values() {
+        let arena = Arena::new();
+        arena.set_align_cap(64);
+        gamma_survivor_expect_error(arena.try_alloc(Align64([7; 64])));
+        gamma_survivor_expect_error(arena.try_alloc_box(Align32([9; 32])));
+        gamma_survivor_expect_error(arena.try_alloc_rc(Align32([9; 32])));
+        gamma_survivor_expect_error(arena.try_alloc_arc(Align32([9; 32])));
+        gamma_survivor_expect_error(arena.try_alloc_slice_copy([Align64([7; 64])]));
+        gamma_survivor_expect_error(arena.try_alloc_slice_clone([Align64([7; 64])]));
+        gamma_survivor_expect_error(arena.try_alloc_slice_fill_with(2, |_| Align64([7; 64])));
+        gamma_survivor_expect_error(arena.try_alloc_slice_fill_iter([Align64([7; 64])]));
+        gamma_survivor_expect_error(arena.try_alloc_slice_copy_box([Align32([9; 32])]));
+        gamma_survivor_expect_error(arena.try_alloc_slice_fill_with_box(2, |_| Align32([9; 32])));
+        gamma_survivor_expect_error(arena.try_alloc_slice_fill_with_rc(2, |_| Align32([9; 32])));
+        gamma_survivor_expect_error(arena.try_alloc_slice_fill_with_arc(2, |_| Align32([9; 32])));
+        let unrestricted = Arena::new();
+        assert_eq!(unrestricted.alloc(Align64([7; 64])).0, [7; 64]);
+        assert_eq!(unrestricted.alloc_box(Align32([9; 32])).0, [9; 32]);
+    }
+
+    fn check<T>() {
+        let align = mem::align_of::<T>();
+        let prefix = 4_usize.div_ceil(align) * align;
+        let payload = mem::size_of::<T>().max(1);
+        assert_eq!(worst_case_payload::<T>(), mem::size_of::<T>() + align);
+        assert_eq!(worst_case_strong_payload::<AtomicStrong, T>(), prefix + payload + align.max(4));
+        assert_eq!(worst_case_strong_payload::<LocalStrong, T>(), prefix + payload + align);
+    }
+
+    #[test]
+    fn gamma_survivor_exact_scalar_strong_prefix_geometry() {
+        check::<()>();
+        check::<u8>();
+        check::<u16>();
+        check::<u32>();
+        check::<u64>();
+        check::<u128>();
+        check::<[u8; 65]>();
+    }
+
+    fn gamma_survivor_expect_error<T, E>(result: Result<T, E>) {
+        let Err(_) = result else {
+            panic!("the lowered alignment cap must reject this nonzero-sized value");
+        };
+        drop(result);
     }
 }
