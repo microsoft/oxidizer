@@ -12,7 +12,7 @@ use crate::runtime::hook::{Hook, HookFn, registration};
 /// It does not keep the runtime alive and is not tied to the task's worker.
 ///
 /// [`workers`](Self::workers) lists the runtime's workers.
-/// [`request_stop`](Self::request_stop) starts shutdown without waiting.
+/// [`shutdown`](Self::shutdown) starts shutdown without waiting.
 #[derive(Debug, Clone)]
 pub struct RuntimeControl {
     dispatcher: DispatcherClient,
@@ -83,7 +83,7 @@ impl RuntimeControl {
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.on(Panic::IGNORE);
+    /// control.on(Panic::ignore());
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -114,11 +114,11 @@ impl RuntimeControl {
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.request_stop();
+    /// control.shutdown();
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn request_stop(&self) {
+    pub fn shutdown(&self) {
         let cause = self.dispatcher.stop(arty_executor::ShutdownCause::default());
         crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.dispatcher, cause);
     }

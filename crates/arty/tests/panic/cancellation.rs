@@ -101,7 +101,7 @@ fn borrowing_cancellation_drop_panic_releases_caller_storage() {
         .scheduler()
         .block_on(async move |cx| {
             let guard = borrowed;
-            cx.control().request_stop();
+            cx.control().shutdown();
             std::future::pending::<()>().await;
             drop(guard);
         })

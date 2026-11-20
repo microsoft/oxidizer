@@ -35,3 +35,9 @@ mod observation;
 mod pagemap;
 
 pub use allocator::Mimalloc;
+
+#[cfg(test)]
+pub(super) fn has_current_owner() -> bool {
+    let mut observation = seismograph_rallocator::mimalloc::Observation::EMPTY;
+    heap::observe_current(&mut observation)
+}

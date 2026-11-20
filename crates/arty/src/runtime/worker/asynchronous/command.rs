@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let context = runtime.scheduler().block_on(async |context| context).unwrap();

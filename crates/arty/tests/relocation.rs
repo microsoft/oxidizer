@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
