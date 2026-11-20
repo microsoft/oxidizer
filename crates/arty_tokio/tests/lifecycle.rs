@@ -28,7 +28,7 @@ fn owned_runtime_stays_alive_until_blocking_shutdown_completes() {
     let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let caller = Builder::new_current_thread().build().unwrap();
 
-    caller.block_on(async { control.shutdown() });
+    caller.block_on(async { control.request_stop() });
 
     assert_eq!(caller.block_on(handle.spawn(async { 42 })).unwrap(), 42);
     stop_bounded(runtime);
@@ -63,7 +63,7 @@ fn worker_shutdown_cancels_arty_task_awaited_by_tokio_blocking_task() {
             })
             .unwrap();
 
-        let _shutdown_result = runtime.scheduler().block_on(async move |_| control.shutdown());
+        let _shutdown_result = runtime.scheduler().block_on(async move |_| control.request_stop());
 
         let cancelled = cancellation.recv_timeout(TEST_TIMEOUT).unwrap();
         runtime.stop().unwrap();
