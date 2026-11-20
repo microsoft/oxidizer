@@ -516,6 +516,8 @@ impl DecompressorBuilder<()> {
 }
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Runtime cases iterate all five backends, exposed without features only in the
+// cfg(test) library build. Others inspect sealed pull outcomes, counts or default limits.
 mod tests {
     use std::num::{NonZeroU64, NonZeroUsize};
 

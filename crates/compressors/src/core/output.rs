@@ -86,6 +86,7 @@ impl Output {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Output is exported only within the crate. Public APIs do not expose its variants.
 mod tests {
     use bytesbuf::mem::GlobalPool;
 

@@ -618,6 +618,8 @@ fn non_driving_state_reached_the_step_loop() -> ! {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Pump, Codec, Operation, Step and State are private. These cases inject codec outcomes,
+// inspect counts and state, or set buffered fallbacks that public callers cannot select.
 mod tests {
     #[test]
     fn gamma_round2_step_output_budgets_and_flush_return() {

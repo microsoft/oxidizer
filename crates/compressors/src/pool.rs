@@ -328,6 +328,8 @@ impl fmt::Debug for Pool {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Pool is private. These cases inspect idle entries, identity, capacity and poisoned locks.
+// Resources deliberately does not expose retention or checkout operations.
 mod tests {
     use super::*;
 

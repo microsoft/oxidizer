@@ -51,6 +51,42 @@ fn create_test_redactor(mode: SimpleRedactorMode) -> SimpleRedactor {
     SimpleRedactor::with_mode(mode)
 }
 
+#[test]
+fn test_redacts_returns_true_for_unknown_class() {
+    let engine = RedactionEngine::default();
+    assert!(engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+}
+
+#[test]
+fn test_redacts_returns_true_for_registered_redactor() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::new())
+        .build();
+    assert!(engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+}
+
+#[test]
+fn test_redacts_returns_false_for_suppressed_class() {
+    let engine = RedactionEngine::builder().suppress_redaction(TestTaxonomy::Sensitive).build();
+    assert!(!engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+}
+
+#[test]
+fn test_redacts_returns_false_for_passthrough_redactor() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
+        .build();
+    assert!(!engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+}
+
+#[test]
+fn test_redacts_returns_false_for_passthrough_fallback() {
+    let engine = RedactionEngine::builder()
+        .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
+        .build();
+    assert!(!engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+}
+
 fn collect_output<C>(engine: &RedactionEngine, value: &C) -> String
 where
     C: RedactedDisplay,

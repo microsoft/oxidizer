@@ -26,13 +26,9 @@ pub(crate) fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Hash redactors cannot select the helper's exact 0 and u64::MAX inputs.
+// Keep its byte-array assertions here rather than substituting hash-output checks.
 mod tests {
-    use std::fmt::Write;
-
-    use data_privacy_macros::taxonomy;
-
-    use crate::Redactor;
-
     #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
     #[test]
     fn test_u64_to_hex_array() {
@@ -49,31 +45,5 @@ mod tests {
         let result = u64_to_hex_array(u64::MAX);
         let expected = b"ffffffffffffffff";
         assert_eq!(result, *expected);
-    }
-
-    struct TestRedactor;
-
-    impl crate::Redactor for TestRedactor {
-        fn redacts(&self, _data_class: &crate::DataClass) -> bool {
-            true
-        }
-
-        fn redact(&self, _data_class: &crate::DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result {
-            write!(output, "{value}tomato")
-        }
-    }
-
-    #[taxonomy(test)]
-    enum TestTaxonomy {
-        Sensitive,
-    }
-
-    #[test]
-    fn test_exact_len_default_behavior() {
-        let redactor = TestRedactor;
-        let mut output_buffer = String::new();
-        _ = redactor.redact(&TestTaxonomy::Sensitive.data_class(), "test_value", &mut output_buffer);
-
-        assert_eq!(output_buffer, "test_valuetomato");
     }
 }
