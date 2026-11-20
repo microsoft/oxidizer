@@ -1,15 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::slice;
-
 use thread_aware::Thread;
 
 /// A list of a runtime's workers and their details.
 ///
 /// Obtain this list from
 /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
-/// The runtime owns the list. Each item refers to one worker. Pass an item
+/// The runtime owns the list. Each item identifies one worker. Pass a reference to an item
 /// directly to [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
 #[derive(Debug)]
 pub struct Workers {
@@ -20,17 +18,19 @@ impl Workers {
     pub(crate) fn new(inner: Box<[Thread]>) -> Self {
         Self { inner }
     }
-}
 
-#[expect(
-    clippy::into_iter_without_iter,
-    reason = "Workers intentionally exposes iteration without public inherent methods"
-)]
-impl<'a> IntoIterator for &'a Workers {
-    type Item = &'a Thread;
-    type IntoIter = slice::Iter<'a, Thread>;
+    /// Returns the number of workers in this runtime.
+    #[must_use]
+    #[expect(clippy::len_without_is_empty, reason = "runtime worker lists are non-empty by construction")]
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.inner.iter()
+    /// Returns an iterator over owned worker thread handles.
+    ///
+    /// Each item is a clone of a handle in the list. Iteration does not remove
+    /// workers or transfer ownership of the runtime's threads.
+    pub fn iter(&self) -> impl Iterator<Item = Thread> {
+        self.inner.iter().cloned()
     }
 }

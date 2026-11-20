@@ -123,10 +123,7 @@ fn enabled_monitor_policy_starts_monitoring() {
     let _recording = RecorderGuard::new();
     let runtime = Runtime::builder().monitor(MonitorPolicy::enabled()).build().unwrap();
     let diagnostics = runtime.diagnostics().unwrap();
-    let workers = runtime
-        .scheduler()
-        .block_on(async |cx| cx.control().workers().into_iter().count())
-        .unwrap();
+    let workers = runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap();
     let active = diagnostics.capture(CaptureOptions::default()).unwrap();
     runtime.stop().unwrap();
     let stopped = runtimes().into_iter().find(|runtime| runtime.id == diagnostics.id()).unwrap().state;
@@ -839,13 +836,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
     let parent = runtime
         .scheduler()
         .spawn_anywhere(Unaware(started), |cx, Unaware(started)| async move {
-            let destination = cx
-                .control()
-                .workers()
-                .into_iter()
-                .find(|worker| *worker != cx.thread())
-                .unwrap()
-                .clone();
+            let destination = cx.control().workers().iter().find(|worker| worker != cx.thread()).unwrap();
             let at = cx.scheduler().spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
                 PendingBody::<64>::new(started)
             });

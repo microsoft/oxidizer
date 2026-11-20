@@ -354,10 +354,10 @@ mod tests {
         let tasks: Vec<_> = cx
             .control()
             .workers()
-            .into_iter()
+            .iter()
             .map(|worker| {
                 scheduler.spawn_at(
-                    worker,
+                    &worker,
                     (cx.clone(), counts.clone(), per_thread.clone(), HardwareProbe(hardware.clone())),
                     |(cx, counts, value, hardware)| async move {
                         let thread = thread::current().id();
@@ -405,8 +405,8 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .into_iter()
-            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
+            .iter()
+            .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 
@@ -426,8 +426,8 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .into_iter()
-            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
+            .iter()
+            .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 

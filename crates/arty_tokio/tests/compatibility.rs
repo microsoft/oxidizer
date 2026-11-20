@@ -36,7 +36,7 @@ fn wait_for_worker_initialization(cx: &Context) {
         .on(HookFn::<WorkerSpawn, _>::new(InitSignal(initialized), |_event, signal| {
             signal.0.send(()).unwrap();
         }));
-    for _ in cx.control().workers() {
+    for _ in cx.control().workers().iter() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 }
@@ -45,10 +45,10 @@ async fn worker_runtime_ids(cx: &Context) -> Vec<String> {
     let tasks = cx
         .control()
         .workers()
-        .into_iter()
+        .iter()
         .map(|worker| {
             cx.scheduler()
-                .spawn_at(worker, (), |()| async { Handle::current().id().to_string() })
+                .spawn_at(&worker, (), |()| async { Handle::current().id().to_string() })
         })
         .collect::<Vec<_>>();
     let mut contexts = Vec::with_capacity(tasks.len());
@@ -70,7 +70,7 @@ fn builder_supports_tokio_on_every_worker() {
     let observations = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
+            let workers = cx.control().workers().iter().collect::<Vec<_>>();
             let tasks = workers
                 .iter()
                 .map(|worker| {
