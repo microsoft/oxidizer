@@ -5,7 +5,10 @@
 
 #![cfg(test)]
 
-#[cfg(all(feature = "test-util", feature = "futures-stream"))]
+#[cfg(feature = "futures-stream")]
+mod read_fixture;
+
+#[cfg(feature = "futures-stream")]
 mod read_futures {
     use std::convert::Infallible;
     use std::future::ready;
@@ -16,11 +19,49 @@ mod read_futures {
     use bytesbuf::mem::testing::TransparentMemory;
     use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
     use bytesbuf::{BytesBuf, BytesView};
-    use bytesbuf_io::testing::{FakeRead, Pending};
-    use bytesbuf_io::{ReadAsFuturesStream, ReadExt};
+    use bytesbuf_io::{Read, ReadAsFuturesStream, ReadExt};
     use futures::{Stream, StreamExt};
     use new_zealand::nz;
     use testing_aids::{YieldFuture, async_test};
+
+    use crate::read_fixture::FakeRead;
+
+    #[derive(Debug)]
+    struct Pending;
+
+    impl Pending {
+        fn new() -> Self {
+            Self
+        }
+    }
+
+    impl Memory for Pending {
+        fn reserve(&self, min_bytes: usize) -> BytesBuf {
+            TransparentMemory::new().reserve(min_bytes)
+        }
+    }
+
+    impl HasMemory for Pending {
+        fn memory(&self) -> impl MemoryShared {
+            TransparentMemory::new()
+        }
+    }
+
+    impl Read for Pending {
+        type Error = Infallible;
+
+        async fn read_at_most_into(&mut self, _: usize, _: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            std::future::pending().await
+        }
+
+        async fn read_more_into(&mut self, _: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            std::future::pending().await
+        }
+
+        async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
+            std::future::pending().await
+        }
+    }
 
     #[test]
     fn smoke_test() {

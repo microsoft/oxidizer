@@ -5,7 +5,8 @@
 
 #![cfg(test)]
 
-#[cfg(feature = "test-util")]
+mod read_fixture;
+
 mod read_ext {
     #![allow(clippy::arithmetic_side_effects, reason = "Not a problem in test code")]
 
@@ -13,10 +14,11 @@ mod read_ext {
 
     use bytesbuf::mem::GlobalPool;
     use bytesbuf::{BytesBuf, BytesView};
-    use bytesbuf_io::testing::FakeRead;
     use bytesbuf_io::{ReadExt, ReadInspectDecision};
     use new_zealand::nz;
     use testing_aids::async_test;
+
+    use crate::read_fixture::FakeRead;
 
     const TEST_DATA: &[u8] = b"Hello, world!";
 

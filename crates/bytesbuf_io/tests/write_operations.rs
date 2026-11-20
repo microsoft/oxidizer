@@ -5,14 +5,16 @@
 
 #![cfg(test)]
 
-#[cfg(feature = "test-util")]
+mod write_fixture;
+
 mod write_ext {
     use std::convert::Infallible;
 
     use bytesbuf::BytesView;
     use bytesbuf_io::WriteExt;
-    use bytesbuf_io::testing::FakeWrite;
     use testing_aids::async_test;
+
+    use crate::write_fixture::FakeWrite;
 
     const TEST_DATA: &[u8] = b"Hello, world!";
 
