@@ -4577,6 +4577,7 @@ dependencies = [
  "libc",
  "seismograph",
  "seismograph_rallocator",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

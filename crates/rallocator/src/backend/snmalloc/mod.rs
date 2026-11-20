@@ -21,3 +21,10 @@ mod snapshot;
 mod thread;
 
 pub use allocator::Snmalloc;
+
+#[cfg(test)]
+pub(super) fn has_current_owner() -> bool {
+    let mut present = false;
+    thread::observe_current(|_| present = true);
+    present
+}
