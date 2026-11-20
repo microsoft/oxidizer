@@ -434,6 +434,38 @@ mod tests {
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn observer_slots_reject_invalid_lifecycle_order() {
+        let target = ThreadBuilder::default().build(std::thread::current().id());
+
+        assert_panics(|| {
+            let mut slot = ObserverSlot::<(), OneBytePoll>::Activating;
+            slot.relocate(None, &target);
+        });
+        assert_panics(|| {
+            let mut slot = ObserverSlot::<(), OneBytePoll>::Activating;
+            slot.activate();
+        });
+        assert_panics(|| {
+            let mut slot = ObserverSlot::Pending {
+                data: (),
+                create: |()| OneBytePoll(1),
+            };
+            slot.poll_start();
+        });
+        assert_panics(|| {
+            let mut slot = ObserverSlot::Pending {
+                data: (),
+                create: |()| OneBytePoll(1),
+            };
+            slot.poll_end(Poll::Pending);
+        });
+    }
+
+    fn assert_panics(action: impl FnOnce()) {
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(action)).is_err());
+    }
+
     #[cfg(not(miri))]
     fn observer_allocations(observer_count: usize) -> u64 {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
