@@ -36,6 +36,7 @@ tick = { workspace = true, features = ["coarse-time"] }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
+insta = { workspace = true, features = ["filters"] }
 metabench = { path = "../metabench", default-features = false }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }

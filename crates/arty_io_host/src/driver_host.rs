@@ -3,7 +3,6 @@
 
 use std::any::{Any, type_name};
 use std::cell::{Cell, RefCell};
-use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -150,20 +149,19 @@ impl Wake for DriverInterrupt {
 /// each secondary driver before the primary driver. A returned shutdown error
 /// emits a diagnostic but does not stop the remaining shutdowns. A panic from a
 /// driver or diagnostic stops shutdown and propagates.
+#[derive(derive_more::Debug)]
 pub struct DriverHost {
     runtime: IoRuntime,
     thread: Thread,
+    // Keep the waker's data and vtable addresses out of Debug output.
+    #[debug(skip)]
     owner_waker: Waker,
+    #[debug(skip)]
     interrupt: Arc<DriverInterrupt>,
+    #[debug(skip)]
     drivers: RefCell<DriverSet>,
     initializing: Cell<bool>,
     _single_threaded: PhantomData<Rc<()>>,
-}
-
-impl fmt::Debug for DriverHost {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DriverHost").field("thread", &self.thread).finish_non_exhaustive()
-    }
 }
 
 impl DriverHost {

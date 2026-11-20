@@ -1,0 +1,5 @@
+---
+source: crates/arty_executor/src/wake.rs
+expression: remote
+---
+RemoteWake(..)

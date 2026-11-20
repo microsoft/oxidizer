@@ -1,0 +1,43 @@
+---
+source: crates/cachet/tests/cache.rs
+expression: cache
+---
+Cache {
+    name: "debug-cache",
+    storage: DynamicCache(..),
+    clock: Clock {
+        kind: "controlled",
+        timers: 0,
+        alive: true,
+        ..
+    },
+    telemetry: CacheTelemetry {
+        logging_enabled: false,
+        has_handler: false,
+    },
+    mergers: Some(
+        Mergers {
+            get: Merger {
+                inner: DashMap<...>,
+            },
+            invalidate: Merger {
+                inner: DashMap<...>,
+            },
+            get_or_insert: Merger {
+                inner: DashMap<...>,
+            },
+            get_or_insert_with: Merger {
+                inner: DashMap<...>,
+            },
+            try_get_or_insert: Merger {
+                inner: DashMap<...>,
+            },
+            try_get_or_insert_with: Merger {
+                inner: DashMap<...>,
+            },
+            optionally_get_or_insert: Merger {
+                inner: DashMap<...>,
+            },
+        },
+    ),
+}

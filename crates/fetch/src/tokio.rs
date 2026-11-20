@@ -688,15 +688,15 @@ mod tests {
     async fn connector_surfaces_connect_failure_as_recoverable_io_error() -> http_extensions::Result<()> {
         use seatbelt::{Recovery as _, RecoveryInfo};
 
-        // Drop the listener so the connection fails. Another process can bind the port during the
-        // short interval before the connection, but that interval is only a few microseconds.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let port = listener.local_addr()?.port();
-        drop(listener);
+        // Reserve the port without listening so neither another listener nor the connecting
+        // socket can claim it. Releasing it first permits a loopback self-connection.
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.bind("127.0.0.1:0".parse().unwrap())?;
+        let port = socket.local_addr()?.port();
 
         let error = connect_with(fetch_options::SocketOptions::default().send_buffer_size(64 * 1024), port)
             .await
-            .expect_err("the listener was dropped before dialing, so the connection must be refused");
+            .expect_err("the destination port is reserved without listening, so the connection must be refused");
 
         // hyper's own `Display` is only a static summary, so the operating system detail has to
         // survive in the source chain for the message to be diagnosable at all.

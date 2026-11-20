@@ -49,6 +49,7 @@ test-util = ["std"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
+derive_more = { workspace = true, features = ["debug"] }
 nm = { workspace = true, optional = true }
 performables = { workspace = true, default-features = false, optional = true }
 plurality = { workspace = true, optional = true }
@@ -61,6 +62,7 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
+insta = { workspace = true, features = ["filters"] }
 new_zealand = { workspace = true }
 nm = { workspace = true }
 plurality = { path = "../plurality" }

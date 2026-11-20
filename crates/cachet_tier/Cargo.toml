@@ -32,12 +32,14 @@ allowed_external_types = [
 test-util = ["dep:parking_lot"]
 
 [dependencies]
+derive_more = { workspace = true, features = ["debug"] }
 dynosaur = { workspace = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true, optional = true }
 recoverable = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 parking_lot = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = [

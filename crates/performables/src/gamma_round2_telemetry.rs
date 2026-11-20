@@ -8,13 +8,13 @@ pub(crate) fn enable_recording() {
 
     // Reconfiguring capacity restarts the process-wide session and can drop another test's events.
     INITIALIZE.call_once(|| {
+        #[cfg(miri)]
+        let event_capacity = seismograph::recorder::EventBufferCapacity::new(64);
+        #[cfg(not(miri))]
+        let event_capacity = seismograph::recorder::EventBufferCapacity::default();
         seismograph::recorder(seismograph::recorder::Configuration {
             general_events: seismograph::recorder::Policy::all(false),
-            event_capacity_per_thread: if cfg!(miri) {
-                seismograph::recorder::EventBufferCapacity::new(64)
-            } else {
-                seismograph::recorder::EventBufferCapacity::default()
-            },
+            event_capacity_per_thread: event_capacity,
             ..Default::default()
         });
     });

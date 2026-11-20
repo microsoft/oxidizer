@@ -1,0 +1,5 @@
+---
+source: crates/arty_io_host/tests/hosting.rs
+expression: error
+---
+ReentrantFormatError { .. }

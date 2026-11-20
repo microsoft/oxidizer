@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use core::fmt::Debug;
-
 use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
@@ -65,23 +63,14 @@ use crate::mem::Memory;
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
-#[derive(Clone, ThreadAware)]
+#[derive(Clone, ThreadAware, derive_more::Debug)]
 pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
+    // Callback data need not implement Debug.
+    #[debug(skip)]
     data: D,
     // The function pointer holds no state; only the captured data can be thread-affine.
     #[thread_aware(skip)]
     reserve_fn: fn(&D, usize) -> BytesBuf,
-}
-
-impl<D: ThreadAware + Clone + Send + Sync + 'static> Debug for CallbackMemory<D> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // `data` is deliberately not formatted so that `CallbackMemory` is `Debug` regardless of
-        // whether `D` is, which keeps it usable with thread-aware data that is intentionally not
-        // `Debug` (e.g. a tuple containing a non-`Debug` field).
-        f.debug_struct("CallbackMemory")
-            .field("reserve_fn", &self.reserve_fn)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
