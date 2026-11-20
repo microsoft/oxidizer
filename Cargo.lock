@@ -3720,6 +3720,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "observed_arty"
+version = "0.1.0"
+dependencies = [
+ "alloc_tracker",
+ "arty",
+ "observed",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
+]
+
+[[package]]
 name = "observed_destination_core"
 version = "0.29.2"
 dependencies = [
