@@ -15,6 +15,95 @@ where
     concrete: i64,
 }
 const _: () = {
+    impl<'a, T: 'static, const N: usize> ::observed::VisitFields for Generic<'a, T, N>
+    where
+        T: Clone,
+        T: ::core::clone::Clone,
+        ::observed::Value: ::core::convert::From<T>,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::core::fmt::Display,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::core::fmt::Display,
+        &'a T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::observed::__private::RedactedDisplay,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::observed::__private::RedactedDisplay,
+        Option<T>: ::core::marker::Send + ::core::marker::Sync,
+        [T; N]: ::observed::__private::RedactedDisplay,
+        [T; N]: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.unredacted_value.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            &self.classified,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            self.classified_ref,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
+                    &|engine| ::observed::Value::from_redacted(&self.defaulted, engine),
+                )?;
+            }
+            {
+                match self.optional.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
+                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
+                            &|_| ::observed::Value::from("n/a"),
+                        )?;
+                    }
+                }
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
+                    &|engine| ::observed::Value::from_redacted(&self.matrix, engine),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[6usize],
+                    &|_| ::observed::Value::from(self.concrete.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static, const N: usize> ::observed::Event for Generic<'a, T, N>
     where
         T: Clone,
@@ -98,75 +187,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.unredacted_value.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        &::observed::__private::Sensitive::new(
-                            &self.classified,
-                            DataTaxonomy::Euii,
-                        ),
-                        engine,
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        &::observed::__private::Sensitive::new(
-                            self.classified_ref,
-                            DataTaxonomy::Euii,
-                        ),
-                        engine,
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
-                    &|engine| ::observed::Value::from_redacted(&self.defaulted, engine),
-                )?;
-            }
-            {
-                match self.optional.as_ref() {
-                    ::core::option::Option::Some(__val) => {
-                        visitor(
-                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
-                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
-                        )?;
-                    }
-                    ::core::option::Option::None => {
-                        visitor(
-                            &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
-                            &|_| ::observed::Value::from("n/a"),
-                        )?;
-                    }
-                }
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
-                    &|engine| ::observed::Value::from_redacted(&self.matrix, engine),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[6usize],
-                    &|_| ::observed::Value::from(self.concrete.clone()),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

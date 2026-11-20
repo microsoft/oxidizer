@@ -7,6 +7,27 @@ struct Raw {
     r#match: i64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Raw {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.r#type, engine),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.r#match.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Raw {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "raw",
@@ -42,23 +63,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.r#type, engine),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_| ::observed::Value::from(self.r#match.clone()),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

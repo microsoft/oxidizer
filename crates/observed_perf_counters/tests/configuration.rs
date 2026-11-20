@@ -74,7 +74,10 @@ impl Event for UntypedEvent {
         false,
         &[],
     );
+}
 
+impl observed::VisitFields for UntypedEvent {
+    const CONTAINS_METRICS: bool = false;
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }

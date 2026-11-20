@@ -292,6 +292,9 @@ fn malformed_slot_surfaces_through_flush_instead_of_being_swallowed() {
                 )),
             )]),
         );
+    }
+    impl observed::VisitFields for Malformed {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

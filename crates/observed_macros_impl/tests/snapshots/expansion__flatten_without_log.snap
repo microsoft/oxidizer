@@ -1,0 +1,41 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"flattened\"\"#,\nr\"\n        struct Flattened<T> {\n            #[flatten]\n            generic: T,\n        }\n        \",)"
+---
+struct Flattened<T> {
+    generic: T,
+}
+const _: () = {
+    impl<T: 'static> ::observed::VisitFields for Flattened<T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const CONTAINS_METRICS: bool = false
+            || <T as ::observed::VisitFields>::CONTAINS_METRICS;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::observed::__private::visit_flattened(&self.generic, visitor)?;
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+    impl<T: 'static> ::observed::Event for Flattened<T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::with_field_metrics(
+            ::observed::__private::event_description(
+                "flattened",
+                ::core::option::Option::Some(::core::any::TypeId::of::<Flattened<T>>()),
+                ::core::option::Option::None,
+                ::core::option::Option::None,
+                false,
+                &::observed::__private::event_fields([]),
+            ),
+            false || <T as ::observed::VisitFields>::CONTAINS_METRICS,
+        );
+    }
+};

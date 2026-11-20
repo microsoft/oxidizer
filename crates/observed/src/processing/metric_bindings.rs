@@ -17,6 +17,7 @@ use crate::{Event, Value};
 /// Configure bindings at startup, then share them read-only across processors.
 /// Recording selects registered Rust type identities and stable numeric field
 /// indices. The lazy field visitor evaluates only bound measurement getters.
+/// Flattened fields are not in the static field list and are not recorded.
 /// Successful recording performs no string matching, hashing, allocation,
 /// redaction, or enrichment visits; other event fields are still enumerated.
 ///
@@ -317,7 +318,10 @@ mod tests {
 
     impl Event for Unidentified {
         const DESCRIPTION: EventDescription = EventDescription::new("untyped").with_fields(Bound::DESCRIPTION.fields());
+    }
 
+    impl crate::VisitFields for Unidentified {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

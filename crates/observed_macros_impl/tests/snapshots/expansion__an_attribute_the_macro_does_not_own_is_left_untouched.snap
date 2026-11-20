@@ -9,6 +9,21 @@ struct Ignored {
     v: i64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Ignored {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.v.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Ignored {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "ignored",
@@ -30,17 +45,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.v.clone()),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

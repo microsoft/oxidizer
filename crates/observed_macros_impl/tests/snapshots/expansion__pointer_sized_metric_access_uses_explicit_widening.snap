@@ -7,6 +7,27 @@ struct PointerMetrics {
     delta: isize,
 }
 const _: () = {
+    impl ::observed::VisitFields for PointerMetrics {
+        const CONTAINS_METRICS: bool = true;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.bytes.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.delta.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for PointerMetrics {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "pointer.metrics",
@@ -53,23 +74,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.bytes.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_| ::observed::Value::from(self.delta.clone()),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

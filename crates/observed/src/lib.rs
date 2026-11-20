@@ -225,7 +225,7 @@ pub(crate) mod value;
 
 // Re-export core types at the crate root for convenience.
 pub use error::{FlushError, SinkFlushError};
-pub use event::Event;
+pub use event::{Event, VisitFields};
 pub use key::Key;
 /// Derives the [`Enrichment`](enrichment::Enrichment) trait for a struct.
 ///
@@ -337,7 +337,7 @@ pub use key::Key;
 /// )();
 /// ```
 pub use observed_macros::Enrichment;
-/// Declares a struct as an [`Event`] and generates its trait impl.
+/// Declares a struct as an [`Event`] and generates its [`VisitFields`] and [`Event`] impls.
 ///
 /// # Full syntax
 ///
@@ -368,6 +368,10 @@ pub use observed_macros::Enrichment;
 ///     opt: Option<T>,                       // `None` → filled with "n/a" (default)
 ///     #[if_none(drop)]                      // ...or omit `opt` entirely when `None`
 ///     opt2: Option<T>,
+///
+///     // ── fields known only at run time ────────────────────────
+///     #[flatten]                            // visit the fields of `extra` here; E: VisitFields
+///     extra: E,
 /// }
 /// ```
 ///
@@ -399,7 +403,7 @@ pub use observed_macros::Enrichment;
 ///
 /// The macro attaches a static field inventory to [`Event::DESCRIPTION`].
 /// [`EventDescription::fields`](metadata::EventDescription::fields) exposes the same
-/// descriptors passed to [`Event::visit_fields`], with stable numeric field indices
+/// descriptors passed to [`VisitFields::visit_fields`], with stable numeric field indices
 /// and declared measurement representations. A fieldless counter remains in
 /// [`EventDescription::metric`](metadata::EventDescription::metric).
 ///
@@ -478,6 +482,7 @@ pub use observed_macros::Enrichment;
 /// | `#[unredacted]` | Escape hatch: bypass redaction for a value that carries no user data. Never implicit. The type must implement `Into<Value>`. |
 /// | `#[data_class(<expr>)]` | Wrap the value in `Sensitive::new(value, <expr>)` for classification. |
 /// | `#[if_none(drop)]` / `#[if_none("...")]` | Control how a `None` `Option<T>` is recorded. The default is `#[if_none("n/a")]`. |
+/// | `#[flatten]` | Visit the fields of the value as fields of the event. The type must implement [`VisitFields`]. If the type is an `#[event]`, its fields reach the log only if it has a severity attribute, such as `#[info]`. |
 ///
 /// `#[unredacted]` and `#[data_class(...)]` are mutually exclusive.
 ///
@@ -592,5 +597,20 @@ pub mod __private {
         fields: &'static [crate::metadata::FieldDescriptor],
     ) -> crate::metadata::EventDescription {
         crate::metadata::EventDescription::from_parts(name, type_id, log, metric, false, disabled).with_fields(fields)
+    }
+
+    #[must_use]
+    pub const fn with_field_metrics(
+        description: crate::metadata::EventDescription,
+        has_field_metrics: bool,
+    ) -> crate::metadata::EventDescription {
+        description.with_field_metrics(has_field_metrics)
+    }
+
+    pub fn visit_flattened(
+        value: &impl crate::VisitFields,
+        visitor: &mut crate::processing::FieldVisitorFn<'_>,
+    ) -> std::ops::ControlFlow<()> {
+        value.visit_fields(&mut |field, getter| visitor(&field.without_field_index(), getter))
     }
 }

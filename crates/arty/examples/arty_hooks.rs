@@ -11,7 +11,7 @@ use arty::task::{Context, JoinError};
 async fn main(cx: Context) -> Result<(), JoinError> {
     cx.control().on(HookFn::<Panic, _>::new((), |event, ()| {
         println!("{event:?}");
-        event.ignore();
+        event.set_ignore();
     }));
 
     let panic = cx.scheduler().spawn(async |_| panic!("contained panic")).await.unwrap_err();

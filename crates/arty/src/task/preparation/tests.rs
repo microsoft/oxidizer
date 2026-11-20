@@ -14,7 +14,8 @@ use futures::executor::block_on;
 
 use super::*;
 use crate::runtime::monitoring::{BlockingTaskMonitoring, TaskMonitoring};
-use crate::runtime::{Runtime, Shutdown, WorkersPolicy};
+use crate::runtime::policy::WorkersPolicy;
+use crate::runtime::{Runtime, Shutdown};
 use crate::task::Context;
 use crate::task::handle::JoinHandlePool;
 
@@ -60,7 +61,7 @@ fn shutdown_cancelled_deferred_task_stays_pending_without_invoking_factory() {
     let (runtime, cx) = test_context();
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
-    cx.control().request_stop();
+    cx.control().shutdown();
     let mut task = pin!(DeferredTask::new(
         move |_| {
             factory_invoked.store(true, Ordering::Release);

@@ -46,9 +46,6 @@ pub struct SimpleClock(TimeKind);
 enum TimeKind {
     /// Reads real OS time. Stateless and zero-cost.
     System,
-    /// Reads lower-precision OS time with lower overhead.
-    #[cfg(any(feature = "fast-instant", test))]
-    SystemFast,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
     Controlled(crate::ClockControl),
@@ -65,47 +62,10 @@ impl SimpleClock {
         Self(TimeKind::System)
     }
 
-    /// Selects lower-overhead [`Instant`] reads where supported.
-    ///
-    /// On Linux and Windows, this option uses a lower-precision source. The
-    /// platform defines its resolution. On Windows, the resolution is normally
-    /// 10 to 16 milliseconds. Other platforms use [`Instant::now`].
-    ///
-    /// The setting applies only to this clock value. A clone can use a different
-    /// setting. A stopwatch keeps the setting of its source clock. This option
-    /// does not affect controlled clocks.
-    ///
-    /// # Performance
-    ///
-    /// Enable fast instant reads only if measurements show that
-    /// [`SimpleClock::instant`] is a performance bottleneck. Otherwise, use the
-    /// default precise source.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tick::SimpleClock;
-    ///
-    /// let precise_clock = SimpleClock::new_system();
-    /// let fast_clock = precise_clock.clone().with_fast_instant(true);
-    ///
-    /// let precise = precise_clock.instant();
-    /// let fast = fast_clock.instant();
-    /// ```
-    #[cfg(any(feature = "fast-instant", test))]
+    #[cfg(any(feature = "coarse-time", test))]
     #[must_use]
-    pub fn with_fast_instant(self, enabled: bool) -> Self {
-        match self.0 {
-            TimeKind::System | TimeKind::SystemFast if enabled => Self(TimeKind::SystemFast),
-            TimeKind::System | TimeKind::SystemFast => Self(TimeKind::System),
-            #[cfg(any(feature = "test-util", test))]
-            TimeKind::Controlled(control) => Self(TimeKind::Controlled(control)),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn uses_fast_instant(&self) -> bool {
-        matches!(self.0, TimeKind::SystemFast)
+    pub(crate) const fn is_system(&self) -> bool {
+        matches!(self.0, TimeKind::System)
     }
 
     /// Creates a frozen `SimpleClock`.
@@ -189,8 +149,6 @@ impl SimpleClock {
     pub fn system_time(&self) -> SystemTime {
         match &self.0 {
             TimeKind::System => SystemTime::now(),
-            #[cfg(any(feature = "fast-instant", test))]
-            TimeKind::SystemFast => SystemTime::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.system_time(),
         }
@@ -200,8 +158,8 @@ impl SimpleClock {
     ///
     /// This method is intentionally infallible for practical production use.
     /// Production data means a current value read from the operating system
-    /// clock without test-controlled offsets. All `tick::fmt` types cover that
-    /// range. Requiring
+    /// clock without test-controlled offsets. Common timestamp types, such as
+    /// `jiff::Timestamp`, cover that range. Requiring
     /// every caller to handle a conversion error would add an error path that
     /// supported production formats cannot reach.
     ///
@@ -253,8 +211,6 @@ impl SimpleClock {
     pub fn instant(&self) -> Instant {
         match &self.0 {
             TimeKind::System => Instant::now(),
-            #[cfg(any(feature = "fast-instant", test))]
-            TimeKind::SystemFast => crate::fast_instant::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.instant(),
         }
@@ -263,37 +219,14 @@ impl SimpleClock {
     /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
-        crate::Stopwatch::new(self)
+        let mut stopwatch = crate::Stopwatch::new(self);
+        stopwatch.start();
+        stopwatch
     }
 }
 
 impl AsRef<Self> for SimpleClock {
     fn as_ref(&self) -> &Self {
         self
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
-    #[test]
-    fn private_time_kind_tracks_clone_local_fast_instant_configuration() {
-        // The selected private `TimeKind` variant is not observable through the public API.
-        let precise_clock = SimpleClock::new_system();
-        let fast_clock = precise_clock.clone().with_fast_instant(true);
-        let precise_again = fast_clock.clone().with_fast_instant(false);
-
-        assert!(matches!(precise_clock.0, TimeKind::System));
-        assert!(matches!(fast_clock.0, TimeKind::SystemFast));
-        assert!(matches!(precise_again.0, TimeKind::System));
-
-        _ = fast_clock.system_time();
-        _ = fast_clock.instant();
-
-        let controlled_clock = SimpleClock::new_frozen().with_fast_instant(true);
-        assert!(!controlled_clock.uses_fast_instant());
     }
 }

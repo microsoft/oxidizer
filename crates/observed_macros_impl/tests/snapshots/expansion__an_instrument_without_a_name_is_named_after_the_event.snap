@@ -6,6 +6,21 @@ struct Heartbeat {
     level: f64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Heartbeat {
+        const CONTAINS_METRICS: bool = true;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.level.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Heartbeat {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "heartbeat",
@@ -42,17 +57,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.level.clone()),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

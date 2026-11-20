@@ -267,13 +267,38 @@ impl DispatcherCore {
             return;
         }
 
+        // Clone before taking the retention lock because application Clone code
+        // can register another hook.
+        let delivery = hook.clone();
+        // Retain the caller's original before a callback runs or a command can
+        // reach another worker. retain_hook releases the lock before delivery.
+        if hook.is_retained() && !self.retain_hook(hook) {
+            return;
+        }
+        let hook = delivery;
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        let mut remote = self
+            .worker_endpoints
+            .iter()
+            .filter(|endpoint| source.as_ref().is_none_or(|source| source != &endpoint.thread))
+            .peekable();
         if let Some(source) = &source {
+            if remote.peek().is_none() {
+                LocalWorker::install_hook(hook, Some(source));
+                return;
+            }
             LocalWorker::install_hook(hook.clone(), Some(source));
         }
-        for endpoint in &self.worker_endpoints {
-            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
-                continue;
+        while let Some(endpoint) = remote.next() {
+            // The prepared clone becomes the final worker's data. Earlier
+            // workers receive clones, so application Clone runs once per worker.
+            if remote.peek().is_none() {
+                _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
+                    hook,
+                    source: source.clone(),
+                });
+                endpoint.waker.wake_by_ref();
+                break;
             }
             _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
                 hook: hook.clone(),
@@ -281,16 +306,15 @@ impl DispatcherCore {
             });
             endpoint.waker.wake_by_ref();
         }
-        self.retain_hook(hook);
     }
 
-    fn retain_hook(&self, hook: HookRegistration) {
-        if !hook.is_retained() {
-            return;
-        }
+    fn retain_hook(&self, hook: HookRegistration) -> bool {
         let mut retained = self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS);
         if matches!(self.shutdown().state(), ShutdownState::Running) {
             retained.push(hook);
+            true
+        } else {
+            false
         }
     }
 
@@ -476,6 +500,19 @@ mod tests {
         fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
     }
 
+    struct StopOnClone(Arc<DispatcherCore>);
+
+    impl Clone for StopOnClone {
+        fn clone(&self) -> Self {
+            self.0.stop_inner(ShutdownCause::default());
+            Self(self.0.clone())
+        }
+    }
+
+    impl ThreadAware for StopOnClone {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
     #[test]
     fn retained_hook_allows_registration_from_clone() {
         let threads = test_threads(1);
@@ -490,10 +527,24 @@ mod tests {
         assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
 
         dispatcher.stop_inner(ShutdownCause::default());
-        dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {})));
+        assert!(!dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {}))));
         assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
         dispatcher.release_retained_hooks();
         assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shutdown_from_clone_prevents_retention_and_delivery() {
+        let threads = test_threads(1);
+        let (worker, worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        let hook = registration(HookFn::<WorkerInit, _>::new(StopOnClone(dispatcher.clone()), |_event, _data| {}));
+
+        dispatcher.register_hook(hook);
+
+        assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+        assert!(matches!(worker_rx.system_receiver().try_recv().unwrap(), SystemCommand::Shutdown));
+        worker_rx.system_receiver().try_recv().unwrap_err();
     }
 
     #[test]

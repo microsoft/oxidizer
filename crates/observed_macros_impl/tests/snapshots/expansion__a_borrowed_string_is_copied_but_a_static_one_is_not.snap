@@ -13,6 +13,79 @@ struct Strings<'a> {
     classified_ref: &'a Classified,
 }
 const _: () = {
+    impl<'a> ::observed::VisitFields for Strings<'a> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.borrowed),
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.qualified),
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|_| ::observed::Value::from(self.immortal.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
+                    &|_| ::observed::Value::from(self.numeric_ref.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
+                    &|_| ::observed::Value::from(self.owned.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        self.redactable_ref,
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[6usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        self.parenthesized,
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[7usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            self.classified_ref,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a> ::observed::Event for Strings<'a> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "strings",
@@ -85,75 +158,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(
-                        ::std::sync::Arc::<str>::from(self.borrowed),
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_| ::observed::Value::from(
-                        ::std::sync::Arc::<str>::from(self.qualified),
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                    &|_| ::observed::Value::from(self.immortal.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
-                    &|_| ::observed::Value::from(self.numeric_ref.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
-                    &|_| ::observed::Value::from(self.owned.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        self.redactable_ref,
-                        engine,
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[6usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        self.parenthesized,
-                        engine,
-                    ),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[7usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        &::observed::__private::Sensitive::new(
-                            self.classified_ref,
-                            DataTaxonomy::Euii,
-                        ),
-                        engine,
-                    ),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

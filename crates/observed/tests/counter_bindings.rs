@@ -18,7 +18,7 @@ use observed::__private::{event_description, event_fields, field_descriptor, log
 use observed::interop::{DynEvent, emit_dyn_event};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricValueKind};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn, MetricBindings};
-use observed::{Event, FlushError, Sink, Value, emit, event};
+use observed::{Event, FlushError, Sink, Value, VisitFields, emit, event};
 use ohno::ErrorExt;
 use tick::SimpleClock;
 
@@ -274,7 +274,10 @@ impl Event for NumericOnly {
             )),
         )]),
     );
+}
 
+impl VisitFields for NumericOnly {
+    const CONTAINS_METRICS: bool = true;
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         visitor(&Self::DESCRIPTION.fields()[0], &|_| Value::from(self.amount))
     }
@@ -374,6 +377,9 @@ fn bound_recording_never_evaluates_unbound_field_getters() {
                 ),
             ]),
         );
+    }
+    impl VisitFields for Guarded {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             const FOREIGN_FIELDS: &[FieldDescriptor] = &event_fields([
                 field_descriptor("first", Some(log_field("first")), None),
@@ -435,6 +441,9 @@ fn fieldless_counters_record_one_without_visiting_unneeded_fields() {
             false,
             &event_fields([field_descriptor("unused", Some(log_field("unused")), None)]),
         );
+    }
+    impl VisitFields for CountOnly {
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             panic!("a fieldless counter needs no field values")
         }
@@ -467,6 +476,9 @@ fn invalid_static_field_indices_fail_before_preparing_targets() {
                 )),
             )],
         );
+    }
+    impl VisitFields for Unindexed {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
@@ -523,7 +535,10 @@ impl Event for MissingSlot {
         false,
         NumericOnly::DESCRIPTION.fields(),
     );
+}
 
+impl VisitFields for MissingSlot {
+    const CONTAINS_METRICS: bool = true;
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }
@@ -675,6 +690,9 @@ struct Unidentified;
 
 impl Event for Unidentified {
     const DESCRIPTION: EventDescription = event_description("unidentified", None, None, None, false, NumericOnly::DESCRIPTION.fields());
+}
+impl VisitFields for Unidentified {
+    const CONTAINS_METRICS: bool = true;
     fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }
@@ -923,6 +941,9 @@ fn inconsistent_numeric_representation_is_reported_before_delivery() {
             false,
             NumericOnly::DESCRIPTION.fields(),
         );
+    }
+    impl VisitFields for WrongType {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             visitor(&Self::DESCRIPTION.fields()[0], &|_| Value::I64(-1))
         }
@@ -960,6 +981,9 @@ fn nonnumeric_getters_and_incompatible_float_values_are_reported() {
     struct InvalidValue(Value);
     impl Event for InvalidValue {
         const DESCRIPTION: EventDescription = NumericOnly::DESCRIPTION;
+    }
+    impl VisitFields for InvalidValue {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             visitor(&Self::DESCRIPTION.fields()[0], &|_| self.0.clone())
         }
@@ -984,7 +1008,7 @@ fn nonnumeric_getters_and_incompatible_float_values_are_reported() {
             Self::DESCRIPTION
         }
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            Event::visit_fields(self, visitor)
+            VisitFields::visit_fields(self, visitor)
         }
     }
     let mut bindings = MetricBindings::<()>::new();
@@ -1083,6 +1107,9 @@ fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
     const VISIT_FIELDS: &[FieldDescriptor] = &event_fields([NumericOnly::DESCRIPTION.fields()[0], NumericOnly::DESCRIPTION.fields()[0]]);
     impl Event for Visits {
         const DESCRIPTION: EventDescription = event_description("visits", Some(TypeId::of::<Self>()), None, None, false, VISIT_FIELDS);
+    }
+    impl VisitFields for Visits {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             for &index in self.0 {
                 visitor(&Self::DESCRIPTION.fields()[index], &|_| {
@@ -1112,7 +1139,7 @@ fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
             Self::DESCRIPTION
         }
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            Event::visit_fields(self, visitor)
+            VisitFields::visit_fields(self, visitor)
         }
     }
     let mut bindings = MetricBindings::new();
@@ -1145,4 +1172,82 @@ fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
         "event `visits` has invalid metric field 1: nonnumeric measurement supplied"
     );
     assert_eq!(values, [(0, Value::U64(7))]);
+}
+
+#[test]
+fn flattened_fields_keep_routing_without_reusing_outer_metric_indices() {
+    #[event("inner")]
+    #[counter(value, name = "inner.value")]
+    struct Inner {
+        #[unredacted]
+        value: u64,
+    }
+    #[event("nested")]
+    struct Nested {
+        #[flatten]
+        inner: Inner,
+    }
+    #[event("outer")]
+    #[counter(before, name = "before")]
+    #[counter(after, name = "after")]
+    struct Outer {
+        #[unredacted]
+        before: u64,
+        #[flatten]
+        nested: Nested,
+        #[unredacted]
+        after: u64,
+    }
+
+    assert!(Nested::DESCRIPTION.contains_metrics());
+    assert!(Nested::DESCRIPTION.fields().is_empty());
+    assert!(MetricBindings::<()>::new().bind_event::<Nested>(|_| ()).is_err());
+    let event = Outer {
+        before: 3,
+        nested: Nested {
+            inner: Inner { value: 999 },
+        },
+        after: 5,
+    };
+    let mut fields = Vec::new();
+    let flow = event.visit_fields(&mut |descriptor, _| {
+        fields.push((
+            descriptor.field_name(),
+            descriptor.field_index(),
+            descriptor.metric().unwrap().instrument_description().unwrap().instrument_name(),
+        ));
+        ControlFlow::Continue(())
+    });
+    assert_eq!(flow, ControlFlow::Continue(()));
+    assert_eq!(
+        fields,
+        [
+            ("before", Some(0), "before"),
+            ("value", None, "inner.value"),
+            ("after", Some(1), "after")
+        ]
+    );
+    let mut visited = Vec::new();
+    let flow = event.visit_fields(&mut |descriptor, _| {
+        visited.push(descriptor.field_name());
+        if descriptor.field_index().is_none() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    assert_eq!((flow, visited), (ControlFlow::Break(()), vec!["before", "value"]));
+
+    let totals: [Arc<AtomicU64>; 2] = std::array::from_fn(|_| Arc::new(AtomicU64::new(0)));
+    let mut bindings = MetricBindings::new();
+    let mut next = 0;
+    bindings
+        .bind_event::<Outer>(|_| {
+            let target = Arc::clone(&totals[next]);
+            next += 1;
+            target
+        })
+        .unwrap();
+    emit!(sink(bindings), event);
+    assert_eq!(totals.map(|total| total.load(Ordering::Relaxed)), [3, 5]);
 }

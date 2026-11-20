@@ -11,6 +11,39 @@ struct HttpRequest {
     request_id: ClassifiedString,
 }
 const _: () = {
+    impl ::observed::VisitFields for HttpRequest {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.status.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            &self.user,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for HttpRequest {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "http.request",
@@ -48,35 +81,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_| ::observed::Value::from(self.status.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                    &|engine| ::observed::Value::from_redacted(
-                        &::observed::__private::Sensitive::new(
-                            &self.user,
-                            DataTaxonomy::Euii,
-                        ),
-                        engine,
-                    ),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

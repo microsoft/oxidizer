@@ -11,8 +11,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
+use arty::runtime::Runtime;
 use arty::runtime::hook::{HookFn, WorkerInit};
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
 use arty::task::Context;
 use arty_tokio::TokioCompatExt as _;
 use static_assertions::assert_impl_all;
@@ -182,6 +183,37 @@ fn owned_custom_runtime_supports_tokio_tasks() {
     assert_eq!(actual_runtime, expected_runtime);
     assert_eq!(value, 42);
     stop_bounded(runtime);
+}
+
+#[test]
+fn independent_arty_runtimes_use_independent_tokio_runtimes() {
+    let first_tokio = Builder::new_multi_thread().worker_threads(1).build().unwrap();
+    let first_tokio_id = first_tokio.handle().id().to_string();
+    let first = Runtime::builder()
+        .tokio_compat_with(arty_tokio::TokioHandle::from(first_tokio))
+        .build()
+        .unwrap();
+
+    let second_tokio = Builder::new_multi_thread().worker_threads(1).build().unwrap();
+    let second_tokio_id = second_tokio.handle().id().to_string();
+    let second = Runtime::builder()
+        .tokio_compat_with(arty_tokio::TokioHandle::from(second_tokio))
+        .build()
+        .unwrap();
+
+    let first_result = first
+        .scheduler()
+        .block_on(async |_| (Handle::current().id().to_string(), tokio::spawn(async { 21 }).await.unwrap()))
+        .unwrap();
+    let second_result = second
+        .scheduler()
+        .block_on(async |_| (Handle::current().id().to_string(), tokio::spawn(async { 42 }).await.unwrap()))
+        .unwrap();
+
+    assert_eq!(first_result, (first_tokio_id, 21));
+    assert_eq!(second_result, (second_tokio_id, 42));
+    stop_bounded(first);
+    stop_bounded(second);
 }
 
 #[test]

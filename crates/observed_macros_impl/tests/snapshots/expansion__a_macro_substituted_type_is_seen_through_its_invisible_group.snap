@@ -8,6 +8,35 @@ struct FromMacro<'a> {
     label: &'a str,
 }
 const _: () = {
+    impl<'a> ::observed::VisitFields for FromMacro<'a> {
+        const CONTAINS_METRICS: bool = true;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.hits.clone()),
+                )?;
+            }
+            if let ::core::option::Option::Some(__val) = self.maybe.as_ref() {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.label),
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a> ::observed::Event for FromMacro<'a> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "macro.built",
@@ -60,31 +89,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.hits.clone()),
-                )?;
-            }
-            if let ::core::option::Option::Some(__val) = self.maybe.as_ref() {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_engine| ::observed::Value::from_redacted(__val, _engine),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                    &|_| ::observed::Value::from(
-                        ::std::sync::Arc::<str>::from(self.label),
-                    ),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

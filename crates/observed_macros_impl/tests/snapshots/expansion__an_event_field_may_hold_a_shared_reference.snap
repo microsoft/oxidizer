@@ -8,6 +8,43 @@ struct SharedRefs<'a> {
     optional: Option<&'a u64>,
 }
 const _: () = {
+    impl<'a> ::observed::VisitFields for SharedRefs<'a> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.plain.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.nested.clone()),
+                )?;
+            }
+            {
+                match self.optional.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                            &|_engine| ::observed::Value::from(*__val),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(
+                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                            &|_| ::observed::Value::from("n/a"),
+                        )?;
+                    }
+                }
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a> ::observed::Event for SharedRefs<'a> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shared.refs",
@@ -47,39 +84,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|_| ::observed::Value::from(self.plain.clone()),
-                )?;
-            }
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
-                    &|_| ::observed::Value::from(self.nested.clone()),
-                )?;
-            }
-            {
-                match self.optional.as_ref() {
-                    ::core::option::Option::Some(__val) => {
-                        visitor(
-                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                            &|_engine| ::observed::Value::from(*__val),
-                        )?;
-                    }
-                    ::core::option::Option::None => {
-                        visitor(
-                            &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
-                            &|_| ::observed::Value::from("n/a"),
-                        )?;
-                    }
-                }
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

@@ -11,6 +11,15 @@ struct Subject {
     v: u64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
@@ -20,12 +29,6 @@ const _: () = {
             false,
             &::observed::__private::event_fields([]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -38,6 +41,15 @@ struct Subject {
     v: u64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
@@ -47,12 +59,6 @@ const _: () = {
             false,
             &::observed::__private::event_fields([]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -65,6 +71,15 @@ struct Subject {
     v: u64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
@@ -74,12 +89,6 @@ const _: () = {
             true,
             &::observed::__private::event_fields([]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -92,6 +101,15 @@ struct Subject {
     v: u64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Subject {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
@@ -101,11 +119,5 @@ const _: () = {
             true,
             &::observed::__private::event_fields([]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

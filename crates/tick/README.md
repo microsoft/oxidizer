@@ -73,34 +73,31 @@ If `test-util` is disabled, its support adds no runtime overhead.
 * [`Delay`][__link8] completes after a duration.
 * [`Timer`][__link9] produces periodic ticks.
 * [`Error`][__link10] reports failures and provides limited error inspection.
-* [`fmt`][__link11] parses and displays `SystemTime`. Enable `fmt` to use it.
-* [`runtime`][__link12] connects clocks to async runtimes.
+* [`runtime`][__link11] connects clocks to async runtimes.
 
-The [design guide][__link13]
+The [design guide][__link12]
 explains the runtime-neutral boundary and the internal timer architecture.
 
 ## Extensions
 
-* [`FutureExt`][__link14] adds timeouts to `Future`.
-* [`SystemTimeExt`][__link15] adds display formats to
-  [`SystemTime`][__link16].
+* [`FutureExt`][__link13] adds timeouts to `Future`.
 
 ## Time retrieval without timers
 
-Use [`SimpleClock`][__link17] when an API only reads time. It has no timers, so it
-needs no async runtime or driver. [`SimpleClock::new_system`][__link18] creates a
+Use [`SimpleClock`][__link14] when an API only reads time. It has no timers, so it
+needs no async runtime or driver. [`SimpleClock::new_system`][__link15] creates a
 ready-to-use clock that reads operating system time.
 
 Each clock type provides the `SimpleClock` interface:
 
-* [`Clock`][__link19] implements [`AsRef<SimpleClock>`][__link20] and exposes
-  [`simple_clock()`][__link21]. You can pass a timer-capable clock
+* [`Clock`][__link16] implements [`AsRef<SimpleClock>`][__link17] and exposes
+  [`simple_clock()`][__link18]. You can pass a timer-capable clock
   to an API that accepts `SimpleClock`.
-* With the `test-util` feature, [`ClockControl::to_simple_clock`][__link22] creates a controlled
-  `SimpleClock`. A [`Clock`][__link23] from the same control observes the same time.
+* With the `test-util` feature, [`ClockControl::to_simple_clock`][__link19] creates a controlled
+  `SimpleClock`. A [`Clock`][__link20] from the same control observes the same time.
 
-A time-only API can accept either clock. For example, [`Stopwatch`][__link24] accepts
-any [`AsRef<SimpleClock>`][__link25]:
+A time-only API can accept either clock. For example, [`Stopwatch`][__link21] accepts
+any [`AsRef<SimpleClock>`][__link22]:
 
 ```rust
 use tick::{SimpleClock, Stopwatch};
@@ -111,7 +108,8 @@ let clock = SimpleClock::new_system();
 let _now = clock.system_time();
 
 // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
-let stopwatch = Stopwatch::new(&clock);
+let mut stopwatch = Stopwatch::new(&clock);
+stopwatch.start();
 let _elapsed = stopwatch.elapsed();
 ```
 
@@ -124,29 +122,44 @@ Time has two common uses:
 * Human time uses calendars, local clock time, and time zones. These values
   can be ambiguous.
 
-This crate focuses on machine time. Use [jiff][__link26] or [time][__link27] for
-human time. `tick` values can convert to types from these crates. See the
-`interop_*` examples.
+This crate focuses on machine time. Use [Jiff][__link23] for parsing, formatting,
+calendar arithmetic, local clock time, and time zones.
+
+[`Clock::system_time_as`][__link24] and [`SimpleClock::system_time_as`][__link25] convert the
+current time directly to types that implement `TryFrom<SystemTime>`.
+Jiff’s [`Timestamp`][__link26]
+implements this conversion:
+
+```rust
+use jiff::Timestamp;
+use tick::Clock;
+
+let clock = Clock::new_frozen();
+let timestamp: Timestamp = clock.system_time_as();
+assert_eq!(timestamp, Timestamp::UNIX_EPOCH);
+```
+
+See the `interop_jiff` example for time zones and formatting.
 
 ## Thread-aware relocation
 
-All clock types implement [`ThreadAware`][__link28].
+All clock types implement [`ThreadAware`][__link27].
 Thread-isolated runtimes can use it to isolate timers.
 
-If an [`InactiveClock`][__link29] moves between coordinates
+If an [`InactiveClock`][__link28] moves between coordinates
 with the same runtime owner, each destination thread gets separate timer
-storage. After activation, each thread has an independent [`Clock`][__link30] and
-[`ClockDriver`][__link31]. A move to another owner keeps the
+storage. After activation, each thread has an independent [`Clock`][__link29] and
+[`ClockDriver`][__link30]. A move to another owner keeps the
 existing storage instead.
 
-Relocation does not change a [`ClockControl`][__link32] clock. Its clones share one
+Relocation does not change a [`ClockControl`][__link31] clock. Its clones share one
 controlled time state across threads.
 
-See the [`runtime`][__link33] module documentation for setup examples.
+See the [`runtime`][__link32] module documentation for setup examples.
 
 ## Testing
 
-Enable `test-util` to use [`ClockControl`][__link34] in tests.
+Enable `test-util` to use [`ClockControl`][__link33] in tests.
 
 Do not enable `test-util` in production dependencies. Enable it only in
 `dev-dependencies`. The feature adds test support that reduces production
@@ -156,7 +169,7 @@ performance.
 
 ### Use `Clock` to retrieve absolute time
 
-A clock returns absolute time as `SystemTime`. See [`Clock`][__link35] for details.
+A clock returns absolute time as `SystemTime`. See [`Clock`][__link34] for details.
 
 ```rust
 use std::time::{Duration, SystemTime};
@@ -173,7 +186,7 @@ assert!(time1 <= time2);
 
 ### Use `Clock` to retrieve relative time
 
-A clock provides relative time through [`Clock::instant`][__link36] and [`Stopwatch`][__link37].
+A clock provides relative time through [`Clock::instant`][__link35] and [`Stopwatch`][__link36].
 
 ```rust
 use std::time::{Duration, Instant};
@@ -225,49 +238,32 @@ for _ in 0..3 {
 
 You can enable these features in `Cargo.toml`:
 
-* `tokio` adds [Tokio][__link38] integration and
-  [`Clock::new_tokio`][__link39].
-* `test-util` adds [`ClockControl`][__link40] for deterministic tests. It can freeze
+* `tokio` adds [Tokio][__link37] integration and
+  [`Clock::new_tokio`][__link38].
+* `test-util` adds [`ClockControl`][__link39] for deterministic tests. It can freeze
   time, advance time, or advance timers automatically. Enable it only in
   `dev-dependencies`.
-* `serde` adds serialization through [serde][__link41].
-* `fmt` adds the [`fmt`][__link42] module and formats such as ISO 8601 and RFC 2822.
-* `fast-instant` lets each clock clone select a lower-overhead,
-  lower-precision instant source on Linux and Windows. Timer scheduling stays
-  precise. Other platforms use [`std::time::Instant::now`][__link43]. Precise reads
-  remain the default.
+* `coarse-time` adds [`Stopwatch::new_coarse`][__link40]. This constructor uses a
+  lower-overhead, lower-precision instant source on Linux and Windows.
+  Other platforms use [`std::time::Instant::now`][__link41].
 
-### Fast instant contract
+### Coarse stopwatch
 
-Fast instant reads are disabled by default. Each clock clone has its own
-setting. Values do not decrease, but consecutive reads can be equal. The
-platform defines their precision. A stopwatch keeps the source setting of
-its clock.
-
-This option does not affect `system_time()`, controlled clocks, or precise
-timer scheduling. On an unsupported platform, it keeps the standard instant
-source.
-
-### Using precise and fast clocks together
-
-A component can create a fast clone from an existing [`Clock`][__link44]. It does not
-need a separate application dependency. The original clock stays precise:
+Use a coarse stopwatch only if measurements show that elapsed-time reads are
+a performance bottleneck. Values do not decrease, but consecutive reads can
+be equal. The platform defines their precision.
 
 ```rust
-use tick::Clock;
+use tick::{SimpleClock, Stopwatch};
 
-fn process(clock: &Clock) {
-    let fast_clock = clock.clone().with_fast_instant(true);
-
-    let decision_time = clock.instant();
-    let telemetry_time = fast_clock.instant();
-    // Use precise time for logic and fast time for debug data.
-}
+let mut stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
+stopwatch.start();
+let elapsed = stopwatch.elapsed();
 ```
 
 ## More examples
 
-The [time examples][__link45]
+The [time examples][__link42]
 show more uses of these types.
 
 
@@ -276,48 +272,45 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvr6nKxKRpLMbfOLXvPnaRFIbB4FRhucNEsMbRWsFUYFpzDhhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbDiMAK2cRq_MbyZcVrgKf53gbMuzJwvcqqq0b_xW_a7pSGOBhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
  [__link0]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.9.1/tick/?search=Error
- [__link11]: https://docs.rs/tick/0.9.1/tick/fmt/index.html
- [__link12]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
- [__link13]: https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md
- [__link14]: https://docs.rs/tick/0.9.1/tick/?search=FutureExt
- [__link15]: https://docs.rs/tick/0.9.1/tick/?search=SystemTimeExt
- [__link16]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
- [__link17]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock
- [__link18]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock::new_system
- [__link19]: https://docs.rs/tick/0.9.1/tick/?search=Clock
+ [__link11]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
+ [__link12]: https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md
+ [__link13]: https://docs.rs/tick/0.9.1/tick/?search=FutureExt
+ [__link14]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock
+ [__link15]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock::new_system
+ [__link16]: https://docs.rs/tick/0.9.1/tick/?search=Clock
+ [__link17]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
+ [__link18]: https://docs.rs/tick/0.9.1/tick/?search=Clock::simple_clock
+ [__link19]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl::to_simple_clock
  [__link2]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link20]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link21]: https://docs.rs/tick/0.9.1/tick/?search=Clock::simple_clock
- [__link22]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl::to_simple_clock
- [__link23]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link24]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch
- [__link25]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link26]: https://crates.io/crates/jiff
- [__link27]: https://crates.io/crates/time
- [__link28]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
- [__link29]: https://docs.rs/tick/0.9.1/tick/?search=runtime::InactiveClock
+ [__link20]: https://docs.rs/tick/0.9.1/tick/?search=Clock
+ [__link21]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch
+ [__link22]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
+ [__link23]: https://crates.io/crates/jiff
+ [__link24]: https://docs.rs/tick/0.9.1/tick/?search=Clock::system_time_as
+ [__link25]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock::system_time_as
+ [__link26]: https://docs.rs/jiff/latest/jiff/struct.Timestamp.html
+ [__link27]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
+ [__link28]: https://docs.rs/tick/0.9.1/tick/?search=runtime::InactiveClock
+ [__link29]: https://docs.rs/tick/0.9.1/tick/?search=Clock
  [__link3]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link30]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link31]: https://docs.rs/tick/0.9.1/tick/?search=runtime::ClockDriver
- [__link32]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
- [__link33]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
- [__link34]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
- [__link35]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link36]: https://docs.rs/tick/0.9.1/tick/?search=Clock::instant
- [__link37]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch
- [__link38]: https://tokio.rs/
- [__link39]: https://docs.rs/tick/0.9.1/tick/?search=Clock::new_tokio
+ [__link30]: https://docs.rs/tick/0.9.1/tick/?search=runtime::ClockDriver
+ [__link31]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
+ [__link32]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
+ [__link33]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
+ [__link34]: https://docs.rs/tick/0.9.1/tick/?search=Clock
+ [__link35]: https://docs.rs/tick/0.9.1/tick/?search=Clock::instant
+ [__link36]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch
+ [__link37]: https://tokio.rs/
+ [__link38]: https://docs.rs/tick/0.9.1/tick/?search=Clock::new_tokio
+ [__link39]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link4]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock
- [__link40]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
- [__link41]: https://serde.rs/
- [__link42]: https://docs.rs/tick/0.9.1/tick/fmt/index.html
- [__link43]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
- [__link44]: https://docs.rs/tick/0.9.1/tick/?search=Clock
- [__link45]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
+ [__link40]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch::new_coarse
+ [__link41]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
+ [__link42]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
  [__link5]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
  [__link6]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link7]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch

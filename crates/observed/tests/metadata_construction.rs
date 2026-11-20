@@ -4,7 +4,7 @@
 //! Generated metadata inspection and macro-owned field indexing.
 
 use observed::metadata::{InstrumentKind, MetricValueKind};
-use observed::{Event, Severity, event};
+use observed::{Event, Severity, VisitFields, event};
 
 #[test]
 fn generated_descriptions_expose_signal_metadata_without_consumer_construction() {

@@ -31,7 +31,8 @@ Use [`TokioCompatExt::tokio_compat_with`][__link2] to configure workers before t
 runtime starts:
 
 ```rust
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 use arty_tokio::TokioCompatExt as _;
 use tokio::runtime::Builder;
 
@@ -80,7 +81,7 @@ integrated with Arty.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblJY_zOW2G8YbsuD-ndQHjJUb3aR56ALBFYkbNP6UG1ouBm9hZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0rkTYYLkQgYb5Fhvnc5n5CUbsIjQx7CvPX0bfien_eMkqOFhZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
  [__link0]: https://crates.io/crates/arty/0.6.1
  [__link1]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
  [__link2]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with

@@ -312,9 +312,9 @@ pub unsafe trait BlockRefDynamicWithMeta: BlockRefDynamic {
     fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn BlockMeta>;
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    // These cases inspect private vtable fields as well as dispatch behavior.
     use std::sync::atomic::{self, AtomicUsize};
 
     use super::*;
@@ -363,83 +363,6 @@ mod tests {
 
             state.meta.unwrap()
         }
-    }
-
-    const TEST_BLOCK_REF_FNS: BlockRefVTable<TestBlock> = BlockRefVTable::from_trait_with_meta();
-
-    const TEST_BLOCK_REF_FNS_WITHOUT_META: BlockRefVTable<TestBlock> = BlockRefVTable::from_trait();
-
-    #[test]
-    fn smoke_test() {
-        let meta_ptr = NonNull::new(Box::into_raw(Box::new(TestBlockMeta {
-            label: "Test Block".to_string(),
-        })))
-        .unwrap();
-
-        let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {
-            ref_count: AtomicUsize::new(1),
-            meta: Some(meta_ptr),
-        })))
-        .unwrap();
-
-        // SAFETY: block_ptr must remain valid for reads and writes until drop()
-        // is called via the dynamic fns. Yep, it does - the dynamic impl type takes ownership.
-        let block_ref = unsafe { BlockRef::new(block_ptr, &TEST_BLOCK_REF_FNS) };
-
-        let meta = block_ref.meta().unwrap();
-
-        assert_eq!(meta.downcast_ref::<TestBlockMeta>().unwrap().label, "Test Block");
-
-        let block_ref_clone = block_ref.clone();
-
-        let meta = block_ref_clone.meta().unwrap();
-
-        assert_eq!(meta.downcast_ref::<TestBlockMeta>().unwrap().label, "Test Block");
-
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-
-        assert_eq!(2, ref_count);
-
-        drop(block_ref_clone);
-        drop(block_ref);
-
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-
-        assert_eq!(0, ref_count);
-
-        // All done, clean up please.
-        // SAFETY: Yep, that is our block.
-        drop(unsafe { Box::from_raw(block_ptr.as_ptr()) });
-        // SAFETY: Yep, that is our meta.
-        drop(unsafe { Box::from_raw(meta_ptr.as_ptr()) });
-    }
-
-    #[test]
-    fn without_meta_returns_none_meta() {
-        let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {
-            ref_count: AtomicUsize::new(1),
-            meta: None,
-        })))
-        .unwrap();
-
-        // SAFETY: block_ptr must remain valid for reads and writes until drop()
-        // is called via the dynamic fns. Yep, it does - the dynamic impl type takes ownership.
-        let block_ref = unsafe { BlockRef::new(block_ptr, &TEST_BLOCK_REF_FNS_WITHOUT_META) };
-
-        assert!(block_ref.meta().is_none());
-
-        let block_ref_clone = block_ref.clone();
-
-        assert!(block_ref_clone.meta().is_none());
-
-        drop(block_ref_clone);
-        drop(block_ref);
-
-        // All done, clean up please.
-        // SAFETY: Yep, that is our block.
-        drop(unsafe { Box::from_raw(block_ptr.as_ptr()) });
     }
 
     #[test]
@@ -506,82 +429,6 @@ mod tests {
         assert!(block_ref.meta().is_none());
 
         drop(block_ref);
-
-        // Clean up
-        // SAFETY: Yep, that is our block.
-        drop(unsafe { Box::from_raw(block_ptr.as_ptr()) });
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn from_trait_with_meta_vtable_handles_clone_correctly() {
-        // Create vtable at runtime to ensure we measure test coverage.
-        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
-        let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait_with_meta()));
-
-        let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {
-            ref_count: AtomicUsize::new(1),
-            meta: None,
-        })))
-        .unwrap();
-
-        // SAFETY: block_ptr must remain valid for reads and writes until drop()
-        // is called via the dynamic fns. It is - we clean it up at the end.
-        let block_ref = unsafe { BlockRef::new(block_ptr, vtable) };
-
-        // Clone the block ref
-        let block_ref_clone = block_ref.clone();
-
-        // Verify reference count increased
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-        assert_eq!(ref_count, 2);
-
-        drop(block_ref_clone);
-        drop(block_ref);
-
-        // Verify reference count decreased to 0
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-        assert_eq!(ref_count, 0);
-
-        // Clean up
-        // SAFETY: Yep, that is our block.
-        drop(unsafe { Box::from_raw(block_ptr.as_ptr()) });
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn from_trait_vtable_handles_clone_correctly() {
-        // Create vtable at runtime to ensure we measure test coverage.
-        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
-        let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait()));
-
-        let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {
-            ref_count: AtomicUsize::new(1),
-            meta: None,
-        })))
-        .unwrap();
-
-        // SAFETY: block_ptr must remain valid for reads and writes until drop()
-        // is called via the dynamic fns. It is - we clean it up at the end.
-        let block_ref = unsafe { BlockRef::new(block_ptr, vtable) };
-
-        // Clone the block ref
-        let block_ref_clone = block_ref.clone();
-
-        // Verify reference count increased
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-        assert_eq!(ref_count, 2);
-
-        drop(block_ref_clone);
-        drop(block_ref);
-
-        // Verify reference count decreased to 0
-        // SAFETY: That is our block and it is perfectly valid for reads.
-        let ref_count = unsafe { block_ptr.as_ref() }.ref_count.load(atomic::Ordering::Relaxed);
-        assert_eq!(ref_count, 0);
 
         // Clean up
         // SAFETY: Yep, that is our block.

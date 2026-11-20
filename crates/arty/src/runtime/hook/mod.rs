@@ -26,7 +26,7 @@
 //! use arty::runtime::Runtime;
 //! use arty::runtime::hook::Panic;
 //!
-//! let runtime = Runtime::builder().on(Panic::IGNORE).build()?;
+//! let runtime = Runtime::builder().on(Panic::ignore()).build()?;
 //! runtime.stop()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

@@ -263,7 +263,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::MonitorOptions;
-    use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+    use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };

@@ -1,0 +1,82 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"flattened\"\"#,\nr\"\n        #[info]\n        struct Flattened<'a, T> {\n            #[unredacted]\n            before: i64,\n            #[flatten]\n            concrete: Parameters<'a>,\n            #[flatten]\n            generic: T,\n            #[unredacted]\n            after: i64,\n        }\n        \",)"
+---
+struct Flattened<'a, T> {
+    before: i64,
+    concrete: Parameters<'a>,
+    generic: T,
+    after: i64,
+}
+const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Flattened<'a, T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const CONTAINS_METRICS: bool = false
+            || <Parameters<'a> as ::observed::VisitFields>::CONTAINS_METRICS
+            || <T as ::observed::VisitFields>::CONTAINS_METRICS;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.before.clone()),
+                )?;
+            }
+            ::observed::__private::visit_flattened(&self.concrete, visitor)?;
+            ::observed::__private::visit_flattened(&self.generic, visitor)?;
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.after.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+    impl<'a, T: 'static> ::observed::Event for Flattened<'a, T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::with_field_metrics(
+            ::observed::__private::event_description(
+                "flattened",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Flattened<'static, T>>(),
+                ),
+                ::core::option::Option::Some(
+                    ::observed::__private::log_description(
+                        "flattened",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                &::observed::__private::event_fields([
+                    ::observed::__private::field_descriptor(
+                        "before",
+                        ::core::option::Option::Some(
+                            ::observed::__private::log_field("before"),
+                        ),
+                        ::core::option::Option::None,
+                    ),
+                    ::observed::__private::field_descriptor(
+                        "after",
+                        ::core::option::Option::Some(
+                            ::observed::__private::log_field("after"),
+                        ),
+                        ::core::option::Option::None,
+                    ),
+                ]),
+            ),
+            false || <Parameters<'a> as ::observed::VisitFields>::CONTAINS_METRICS
+                || <T as ::observed::VisitFields>::CONTAINS_METRICS,
+        );
+    }
+};

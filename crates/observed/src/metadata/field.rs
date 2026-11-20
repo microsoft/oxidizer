@@ -114,10 +114,15 @@ impl FieldDescriptor {
         self
     }
 
+    pub(crate) const fn without_field_index(mut self) -> Self {
+        self.field_index = None;
+        self
+    }
+
     /// Returns this field's position in [`EventDescription::fields`](super::EventDescription::fields).
     ///
-    /// Event fields return `Some(index)`. Enrichment entries return `None`:
-    /// they are attached context, not fields in the event's declaration.
+    /// Direct event fields return `Some(index)`. Enrichment and flattened fields
+    /// return `None` because they are outside the event's static field list.
     /// An optional event field keeps its index even when its value is absent.
     #[must_use]
     pub const fn field_index(&self) -> Option<usize> {

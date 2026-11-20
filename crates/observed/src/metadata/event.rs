@@ -56,7 +56,6 @@ impl EventDescription {
     #[must_use]
     pub(crate) const fn with_fields(mut self, fields: &'static [FieldDescriptor]) -> Self {
         self.fields = fields;
-        self.has_field_metrics = false;
         let mut remaining = fields;
         while let [field, tail @ ..] = remaining {
             if let Some(entry) = field.metric()
@@ -66,6 +65,11 @@ impl EventDescription {
             }
             remaining = tail;
         }
+        self
+    }
+
+    pub(crate) const fn with_field_metrics(mut self, has_field_metrics: bool) -> Self {
+        self.has_field_metrics |= has_field_metrics;
         self
     }
 
@@ -129,8 +133,9 @@ impl EventDescription {
         self.log.is_some()
     }
 
-    /// Returns `true` if this event produces metric data points
-    /// (either an event-level metric or at least one field-level metric).
+    /// Returns `true` if this event produces metric data points: it has an
+    /// event-level metric, a field-level metric, or a `#[flatten]` field whose
+    /// type has field-level metrics.
     #[must_use]
     #[inline]
     pub const fn contains_metrics(&self) -> bool {

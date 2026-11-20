@@ -7,10 +7,11 @@ use seismograph::recorder::event::EventClass;
 
 use crate::backend::{Backend, Snmalloc};
 
-/// A stateless allocator handle with a backend selected at compile time.
+/// A stateless allocator handle.
 ///
 /// Use [`rallocator!`](crate::rallocator) to install the global allocator.
-/// The macro selects the backend. The default is snmalloc.
+/// The macro selects a fixed backend or defers the choice to process startup.
+/// The default is snmalloc.
 ///
 /// Handles with the same backend share allocator state. Return each allocation
 /// to the backend that created it.
@@ -84,26 +85,8 @@ impl<B: Backend> Rallocator<B> {
     #[inline(never)]
     unsafe fn reallocate_recorded(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let record = |replacement| crate::recording::resize(pointer, replacement, layout.size(), new_size, layout.align());
-        // SAFETY: The caller forwards the live block and complete resize contract.
-        unsafe { self.reallocate_recorded_with(pointer, layout, new_size, record) }
-    }
-
-    unsafe fn reallocate_recorded_with(&self, pointer: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
-        // SAFETY: The caller supplies a live block and a valid resize request.
-        let replacement = unsafe { self.backend.prepare_reallocation(pointer, layout, new_size) };
-        if replacement.is_null() {
-            return replacement;
-        }
-        if replacement != pointer || new_size != layout.size() {
-            record(replacement);
-        }
-        if replacement != pointer {
-            // SAFETY: Preparation copied the payload and kept the old block live
-            // until its successful resize event was recorded.
-            unsafe { self.backend.deallocate(pointer, layout) };
-        }
-        self.backend.publish_state();
-        replacement
+        // SAFETY: The caller supplies a valid resize. Recording only observes the block addresses.
+        unsafe { self.backend.reallocate_recorded(pointer, layout, new_size, record) }
     }
 }
 
@@ -192,7 +175,9 @@ mod tests {
         }
 
         unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            let new_layout = Layout::from_size_align(new_size, layout.align()).unwrap();
+            let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+                return std::ptr::null_mut();
+            };
             // SAFETY: The checked nonzero layout creates separate live storage.
             let replacement = unsafe { System.alloc(new_layout) };
             assert!(!replacement.is_null());
@@ -206,6 +191,25 @@ mod tests {
             assert_eq!(self.0.get(), Phase::Released);
             self.0.set(Phase::Published);
         }
+    }
+
+    #[test]
+    fn system_resize_preparation_rejects_alignment_overflow_without_retiring_the_block() {
+        let layout = Layout::new::<u64>();
+        // SAFETY: The layout has nonzero size.
+        let ptr = unsafe { System.alloc(layout) };
+        assert!(!ptr.is_null());
+        // SAFETY: The allocation owns at least one writable byte.
+        unsafe { ptr.write(0x5a) };
+
+        // SAFETY: This private preparation step accepts a nonzero size and checks
+        // the replacement layout. Rounding isize::MAX up to u64 alignment exceeds it.
+        let replacement = unsafe { System.prepare_reallocation(ptr, layout, isize::MAX as usize) };
+        assert!(replacement.is_null());
+        // SAFETY: Failed preparation leaves the initialized byte live.
+        assert_eq!(unsafe { ptr.read() }, 0x5a);
+        // SAFETY: The original System allocation still has its original layout.
+        unsafe { System.dealloc(ptr, layout) };
     }
 
     #[test]
@@ -229,7 +233,7 @@ mod tests {
         };
 
         // SAFETY: The fixture transfers its live old block for this valid resize.
-        let new = unsafe { allocator.reallocate_recorded_with(old, layout, 128, record) };
+        let new = unsafe { allocator.backend.reallocate_recorded(old, layout, 128, record) };
 
         assert_ne!(old, new);
         assert_eq!(phase.get(), Phase::Published);

@@ -82,7 +82,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKyuTOE90ds0bgAW9LbJGW_MbxIOJ-HBer34bv1EUv4GL2nphZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrXZSOrZZ5bkbvTzsKfOtLxsbgvkdGv_ZpkcbMPiYkjAmfxBhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.1/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.1/arty/core/index.html
@@ -90,7 +90,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link12]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=test
  [__link13]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=main
  [__link14]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=test
- [__link15]: https://docs.rs/arty/0.6.1/arty/?search=runtime::MonitorPolicy
+ [__link15]: https://docs.rs/arty/0.6.1/arty/?search=runtime::policy::MonitorPolicy
  [__link16]: https://docs.rs/arty/0.6.1/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.6.1/arty/?search=task::JoinError

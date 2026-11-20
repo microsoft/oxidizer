@@ -865,6 +865,10 @@ mod tests {
                 )),
             )]),
         );
+    }
+
+    impl observed::VisitFields for MissingSlot {
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(&self, _: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }

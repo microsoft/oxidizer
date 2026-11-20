@@ -11,6 +11,21 @@ struct Shapes<'a, T> {
     field: (u8, u8),
 }
 const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shapes",
@@ -36,18 +51,6 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -60,6 +63,21 @@ struct Shapes<'a, T> {
     field: <i32 as Copy>::Output,
 }
 const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shapes",
@@ -85,18 +103,6 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -109,6 +115,21 @@ struct Shapes<'a, T> {
     field: Option,
 }
 const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shapes",
@@ -134,18 +155,6 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -158,6 +167,21 @@ struct Shapes<'a, T> {
     field: Option<u8, u16>,
 }
 const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shapes",
@@ -183,18 +207,6 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
 
@@ -207,6 +219,21 @@ struct Shapes<'a, T> {
     field: Option<'a>,
 }
 const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T> {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "shapes",
@@ -232,6 +259,24 @@ const _: () = {
                 ),
             ]),
         );
+    }
+};
+
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: [T; 4] }
+
+---- yields ----
+struct Shapes<'a, T> {
+    field: [T; 4],
+}
+const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T>
+    where
+        [T; 4]: ::observed::__private::RedactedDisplay,
+        [T; 4]: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -245,17 +290,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("shapes")]
-#[info] struct Shapes<'a, T> { field: [T; 4] }
-
----- yields ----
-struct Shapes<'a, T> {
-    field: [T; 4],
-}
-const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T>
     where
         [T; 4]: ::observed::__private::RedactedDisplay,
@@ -285,6 +319,24 @@ const _: () = {
                 ),
             ]),
         );
+    }
+};
+
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: (T, u8) }
+
+---- yields ----
+struct Shapes<'a, T> {
+    field: (T, u8),
+}
+const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T>
+    where
+        (T, u8): ::observed::__private::RedactedDisplay,
+        (T, u8): ::core::marker::Send + ::core::marker::Sync,
+    {
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -298,17 +350,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("shapes")]
-#[info] struct Shapes<'a, T> { field: (T, u8) }
-
----- yields ----
-struct Shapes<'a, T> {
-    field: (T, u8),
-}
-const _: () = {
     impl<'a, T: 'static> ::observed::Event for Shapes<'a, T>
     where
         (T, u8): ::observed::__private::RedactedDisplay,
@@ -338,17 +379,5 @@ const _: () = {
                 ),
             ]),
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                visitor(
-                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
-                    &|engine| ::observed::Value::from_redacted(&self.field, engine),
-                )?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };
