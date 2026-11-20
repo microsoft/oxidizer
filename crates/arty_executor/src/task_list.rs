@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
-#[cfg(feature = "inspection")]
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
@@ -17,7 +16,6 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
-    #[cfg(feature = "inspection")]
     pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> ControlFlow<()>) {
         let mut next = self.head;
         while let Some(task) = next {
@@ -114,7 +112,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg(feature = "inspection")]
     #[test]
     fn inspection_advances_once_per_task_and_honors_early_termination() {
         let pool = MultiPool::new();

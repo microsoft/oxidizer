@@ -5,28 +5,34 @@
 //!
 //! This module provides these hooks:
 //!
-//! - [`WorkerInit`] runs once on each async worker after the worker initializes.
-//!   It also runs on workers that start after registration.
-//! - [`Panic`] runs when Arty contains a panic from an async task factory or
+//! - [`TaskSpawn`] runs when Arty submits an async task.
+//! - [`WorkerSpawn`][^worker-spawn-retention] runs once on each async worker after
+//!   the worker initializes.
+//! - [`TaskPanic`] runs when Arty contains a panic from an async task factory or
 //!   task poll. The callback can stop the runtime or keep it running.
 //!
-//! Arty passes each callback a mutable hook and shared callback data. Arty
-//! clones the data for each worker and relocates it before the callback can run.
-//! Function pointers prevent hidden closure captures from bypassing
-//! [`ThreadAware`] relocation.
+//! [^worker-spawn-retention]: [`WorkerSpawn`] has retained registration semantics.
+//! Arty runs the callback on current workers and on workers that start after
+//! registration.
+//!
+//! Arty clones the data for each worker and relocates it before a callback can
+//! run there. Task-spawn hooks also keep a worker-neutral instance for submissions
+//! outside runtime workers. Neutral callbacks can run concurrently. Function
+//! pointers prevent hidden closure captures from bypassing [`ThreadAware`]
+//! relocation.
 //!
 //! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
 //! startup with [`RuntimeControl::on`]. Before startup completes, each initial
-//! worker runs its [`WorkerInit`] callbacks from the builder.
+//! worker runs its [`WorkerSpawn`] callbacks from the builder.
 //!
 //! Arty does not catch a panic from a hook callback. You must make sure that
 //! every hook callback completes without a panic.
 //!
 //! ```
 //! use arty::runtime::Runtime;
-//! use arty::runtime::hook::Panic;
+//! use arty::runtime::hook::TaskPanic;
 //!
-//! let runtime = Runtime::builder().on(Panic::ignore()).build()?;
+//! let runtime = Runtime::builder().on(TaskPanic::ignore()).build()?;
 //! runtime.stop()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -37,16 +43,21 @@
 
 mod hook_fn;
 mod local_hook;
-mod panic;
 mod registry;
-mod worker_init;
+mod retained_hooks;
+mod spawn;
+mod task_panic;
+mod worker_spawn;
 
 pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
-pub(crate) use local_hook::{LocalHook, LocalHookGuard};
-pub use panic::Panic;
+pub(crate) use local_hook::{LocalHook, LocalHookGuard, LocalHookStorage};
 pub(crate) use registry::{HookRegistration, registration};
-pub use worker_init::WorkerInit;
+pub(crate) use retained_hooks::RetainedHooks;
+pub(crate) use spawn::TaskObservers;
+pub use spawn::{TaskObserver, TaskSpawn};
+pub use task_panic::TaskPanic;
+pub use worker_spawn::WorkerSpawn;
 
 /// Marks an event that can be registered as a runtime hook.
 ///
@@ -63,6 +74,6 @@ mod private {
         type Erased<D>: From<HookFn<Self, D>> + Into<HookRegistration>
         where
             Self: super::Hook,
-            D: ThreadAware + Clone + 'static;
+            D: ThreadAware + Clone + Sync + 'static;
     }
 }

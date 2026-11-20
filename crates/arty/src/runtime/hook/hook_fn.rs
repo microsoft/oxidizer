@@ -5,16 +5,18 @@ use thread_aware::ThreadAware;
 
 use super::Hook;
 
-/// A runtime hook callback and its worker-local data.
+/// A runtime hook callback and its relocatable data.
 ///
-/// Arty clones the data for each worker and relocates it before the callback
-/// runs. The callback is a function pointer, so it cannot capture data that
+/// Arty clones the data for each worker and relocates each clone before the
+/// callback runs there. Task-spawn hooks also keep one worker-neutral instance.
+/// Neutral callbacks can run concurrently, so hook data must support shared
+/// access. The callback is a function pointer, so it cannot capture data that
 /// bypasses relocation.
 #[derive(Debug)]
 pub struct HookFn<H, D>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
     data: D,
     callback: fn(&mut H, &D),
@@ -23,9 +25,9 @@ where
 impl<H, D> HookFn<H, D>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
-    /// Creates a hook from worker-local data and a callback.
+    /// Creates a hook from relocatable data and a callback.
     pub const fn new(data: D, callback: fn(&mut H, &D)) -> Self {
         Self { data, callback }
     }
@@ -34,7 +36,7 @@ where
 impl<H, D> Clone for HookFn<H, D>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -47,28 +49,28 @@ where
 impl<H, D> ThreadAware for HookFn<H, D>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
     fn relocate(&mut self, source: Option<&thread_aware::Thread>, destination: &thread_aware::Thread) {
         self.data.relocate(source, destination);
     }
 }
 
-trait ErasedCallback<H: Hook>: Send + ThreadAware {
+trait ErasedCallback<H: Hook>: Send + Sync + ThreadAware {
     fn clone_box(&self) -> Box<dyn ErasedCallback<H>>;
-    fn execute(&mut self, event: &mut H);
+    fn execute(&self, event: &mut H);
 }
 
 impl<H, D> ErasedCallback<H> for HookFn<H, D>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
     fn clone_box(&self) -> Box<dyn ErasedCallback<H>> {
         Box::new(self.clone())
     }
 
-    fn execute(&mut self, event: &mut H) {
+    fn execute(&self, event: &mut H) {
         (self.callback)(event, &self.data);
     }
 }
@@ -82,7 +84,7 @@ pub(crate) struct ErasedHookFn<H: Hook> {
 impl<H, D> From<HookFn<H, D>> for ErasedHookFn<H>
 where
     H: Hook,
-    D: ThreadAware + Clone + 'static,
+    D: ThreadAware + Clone + Sync + 'static,
 {
     fn from(hook: HookFn<H, D>) -> Self {
         Self { callback: Box::new(hook) }
@@ -90,7 +92,7 @@ where
 }
 
 impl<H: Hook> ErasedHookFn<H> {
-    pub(crate) fn execute(&mut self, event: &mut H) {
+    pub(crate) fn execute(&self, event: &mut H) {
         self.callback.execute(event);
     }
 }

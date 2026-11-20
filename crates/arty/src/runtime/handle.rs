@@ -33,7 +33,7 @@ use crate::task::RuntimeScheduler;
 /// Dropping this value in an Arty task or on a blocking worker panics.
 /// Keep it on a thread that is not an Arty worker.
 /// From worker code, use
-/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown).
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
 ///
 /// Schedulers and [`Context`](crate::task::Context) values do not keep
 /// the runtime running after this value is dropped.
@@ -172,7 +172,7 @@ impl Runtime {
     /// # Panics
     ///
     /// Panics if called from an Arty task or blocking worker. Use
-    /// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown)
+    /// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
     /// to request shutdown from worker code.
     ///
     /// # Examples
@@ -182,7 +182,7 @@ impl Runtime {
     ///
     /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     cx.control().shutdown();
+    ///     cx.control().request_stop();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await
@@ -280,7 +280,7 @@ fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> 
 #[inline(never)]
 #[expect(clippy::panic, reason = "runtime ownership on a worker is a programming error")]
 fn panic_shutdown_from_worker(operation: &str) -> ! {
-    panic!("{operation} cannot run on an Arty worker; use RuntimeControl::shutdown")
+    panic!("{operation} cannot run on an Arty worker; use RuntimeControl::request_stop")
 }
 
 #[cfg(test)]
@@ -401,7 +401,7 @@ mod tests {
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::ignore())
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -454,7 +454,7 @@ mod tests {
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::ignore())
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -548,7 +548,7 @@ mod tests {
             .or_else(|| panic.downcast_ref::<&str>().copied())
             .expect("runtime ownership panic uses a string payload");
         assert!(message.contains(operation));
-        assert!(message.contains("RuntimeControl::shutdown"));
+        assert!(message.contains("RuntimeControl::request_stop"));
     }
 
     fn worker_scheduler(runtime: &Runtime) -> crate::task::Scheduler {

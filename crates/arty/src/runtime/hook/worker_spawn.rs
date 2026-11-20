@@ -4,19 +4,20 @@
 use thread_aware::Thread;
 
 /// An event that runs once on each async worker after the worker initializes.
-///
-/// Each registered callback runs exactly once on every worker. This includes
-/// workers that start after callback registration.
+/// [^worker-spawn-retention]
 ///
 /// Do not request runtime shutdown from this callback, including through
-/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown).
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
 /// Worker initialization callbacks must finish their setup and return normally.
+///
+/// [^worker-spawn-retention]: Arty retains each registered callback. The callback runs once on every
+/// current worker and once on each worker that starts after registration.
 #[derive(Debug)]
-pub struct WorkerInit {
+pub struct WorkerSpawn {
     thread: Thread,
 }
 
-impl WorkerInit {
+impl WorkerSpawn {
     pub(crate) const fn new(thread: Thread) -> Self {
         Self { thread }
     }
@@ -28,11 +29,11 @@ impl WorkerInit {
     }
 }
 
-impl super::Hook for WorkerInit {}
+impl super::Hook for WorkerSpawn {}
 
-impl super::private::Sealed for WorkerInit {
+impl super::private::Sealed for WorkerSpawn {
     type Erased<D>
         = super::hook_fn::ErasedHookFn<Self>
     where
-        D: thread_aware::ThreadAware + Clone + 'static;
+        D: thread_aware::ThreadAware + Clone + Sync + 'static;
 }

@@ -86,7 +86,7 @@ fn gamma_survivor_suspend_requires_suspend_outcome_and_unexhausted_batch() {
 /// 4. Dead: The worker completed shutdown and its thread terminated.
 ///
 /// A running worker stops after
-/// [`RuntimeControl::shutdown`](crate::runtime::RuntimeControl::shutdown),
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop),
 /// `Runtime::stop`, or `Runtime` destruction.
 ///
 /// # Thread safety
@@ -345,8 +345,11 @@ impl Worker {
         // this batch, prepare_cycle stops before polling the registered tasks.
         let mut processed = 0_usize;
         for SpawnCommand { future_factory } in std::iter::from_fn(|| commands.spawn_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
-            let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
+            future_factory.into_inner().register(context.clone(), &self.tasks);
             processed = processed.saturating_add(1);
+            if !commands.system_receiver().is_empty() {
+                return BatchProgress::LimitReached;
+            }
         }
         if processed == COMMANDS_PER_CYCLE {
             BatchProgress::LimitReached
@@ -792,17 +795,17 @@ mod tests {
     }
 
     trait TestTaskSetExt {
-        fn add_test<F, R>(&self, future: F)
+        fn add_test<F>(&self, future: F)
         where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static;
+            F: IntoFuture + 'static,
+            F::Output: 'static;
     }
 
     impl TestTaskSetExt for TaskSet {
-        fn add_test<F, R>(&self, future: F)
+        fn add_test<F>(&self, future: F)
         where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static,
+            F: IntoFuture + 'static,
+            F::Output: 'static,
         {
             self.task(future).register(DiscardCompletion);
         }
@@ -858,6 +861,10 @@ mod tests {
         SpawnCommand {
             future_factory: QueuedFactory::new(factory),
         }
+    }
+
+    fn test_factory(factory: impl FnOnce(Context, &TaskSet) + Send + 'static) -> RemoteFutureFactory {
+        RemoteFutureFactory::new(factory)
     }
 
     #[derive(Clone)]
@@ -940,7 +947,7 @@ mod tests {
     }
 
     fn replenishing_command(sender: CommandSender, processed: Arc<AtomicUsize>) -> SpawnCommand {
-        enqueue(RemoteFutureFactory::new(move |_, _| {
+        enqueue(test_factory(move |_, _| {
             processed.fetch_add(1, Ordering::Relaxed);
             sender
                 .spawn_sender()
@@ -1056,7 +1063,7 @@ mod tests {
                 if self
                     .commands
                     .spawn_sender()
-                    .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                    .send(enqueue(test_factory(move |_, _| {
                         invocations.fetch_add(1, Ordering::Relaxed);
                         if forbidden_after_queued_shutdown {
                             forbidden.fetch_add(1, Ordering::Relaxed);
@@ -1165,7 +1172,7 @@ mod tests {
             let order = Arc::clone(&order);
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .send(enqueue(test_factory(move |_, _| {
                     order.lock().unwrap().push(index);
                 })))
                 .unwrap();
@@ -1212,7 +1219,7 @@ mod tests {
         }
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new({
+            .send(enqueue(test_factory({
                 let processed = Arc::clone(&processed);
                 let spawned_after = Arc::clone(&spawned_after);
                 move |_, _| {
@@ -1236,6 +1243,36 @@ mod tests {
         _ = worker.prepare_cycle();
 
         assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
+    }
+
+    #[test]
+    fn pending_system_command_interrupts_spawn_registration() {
+        let (commands, command_rx) = command_channel();
+        let worker = test_worker(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let registered = Arc::new(AtomicUsize::new(0));
+        for _ in 0..2 {
+            let registered = Arc::clone(&registered);
+            commands
+                .spawn_sender()
+                .send(enqueue(test_factory(move |_, _| {
+                    registered.fetch_add(1, Ordering::Relaxed);
+                })))
+                .unwrap();
+        }
+        commands
+            .system_sender()
+            .send(SystemCommand::AccessIo {
+                access: QueuedIoAccess::new(Box::new(|_| {})),
+            })
+            .unwrap();
+
+        assert_eq!(worker.process_spawn_commands(), BatchProgress::LimitReached);
+        assert_eq!(registered.load(Ordering::Relaxed), 1);
     }
 
     #[cfg(any(test, feature = "monitor"))]
@@ -1337,14 +1374,15 @@ mod tests {
             let invocations = Arc::clone(&invocations);
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .send(enqueue(test_factory(move |_, _| {
                     invocations.fetch_add(1, Ordering::Relaxed);
                 })))
                 .unwrap();
         }
-        let join = worker_context(&worker)
-            .dispatcher()
-            .spawn(|_| async {}, crate::runtime::monitoring::TaskMonitoring::capture());
+        let join = worker_context(&worker).dispatcher().spawn(
+            |_| std::future::ready(()),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
+        );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         assert!(worker.execute_step().is_break());
@@ -1356,7 +1394,7 @@ mod tests {
         };
         assert!(error.is_shutdown());
         assert!(commands.system_sender().send(SystemCommand::Shutdown).is_err());
-        assert!(commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).is_err());
+        assert!(commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).is_err());
     }
 
     #[test]
@@ -1452,13 +1490,13 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        crate::runtime::monitoring::add_task::<(), _, _, _>(
+        crate::task::preparation::TaskSpawnOptions::new::<()>().register(
+            worker_context(&worker).thread(),
             &worker.tasks,
             async move {
                 assert_eq!(crate::runtime::monitoring::current_task(), None);
                 completed.set(true);
             },
-            arty_executor::TaskPlacement::Any,
             DiscardCompletion,
         );
         seismograph::recorder::without_recording(|| {
@@ -1476,7 +1514,7 @@ mod tests {
             WorkerState::Running
         );
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         assert!(worker.execute_step().is_continue());
 
@@ -1720,7 +1758,7 @@ mod tests {
         assert!(!signal.is_notified());
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1744,7 +1782,7 @@ mod tests {
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _context = worker_context(&worker).io().context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1804,7 +1842,7 @@ mod tests {
         let (inner_completed_tx, inner_completed_rx) = Event::boxed();
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_: Context, tasks: &TaskSet| {
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     inner_completed_tx.send(());
                 });
@@ -1863,7 +1901,7 @@ mod tests {
 
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new({
+                .send(enqueue(test_factory({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             inner_completed_tx.send(());
@@ -1904,7 +1942,7 @@ mod tests {
         worker.tasks.add_test(async move { initial_completed_tx.send(()) });
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_: Context, tasks: &TaskSet| {
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     spawned_completed_tx.send(());
                 });
@@ -1950,13 +1988,13 @@ mod tests {
         let (completed_tx, completed_rx) = Event::boxed();
 
         // The channel can already be closed because the worker is shutting down.
-        let _ = commands.spawn_sender().send(enqueue(RemoteFutureFactory::new({
-            move |_: Context, tasks: &TaskSet| {
+        let _ = commands
+            .spawn_sender()
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     completed_tx.send(14);
                 });
-            }
-        })));
+            })));
 
         // This waits for the worker to shut down.
         async_worker_thread.join().unwrap();
@@ -2001,7 +2039,7 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
         worker.tasks.add_test(async move {
-            control.shutdown();
+            control.request_stop();
         });
         worker.tasks.add_test(async move {
             invoked_by_task.store(true, Ordering::Release);
@@ -2083,7 +2121,7 @@ mod tests {
             let shutdown = shutdown.clone();
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
+                .send(enqueue(test_factory(move |_, tasks| {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown.begin(ShutdownCause::default());
                     }
@@ -2111,7 +2149,7 @@ mod tests {
         let shutdown = worker.shutdown.clone();
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+            .send(enqueue(test_factory(move |_, _| {
                 shutdown.begin(ShutdownCause::default());
             })))
             .unwrap();
@@ -2124,7 +2162,7 @@ mod tests {
                     std::future::ready(())
                 }
             },
-            crate::runtime::monitoring::TaskMonitoring::capture(),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
         );
 
         assert!(worker.execute_step().is_break());

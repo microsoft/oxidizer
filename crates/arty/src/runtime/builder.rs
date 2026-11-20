@@ -60,11 +60,11 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Registers a runtime hook with worker-local callback data.
+    /// Registers a runtime hook with relocatable callback data.
     ///
     /// Arty clones the hook data for each worker and relocates it before a
-    /// callback can run. Registering another hook of the same type appends it
-    /// after earlier callbacks.
+    /// callback can run there. Task-spawn hooks also keep a worker-neutral instance.
+    /// Registering another hook of the same type appends it after earlier callbacks.
     ///
     /// Arty does not catch a panic from the callback. You must make sure that
     /// the callback completes without a panic.
@@ -73,15 +73,15 @@ impl RuntimeBuilder {
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::Panic;
+    /// use arty::runtime::hook::TaskPanic;
     ///
-    /// let builder = Runtime::builder().on(Panic::ignore());
+    /// let builder = Runtime::builder().on(TaskPanic::ignore());
     /// ```
     #[must_use]
     pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self
     where
         H: Hook,
-        D: thread_aware::ThreadAware + Clone + 'static,
+        D: thread_aware::ThreadAware + Clone + Sync + 'static,
     {
         self.config.hook_registrations.push(crate::runtime::hook::registration(hook.into()));
         self

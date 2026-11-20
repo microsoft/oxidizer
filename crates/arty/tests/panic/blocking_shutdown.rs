@@ -49,7 +49,7 @@ fn queued_blocking_capture_drop_panic_still_completes_its_join() {
         captured_invoked.fetch_add(1, Ordering::SeqCst);
         drop(capture);
     });
-    control.shutdown();
+    control.request_stop();
     release.send(()).unwrap();
     assert_eq!(running.join().unwrap(), 42);
     runtime.stop().unwrap();
@@ -90,7 +90,7 @@ fn stop_waits_for_running_blocking_panic_and_retains_its_error() {
         panic!("running blocking callback at shutdown");
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    control.shutdown();
+    control.request_stop();
     release.send(()).unwrap();
     runtime.stop().unwrap();
     observed.recv_timeout(TEST_TIMEOUT).unwrap();

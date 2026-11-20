@@ -58,7 +58,7 @@ fn stop_via_async_task() {
         runtime
             .scheduler()
             .spawn_anywhere(Unaware(requested), |cx, Unaware(requested)| async move {
-                cx.control().shutdown();
+                cx.control().request_stop();
                 requested.send(());
             });
 

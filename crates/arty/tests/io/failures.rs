@@ -198,7 +198,7 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
         }
     });
     scenario.wait_until_driver_blocked();
-    control.shutdown();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(
@@ -240,7 +240,7 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
         }
     });
     scenario.wait_until_driver_blocked();
-    control.shutdown();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(
@@ -385,7 +385,7 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
         }
     });
     let second_outcome = second_outcome_rx.recv_timeout(testing_aids::TEST_TIMEOUT);
-    control.shutdown();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(

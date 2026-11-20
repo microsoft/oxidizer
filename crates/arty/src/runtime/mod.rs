@@ -49,7 +49,7 @@
 //!   enables monitoring in other environments when the `monitor` feature is
 //!   present. The exact automatic selection can change in future releases.
 //!   Task collection runs on request. This does not enable event recording.
-//! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
+//! - Without a [`TaskPanic`](hook::TaskPanic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
 //!   stopping the runtime.
@@ -134,7 +134,7 @@
 //!
 //! [`Runtime`] owns the workers.
 //! Schedulers and [`Context`](crate::task::Context) values do not keep the runtime running.
-//! [`RuntimeControl::shutdown`] requests shutdown without waiting.
+//! [`RuntimeControl::request_stop`] requests shutdown without waiting.
 //! [`Runtime::stop`] takes ownership of the runtime,
 //! waits for every worker, and reports shutdown failures. Dropping the `Runtime` value
 //! also requests shutdown and waits, but it cannot return an error.
@@ -152,7 +152,7 @@
 //!
 //! Keep the `Runtime` value on a thread that is not an Arty worker.
 //! Stopping or dropping it in an Arty task or on a blocking worker panics.
-//! Worker code must use [`RuntimeControl::shutdown`].
+//! Worker code must use [`RuntimeControl::request_stop`].
 
 mod bootstrap;
 mod builder;

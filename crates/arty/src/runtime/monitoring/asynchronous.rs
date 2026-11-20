@@ -11,7 +11,7 @@ use seismograph_runtime::task::{TaskPoll, TaskRequest};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
 
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::monitoring::task::{Description, set_current, set_events};
+use crate::runtime::monitoring::task::{PollTask, set_current, set_events};
 
 #[derive(Debug)]
 pub(crate) struct WorkerDiagnostics {
@@ -45,10 +45,8 @@ impl WorkerDiagnostics {
             return;
         }
         let mut tasks = Vec::new();
-        let status = collection_status(executor.inspect(request.limit(), |description: &Description| {
-            if let Description::Snapshot(task) = description {
-                tasks.push(task.clone());
-            }
+        let status = collection_status(executor.inspect(request.limit(), |task: &seismograph_runtime::snapshot::Task| {
+            tasks.push(task.clone());
         }));
         let status = if self.failed.replace(false) {
             TaskCollection::Failed
@@ -69,7 +67,7 @@ impl WorkerDiagnostics {
 
 impl PollObserver for WorkerDiagnostics {
     fn poll_started(&self, description: &dyn Any) {
-        if let Some(Description::Poll(id)) = description.downcast_ref::<Description>() {
+        if let Some(PollTask(id)) = description.downcast_ref::<PollTask>() {
             set_current(Some(*id));
             *self.poll.borrow_mut() = Some(self.handle.task_poll_started(*id));
         } else {
@@ -78,14 +76,14 @@ impl PollObserver for WorkerDiagnostics {
     }
 
     // #[gamma::skip(parameter.default_shadow, reason = "The observer deliberately ignores completion; the completion target records the outcome.")]
-    fn poll_finished(&self, _completed: bool) {
+    fn poll_finished(&self) {
         set_current(None);
         if let Some(poll) = self.poll.borrow_mut().take() {
             self.handle.task_poll_finished(poll);
         }
     }
 
-    fn inspection_failed(&self, _error: InspectionError) {
+    fn inspection_failed(&self) {
         self.failed.set(true);
     }
 }
@@ -188,10 +186,10 @@ mod tests {
         let parent = seismograph_runtime::allocate_task_id();
         {
             let _parent = crate::runtime::monitoring::task::enter_current(parent);
-            crate::runtime::monitoring::add_task::<(), _, _, _>(
+            crate::task::preparation::TaskSpawnOptions::new::<()>().register(
+                &thread,
                 &executor.tasks(),
                 std::future::pending::<()>(),
-                arty_executor::TaskPlacement::Any,
                 sender,
             );
         }
@@ -206,29 +204,29 @@ mod tests {
         diagnostics.unparked();
         assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Running);
 
-        diagnostics.inspection_failed(InspectionError::Panicked);
+        diagnostics.inspection_failed();
         runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap();
         diagnostics.collect(&mut executor, receiver.try_recv().unwrap());
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Complete);
         diagnostics.poll_started(&());
-        diagnostics.poll_finished(false);
+        diagnostics.poll_finished();
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
 
         let (_handle, sender) = completion.handle();
         executor
             .tasks()
             .task(std::future::pending::<()>())
-            .inspect(|_, _| Some(Description::Poll(seismograph_runtime::allocate_task_id())))
+            .inspect(|_| Some(PollTask(seismograph_runtime::allocate_task_id())))
             .register(sender);
         assert_eq!(capture(&mut executor).tasks.len(), 1);
 
         let task = seismograph_runtime::allocate_task_id();
-        diagnostics.poll_started(&Description::Poll(task));
+        diagnostics.poll_started(&PollTask(task));
         assert_eq!(current_task(), Some(task));
-        diagnostics.poll_finished(false);
+        diagnostics.poll_finished();
         assert_eq!(current_task(), None);
-        diagnostics.poll_started(&Description::Poll(task));
+        diagnostics.poll_started(&PollTask(task));
         drop(diagnostics);
         assert_eq!(current_task(), None);
         assert!(current_events().is_none());

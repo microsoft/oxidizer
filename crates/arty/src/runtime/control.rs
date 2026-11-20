@@ -12,7 +12,7 @@ use crate::runtime::hook::{Hook, HookFn, registration};
 /// It does not keep the runtime alive and is not tied to the task's worker.
 ///
 /// [`workers`](Self::workers) lists the runtime's workers.
-/// [`shutdown`](Self::shutdown) starts shutdown without waiting.
+/// [`request_stop`](Self::request_stop) starts shutdown without waiting.
 #[derive(Debug, Clone)]
 pub struct RuntimeControl {
     dispatcher: DispatcherClient,
@@ -58,14 +58,14 @@ impl RuntimeControl {
 
     /// Registers a runtime hook on every live async worker.
     ///
-    /// Arty clones the hook data for each worker and relocates it before the
-    /// callback can run. On a runtime worker, Arty applies the hook to that
-    /// worker before this method returns. Arty sends registration to other
-    /// workers through their normal command queues. A worker applies the hook
-    /// when it processes that command. If runtime shutdown has started, Arty
-    /// ignores the registration.
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run there. Task-spawn hooks also keep a worker-neutral instance.
+    /// On a runtime worker, Arty applies the hook before this method returns.
+    /// Arty sends registration to other workers through their normal command
+    /// queues. A worker applies the hook when it processes that command. If
+    /// runtime shutdown has started, Arty ignores the registration.
     ///
-    /// [`WorkerInit`](crate::runtime::hook::WorkerInit) runs once on each live
+    /// [`WorkerSpawn`](crate::runtime::hook::WorkerSpawn) runs once on each live
     /// worker. The runtime keeps that registration for workers that start
     /// later and releases it during shutdown. Each worker discards its
     /// callback after it runs.
@@ -77,20 +77,20 @@ impl RuntimeControl {
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::Panic;
+    /// use arty::runtime::hook::TaskPanic;
     ///
     /// let runtime = Runtime::new()?;
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.on(Panic::ignore());
+    /// control.on(TaskPanic::ignore());
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn on<H, D>(&self, hook: impl Into<HookFn<H, D>>)
     where
         H: Hook,
-        D: thread_aware::ThreadAware + Clone + 'static,
+        D: thread_aware::ThreadAware + Clone + Sync + 'static,
     {
         let hook = registration(hook.into());
         self.dispatcher.register_hook(hook);
@@ -114,11 +114,11 @@ impl RuntimeControl {
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.shutdown();
+    /// control.request_stop();
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn shutdown(&self) {
+    pub fn request_stop(&self) {
         let cause = self.dispatcher.stop(arty_executor::ShutdownCause::default());
         crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.dispatcher, cause);
     }

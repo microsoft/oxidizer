@@ -214,7 +214,7 @@ fn shutdown_during_external_initialization_unblocks_without_io_failure() {
         })
     };
     scenario.wait_until_driver_blocked();
-    control.shutdown();
+    control.request_stop();
     scenario.release_driver();
 
     assert_eq!(external.join().unwrap(), "the runtime is shutting down");
@@ -244,7 +244,7 @@ fn external_access_racing_shutdown_returns_shutdown() {
             .unwrap_err()
             .to_string()
     });
-    control.shutdown();
+    control.request_stop();
     release_blocker_tx.send(()).unwrap();
 
     assert_eq!(external.join().unwrap(), "the runtime is shutting down");
