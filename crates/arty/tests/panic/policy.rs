@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context as PollContext, Wake, Waker};
 
-use arty::runtime::hook::{HookFn, Panic};
+use arty::runtime::hook::{HookFn, TaskPanic};
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::runtime::{Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause};
 use arty::task::Context;
@@ -34,8 +34,8 @@ fn runtime_builder(workers: usize, response: PanicResponse) -> RuntimeBuilder {
         // callbacks whose completion or cancellation the test observes.
         .blocking_pool(BlockingPoolPolicy::shared().max(2));
     match response {
-        PanicResponse::Shutdown => builder.on(Panic::shutdown()),
-        PanicResponse::Ignore => builder.on(Panic::ignore()),
+        PanicResponse::Shutdown => builder.on(TaskPanic::shutdown()),
+        PanicResponse::Ignore => builder.on(TaskPanic::ignore()),
     }
 }
 
@@ -242,7 +242,7 @@ fn blocking_panics_do_not_run_hooks_or_start_shutdown() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<Panic, _>::new(Unaware(Arc::clone(&calls)), |event, data| {
+        .on(HookFn::<TaskPanic, _>::new(Unaware(Arc::clone(&calls)), |event, data| {
             data.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             event.set_shutdown();
         }))

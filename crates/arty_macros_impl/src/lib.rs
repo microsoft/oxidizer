@@ -97,8 +97,8 @@ impl Args {
             MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::policy::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::shutdown())),
-            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::ignore())),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::TaskPanic::shutdown())),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::TaskPanic::ignore())),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))

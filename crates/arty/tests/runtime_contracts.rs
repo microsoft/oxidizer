@@ -19,7 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use arty::runtime::Runtime;
-use arty::runtime::hook::Panic;
+use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Context;
@@ -324,7 +324,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .on(Panic::ignore())
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));

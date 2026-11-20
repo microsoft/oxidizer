@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use arty::runtime::hook::{HookFn, WorkerInit};
+use arty::runtime::hook::{HookFn, WorkerSpawn};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
 use thread_aware::ThreadAware;
 use tokio::runtime::{Handle, Runtime};
@@ -151,11 +151,11 @@ impl TokioCompatExt for RuntimeBuilder {
     type Output = Self;
 
     fn tokio_compat(self) -> Self::Output {
-        self.on(worker_init(TokioSupport::new()))
+        self.on(worker_spawn(TokioSupport::new()))
     }
 
     fn tokio_compat_with(self, tokio: impl Into<TokioHandle>) -> Self::Output {
-        self.on(worker_init(TokioSupport::from_handle(tokio.into())))
+        self.on(worker_spawn(TokioSupport::from_handle(tokio.into())))
     }
 }
 
@@ -163,19 +163,19 @@ impl TokioCompatExt for &RuntimeControl {
     type Output = ();
 
     fn tokio_compat(self) {
-        self.on(worker_init(TokioSupport::new()));
+        self.on(worker_spawn(TokioSupport::new()));
     }
 
     fn tokio_compat_with(self, tokio: impl Into<TokioHandle>) {
-        self.on(worker_init(TokioSupport::from_handle(tokio.into())));
+        self.on(worker_spawn(TokioSupport::from_handle(tokio.into())));
     }
 }
 
-fn worker_init(tokio: TokioSupport) -> HookFn<WorkerInit, TokioSupport> {
+fn worker_spawn(tokio: TokioSupport) -> HookFn<WorkerSpawn, TokioSupport> {
     HookFn::new(tokio, enter_worker)
 }
 
-fn enter_worker(_event: &mut WorkerInit, tokio: &TokioSupport) {
+fn enter_worker(_event: &mut WorkerSpawn, tokio: &TokioSupport) {
     tokio.enter();
 }
 
