@@ -285,6 +285,7 @@ impl BackgroundWriterInner {
         Ok(())
     }
 
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "The mutant never wakes the worker, so cold runs stall in tests that wait for a real worker before unanswered_requests_wake_the_worker_and_time_out detects it.")]
     fn wake_worker(&self) {
         let _ = self.wake_tx.try_send(());
     }
