@@ -22,7 +22,7 @@ fn gamma_survivor_controlled_clock_forces_builder() {
     ] {
         assert!(text.contains(&expected.to_string()), "{expected}");
     }
-    assert!(!text.contains(&quote!(.monitor(::arty::runtime::MonitorPolicy::disabled())).to_string()));
+    assert!(!text.contains(&quote!(.monitor(::arty::runtime::policy::MonitorPolicy::disabled())).to_string()));
     assert!(!text.contains(&quote!(Runtime::new()).to_string()));
 }
 

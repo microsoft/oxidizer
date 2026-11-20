@@ -35,7 +35,8 @@ use crate::runtime::worker::blocking::Pools;
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{BlockingPoolPolicy, Runtime};
+/// use arty::runtime::Runtime;
+/// use arty::runtime::policy::BlockingPoolPolicy;
 ///
 /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
 /// ```
@@ -60,7 +61,8 @@ impl BlockingPoolPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::BlockingPoolPolicy;
     ///
     /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::per_worker());
     /// ```
@@ -77,7 +79,8 @@ impl BlockingPoolPolicy {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::BlockingPoolPolicy;
     ///
     /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```

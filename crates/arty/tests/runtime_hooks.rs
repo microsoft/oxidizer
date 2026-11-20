@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::hook::{HookFn, Panic, WorkerInit};
-use arty::runtime::{Runtime, RuntimeControl, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, RuntimeControl};
 use arty::task::Context;
 use support::JoinHandleExt as _;
 
@@ -262,7 +263,7 @@ fn panic_hook_covers_async_user_panics_only() {
                 assert_eq!(data.destination, Some(std::thread::current().id()));
                 assert_eq!(event.payload().downcast_ref::<&str>(), Some(&"async panic"));
                 data.count.fetch_add(1, Ordering::SeqCst);
-                event.ignore();
+                event.set_ignore();
             },
         ))
         .build()
@@ -295,7 +296,7 @@ fn panic_hook_selects_shutdown_from_the_payload() {
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new((), |event, ()| {
             if event.payload().downcast_ref::<u32>() != Some(&2) {
-                event.ignore();
+                event.set_ignore();
             }
         }))
         .build()
@@ -336,7 +337,7 @@ fn control_appends_panic_hooks_in_registration_order() {
         },
         |event, data| {
             data.log.push("ignore");
-            event.ignore();
+            event.set_ignore();
         },
     ));
     installation.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -359,7 +360,7 @@ fn control_appends_panic_hooks_in_registration_order() {
         },
         |event, data| {
             data.log.push("shutdown");
-            event.shutdown();
+            event.set_shutdown();
         },
     ));
     installation.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -383,7 +384,7 @@ fn control_registration_applies_before_local_spawn() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.control().on(Panic::IGNORE);
+            cx.control().on(Panic::ignore());
             cx.control()
                 .on(HookFn::<Panic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
                     data.0.fetch_add(1, Ordering::SeqCst);
@@ -435,7 +436,7 @@ fn local_worker_init_retains_original_before_callback_starts_shutdown() {
                 control: cx.control().clone(),
                 original_dropped: Some(Arc::clone(&original_dropped)),
             },
-            |_event, data| data.control.request_stop(),
+            |_event, data| data.control.shutdown(),
         ));
         assert!(!original_dropped.load(Ordering::SeqCst));
     });
@@ -476,7 +477,7 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
                             .is_ok(),
                         "the test retains the observation receiver until both callbacks run"
                     );
-                    event.ignore();
+                    event.set_ignore();
                 },
             ));
             (workers, source, cx.scheduler().clone())
@@ -515,12 +516,12 @@ fn panic_callbacks_share_one_borrowed_event() {
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
-            event.ignore();
+            event.set_ignore();
         }))
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
-            event.ignore();
+            event.set_ignore();
         }))
         .build()
         .unwrap();
@@ -638,7 +639,7 @@ fn retained_worker_init_data_is_released_during_shutdown() {
 }
 
 #[test]
-fn request_stop_does_not_drop_retained_hook_data() {
+fn control_shutdown_does_not_drop_retained_hook_data() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let (started, drop_started) = mpsc::channel();
     let (release, released) = mpsc::channel();
@@ -657,7 +658,7 @@ fn request_stop_does_not_drop_retained_hook_data() {
         })
         .unwrap();
 
-    control.request_stop();
+    control.shutdown();
     assert!(drop_started.try_recv().is_err());
 
     let (stopped, stop_result) = mpsc::sync_channel(1);
@@ -674,7 +675,7 @@ fn control_ignores_registration_after_shutdown_starts() {
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
 
-    control.request_stop();
+    control.shutdown();
     control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
 
     assert_eq!(clones.load(Ordering::SeqCst), 0);

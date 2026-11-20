@@ -22,7 +22,8 @@ use std::hint::black_box;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
-use arty::runtime::{BlockingPoolPolicy, MonitorPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 use arty::task::JoinHandle;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;

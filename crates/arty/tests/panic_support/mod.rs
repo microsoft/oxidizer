@@ -3,14 +3,15 @@
 
 #![cfg(test)]
 
+use arty::runtime::Runtime;
 use arty::runtime::hook::Panic;
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 
 pub(crate) fn runtime() -> Runtime {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .on(Panic::IGNORE)
+        .on(Panic::ignore())
         .build()
         .unwrap()
 }

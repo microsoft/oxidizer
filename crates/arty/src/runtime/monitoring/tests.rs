@@ -19,8 +19,9 @@ use seismograph_runtime::worker::WorkerRole;
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
+use crate::runtime::Runtime;
 use crate::runtime::hook::Panic;
-use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, Runtime, WorkersPolicy};
+use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
 struct RecorderGuard {
     _lock: MutexGuard<'static, ()>,
@@ -46,7 +47,7 @@ fn runtime(name: &str) -> Runtime {
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .name(name)
-        .on(Panic::IGNORE)
+        .on(Panic::ignore())
         .build()
         .unwrap()
 }
@@ -414,7 +415,7 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -489,7 +490,7 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -969,7 +970,7 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         .unwrap()
         .id;
 
-    control.request_stop();
+    control.shutdown();
     let stopping = capture(&runtime).state;
     release.send(()).unwrap();
     runtime.stop().unwrap();

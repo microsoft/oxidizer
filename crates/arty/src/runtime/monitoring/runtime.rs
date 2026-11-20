@@ -4,8 +4,9 @@
 use seismograph::monitor::Monitor;
 use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration};
 
+use crate::runtime::Error;
 use crate::runtime::config::RuntimeName;
-use crate::runtime::{Error, MonitorPolicy};
+use crate::runtime::policy::MonitorPolicy;
 
 #[cfg(test)]
 thread_local! {

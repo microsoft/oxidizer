@@ -423,8 +423,8 @@ mod tests {
     #[test]
     fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
         let runtime = Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::IGNORE)
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
+            .on(crate::runtime::hook::Panic::ignore())
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

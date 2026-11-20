@@ -34,26 +34,11 @@
 //!
 //! ```rust
 //! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!();
-//! ```
+//! rallocator::rallocator!(); // Uses snmalloc by default.
 //!
-//! Select a backend at compile time with `rallocator!(backend = snmalloc)` or
-//! `rallocator!(backend = mimalloc)`. The default remains snmalloc.
-//! The macro installs [`Rallocator`] with the selected backend.
-//! An allocation must return to the backend that created it.
-//! Both backends record allocation events and provide Seismograph state snapshots.
-//! State observations can be incomplete or stale. Allocator capacity is not application-live memory.
-//!
-//! With allocation recording enabled, [`Rallocator`] records allocations, successful
-//! resizes, and frees. A resize is one event with the previous and new addresses
-//! and requested sizes. In-place size changes also produce this event.
-//! Failed resizes and calls that keep both the address and size produce no event.
-//! For a move, recording completes before the old block becomes reusable.
-//! A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
-//!
-//! ```rust
-//! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!(backend = mimalloc);
+//! // To select a backend at compile time, use one of these calls instead:
+//! // rallocator::rallocator!(backend = snmalloc);
+//! // rallocator::rallocator!(backend = mimalloc);
 //! ```
 
 #![deny(unsafe_op_in_unsafe_fn)]
