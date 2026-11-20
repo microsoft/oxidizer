@@ -178,7 +178,7 @@ internity = { path = "crates/internity", default-features = false, version = "0.
 internity_macros = { path = "crates/internity_macros", default-features = false, version = "=0.3.1" }
 internity_macros_impl = { path = "crates/internity_macros_impl", default-features = false, version = "=0.3.1" }
 itoa = { version = "1.0.17", default-features = false }
-jiff = { version = "0.2.21", default-features = false }
+jiff = { version = "1.0", default-features = false }
 lasso = { version = "0.7.3", default-features = false }
 layered = { path = "crates/layered", default-features = false, version = "0.3.9" }
 libc = { version = "0.2.178", default-features = false }
