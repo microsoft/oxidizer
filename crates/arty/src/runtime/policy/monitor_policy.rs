@@ -7,10 +7,9 @@
 /// [`RuntimeBuilder::monitor`](crate::runtime::RuntimeBuilder::monitor).
 /// The automatic policy is the default.
 ///
-/// The `monitor` Cargo feature enables the Seismograph dependencies that
-/// monitoring needs. Building an enabled runtime starts a local monitor.
-/// Task collection and poll timing run only when requested. This policy does
-/// not enable event recording or install an allocator.
+/// Building an enabled runtime starts a local monitor. Task collection and
+/// poll timing run only when requested. This policy does not enable event
+/// recording or install an allocator.
 ///
 /// The automatic policy disables monitoring for tests, doctests, documentation
 /// examples, and Miri. It enables monitoring in other environments. The exact
@@ -30,10 +29,6 @@
 /// ```
 #[derive(Debug, Clone)]
 pub struct MonitorPolicy {
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(dead_code, reason = "The policy is only read when monitoring is compiled in.")
-    )]
     selection: Selection,
 }
 
@@ -73,12 +68,10 @@ impl MonitorPolicy {
         }
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn is_enabled(&self) -> bool {
         self.is_enabled_for(is_test_environment())
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     const fn is_enabled_for(&self, test_environment: bool) -> bool {
         match &self.selection {
             Selection::Auto => !test_environment,
@@ -94,7 +87,6 @@ impl Default for MonitorPolicy {
     }
 }
 
-#[cfg(any(test, feature = "monitor"))]
 // #[gamma::skip(fn_value.bool_true, reason = "Mutation tests always run in a test executable, where this function must return true.")]
 fn is_test_environment() -> bool {
     // #[gamma::skip(call_result.default, reason = "Mutation tests always run in a test executable, where the injected compile-time value is true.")]
@@ -102,7 +94,6 @@ fn is_test_environment() -> bool {
     is_test_environment_with(cfg!(any(test, doctest, miri)), std::env::current_exe)
 }
 
-#[cfg(any(test, feature = "monitor"))]
 fn is_test_environment_with(
     compile_time_test_environment: bool,
     current_executable: impl FnOnce() -> std::io::Result<std::path::PathBuf>,
@@ -117,7 +108,6 @@ fn is_test_environment_with(
     is_cargo_test_executable(&executable)
 }
 
-#[cfg(any(test, feature = "monitor"))]
 fn is_cargo_test_executable(executable: &std::path::Path) -> bool {
     // cfg(test) does not reach a dependency used by an integration test.
     // Cargo places those test executables in the target profile's deps directory

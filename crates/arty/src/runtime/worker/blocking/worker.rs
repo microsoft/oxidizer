@@ -278,7 +278,6 @@ impl Pool {
         pool.enqueue(job)
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn enable_monitoring(&self, runtime: &seismograph_runtime::RuntimeHandle) {
         let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
         if let Some(pool) = pool.as_ref() {
@@ -698,7 +697,6 @@ mod tests {
         pool.shutdown_and_join();
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     #[test]
     fn joined_workers_stop_while_the_queue_is_still_owned() {
         use seismograph_runtime::RuntimeMetadata;
@@ -716,7 +714,6 @@ mod tests {
         assert!(snapshot.workers.iter().all(|worker| worker.state == WorkerState::Stopped));
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     #[test]
     fn a_closed_pool_does_not_register_workers_when_monitoring_is_enabled() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();

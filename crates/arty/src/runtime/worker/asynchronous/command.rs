@@ -72,7 +72,6 @@ pub(crate) enum SystemCommand {
     AccessIo { access: QueuedIoAccess },
 
     /// Copies task descriptions from native executor storage between cycles.
-    #[cfg(any(test, feature = "monitor"))]
     #[debug("Inspect")]
     Inspect { request: seismograph_runtime::task::TaskRequest },
 

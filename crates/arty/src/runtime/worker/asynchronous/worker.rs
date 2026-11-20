@@ -108,7 +108,6 @@ pub(crate) struct Worker {
     // Cycle-local timestamps and wait budgets use precise system time.
     cycle_clock: SimpleClock,
     signal: Arc<Signal>,
-    #[cfg(any(test, feature = "monitor"))]
     diagnostics: Option<crate::runtime::monitoring::WorkerDiagnostics>,
     _single_threaded: PhantomData<*const ()>,
 }
@@ -157,12 +156,9 @@ impl Worker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
-        #[cfg(any(test, feature = "monitor"))]
         let diagnostics = monitor_options
             .runtime()
             .map(|runtime| crate::runtime::monitoring::WorkerDiagnostics::new(runtime, &dispatcher, &thread));
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = monitor_options;
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hook_registrations);
 
@@ -177,7 +173,6 @@ impl Worker {
             clock_driver,
             cycle_clock,
             signal,
-            #[cfg(any(test, feature = "monitor"))]
             diagnostics,
             _single_threaded: PhantomData,
         }
@@ -202,7 +197,6 @@ impl Worker {
             CycleAction::Poll | CycleAction::WaitForSignal(_) => Duration::ZERO,
         };
 
-        #[cfg(any(test, feature = "monitor"))]
         if !matches!(action, CycleAction::Poll)
             && let Some(diagnostics) = &self.diagnostics
         {
@@ -220,7 +214,6 @@ impl Worker {
             }
         }
 
-        #[cfg(any(test, feature = "monitor"))]
         if !matches!(action, CycleAction::Poll)
             && let Some(diagnostics) = &self.diagnostics
         {
@@ -248,13 +241,10 @@ impl Worker {
             .expect("system command processing only succeeds while the worker is ready")
             .executor;
 
-        #[cfg(any(test, feature = "monitor"))]
         let cycle_outcome = match &self.diagnostics {
             Some(diagnostics) if diagnostics.is_observed() => executor.execute_cycle_observed(diagnostics),
             _ => executor.execute_cycle(),
         };
-        #[cfg(not(any(test, feature = "monitor")))]
-        let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -318,7 +308,6 @@ impl Worker {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(&state.context);
                 }
-                #[cfg(any(test, feature = "monitor"))]
                 SystemCommand::Inspect { request } => {
                     if let Some(diagnostics) = &self.diagnostics {
                         diagnostics.collect(&mut state.executor, request);
@@ -380,7 +369,6 @@ impl Worker {
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
         drop(executor);
-        #[cfg(any(test, feature = "monitor"))]
         drop(self.diagnostics.take());
         let driver_host = RuntimeDriverHost::uninstall();
         drop(driver_host);
@@ -1275,7 +1263,6 @@ mod tests {
         assert_eq!(registered.load(Ordering::Relaxed), 1);
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     #[test]
     fn inspection_without_worker_diagnostics_reports_failure() {
         use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
@@ -1430,7 +1417,6 @@ mod tests {
             &MonitorPolicy::disabled().into(),
         );
 
-        #[cfg(any(test, feature = "monitor"))]
         assert!(worker.diagnostics.is_none());
     }
 

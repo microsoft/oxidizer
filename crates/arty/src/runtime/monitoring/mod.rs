@@ -10,12 +10,9 @@
 //! inspection metadata share one allocation so inspection can find queued and running tasks.
 //! Handles provide access to these registrations but do not own runtime shutdown.
 
-#[cfg(any(test, feature = "monitor"))]
 mod asynchronous;
 mod blocking;
-#[cfg(any(test, feature = "monitor"))]
 mod runtime;
-#[cfg(any(test, feature = "monitor"))]
 mod task;
 
 #[cfg(test)]
@@ -27,16 +24,11 @@ mod tests;
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg(any(test, feature = "monitor"))]
 pub(crate) use asynchronous::WorkerDiagnostics;
-#[cfg(any(test, feature = "monitor"))]
-pub(crate) use blocking::MonitoredBlockingJob;
-pub(crate) use blocking::{BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring};
-#[cfg(any(test, feature = "monitor"))]
+pub(crate) use blocking::{
+    BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob,
+};
 pub(crate) use runtime::RuntimeDiagnostics;
-#[cfg(any(test, feature = "monitor"))]
-pub(crate) use task::{TaskInfo, current_task};
-#[cfg(any(test, feature = "monitor"))]
-pub(crate) use task::{descriptor, register_monitored};
+pub(crate) use task::{TaskInfo, current_task, descriptor, register_monitored};
 #[cfg(test)]
 pub(crate) use task::{enter_current, set_events};

@@ -56,7 +56,6 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
-    #[cfg(any(test, feature = "monitor"))]
     diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
@@ -212,30 +211,16 @@ impl Runtime {
         wait(self)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(
-            clippy::needless_pass_by_ref_mut,
-            reason = "monitoring consumes the diagnostic registration after workers stop"
-        )
-    )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
         self.scheduler.dispatcher.release_retained_hooks();
-        #[cfg(any(test, feature = "monitor"))]
         let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
-        #[cfg(any(test, feature = "monitor"))]
-        {
-            monitor_result(wait_error, monitor_error)
-        }
-        #[cfg(not(any(test, feature = "monitor")))]
-        wait_error.map_or(Ok(()), Err)
+        monitor_result(wait_error, monitor_error)
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
         self.diagnostics = diagnostics;
     }
@@ -245,7 +230,6 @@ impl Runtime {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
-            #[cfg(any(test, feature = "monitor"))]
             diagnostics: None,
         }
     }
@@ -270,7 +254,6 @@ impl Drop for Runtime {
     }
 }
 
-#[cfg(any(test, feature = "monitor"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
 fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
     worker_error.or(monitor_error).map_or(Ok(()), Err)

@@ -149,7 +149,6 @@ impl ThreadEntry {
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
         let blocking_pool = blocking_pools.pool_for_worker(worker_index);
-        #[cfg(any(test, feature = "monitor"))]
         if let Some(runtime) = monitor_options.runtime() {
             blocking_pool.enable_monitoring(runtime);
         }

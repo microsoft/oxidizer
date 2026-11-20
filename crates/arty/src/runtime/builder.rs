@@ -101,10 +101,9 @@ impl RuntimeBuilder {
     /// doctests, documentation examples, and Miri. It enables monitoring in
     /// other environments. This automatic selection can change in future releases.
     ///
-    /// The `monitor` Cargo feature enables the Seismograph dependencies that
-    /// monitoring needs. Building an enabled runtime starts a local connection
-    /// for the Seismograph CLI. Task collection runs on request. This does not
-    /// enable event recording or change which tasks run. See the
+    /// Building an enabled runtime starts a local connection for the Seismograph
+    /// CLI. Task collection runs on request. This does not enable event
+    /// recording or change which tasks run. See the
     /// [monitoring guide](crate::runtime#monitoring).
     ///
     /// # Examples
