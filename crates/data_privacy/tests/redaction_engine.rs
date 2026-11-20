@@ -300,16 +300,6 @@ fn test_debug_trait_implementation() {
 }
 
 #[test]
-fn test_debug_trait_with_default_redactors() {
-    let engine = RedactionEngine::builder().build();
-
-    // Test the Debug trait implementation with no redactors
-    let debug_output = format!("{engine:?}");
-
-    assert_eq!(debug_output, "[]");
-}
-
-#[test]
 fn test_long_strings() {
     let engine = RedactionEngine::builder()
         .add_class_redactor(
@@ -349,9 +339,6 @@ fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str,
 
 #[test]
 fn new_creates_builder_with_default_values() {
-    let engine = RedactionEngine::builder().build();
-    test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
-
     let engine = RedactionEngine::builder().build();
     test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
 }

@@ -421,6 +421,10 @@ mod tests {
             format!("{pool:?}"),
             "JoinableThreadPool { name: RuntimeName(\"arty\"), queued_count: 0, active_count: 0, max_count: 1 }"
         );
+        let debug = format!("{pool:?}");
+        assert!(debug.contains("queued_count: 0"));
+        assert!(debug.contains("active_count: 0"));
+        assert!(debug.contains("max_count: 1"));
         let (started, started_rx) = std::sync::mpsc::sync_channel(1);
         let (release, release_rx) = std::sync::mpsc::sync_channel(1);
         let (finished, finished_rx) = std::sync::mpsc::sync_channel(2);
@@ -764,17 +768,6 @@ mod tests {
         };
 
         pool.shutdown_and_join();
-    }
-
-    #[test]
-    fn joinable_pool_debug_reports_counts() {
-        let pool = joinable_pool(1);
-
-        let debug = format!("{pool:?}");
-        assert!(debug.contains("queued_count: 0"));
-        assert!(debug.contains("active_count: 0"));
-        assert!(debug.contains("max_count: 1"));
-        pool.join();
     }
 
     #[test]
