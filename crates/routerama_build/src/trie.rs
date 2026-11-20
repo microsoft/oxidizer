@@ -106,9 +106,10 @@ pub struct Leaf {
     pub verb: Option<String>,
     pub name: String,
     pub vars: Vec<VarPlan>,
-    /// The position of the route that produced this leaf in the input route set,
-    /// so a runtime backend can index a parallel per-route payload table. The
-    /// static (codegen) backend ignores it.
+    /// The position of the route that produced this leaf in the input route set.
+    /// The runtime backend uses it to look up the value, the template and the
+    /// parameter names of the route. The static (codegen) backend uses it to find
+    /// the template of the route when it generates the route table.
     pub route_index: usize,
 }
 

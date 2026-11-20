@@ -4,6 +4,7 @@
 //! Procedural macro expansion public API tests.
 
 #![cfg(feature = "codegen")]
+#![allow(clippy::unwrap_used, reason = "test code")]
 
 use quote::quote;
 use routerama_build::macro_impl::{derive_from_query, derive_to_query, resolver};
@@ -122,4 +123,36 @@ fn resolver_rejects_unknown_naming_arguments() {
     .to_string();
 
     assert!(expanded.contains("expected `name = ResolverType`"), "{expanded}");
+}
+
+/// The expansion of `#[resolver]` on `item`, formatted as Rust source.
+fn expand_resolver(item: proc_macro2::TokenStream) -> String {
+    prettyplease::unparse(&syn::parse2(resolver(quote! {}, item)).unwrap())
+}
+
+#[test]
+fn hybrid_route_table_tries_static_routes_first() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route<'p> {
+            #[route(GET, "/shelves/{shelf.id}")]
+            GetShelf { shelf_id: &'p str },
+            Plugin,
+        }
+    }));
+}
+
+#[test]
+fn dynamic_resolver_route_table_is_runtime_table() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route {
+            Plugin,
+        }
+    }));
+}
+
+#[test]
+fn resolver_without_routes_has_empty_route_table() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route {}
+    }));
 }

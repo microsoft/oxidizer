@@ -2614,6 +2614,9 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno 0.5.4",
+ "parking_lot 0.13.0",
+ "routerama",
+ "smallvec",
  "templated_uri",
  "tick",
  "tokio",
@@ -4936,6 +4939,7 @@ version = "0.3.1"
 dependencies = [
  "criterion",
  "http_path_template",
+ "insta",
  "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",

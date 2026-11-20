@@ -1,18 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::ToString as _;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
 use routerama_build::Route;
-use routerama_build::trie::{Leaf, Trie, build_trie};
+use routerama_build::trie::{Leaf, Trie, build_trie, capture_field_names};
 use smallvec::SmallVec;
 
 use crate::captures::materialize;
 use crate::codegen_helpers::{ScannedPath, scan_path, split_verb};
 use crate::raw_match::{INLINE_CAPTURES, RawMatch};
+use crate::route_table::{RouteHit, RouteTable, RouteTemplate};
 use crate::rt_node::RtNode;
 use crate::walk::Walk;
 
@@ -35,6 +38,14 @@ pub struct RawResolver<T = ()> {
     any_verb: bool,
     /// Values indexed by [`Leaf::route_index`].
     payloads: Box<[T]>,
+    /// Route templates and parameter names indexed by [`Leaf::route_index`].
+    routes: Box<[RouteRecord]>,
+}
+
+/// The route template and the parameter names of one registered route.
+struct RouteRecord {
+    template: RouteTemplate,
+    parameters: Box<[Cow<'static, str>]>,
 }
 
 impl RawResolver<()> {
@@ -55,22 +66,36 @@ impl<T> RawResolver<T> {
         Self::build(&routes, payloads.into_boxed_slice())
     }
 
-    /// Compiles an already-built trie with its route-aligned payload table.
-    pub(crate) fn with_trie(payloads: Box<[T]>, trie: Trie) -> Self {
-        Self::compile(trie, payloads)
+    /// Compiles an already-built trie of `routes` with its route-aligned payload table.
+    pub(crate) fn with_trie(routes: &[Route], payloads: Box<[T]>, trie: Trie) -> Self {
+        Self::compile(routes, trie, payloads)
     }
 
     fn build(routes: &[Route], payloads: Box<[T]>) -> Self {
         let trie = build_trie(routes);
-        Self::compile(trie, payloads)
+        Self::compile(routes, trie, payloads)
     }
 
-    fn compile(trie: Trie, payloads: Box<[T]>) -> Self {
+    fn compile(routes: &[Route], trie: Trie, payloads: Box<[T]>) -> Self {
+        let routes = routes
+            .iter()
+            .map(|route| {
+                let template = route.template();
+                RouteRecord {
+                    template: RouteTemplate::Shared(template.to_string().into()),
+                    parameters: capture_field_names(template.segments())
+                        .iter()
+                        .map(|name| Cow::Owned(name.join(".")))
+                        .collect(),
+                }
+            })
+            .collect();
         Self {
             root: RtNode::compile(trie.root),
             max_segments: trie.max_segments,
             any_verb: trie.any_verb,
             payloads,
+            routes,
         }
     }
 
@@ -142,11 +167,11 @@ impl<T> RawResolver<T> {
     ///
     /// Returns [`InvalidPath`](crate::codegen_helpers::InvalidPath) when `path`
     /// contains a query or fragment delimiter.
-    pub fn resolve_scanned_checked<'p, P, R>(
-        &'p self,
+    pub fn resolve_scanned_checked<'r, 'p, P, R>(
+        &'r self,
         method: impl AsRef<str>,
         path: &'p P,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Result<Option<R>, crate::codegen_helpers::InvalidPath>
     where
         P: AsRef<str> + ?Sized,
@@ -191,13 +216,13 @@ impl<T> RawResolver<T> {
         Ok(self.finish_scanned(method, verb, &path, finish))
     }
 
-    fn resolve_with_heap_offsets<'p, R>(
-        &'p self,
+    fn resolve_with_heap_offsets<'r, 'p, R>(
+        &'r self,
         method: &str,
         body: &'p str,
         verb: Option<&str>,
         segment_count: usize,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Option<R> {
         let capacity = segment_count.min(self.max_segments);
         let mut heap_offsets = vec![0_usize; capacity * 2];
@@ -206,12 +231,12 @@ impl<T> RawResolver<T> {
         self.finish_scanned(method, verb, &path, finish)
     }
 
-    fn finish_scanned<'p, R>(
-        &'p self,
+    fn finish_scanned<'r, 'p, R>(
+        &'r self,
         method: &str,
         verb: Option<&str>,
         path: &ScannedPath<'p, '_>,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Option<R> {
         let walk = Walk { path, method, verb };
         // #[gamma::skip(cond.always_true, reason = "When any_verb is false, every leaf's verb and the unsplit request verb passed by both callers are None; enabling the verb equality check preserves every dispatch result")]
@@ -222,6 +247,25 @@ impl<T> RawResolver<T> {
         }?;
         let value = &self.payloads[leaf.route_index];
         Some(finish(leaf, value, path))
+    }
+}
+
+impl<T> RouteTable for RawResolver<T> {
+    fn match_route<'p>(&self, method: &str, path: &'p str) -> Option<RouteHit<'_, 'p>> {
+        self.resolve_scanned_checked(method, path, |leaf, _, path| {
+            let record = &self.routes[leaf.route_index];
+            let mut captures = capture_values(leaf.vars.len());
+            for plan in &leaf.vars {
+                captures.push(materialize(plan, path));
+            }
+            RouteHit {
+                template: &record.template,
+                names: &record.parameters,
+                captures,
+            }
+        })
+        .ok()
+        .flatten()
     }
 }
 
