@@ -192,18 +192,20 @@ fn inspection_builder_defers_conversion_and_inspects_the_native_future() {
 }
 
 #[test]
-fn replacing_inspector_uses_the_latest_callback() {
+fn layered_inspectors_emit_descriptions_in_registration_order() {
     let mut executor = Executor::builder().build();
     executor
         .tasks()
         .task(std::future::ready(42))
-        .inspect(|_| -> Option<()> { panic!("the replaced inspector must not run") })
-        .inspect(Some)
+        .inspect(|state| Some((1_u8, state)))
+        .inspect(|state| Some((2_u8, state)))
         .register(Completion);
 
     let mut descriptions = Vec::new();
-    executor.inspect(1, |state: &TaskState| descriptions.push(*state)).unwrap();
-    assert_eq!(descriptions, [TaskState::Ready]);
+    executor
+        .inspect(1, |description: &(u8, TaskState)| descriptions.push(*description))
+        .unwrap();
+    assert_eq!(descriptions, [(1, TaskState::Ready), (2, TaskState::Ready)]);
 
     let _ = executor.execute_cycle();
 }
@@ -734,12 +736,16 @@ fn observed_polls_pair_callbacks_only_for_described_tasks() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     tasks.task(async {}).register(Completion);
-    tasks.task(async {}).inspect(|_| Some(42_u32)).register(Completion);
+    tasks
+        .task(async {})
+        .inspect(|_| Some(42_u32))
+        .inspect(|_| Some(42_u32))
+        .register(Completion);
     let observer = Observer::default();
 
     let _ = executor.execute_cycle_observed(&observer);
 
-    assert_eq!((observer.starts.get(), observer.finishes.get(), observer.errors.get()), (1, 1, 0));
+    assert_eq!((observer.starts.get(), observer.finishes.get(), observer.errors.get()), (2, 2, 0));
 }
 
 #[test]

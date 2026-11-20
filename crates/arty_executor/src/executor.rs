@@ -88,7 +88,7 @@ impl ObservePoll for () {
 
 impl ObservePoll for &dyn PollObserver {
     fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
-        let mut observed = false;
+        let mut observed = 0_usize;
         let mut in_callback = false;
         let description = catch_unwind(AssertUnwindSafe(|| {
             task.inspect(TaskState::Running, &mut |description| {
@@ -96,7 +96,7 @@ impl ObservePoll for &dyn PollObserver {
                 self.poll_started(description);
                 // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
                 in_callback = false;
-                observed = true;
+                observed = observed.saturating_add(1);
             });
         }));
         match description {
@@ -106,13 +106,13 @@ impl ObservePoll for &dyn PollObserver {
                 // Observer failures propagate; inspector and description-drop failures
                 // cancel the observation before the task itself is polled.
                 // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                observed = false;
+                observed = 0;
                 discard_task_panic_payload(panic);
                 self.inspection_failed();
             }
         }
         let outcome = task.poll(shared);
-        if observed {
+        for _ in 0..observed {
             self.poll_finished();
         }
         outcome
