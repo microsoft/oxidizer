@@ -970,8 +970,14 @@ fn flatten_visits_inner_fields() {
 
     let engine = passthrough_redaction_engine();
     let tags = [
-        (FieldDescriptor::log_only("tag.red"), 3),
-        (FieldDescriptor::log_only("tag.blue"), 5),
+        (
+            observed::__private::field_descriptor("tag.red", Some(observed::__private::log_field("tag.red")), None),
+            3,
+        ),
+        (
+            observed::__private::field_descriptor("tag.blue", Some(observed::__private::log_field("tag.blue")), None),
+            5,
+        ),
     ];
     let event = Flattened {
         items: 8,

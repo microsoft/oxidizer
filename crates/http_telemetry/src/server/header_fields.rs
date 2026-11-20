@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use data_privacy::DataClass;
 use http::{HeaderMap, HeaderName};
+use observed::__private::{field_descriptor, log_field};
 use observed::metadata::FieldDescriptor;
 
 use super::interner::intern;
@@ -23,10 +24,13 @@ pub(crate) fn header_fields(header_dataclass_map: &HeaderMap<DataClass>, prefix:
     Some(
         header_dataclass_map
             .iter()
-            .map(|(header_name, data_class)| HeaderField {
-                header_name: header_name.clone(),
-                descriptor: FieldDescriptor::log_only(intern(&format!("{prefix}{header_name}"))),
-                data_class: data_class.clone(),
+            .map(|(header_name, data_class)| {
+                let key = intern(&format!("{prefix}{header_name}"));
+                HeaderField {
+                    header_name: header_name.clone(),
+                    descriptor: field_descriptor(key, Some(log_field(key)), None),
+                    data_class: data_class.clone(),
+                }
             })
             .collect(),
     )

@@ -22,26 +22,18 @@ const _: () = {
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "before",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("before"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.before.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.before.clone()),
+                )?;
             }
-            ::observed::VisitFields::visit_fields(&self.concrete, visitor)?;
-            ::observed::VisitFields::visit_fields(&self.generic, visitor)?;
+            ::observed::__private::visit_flattened(&self.concrete, visitor)?;
+            ::observed::__private::visit_flattened(&self.generic, visitor)?;
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "after",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("after"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.after.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.after.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }
@@ -51,22 +43,40 @@ const _: () = {
         T: ::observed::VisitFields,
         T: ::core::marker::Send + ::core::marker::Sync,
     {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "flattened",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<Flattened<'static, T>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "flattened",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::with_field_metrics(
+            ::observed::__private::event_description(
+                "flattened",
+                ::core::option::Option::Some(
+                    ::core::any::TypeId::of::<Flattened<'static, T>>(),
                 ),
+                ::core::option::Option::Some(
+                    ::observed::__private::log_description(
+                        "flattened",
+                        ::observed::Severity::Info,
+                        ::core::option::Option::None,
+                    ),
+                ),
+                ::core::option::Option::None,
+                false,
+                &::observed::__private::event_fields([
+                    ::observed::__private::field_descriptor(
+                        "before",
+                        ::core::option::Option::Some(
+                            ::observed::__private::log_field("before"),
+                        ),
+                        ::core::option::Option::None,
+                    ),
+                    ::observed::__private::field_descriptor(
+                        "after",
+                        ::core::option::Option::Some(
+                            ::observed::__private::log_field("after"),
+                        ),
+                        ::core::option::Option::None,
+                    ),
+                ]),
             ),
-            ::core::option::Option::None,
             false || <Parameters<'a> as ::observed::VisitFields>::CONTAINS_METRICS
                 || <T as ::observed::VisitFields>::CONTAINS_METRICS,
-            false,
         );
     }
 };

@@ -77,7 +77,8 @@ pub trait DynEvent: Send + Sync {
     /// Returns the event description (metadata) for processor prefiltering.
     ///
     /// Compile-time events return `T::DESCRIPTION` (static metadata).
-    /// Dynamic events construct an `EventDescription` from runtime values.
+    /// Adapters reuse a description supplied by an existing event type.
+    /// Metadata construction is not a public adapter API.
     ///
     /// This must carry the event's complete signal metadata: a processor
     /// selects on it alone, so a signal omitted here means the event never
@@ -85,6 +86,9 @@ pub trait DynEvent: Send + Sync {
     /// exports is read from the
     /// [`LogDescription`](crate::metadata::LogDescription) returned here, so
     /// this one statement decides both routing and the exported level.
+    /// Adapters participating in typed [`MetricBindings`](crate::processing::MetricBindings)
+    /// must return the registered type identity and static field inventory, and
+    /// visit the same indexed descriptors in declaration order.
     fn description(&self) -> EventDescription;
 }
 
@@ -146,7 +150,7 @@ mod tests {
         }
 
         fn description(&self) -> EventDescription {
-            EventDescription::new("bridged.event", None, None, None, false, false)
+            EventDescription::new("bridged.event")
         }
     }
 

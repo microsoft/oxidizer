@@ -10,12 +10,14 @@
 
 mod event_state;
 mod event_view;
+mod metric_bindings;
 mod processor;
 
 use std::ops::ControlFlow;
 
 pub(crate) use event_state::IntermediateEvent;
 pub use event_view::EventView;
+pub use metric_bindings::{MetricBindingError, MetricBindings, MetricReadError};
 pub use processor::EventProcessor;
 
 use crate::Value;
