@@ -3,7 +3,7 @@
 
 [package]
 name = "observed_arty"
-description = "Transfers Observed enrichment into Arty tasks."
+description = "Integrates Observed sinks with the Arty runtime."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["arty", "observed", "telemetry", "async"]
@@ -37,9 +37,16 @@ thread_aware = { workspace = true, features = ["derive", "std"] }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 arty = { path = "../arty", features = ["macros", "rt"] }
+criterion = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+metabench = { path = "../metabench" }
 observed = { path = "../observed", features = ["test-util"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+
+[[bench]]
+name = "observed_arty_task_spawn"
+harness = false
 
 # >>> anvil-managed: anvil-lints
 [lints]

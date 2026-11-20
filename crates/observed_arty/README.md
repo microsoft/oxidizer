@@ -13,11 +13,12 @@
 
 </div>
 
-Transfers Observed enrichment into Arty tasks.
+Integrates an Observed sink with the Arty runtime.
 
 Call [`ObservedExt::enable_observed`][__link0] with an [`observed::Sink`][__link1] before you
-submit a task. The integration captures the enrichment at submission time.
-It restores that enrichment for each task poll and removes it after the poll.
+submit a task. The first integration feature transfers enrichment into Arty
+tasks. It captures the enrichment at submission time, restores it for each
+task poll, and removes it after the poll.
 
 Enable the integration on a runtime builder:
 
@@ -59,6 +60,6 @@ The integration restores the previous worker enrichment after every poll.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQm--ZboKHfwbpVojySVWf4Ubb3FOXcZLAhwb29HEahYl5VJhZIKCaG9ic2VydmVkZjAuMzAuMYJtb2JzZXJ2ZWRfYXJ0eWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6b5len3-Nhwbtakg_t3iOQAbyPVKLTEu-n0bioX_bOpnxeVhZIKCaG9ic2VydmVkZjAuMzAuMYJtb2JzZXJ2ZWRfYXJ0eWUwLjEuMA
  [__link0]: https://docs.rs/observed_arty/0.1.0/observed_arty/?search=ObservedExt::enable_observed
  [__link1]: https://docs.rs/observed/0.30.1/observed/?search=Sink
