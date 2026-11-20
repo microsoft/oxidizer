@@ -9,37 +9,6 @@ mod builder {
     use std::time::Duration;
 
     use cachet_memory::InMemoryCacheBuilder;
-    use cachet_memory::policy::EvictionPolicy;
-
-    #[test]
-    fn max_capacity_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100);
-        assert!(format!("{builder:?}").contains("max_capacity: Some(100)"));
-    }
-
-    #[test]
-    fn initial_capacity_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50);
-        assert!(format!("{builder:?}").contains("initial_capacity: Some(50)"));
-    }
-
-    #[test]
-    fn time_to_live_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(Duration::from_mins(5));
-        assert!(format!("{builder:?}").contains("time_to_live: Some(300s)"));
-    }
-
-    #[test]
-    fn time_to_idle_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(Duration::from_mins(1));
-        assert!(format!("{builder:?}").contains("time_to_idle: Some(60s)"));
-    }
-
-    #[test]
-    fn name_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
-        assert!(format!("{builder:?}").contains("name: Some(\"test\")"));
-    }
 
     #[test]
     fn eviction_telemetry_defaults_false() {
@@ -126,12 +95,5 @@ mod builder {
             .time_to_idle(Duration::from_mins(1))
             .build();
         result.unwrap();
-    }
-
-    #[test]
-    fn build_eviction_policy_stores_value() {
-        let policy = EvictionPolicy::lru();
-        let builder = InMemoryCacheBuilder::<String, i32>::new().eviction_policy(policy.clone());
-        assert!(format!("{builder:?}").contains(&format!("eviction_policy: {policy:?}")));
     }
 }

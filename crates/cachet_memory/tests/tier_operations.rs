@@ -9,52 +9,8 @@ mod tier {
 
     use std::time::{Duration, SystemTime};
 
-    use cachet_memory::{InMemoryCache, InMemoryCacheBuilder};
+    use cachet_memory::InMemoryCache;
     use cachet_tier::{CacheEntry, CacheTier};
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_max_capacity_sets_limit() {
-        let expected_max_capacity = 100;
-        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(expected_max_capacity);
-
-        assert!(format!("{builder:?}").contains("max_capacity: Some(100)"));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_initial_capacity_sets_initial_capacity() {
-        let expected_initial_capacity = 50;
-        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(expected_initial_capacity);
-
-        assert!(format!("{builder:?}").contains("initial_capacity: Some(50)"));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_time_to_live_sets_ttl() {
-        let expected_ttl = Duration::from_mins(5);
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
-
-        assert!(format!("{builder:?}").contains("time_to_live: Some(300s)"));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_time_to_idle_sets_tti() {
-        let expected_tti = Duration::from_mins(1);
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
-
-        assert!(format!("{builder:?}").contains("time_to_idle: Some(60s)"));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn builder_name_sets_cache_name() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test-cache");
-
-        assert!(format!("{builder:?}").contains("name: Some(\"test-cache\")"));
-    }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[tokio::test]

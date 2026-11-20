@@ -463,11 +463,50 @@ impl ValidationError {
     }
 }
 
-// Direct listener invocation needs private callbacks. The public cache API
-// cannot force maintenance to deliver these synthetic causes synchronously.
+// Builder fields are private; Debug output is tested separately in integration tests.
+// Direct listener invocation also needs private callbacks that the public cache
+// cannot invoke with synthetic causes synchronously.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_capacity_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100);
+        assert_eq!(builder.max_capacity, Some(100));
+    }
+
+    #[test]
+    fn initial_capacity_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50);
+        assert_eq!(builder.initial_capacity, Some(50));
+    }
+
+    #[test]
+    fn time_to_live_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(Duration::from_mins(5));
+        assert_eq!(builder.time_to_live, Some(Duration::from_mins(5)));
+    }
+
+    #[test]
+    fn time_to_idle_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(Duration::from_mins(1));
+        assert_eq!(builder.time_to_idle, Some(Duration::from_mins(1)));
+    }
+
+    #[test]
+    fn name_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
+        assert_eq!(builder.name, Some("test"));
+    }
+
+    #[test]
+    fn build_eviction_policy_stores_value() {
+        let policy = EvictionPolicy::lru();
+        let builder = InMemoryCacheBuilder::<String, i32>::new().eviction_policy(policy.clone());
+        assert_eq!(builder.eviction_policy, policy);
+    }
+
     #[test]
     fn on_eviction_replaces_previous_listener() {
         use std::sync::Mutex;

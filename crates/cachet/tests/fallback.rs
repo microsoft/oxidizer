@@ -3,8 +3,9 @@
 
 //! Integration tests for fallback cache behavior.
 //!
-//! Note: Tests for internal behavior (promotion policy internals, refresh mechanism)
-//! are in the unit tests in `src/fallback.rs`.
+//! Promotion and refresh contracts are also tested in `fallback_operations.rs`
+//! and `refresh.rs`. Unit tests in `src/fallback.rs` retain private construction
+//! and helper paths that the public API cannot expose.
 
 #![cfg(feature = "memory")]
 

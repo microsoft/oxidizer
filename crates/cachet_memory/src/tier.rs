@@ -256,12 +256,53 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
     }
 }
 
-// These tests inspect backing configuration, intercept private builder calls,
+// These tests inspect private builder fields and backing configuration,
+// intercept private builder calls,
 // or force Moka maintenance. Public counts and notifications are asynchronous,
 // and the cache API exposes no deterministic maintenance operation.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_max_capacity_sets_limit() {
+        let expected_max_capacity = 100;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(expected_max_capacity);
+        assert_eq!(builder.max_capacity, Some(expected_max_capacity));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_initial_capacity_sets_initial_capacity() {
+        let expected_initial_capacity = 50;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(expected_initial_capacity);
+        assert_eq!(builder.initial_capacity, Some(50));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_live_sets_ttl() {
+        let expected_ttl = Duration::from_mins(5);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
+        assert_eq!(builder.time_to_live, Some(expected_ttl));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_idle_sets_tti() {
+        let expected_tti = Duration::from_mins(1);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
+        assert_eq!(builder.time_to_idle, Some(expected_tti));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_name_sets_cache_name() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test-cache");
+        assert_eq!(builder.name, Some("test-cache"));
+    }
+
     #[test]
     fn gamma_round2_optional_capacity_configuration_forwards_the_exact_request_and_skips_an_absent_one() {
         for requested in [None, Some(17), Some(131)] {
