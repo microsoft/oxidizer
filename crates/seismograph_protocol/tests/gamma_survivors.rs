@@ -15,7 +15,7 @@ use seismograph_protocol::monitor::{InstanceId, MonitorOwner};
 use seismograph_protocol::{Error, read_control_response, read_request, read_response, write_request, write_response};
 
 fn frame(kind: u16, payload: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![b'S', b'G', b'M', b'P', 8, 0];
+    let mut bytes = vec![b'S', b'G', b'M', b'P', 9, 0];
     bytes.extend_from_slice(&kind.to_le_bytes());
     bytes.extend_from_slice(&0x0807_0605_0403_0201_u64.to_le_bytes());
     bytes.extend_from_slice(
@@ -127,6 +127,11 @@ fn gamma_survivor_recording_wire_fields_and_capacity_boundaries() {
             capture_backtraces: false,
             sampling_one_in: 32,
         },
+        RecordingPolicy {
+            enabled: false,
+            capture_backtraces: true,
+            sampling_one_in: 64,
+        },
     ];
     let configuration = RecordingConfiguration {
         allocations: policies[0],
@@ -134,10 +139,11 @@ fn gamma_survivor_recording_wire_fields_and_capacity_boundaries() {
         arc_dereferences: policies[2],
         runtime_tasks: policies[3],
         io: policies[4],
+        cache: policies[5],
         ..RecordingConfiguration::default()
     };
     let expected = [
-        0, 0, 1, 0, 1, 0, 2, 0, 0, 0, 0, 1, 4, 0, 0, 0, 1, 1, 8, 0, 0, 0, 0, 0, 16, 0, 0, 0, 1, 0, 32, 0, 0, 0,
+        0, 0, 1, 0, 1, 0, 2, 0, 0, 0, 0, 1, 4, 0, 0, 0, 1, 1, 8, 0, 0, 0, 0, 0, 16, 0, 0, 0, 1, 0, 32, 0, 0, 0, 0, 1, 64, 0, 0, 0,
     ];
     let mut encoded = Vec::new();
     write_request(&mut encoded, 0x0807_0605_0403_0201, &Request::SetRecording(configuration)).unwrap();
@@ -166,9 +172,9 @@ fn gamma_survivor_recording_wire_fields_and_capacity_boundaries() {
             Err(Error::InvalidMessage)
         ));
     }
-    let invalid = frame(101, &[0; 50]);
+    let invalid = frame(101, &[0; 56]);
     assert!(matches!(read_response(&mut invalid.as_slice()), Err(Error::InvalidMessage)));
-    for len in [0, 15, 16, 49, 51] {
+    for len in [0, 15, 16, 55, 57] {
         assert!(matches!(
             read_response(&mut frame(101, &vec![0; len]).as_slice()),
             Err(Error::InvalidMessage)

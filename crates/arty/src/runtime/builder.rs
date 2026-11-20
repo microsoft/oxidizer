@@ -7,10 +7,11 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{RuntimeConfig, RuntimeName};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
-use crate::runtime::hook::{Hook, HookFn};
+use crate::runtime::hook::{Hook, HookFn, RegisterHook};
+use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
 /// Configures workers and clocks before starting a runtime.
 ///
@@ -26,7 +27,8 @@ use crate::runtime::hook::{Hook, HookFn};
 /// # Examples
 ///
 /// ```
-/// use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+/// use arty::runtime::Runtime;
+/// use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 ///
 /// let runtime = Runtime::builder()
 ///     .workers(WorkersPolicy::at_most(4))
@@ -42,7 +44,7 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets the runtime name used in worker thread names.
+    /// Sets the runtime name used in worker thread names and monitoring.
     ///
     /// Async threads use `<name>-async-<index>`, with indices starting at zero.
     /// Shared blocking pools use `<name>-blocking-<thread index>`.
@@ -58,11 +60,11 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Registers a runtime hook with worker-local callback data.
+    /// Registers a runtime hook with relocatable callback data.
     ///
     /// Arty clones the hook data for each worker and relocates it before a
-    /// callback can run. Registering another hook of the same type appends it
-    /// after earlier callbacks.
+    /// callback can run there. Task-spawn hooks also keep a worker-neutral instance.
+    /// Registering another hook of the same type appends it after earlier callbacks.
     ///
     /// Arty does not catch a panic from the callback. You must make sure that
     /// the callback completes without a panic.
@@ -71,30 +73,45 @@ impl RuntimeBuilder {
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::Panic;
+    /// use arty::runtime::hook::TaskPanic;
     ///
-    /// let builder = Runtime::builder().on(Panic::IGNORE);
+    /// let builder = Runtime::builder().on(TaskPanic::ignore());
     /// ```
     #[must_use]
+    #[expect(
+        private_bounds,
+        reason = "RegisterHook applies hook-specific data bounds to the sealed Hook implementations"
+    )]
     pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self
     where
-        H: Hook,
+        H: Hook + RegisterHook<D>,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        self.config.hook_registrations.push(crate::runtime::hook::registration(hook.into()));
+        self.config
+            .hook_registrations
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(crate::runtime::hook::registration(hook.into()));
         self
     }
 
     /// Sets the runtime's monitoring configuration.
     ///
-    /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
-    /// enables the Seismograph dependencies that monitoring needs.
-    /// This choice does not start a monitor or add task measurements.
+    /// The default is [`MonitorPolicy::auto`]. It disables monitoring for tests,
+    /// doctests, documentation examples, and Miri. It enables monitoring in
+    /// other environments. This automatic selection can change in future releases.
+    ///
+    /// The `monitor` Cargo feature enables the Seismograph dependencies that
+    /// monitoring needs. Building an enabled runtime starts a local connection
+    /// for the Seismograph CLI. Task collection runs on request. This does not
+    /// enable event recording or change which tasks run. See the
+    /// [monitoring guide](crate::runtime#monitoring).
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{MonitorPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::MonitorPolicy;
     ///
     /// let builder = Runtime::builder().monitor(MonitorPolicy::enabled());
     /// ```
@@ -115,7 +132,8 @@ impl RuntimeBuilder {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{Runtime, WorkersPolicy};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::WorkersPolicy;
     ///
     /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
     /// ```
@@ -161,7 +179,8 @@ impl RuntimeBuilder {
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{BlockingPoolPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::policy::BlockingPoolPolicy;
     ///
     /// let builder = Runtime::builder().blocking_pool(BlockingPoolPolicy::shared().max(4));
     /// ```
@@ -217,6 +236,7 @@ impl RuntimeBuilder {
     ///
     /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
     /// or if the runtime name contains a null character (`\0`).
+    /// With monitoring enabled, also returns an error if the local monitor cannot start.
     ///
     /// # Panics
     ///
@@ -262,7 +282,7 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
@@ -281,7 +301,7 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]

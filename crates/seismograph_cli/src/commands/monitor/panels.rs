@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
 
-use super::app::{App, MonitorTab, RuntimeFocus, Screen};
+use super::app::{AllocatorBackend, App, MonitorTab, RuntimeFocus, Screen};
 
 pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Info, "  Info  "),
@@ -251,7 +251,14 @@ impl App {
             self.panels.cancel_drag();
             if let Some(key) = info_scroll_key(event.kind) {
                 if let Some((target, _)) = self.panels.rows.at(area, event.column, event.row) {
-                    self.heap_view.native.focus_list(target);
+                    let capture = match &self.screen {
+                        Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot.as_deref(),
+                        Screen::Browse => None,
+                    };
+                    match self.heap_view.backend(capture) {
+                        AllocatorBackend::Snmalloc => self.heap_view.native.focus_list(target),
+                        AllocatorBackend::Mimalloc => self.heap_view.mimalloc.focus_list(target),
+                    }
                 }
                 self.handle_key(key);
             } else {

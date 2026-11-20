@@ -9,8 +9,9 @@ mod support;
 
 use std::time::Duration;
 
-use arty::runtime::hook::Panic;
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::WorkersPolicy;
 use support::JoinHandleExt as _;
 use tick::ClockControl;
 
@@ -104,7 +105,7 @@ fn default_policy_starts_shutdown() {
 
 #[test]
 fn ignore_policy_keeps_the_runtime_running() {
-    let runtime = Runtime::builder().on(Panic::IGNORE).build().unwrap();
+    let runtime = Runtime::builder().on(TaskPanic::ignore()).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
 
     assert!(scheduler.spawn(async |_| panic!("ignore policy")).join().unwrap_err().is_panic());
@@ -114,7 +115,11 @@ fn ignore_policy_keeps_the_runtime_running() {
 
 #[test]
 fn panic_hook_replaces_the_default() {
-    let runtime = Runtime::builder().on(Panic::SHUTDOWN).on(Panic::IGNORE).build().unwrap();
+    let runtime = Runtime::builder()
+        .on(TaskPanic::shutdown())
+        .on(TaskPanic::ignore())
+        .build()
+        .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
 
     assert!(

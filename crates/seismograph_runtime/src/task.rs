@@ -23,6 +23,20 @@ pub struct EventContext {
     backtrace: BacktraceCapture,
 }
 
+/// Identity and timestamp assigned while building a task creation event.
+///
+/// Sampling or a concurrent recording change can omit the event after this
+/// metadata is assigned. Keep the identity for inspection and later outcomes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TaskSpawn {
+    /// Process-wide task identity.
+    pub id: TaskId,
+    /// Concrete task type identity used by the event.
+    pub descriptor: TypeDescriptorId,
+    /// Timestamp used by the task creation event.
+    pub timestamp: EventTimestamp,
+}
+
 impl EventContext {
     pub(crate) const fn new(runtime: RuntimeId, worker: Option<WorkerId>, backtrace: BacktraceCapture) -> Self {
         Self {
@@ -44,7 +58,30 @@ impl EventContext {
     /// Panics if process task identities are exhausted or `body_size` cannot be
     /// encoded as a value smaller than `u64::MAX`.
     #[must_use]
+    #[inline]
     pub fn spawned(&self, descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> Option<TaskId> {
+        self.spawned_with(|| descriptor, parent, body_size).map(|spawn| spawn.id)
+    }
+
+    /// Builds a task creation event and returns its identity and timestamp.
+    ///
+    /// Calls `descriptor` only when the recorder runs the event builder.
+    /// Disabled or suppressed recording does not call it. Sampling and
+    /// concurrent recording changes can still omit the event after it runs.
+    /// Reuse the returned timestamp in native task metadata to avoid another
+    /// clock read. Measure `body_size` before wrapping or type erasure.
+    ///
+    /// # Panics
+    ///
+    /// Propagates a panic from `descriptor`. Panics if process task identities
+    /// are exhausted or `body_size` cannot be encoded below `u64::MAX`.
+    #[must_use]
+    pub fn spawned_with(
+        &self,
+        descriptor: impl FnOnce() -> TypeDescriptorId,
+        parent: Option<TaskId>,
+        body_size: usize,
+    ) -> Option<TaskSpawn> {
         let mut assigned = None;
         seismograph::record(EventClass::RuntimeTask, || {
             let size = u64::try_from(body_size)
@@ -52,9 +89,11 @@ impl EventContext {
                 .and_then(|size| size.checked_add(1))
                 .expect("a concrete task body must be smaller than u64::MAX");
             let id = crate::allocate_task_id();
-            assigned = Some(id);
+            let descriptor = descriptor();
+            let timestamp = EventTimestamp::now();
+            assigned = Some(TaskSpawn { id, descriptor, timestamp });
             Some(Record::runtime(
-                EventTimestamp::now(),
+                timestamp,
                 EventKind::TaskSpawned,
                 RuntimeEvent {
                     runtime_id: self.runtime,

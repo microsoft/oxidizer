@@ -71,7 +71,12 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
-    /// Appends one worker-local runtime hook.
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(any(test, feature = "monitor"))]
+    #[debug("Inspect")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
+
+    /// Registers or executes one runtime hook on this worker.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },
 
@@ -139,7 +144,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
-    use arty_executor::{Executor, TaskPlacement};
+    use arty_executor::Executor;
 
     use super::*;
 
@@ -199,7 +204,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let context = runtime.scheduler().block_on(async |context| context).unwrap();
@@ -210,7 +215,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        let _registered = QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
+        QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -219,7 +224,11 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            &result_pool,
+            |_| std::future::ready(42),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<i32>>(),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "addr2line"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e567177890eb1617b1f774005b66b26b2377afd138a2ca37aae7d8f0c81429d4"
+dependencies = [
+ "gimli",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -207,6 +216,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "argh"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -244,6 +262,8 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 name = "arty"
 version = "0.6.1"
 dependencies = [
+ "alloc_tracker",
+ "arc-swap",
  "arty_executor",
  "arty_io_core",
  "arty_io_host",
@@ -265,6 +285,9 @@ dependencies = [
  "plurality 0.2.4",
  "scopeguard",
  "seismograph",
+ "seismograph_protocol",
+ "seismograph_runtime",
+ "smallvec",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -279,13 +302,10 @@ version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "data_privacy",
  "derive_more",
  "gungraun",
  "metabench",
  "nm",
- "observed",
- "observed_testing",
  "ohno 0.5.4",
  "performables",
  "pin-project",
@@ -344,10 +364,9 @@ version = "0.2.1"
 dependencies = [
  "arty",
  "derive_more",
- "futures",
- "ohno 0.5.4",
- "performables",
  "static_assertions",
+ "testing_aids",
+ "thread_aware",
  "tokio",
 ]
 
@@ -612,6 +631,21 @@ dependencies = [
  "azure_core",
  "serde",
  "time",
+]
+
+[[package]]
+name = "backtrace"
+version = "0.3.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f4220217f3288537b83684130f42fad43320b1c3b805f1910d683d52ded24f"
+dependencies = [
+ "addr2line",
+ "cfg-if",
+ "libc",
+ "miniz_oxide",
+ "object",
+ "rustc-demangle",
+ "windows-link",
 ]
 
 [[package]]
@@ -1022,16 +1056,6 @@ dependencies = [
  "iana-time-zone",
  "num-traits",
  "windows-link",
-]
-
-[[package]]
-name = "chrono-tz"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
-dependencies = [
- "chrono",
- "phf",
 ]
 
 [[package]]
@@ -1544,37 +1568,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
 
 [[package]]
-name = "defmt"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
-dependencies = [
- "bitflags 1.3.2",
- "defmt-macros",
-]
-
-[[package]]
-name = "defmt-macros"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
-dependencies = [
- "defmt-parser",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "defmt-parser"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "der-parser"
 version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1834,10 +1827,11 @@ dependencies = [
  "insta",
  "layered",
  "native-tls",
+ "observed_destination_core",
+ "observed_destination_stdout",
  "ohno 0.5.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "rustls",
@@ -2304,6 +2298,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gimli"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
+
+[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2580,6 +2580,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "jiff",
  "layered",
  "ohno 0.5.4",
  "pin-project",
@@ -2663,6 +2664,9 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno 0.5.4",
+ "parking_lot 0.13.0",
+ "routerama",
+ "smallvec",
  "templated_uri",
  "tick",
  "tokio",
@@ -3013,11 +3017,10 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
-version = "0.2.39"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ac703058abac89e5c39b0b879dce2b6b14a4ba36600c7e7e3d0c60a6883ef3c"
+checksum = "ed5d126d72eb017f10b302e73bdeca446bea405ee449af4d9e7866d6b082d83e"
 dependencies = [
- "defmt",
  "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
@@ -3030,37 +3033,36 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.2"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aee43309eb53bafb8c36d35d6e444769c8f8e6206a9fbf7546f5db9d7d4a0e93"
+checksum = "b6b46a105a9874634dd96231021526bf24ca04955a5998c59a9c7666e634b7b8"
 dependencies = [
- "defmt",
  "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.39"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dc32470c67eb7d0e9ccb74303fa925313dc04cecb1aa048beaa6f391e36a93d"
+checksum = "c0127e9bde3c6130d6169e7d8d68676e4be69c4bf7573c308b6f960a5089c428"
 dependencies = [
  "jiff-core",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
 name = "jiff-tzdb"
-version = "0.1.9"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
 
 [[package]]
 name = "jiff-tzdb-platform"
-version = "0.1.3"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+checksum = "dc65b284afcfa8f6cf189c7274c805505314a7ab975c60e1f548bff56525420e"
 dependencies = [
  "jiff-tzdb",
 ]
@@ -3745,6 +3747,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "object-pool"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3763,7 +3774,6 @@ dependencies = [
  "observed_macros",
  "ohno 0.5.4",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "pin-project",
@@ -3828,7 +3838,6 @@ dependencies = [
  "log",
  "observed_destination_core",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
  "static_assertions",
@@ -4031,17 +4040,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a3cf639fefd3e852869114f9925b578da6dd8e99281a2089bb0e773ead46962"
 
 [[package]]
-name = "opentelemetry-stdout"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2afbc6661934787ce79bef1e35d0ffe9d62e945f07f664dc1283ce83292b908a"
-dependencies = [
- "chrono",
- "opentelemetry",
- "opentelemetry_sdk",
-]
-
-[[package]]
 name = "opentelemetry_sdk"
 version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4235,24 +4233,6 @@ dependencies = [
  "fixedbitset",
  "hashbrown 0.15.5",
  "indexmap",
-]
-
-[[package]]
-name = "phf"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -4693,6 +4673,7 @@ dependencies = [
  "libc",
  "seismograph",
  "seismograph_rallocator",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5051,6 +5032,7 @@ version = "0.3.1"
 dependencies = [
  "criterion",
  "http_path_template",
+ "insta",
  "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -5091,6 +5073,12 @@ dependencies = [
  "syn 2.0.119",
  "unicode-ident",
 ]
+
+[[package]]
+name = "rustc-demangle"
+version = "0.1.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "rustc-hash"
@@ -5262,9 +5250,10 @@ dependencies = [
  "insta",
  "jiff",
  "layered",
+ "observed_destination_core",
+ "observed_destination_stdout",
  "ohno 0.5.4",
  "opentelemetry",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "recoverable",
  "rstest",
@@ -5322,6 +5311,7 @@ dependencies = [
 name = "seismograph"
 version = "0.5.0"
 dependencies = [
+ "backtrace",
  "libc",
  "seismograph_protocol",
  "tempfile",
@@ -5332,16 +5322,16 @@ dependencies = [
 name = "seismograph_cli"
 version = "0.5.0"
 dependencies = [
- "chrono",
  "clap",
  "crossterm",
+ "jiff",
  "performables",
  "ratatui",
- "same-file",
  "seismograph",
  "seismograph_protocol",
  "seismograph_rallocator",
  "seismograph_runtime",
+ "tempfile",
 ]
 
 [[package]]
@@ -5645,7 +5635,7 @@ checksum = "ffa8a5dbe8b3f0bbe29d4c3225daafaeead63afdc1b65fc4c01a1384166038e6"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot 0.12.5",
- "phf_shared 0.14.0",
+ "phf_shared",
  "precomputed-hash",
 ]
 
@@ -5935,8 +5925,6 @@ name = "tick"
 version = "0.9.1"
 dependencies = [
  "alloc_tracker",
- "chrono",
- "chrono-tz",
  "criterion",
  "futures",
  "jiff",
@@ -5945,13 +5933,9 @@ dependencies = [
  "ohno 0.5.4",
  "performables",
  "pin-project-lite",
- "serde",
- "serde_core",
- "serde_json",
  "static_assertions",
  "testing_aids",
  "thread_aware",
- "time",
  "tokio",
  "windows-sys 0.61.2",
 ]

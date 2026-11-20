@@ -31,7 +31,7 @@
 //! Use [`Scheduler::spawn_blocking`] or [`RuntimeScheduler::spawn_blocking`] for
 //! synchronous calls that can stop an async worker from running other tasks.
 //! Blocking functions run on separate threads in
-//! pools configured by [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+//! pools configured by [`BlockingPoolPolicy`](crate::runtime::policy::BlockingPoolPolicy).
 //!
 //! Await [`JoinHandle`] to receive a result or [`JoinError`]. Dropping a
 //! `JoinHandle` does not cancel its task.

@@ -754,6 +754,8 @@ rallocator
 rallocator's
 representability
 resize
+resized
+resizes
 untracked
 subregions
 tunables

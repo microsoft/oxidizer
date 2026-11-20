@@ -65,12 +65,7 @@ rustls = [
 ]
 native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
-seismograph = [
-    "anyspawn?/seismograph",
-    "bytesbuf/seismograph",
-    "performables/seismograph",
-    "tick/seismograph",
-]
+seismograph = ["anyspawn?/seismograph", "bytesbuf/seismograph", "performables/seismograph"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 compression-gzip = ["dep:compressors", "dep:http_compression", "http_compression/gzip"]
 # HTTP `deflate` is zlib-wrapped DEFLATE, which is `compressors/zlib`.
@@ -176,10 +171,9 @@ http_extensions = { path = "../http_extensions", features = ["test-util", "json"
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
+observed_destination_core = { workspace = true }
+observed_destination_stdout = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
-opentelemetry-stdout = { workspace = true, features = [
-    "metrics",
-], default-features = false }
 opentelemetry_sdk = { workspace = true, features = [
     "metrics",
     "testing",

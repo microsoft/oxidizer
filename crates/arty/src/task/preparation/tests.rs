@@ -9,13 +9,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context as PollContext, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor, TaskPlacement};
+use arty_executor::{CycleOutcome, Executor};
 use futures::executor::block_on;
 
 use super::*;
-use crate::runtime::{Runtime, Shutdown, WorkersPolicy};
-use crate::task::Context;
+use crate::runtime::monitoring::BlockingTaskMonitoring;
+use crate::runtime::policy::WorkersPolicy;
+use crate::runtime::{Runtime, Shutdown};
 use crate::task::handle::JoinHandlePool;
+use crate::task::{Context, JoinHandle};
 
 fn test_context() -> (Runtime, Context) {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
@@ -23,55 +25,39 @@ fn test_context() -> (Runtime, Context) {
     (runtime, cx)
 }
 
+fn prepare_remote_for_test<FF, F>(result_pool: &JoinHandlePool, future_factory: FF) -> (RemoteFutureFactory, JoinHandle<F::Output>)
+where
+    FF: FnOnce(Context) -> F + Send + 'static,
+    F: Future + 'static,
+    F::Output: Send + 'static,
+{
+    prepare_remote(result_pool, future_factory, TaskSpawnOptions::new::<F>())
+}
+
 #[test]
-fn remote_factory_remains_deferred_until_poll() {
+fn remote_factory_defers_future_creation_until_polling() {
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (factory, handle) = prepare_remote(
-        &result_pool,
-        move |_| {
-            // This test polls and observes the factory on one thread; no synchronization is needed.
-            factory_invoked.store(true, Ordering::Relaxed);
-            async {
-                // Retain an Rc across await so the factory-produced future remains non-Send.
-                let value = Rc::new(42);
-                std::future::ready(()).await;
-                *value
-            }
-        },
-        TaskPlacement::Any,
-    );
+    let (factory, handle) = prepare_remote_for_test(&result_pool, move |_| {
+        // This test polls and observes the factory on one thread; no synchronization is needed.
+        factory_invoked.store(true, Ordering::Relaxed);
+        async {
+            // Retain an Rc across await so the factory-produced future remains non-Send.
+            let value = Rc::new(42);
+            std::future::ready(()).await;
+            *value
+        }
+    });
 
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
     let (_runtime, cx) = test_context();
-    let _registered = factory.register(cx, &executor.tasks());
+    factory.register(cx, &executor.tasks());
     let before_poll = invoked.load(Ordering::Relaxed);
     run_to_completion(&mut executor);
     let result = block_on(handle).unwrap();
 
     assert_eq!((before_poll, invoked.load(Ordering::Relaxed), result), (false, true, 42),);
-}
-
-#[test]
-fn shutdown_cancelled_deferred_task_stays_pending_without_invoking_factory() {
-    let (runtime, cx) = test_context();
-    let invoked = Arc::new(AtomicBool::new(false));
-    let factory_invoked = Arc::clone(&invoked);
-    cx.control().request_stop();
-    let mut task = pin!(DeferredTask::new(
-        move |_| {
-            factory_invoked.store(true, Ordering::Release);
-            std::future::ready(())
-        },
-        cx,
-    ));
-    let mut cx = PollContext::from_waker(Waker::noop());
-
-    assert!(task.as_mut().poll(&mut cx).is_pending());
-    assert!(task.as_mut().poll(&mut cx).is_pending());
-    assert!(!invoked.load(Ordering::Acquire));
-    runtime.stop().unwrap();
 }
 
 /// Drives the executor until it reports that no further progress can be made.
@@ -90,8 +76,8 @@ impl Wake for PanicWake {
 #[test]
 fn blocking_task_delivers_its_result() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, || 42);
-    task();
+    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingTaskMonitoring::default());
+    task.run();
 
     assert_eq!(block_on(handle).unwrap(), 42);
     assert!(result_pool.shutdown().cause().is_none());
@@ -100,8 +86,8 @@ fn blocking_task_delivers_its_result() {
 #[test]
 fn blocking_panic_is_delivered_to_joiner() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"));
-    task();
+    let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"), BlockingTaskMonitoring::default());
+    task.run();
 
     assert!(block_on(handle).unwrap_err().is_panic());
     assert!(result_pool.shutdown().cause().is_none());
@@ -113,14 +99,10 @@ fn remote_factory_panic_is_delivered_to_joiner() {
     struct Payload(u32);
 
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (factory, handle) = prepare_remote(
-        &result_pool,
-        |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
-        TaskPlacement::Any,
-    );
+    let (factory, handle) = prepare_remote_for_test(&result_pool, |_| -> std::future::Ready<()> { panic_any(Payload(42)) });
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
     let (_runtime, cx) = test_context();
-    let _registered = factory.register(cx, &executor.tasks());
+    factory.register(cx, &executor.tasks());
     run_to_completion(&mut executor);
     assert!(block_on(handle).unwrap_err().is_panic());
 }
@@ -130,7 +112,7 @@ fn discarded_preparation_reports_the_shutdown_cause() {
     let shutdown = Shutdown::default();
     shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
     let result_pool = JoinHandlePool::new(shutdown);
-    let (task, handle) = prepare_blocking(&result_pool, || 42);
+    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingTaskMonitoring::default());
     drop(task);
     let mut handle = pin!(handle);
     let mut context = PollContext::from_waker(Waker::noop());
@@ -147,7 +129,7 @@ fn discarded_remote_factory_reports_the_shutdown_cause() {
     let shutdown = Shutdown::default();
     shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("queued shutdown")).into());
     let result_pool = JoinHandlePool::new(shutdown);
-    let (factory, handle) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+    let (factory, handle) = prepare_remote_for_test(&result_pool, |_| async { 42 });
 
     drop(factory);
 
@@ -168,7 +150,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 
     let capture = PanicOnDrop;
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, move || drop(capture));
+    let (task, handle) = prepare_blocking(&result_pool, move || drop(capture), BlockingTaskMonitoring::default());
     catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     assert!(block_on(handle).unwrap_err().is_shutdown());
 }
@@ -176,7 +158,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 #[test]
 fn discarded_blocking_task_contains_join_waker_panic() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, || 42);
+    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingTaskMonitoring::default());
     let mut handle = pin!(handle);
     let waker = Waker::from(Arc::new(PanicWake));
     assert!(handle.as_mut().poll(&mut PollContext::from_waker(&waker)).is_pending());

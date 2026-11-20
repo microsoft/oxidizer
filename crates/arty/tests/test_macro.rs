@@ -33,7 +33,7 @@ pub async fn main_with_panic_shutdown(cx: Context) -> Result<(), arty::task::Joi
 }
 
 /// This compile-pass fixture sets the ignore panic policy and other options.
-#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+#[arty::main(panic = ignore, workers = 1)]
 pub async fn main_with_panic_ignore(cx: Context) -> Result<(), arty::task::JoinError> {
     assert!(
         cx.scheduler()
@@ -105,11 +105,6 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     for task in tasks {
         assert_eq!(task.await.unwrap(), home);
     }
-}
-
-#[test(monitor = enabled)]
-async fn test_can_enable_monitoring(cx: Context) {
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[test(monitor = disabled, workers = 1)]

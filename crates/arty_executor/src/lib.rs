@@ -8,8 +8,8 @@
 //! Single-threaded async task executor for the Arty Runtime.
 //!
 //! `arty_executor` is an internal part of the [`arty`](https://docs.rs/arty) crate.
-//! It registers, polls, wakes, cancels, and completes tasks. It also reports telemetry
-//! and contains task panics. Applications use `arty` instead of this crate.
+//! It registers, polls, wakes, cancels, and completes tasks. It also contains
+//! task panics. Applications use `arty` instead of this crate.
 //!
 //! `arty` uses this crate to run async tasks. Application code uses the task and join
 //! APIs from `arty`.
@@ -46,9 +46,7 @@ mod task;
 mod task_builder;
 mod task_handle;
 mod task_list;
-mod task_metadata;
 mod task_set;
-mod telemetry;
 mod wake;
 
 pub use builder::*;
@@ -63,11 +61,8 @@ pub(crate) use task::*;
 pub use task_builder::*;
 pub(crate) use task_handle::*;
 pub(crate) use task_list::*;
-pub use task_metadata::TaskPlacement;
-pub(crate) use task_metadata::*;
 pub use task_set::*;
 
 mod inspection;
-#[cfg(feature = "inspection")]
-pub use inspection::{InspectionError, InspectionStatus, PollObserver, TaskState};
+pub use inspection::{InspectionError, InspectionStatus, PollObserver, TaskInstrumentation, TaskState};
 pub(crate) use wake::*;

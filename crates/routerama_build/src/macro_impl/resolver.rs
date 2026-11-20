@@ -204,11 +204,11 @@ fn expand_named_with_runtime(
     });
 
     let raw_enum = Ident::new(&format!("__{enum_name}Raw"), enum_name.span());
+    let mut generator = Generator::new(raw_enum.to_string(), false);
+    generator.full_api(false);
+    generator.runtime_path(quote! { #runtime::codegen_helpers });
+    generator.add_all(static_routes);
     let static_resolve_body = if has_static {
-        let mut generator = Generator::new(raw_enum.to_string(), false);
-        generator.full_api(false);
-        generator.runtime_path(quote! { #runtime::codegen_helpers });
-        generator.add_all(static_routes);
         let raw_impls = generator.generate();
 
         let raw_ty = if static_has_captures {
@@ -484,6 +484,55 @@ fn expand_named_with_runtime(
         }
     };
 
+    let table = quote! { #runtime::RouteTable };
+    let match_route = if has_dynamic && has_static {
+        let static_match = if static_any_verb {
+            quote! { __match_route(__method, __path) }
+        } else {
+            // As in `resolve`, a dynamic `:verb` route must not be consumed as a static capture.
+            quote! {
+                if #runtime::__rt::RawResolver::splits_verbs(&self.__state)
+                    && #runtime::codegen_helpers::split_verb(__path).1.is_some()
+                {
+                    ::core::result::Result::Ok(::core::option::Option::None)
+                } else {
+                    __match_route(__method, __path)
+                }
+            }
+        };
+        quote! {
+            let __matched = #static_match;
+            match __matched {
+                ::core::result::Result::Ok(::core::option::Option::None) => {
+                    #table::match_route(&self.__state, __method, __path)
+                }
+                __matched => __matched.ok().flatten(),
+            }
+        }
+    } else if has_dynamic {
+        quote! { #table::match_route(&self.__state, __method, __path) }
+    } else {
+        quote! { __match_route(__method, __path).ok().flatten() }
+    };
+    let static_table = (has_static || !has_dynamic).then(|| generator.generate_route_table());
+    // The anonymous block keeps the generated items away from user names.
+    let route_table_def = quote! {
+        const _: () = {
+            #static_table
+
+            #[automatically_derived]
+            impl #table for #resolver_name {
+                fn match_route<'p>(
+                    &self,
+                    __method: &str,
+                    __path: &'p str,
+                ) -> ::core::option::Option<#runtime::RouteHit<'_, 'p>> {
+                    #match_route
+                }
+            }
+        };
+    };
+
     for variant in &mut item.variants {
         variant.attrs.retain(|attr| !attr.path().is_ident("route"));
     }
@@ -492,6 +541,7 @@ fn expand_named_with_runtime(
         #resolver_def
         #enum_inherent
         #builder_def
+        #route_table_def
     })
 }
 

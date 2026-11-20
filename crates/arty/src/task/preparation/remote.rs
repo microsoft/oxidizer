@@ -3,12 +3,12 @@
 
 use std::cell::Cell;
 
-use arty_executor::{TaskPlacement, TaskSet};
+use arty_executor::TaskSet;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTaskFactory, discard_panicking_drop};
+use crate::task::preparation::{DeferredTaskFactory, TaskSpawnOptions, discard_panicking_drop};
 
 thread_local! {
     static FUTURE_FACTORIES: MultiPool = MultiPool::new();
@@ -57,9 +57,6 @@ pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
 }
 
-#[must_use]
-pub(crate) struct RegisteredRemoteTask;
-
 impl RemoteFutureFactory {
     pub(crate) fn new(factory: impl FnOnce(Context, &TaskSet) + Send + 'static) -> Self {
         let factory = Cell::new(Some(factory));
@@ -82,28 +79,28 @@ impl RemoteFutureFactory {
         Self { inner }
     }
 
-    pub(crate) fn register(self, cx: Context, tasks: &TaskSet) -> RegisteredRemoteTask {
+    pub(crate) fn register(self, cx: Context, tasks: &TaskSet) {
         (self.inner)(cx, tasks);
-        RegisteredRemoteTask
     }
 }
 
-pub(crate) fn prepare_remote<FF, F, R>(
+pub(crate) fn prepare_remote<FF, F>(
     result_pool: &JoinHandlePool,
     future_factory: FF,
-    placement: TaskPlacement,
-) -> (RemoteFutureFactory, JoinHandle<R>)
+    options: TaskSpawnOptions,
+) -> (RemoteFutureFactory, JoinHandle<F::Output>)
 where
     FF: FnOnce(Context) -> F + Send + 'static,
-    F: Future<Output = R> + 'static,
-    R: Send + 'static,
+    F: Future + 'static,
+    F::Output: Send + 'static,
 {
     let (handle, result_tx) = result_pool.handle();
     let future_factory = TaskFactory::new(future_factory);
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         let future_factory = future_factory.into_inner();
+        let destination = cx.thread().clone();
         let inner = DeferredTaskFactory::new(future_factory, cx);
-        tasks.task(inner).placement(placement).register(result_tx);
+        options.register(&destination, tasks, inner, result_tx);
     });
     (future_factory, handle)
 }

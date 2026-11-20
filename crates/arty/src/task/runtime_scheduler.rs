@@ -32,10 +32,10 @@ struct ScopedStorage<T> {
 }
 
 impl<FF> ScopedStorage<FF> {
-    fn into_future<F, R>(self, cx: Context) -> ScopedStorage<impl Future<Output = R>>
+    fn into_future<F>(self, cx: Context) -> ScopedStorage<impl Future<Output = F::Output>>
     where
         FF: FnOnce(Context) -> F,
-        F: Future<Output = R>,
+        F: Future,
     {
         let Self { inner, completion } = self;
         ScopedStorage {
@@ -105,7 +105,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let mut message = String::from("Hello");
     /// runtime
     ///     .scheduler()
@@ -135,7 +135,9 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
+        let options = crate::task::preparation::TaskSpawnOptions::with_future_size::<LocalBoxFuture<'static, R>>(size_of::<F>());
+        let task = self.dispatcher.spawn(factory, options);
+        futures::executor::block_on(task).map_err(Error::new)
     }
 
     /// Lets the runtime choose a worker for an async task and relocates its data.
@@ -160,7 +162,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
@@ -175,7 +177,7 @@ impl RuntimeScheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly(u32);
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) });
@@ -190,11 +192,14 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.spawn(move |cx| {
-            let mut data = data;
-            data.relocate(None, cx.thread());
-            future_factory(cx, data)
-        })
+        self.dispatcher.spawn(
+            move |cx| {
+                let mut data = data;
+                data.relocate(None, cx.thread());
+                future_factory(cx, data)
+            },
+            crate::task::preparation::TaskSpawnOptions::new::<F>(),
+        )
     }
 
     /// Runs a function on a thread from a blocking pool.
@@ -202,7 +207,7 @@ impl RuntimeScheduler {
     /// Uses a pool chosen by the runtime for synchronous I/O or other calls
     /// that can stop an async worker from running other tasks.
     /// A panic in this function returns an error through [`JoinHandle`].
-    /// It does not invoke the configured [`Panic`](crate::runtime::hook::Panic)
+    /// It does not invoke the configured [`TaskPanic`](crate::runtime::hook::TaskPanic)
     /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
@@ -218,7 +223,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime.scheduler().spawn_blocking(|| 6 * 7);
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -417,8 +422,8 @@ mod tests {
     #[test]
     fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
         let runtime = Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::IGNORE)
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

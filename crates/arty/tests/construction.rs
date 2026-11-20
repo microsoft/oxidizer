@@ -10,8 +10,9 @@ use std::error::Error as StdError;
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 
-use arty::runtime::hook::Panic;
-use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
+use arty::runtime::{Error, Runtime, RuntimeBuilder};
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
 #[cfg(test)]
@@ -220,34 +221,9 @@ fn null_in_runtime_name_is_rejected_when_built() {
 }
 
 #[test]
-fn monitor_policy_defaults_to_enabled() {
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .monitor(MonitorPolicy::default())
-        .build()
-        .unwrap();
-
-    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-    runtime.stop().unwrap();
-}
-
-#[test]
-fn explicit_monitor_policies_preserve_runtime_behavior() {
-    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
-        let runtime = Runtime::builder()
-            .workers(WorkersPolicy::exactly(1))
-            .monitor(policy)
-            .build()
-            .unwrap();
-
-        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-        runtime.stop().unwrap();
-    }
-}
-
-#[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
+        #[cfg(not(feature = "monitor"))]
         Runtime::new().unwrap(),
         Runtime::builder().build().unwrap(),
         Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
@@ -266,8 +242,8 @@ fn default_runtime_construction_uses_one_worker() {
 #[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
     for builder in [
-        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::SHUTDOWN),
-        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::IGNORE),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(TaskPanic::shutdown()),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(TaskPanic::ignore()),
     ] {
         let runtime = builder.build().unwrap();
 

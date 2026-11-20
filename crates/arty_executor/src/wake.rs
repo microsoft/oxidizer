@@ -132,7 +132,6 @@ impl WakeSignal {
         }
     }
 
-    #[cfg(feature = "inspection")]
     pub(crate) fn has_queued_notification(&self) -> bool {
         // Acquire observes the scheduler's released state transitions.
         // This is a racing readiness hint, not access to queued task storage.
