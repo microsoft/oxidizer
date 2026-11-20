@@ -292,8 +292,10 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets the media types of the request bodies to log, such as `application/json`. [Bodies](crate#bodies) tells
-    /// which `Content-Type` values the types cover.
+    /// Sets the media types of the request bodies to log, such as `application/json`.
+    ///
+    /// If the list is not empty, the middleware also logs all `text/*`, `application/*+json` and `application/*+xml`
+    /// bodies. [Bodies](crate#bodies) tells which `Content-Type` values the types cover.
     ///
     /// # Errors
     ///
@@ -303,8 +305,10 @@ impl TelemetryLayer {
         Ok(self)
     }
 
-    /// Sets the media types of the response bodies to log, such as `application/json`. [Bodies](crate#bodies) tells
-    /// which `Content-Type` values the types cover.
+    /// Sets the media types of the response bodies to log, such as `application/json`.
+    ///
+    /// If the list is not empty, the middleware also logs all `text/*`, `application/*+json` and `application/*+xml`
+    /// bodies. [Bodies](crate#bodies) tells which `Content-Type` values the types cover.
     ///
     /// # Errors
     ///

@@ -127,16 +127,18 @@
 //!
 //! # Bodies
 //!
-//! The middleware logs a body when the media types of its direction cover the `Content-Type` of
-//! the body. A list that is not empty covers a `Content-Type` in three cases, without regard to
-//! ASCII case and to the parameters of the `Content-Type`:
+//! The middleware logs no body of a direction while the list of media types of that direction is
+//! empty, which is the default. If the list is not empty, the middleware always logs a body whose
+//! `Content-Type` is one of these types:
 //!
-//! - It equals one of the media types, such as `application/json`.
-//! - Its type is `text`, such as `text/plain`.
-//! - Its type is `application`, and its subtype ends with `+json` or `+xml`, such as
+//! - A `text` type, such as `text/plain` or `text/csv`.
+//! - An `application` type whose subtype ends with `+json` or `+xml`, such as
 //!   `application/problem+json`.
 //!
-//! An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
+//! The media types in the list add more types, such as `application/json`. The list cannot remove
+//! the types above. So with only `application/json` in the list, the middleware also logs
+//! `text/csv` and `application/soap+xml` bodies. ASCII case and the parameters of a `Content-Type`
+//! do not matter.
 //!
 //! The middleware does not redact the bodies that it logs, so the logs can contain personal data
 //! from the bodies. It does not log a body whose `Content-Encoding` names a coding other than

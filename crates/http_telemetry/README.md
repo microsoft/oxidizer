@@ -133,16 +133,18 @@ ends when the handler returns:
 
 ## Bodies
 
-The middleware logs a body when the media types of its direction cover the `Content-Type` of
-the body. A list that is not empty covers a `Content-Type` in three cases, without regard to
-ASCII case and to the parameters of the `Content-Type`:
+The middleware logs no body of a direction while the list of media types of that direction is
+empty, which is the default. If the list is not empty, the middleware always logs a body whose
+`Content-Type` is one of these types:
 
-* It equals one of the media types, such as `application/json`.
-* Its type is `text`, such as `text/plain`.
-* Its type is `application`, and its subtype ends with `+json` or `+xml`, such as
+* A `text` type, such as `text/plain` or `text/csv`.
+* An `application` type whose subtype ends with `+json` or `+xml`, such as
   `application/problem+json`.
 
-An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
+The media types in the list add more types, such as `application/json`. The list cannot remove
+the types above. So with only `application/json` in the list, the middleware also logs
+`text/csv` and `application/soap+xml` bodies. ASCII case and the parameters of a `Content-Type`
+do not matter.
 
 The middleware does not redact the bodies that it logs, so the logs can contain personal data
 from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
@@ -209,7 +211,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ-a6mKk2Hswb6KItTjH0CO0bQXZM9x1lO5Mb_4SnBOCtfAhhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbyYEyPFVDKXMbDRKkHqMoD3sbPQp2e4YVT2sbkF6qdCQL1qJhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit
