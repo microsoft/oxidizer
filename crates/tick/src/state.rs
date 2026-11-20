@@ -128,7 +128,6 @@ impl ClockState {
     ///
     /// A single driver task uses this state. For example, [`Clock::new_tokio`]
     /// uses it. [`ThreadAware::relocate`] does nothing for this state.
-    #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_system_shared() -> Self {
         Self::System(SystemClockState::new(SystemClockStorage::new_shared()))
     }
@@ -211,7 +210,6 @@ pub(crate) enum SystemClockStorage {
     /// [`ThreadAware::relocate`] does nothing. All clones use the same timers,
     /// driver registrations, and clock-owner count on all thread coordinates.
     /// A single driver task uses this state, such as [`Clock::new_tokio`].
-    #[cfg(any(feature = "rt-shared", test))]
     Shared(std::sync::Arc<SystemClockStorageInner>),
 
     /// System-clock state with one timer set per thread.
@@ -234,7 +232,6 @@ pub(crate) struct SystemClockStorageInner {
 impl ThreadAware for SystemClockStorage {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         match self {
-            #[cfg(any(feature = "rt-shared", test))]
             Self::Shared(_) => {}
             Self::Isolated(timers) => timers.relocate(source, destination),
         }
@@ -246,14 +243,12 @@ impl SystemClockStorage {
         Self::Isolated(Arc::new_with(SystemClockStorageInner::default))
     }
 
-    #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_shared() -> Self {
         Self::Shared(std::sync::Arc::new(SystemClockStorageInner::default()))
     }
 
     fn storage(&self) -> &SystemClockStorageInner {
         match self {
-            #[cfg(any(feature = "rt-shared", test))]
             Self::Shared(state) => state,
             Self::Isolated(state) => state,
         }

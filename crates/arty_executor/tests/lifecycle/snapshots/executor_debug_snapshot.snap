@@ -41,9 +41,6 @@ Executor {
                 closed: false,
                 ..
             },
-            sink: observed::sink::core::Sink {
-                variant: "Noop",
-            },
             panic_policy: PanicPolicy(
                 Shutdown,
             ),
@@ -54,8 +51,10 @@ Executor {
         _owner_thread: PhantomData<alloc::rc::Rc<()>>,
         ..
     },
-    clock: SimpleClock(
-        SystemFast,
-    ),
-    last_cycle_ended: None,
+    stopwatch: Stopwatch {
+        source: Coarse {
+            started_at: None,
+        },
+        elapsed: 0ns,
+    },
 }

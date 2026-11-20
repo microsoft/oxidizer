@@ -38,6 +38,9 @@ targets = [
 # Mutation testing is excluded by the workspace mutation configurations.
 exclude = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Environment", "Win32_System_IO"] }
+
 [dependencies]
 seismograph.workspace = true
 seismograph_rallocator.workspace = true

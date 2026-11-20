@@ -22,7 +22,8 @@ use std::{fmt, thread};
 
 use arty::core::{Thread, ThreadAware};
 use arty::io::Io;
-use arty::runtime::{Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::policy::WorkersPolicy;
+use arty::runtime::{Runtime, RuntimeBuilder};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -51,8 +52,7 @@ static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 assert_impl_all!(Io: Clone, Send, ThreadAware);
 assert_not_impl_any!(Io: UnwindSafe, RefUnwindSafe);
-assert_impl_all!(RuntimeBuilder: Send);
-assert_not_impl_any!(RuntimeBuilder: Sync);
+assert_impl_all!(RuntimeBuilder: Send, Sync);
 
 #[derive(Debug)]
 struct IoError(String);

@@ -90,8 +90,8 @@ controlled driver loop from its own shutdown state.
 
 `Clock::system_time_as` and `SimpleClock::system_time_as` are infallible
 convenience methods. Production data is a current operating system clock value
-without test-controlled offsets. Each supported `tick::fmt` type accepts that
-range.
+without test-controlled offsets. Common timestamp types, such as
+`jiff::Timestamp`, accept that range.
 
 A controlled clock can hold a value outside a target format range. In that
 case, the convenience method panics. Code that expects conversion failure must
@@ -146,7 +146,7 @@ deadline.
 
 ## Errors
 
-`tick::Error` owns the crate error contract. It provides timeout and range
+`tick::Error` owns the crate error contract. It provides timeout
 classification, retains upstream causes, and captures a backtrace.
 
 Display output includes the backtrace when capture is enabled. Callers must use

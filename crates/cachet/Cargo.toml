@@ -60,7 +60,6 @@ seismograph = [
     "bytesbuf?/seismograph",
     "cachet_memory?/seismograph",
     "dep:seismograph",
-    "tick/seismograph",
     "uniflight/seismograph",
 ]
 telemetry = []

@@ -28,7 +28,8 @@ use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]

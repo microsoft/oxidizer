@@ -5,7 +5,8 @@
 
 use std::time::Duration;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 
 fn main() -> Result<(), ohno::AppError> {
     let runtime = Runtime::builder().workers(WorkersPolicy::at_most(2)).build()?;

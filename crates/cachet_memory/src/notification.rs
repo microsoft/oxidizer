@@ -33,6 +33,7 @@ pub(crate) fn from_moka(cause: moka::notification::RemovalCause) -> RemovalCause
     }
 }
 
+// Moka causes and this conversion are not exposed by the public cache API.
 #[cfg(test)]
 mod tests {
     use super::*;

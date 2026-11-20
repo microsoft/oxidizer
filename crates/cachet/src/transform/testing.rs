@@ -67,6 +67,7 @@ impl<T: Clone + Send + Sync> Codec<T, T> for MockCodec<T> {
 
 #[cfg(test)]
 mod tests {
+    // MockCodec is a private unit-test fixture, not a supported public codec.
     use super::*;
 
     #[test]

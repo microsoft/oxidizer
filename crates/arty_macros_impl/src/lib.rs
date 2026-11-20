@@ -93,12 +93,12 @@ impl Args {
         let workers = self.workers.as_ref().map(|value| worker_policy(value, runtime_path)).transpose()?;
         let workers = workers.map(|policy| quote!(.workers(#policy)));
         let monitor = monitor.map(|monitor| match monitor {
-            MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::enabled())),
-            MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
+            MonitorSetting::Enabled => quote!(.monitor(#runtime_path::runtime::policy::MonitorPolicy::enabled())),
+            MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::policy::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::SHUTDOWN)),
-            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::IGNORE)),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::TaskPanic::shutdown())),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::TaskPanic::ignore())),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
@@ -169,12 +169,12 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
         && !count.base10_digits().starts_with('-')
         && matches!(count.suffix(), "" | "usize")
     {
-        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::exactly(#count)));
+        return Ok(quote!(#runtime_path::runtime::policy::WorkersPolicy::exactly(#count)));
     }
     if let Expr::Path(syn::ExprPath { qself: None, path, .. }) = value
         && path.is_ident("all")
     {
-        return Ok(quote!(#runtime_path::runtime::WorkersPolicy::all()));
+        return Ok(quote!(#runtime_path::runtime::policy::WorkersPolicy::all()));
     }
     Err(syn::Error::new_spanned(
         value,
@@ -361,7 +361,7 @@ mod tests {
         });
         assert_eq!(
             worker_policy(&grouped, &quote!(::arty)).unwrap().to_string(),
-            quote!(::arty::runtime::WorkersPolicy::exactly(3usize)).to_string()
+            quote!(::arty::runtime::policy::WorkersPolicy::exactly(3usize)).to_string()
         );
     }
 

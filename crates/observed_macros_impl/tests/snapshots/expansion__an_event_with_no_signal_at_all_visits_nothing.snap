@@ -6,6 +6,15 @@ struct Silent {
     tenant: ClassifiedString,
 }
 const _: () = {
+    impl ::observed::VisitFields for Silent {
+        const CONTAINS_METRICS: bool = false;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Silent {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "silent",
@@ -15,11 +24,5 @@ const _: () = {
             false,
             false,
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

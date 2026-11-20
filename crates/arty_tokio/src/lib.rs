@@ -27,7 +27,8 @@
 //! runtime starts:
 //!
 //! ```
-//! use arty::runtime::{Runtime, WorkersPolicy};
+//! use arty::runtime::Runtime;
+//! use arty::runtime::policy::WorkersPolicy;
 //! use arty_tokio::TokioCompatExt as _;
 //! use tokio::runtime::Builder;
 //!

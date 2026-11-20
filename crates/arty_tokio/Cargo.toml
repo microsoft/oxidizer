@@ -45,6 +45,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 [dev-dependencies]
 arty = { path = "../arty", features = ["macros", "rt"] }
 static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["io-util", "rt-multi-thread"] }
 
 [[example]]
