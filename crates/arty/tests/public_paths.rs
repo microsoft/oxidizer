@@ -11,9 +11,8 @@ use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use arty::runtime::hook::{Hook, HookFn, TaskPanic, TaskSpawn, WorkerSpawn};
-use arty::runtime::{
-    BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers, WorkersPolicy,
-};
+use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+use arty::runtime::{Error, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers};
 use arty::task::{Context, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;

@@ -39,7 +39,7 @@ struct ShutdownGuard(RuntimeControl);
 
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
-        self.0.shutdown();
+        self.0.request_stop();
     }
 }
 
