@@ -174,22 +174,26 @@ impl super::private::Sealed for TaskSpawn {
         D: ThreadAware + Clone + Sync + 'static;
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "test code")]
 
+    #[cfg(not(miri))]
     use std::alloc::System;
     use std::hint::black_box;
     use std::sync::{Arc, Mutex};
 
+    #[cfg(not(miri))]
     use alloc_tracker::{Allocator, Session};
     use thread_aware::ThreadBuilder;
 
     use super::*;
 
+    #[cfg(not(miri))]
     #[global_allocator]
     static ALLOCATOR: Allocator<System> = Allocator::system();
 
+    #[cfg(not(miri))]
     const MEASURED_OPERATIONS: usize = 1_000;
 
     struct OneBytePoll(u8);
@@ -228,16 +232,19 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn one_observer_uses_one_allocation() {
         assert_eq!(observer_allocations(1), MEASURED_OPERATIONS as u64);
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn two_observers_use_two_allocations() {
         assert_eq!(observer_allocations(2), (MEASURED_OPERATIONS * 2) as u64);
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn third_observer_allocates_collection_buffer() {
         assert_eq!(observer_allocations(3), (MEASURED_OPERATIONS * 4) as u64);
     }
@@ -278,6 +285,7 @@ mod tests {
         assert_eq!(*observed.lock().unwrap(), RelocationSource::Worker(source.id()));
     }
 
+    #[cfg(not(miri))]
     fn observer_allocations(observer_count: usize) -> u64 {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
         let session = Session::new().no_stdout().no_file();
