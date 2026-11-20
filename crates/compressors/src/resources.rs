@@ -151,6 +151,8 @@ fn global_memory() -> &'static GlobalPool {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Both cases assert private pool capacity. The relocation case also checks its preservation.
+// The memory callback assertion alone does not replace that private-state assertion.
 mod tests {
     use super::*;
 

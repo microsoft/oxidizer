@@ -204,6 +204,8 @@ pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// The error and progress fixtures implement the sealed CompressionInternal trait.
+// A downstream test cannot inject these outcomes into process.
 mod tests {
     use super::*;
     use crate::testing::view;

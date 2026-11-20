@@ -277,6 +277,8 @@ unsafe impl Codec for BrotliDecompress {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// Codec steps, workspaces, mappings and fields are private. Even constructor-only cases
+// run without features through lib.rs's cfg(test) brotli module, unlike downstream tests.
 mod tests {
     #[test]
     fn gamma_afternoon_flush_completion_requires_the_flush_operation_consumed_input_and_no_pending_output() {

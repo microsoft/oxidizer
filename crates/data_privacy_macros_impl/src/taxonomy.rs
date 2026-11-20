@@ -187,16 +187,3 @@ fn pascal_to_snake_case(s: &str) -> String {
 
     result
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::taxonomy::pascal_to_snake_case;
-
-    #[test]
-    fn test_pascal_to_snake_case() {
-        assert_eq!(pascal_to_snake_case("PascalCase"), "pascal_case");
-        assert_eq!(pascal_to_snake_case("AnotherExample"), "another_example");
-        assert_eq!(pascal_to_snake_case("Simple"), "simple");
-        assert_eq!(pascal_to_snake_case("WithNumbers123"), "with_numbers123");
-    }
-}

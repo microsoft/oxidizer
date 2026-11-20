@@ -30,6 +30,14 @@ fn test_classified_wrapper() {
 }
 
 #[test]
+fn reclassify_changes_data_class() {
+    let sensitive = Sensitive::new("secret", data_privacy::DataClass::new("original", "pii"));
+    let reclassified = sensitive.reclassify(data_privacy::DataClass::new("updated", "eupi"));
+    assert_eq!(reclassified.data_class().taxonomy(), "updated");
+    assert_eq!(reclassified.data_class().name(), "eupi");
+}
+
+#[test]
 fn test_declassification() {
     let mut classified = Sensitive::new(42, TestTaxonomy::PII);
     assert_eq!(*classified.declassify_ref(), 42);
