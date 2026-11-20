@@ -3,7 +3,7 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{Hook, HookFn, registration};
+use crate::runtime::hook::{Hook, HookFn, RegisterHook, registration};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -87,10 +87,14 @@ impl RuntimeControl {
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[expect(
+        private_bounds,
+        reason = "RegisterHook applies hook-specific data bounds to the sealed Hook implementations"
+    )]
     pub fn on<H, D>(&self, hook: impl Into<HookFn<H, D>>)
     where
-        H: Hook,
-        D: thread_aware::ThreadAware + Clone + Sync + 'static,
+        H: Hook + RegisterHook<D>,
+        D: thread_aware::ThreadAware + Clone + 'static,
     {
         let hook = registration(hook.into());
         self.dispatcher.register_hook(hook);

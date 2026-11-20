@@ -5,6 +5,7 @@ use std::any::Any;
 use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::fmt::Debug;
 use std::marker::PhantomPinned;
+use std::mem::MaybeUninit;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::task;
@@ -39,14 +40,14 @@ where
     T: TaskCompletion<F::Output>,
     I: TaskInstrumentation,
 {
-    /// `None` after the task completes or the executor abandons it during shutdown.
+    /// Empty after the task completes or the executor abandons it during shutdown.
     ///
     /// We use `UnsafeCell` to allow the `Task` to be accessed from multiple viewpoints, with the
     /// executor using both the payload and the wake signal, and the wakers emitted by the
     /// wake signal using the wake signal. All access is through shared references, so there are no
     /// aliasing violations, with `UnsafeCell` used when mutation of the contents is needed.
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
-    payload: UnsafeCell<Option<Payload<F, T, I>>>,
+    payload: UnsafeCell<PayloadSlot<Payload<F, T, I>>>,
 
     /// Initialized once on the owner, before any waker is exposed. The signal is never replaced.
     wake_signal: OnceCell<WakeSignal>,
@@ -97,7 +98,7 @@ where
 {
     fn new(future: F, result_target: T, instrumentation: I) -> Self {
         Self {
-            payload: UnsafeCell::new(Some(Payload {
+            payload: UnsafeCell::new(PayloadSlot::new(Payload {
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
                 instrumentation,
@@ -157,7 +158,7 @@ where
     fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
         // SAFETY: Inspection runs on the owner between cycles or immediately before polling.
         let payload = unsafe { &*self.payload.get() };
-        if let Some(payload) = payload {
+        if let Some(payload) = payload.as_ref() {
             payload.instrumentation.inspect(state, visitor);
         }
     }
@@ -170,9 +171,9 @@ where
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
-        let maybe_payload = unsafe { self.payload.get().as_mut().expect("UnsafeCell pointer cannot be null") };
+        let payload_slot = unsafe { self.payload.get().as_mut().expect("UnsafeCell pointer cannot be null") };
 
-        let Some(payload) = maybe_payload else {
+        let Some(payload) = payload_slot.as_mut() else {
             unreachable!("attempted to poll a task whose future was already dropped");
         };
 
@@ -194,10 +195,10 @@ where
         };
 
         match poll_result {
-            Err(panic) => Self::finish_panicked(maybe_payload, wake_signal, panic, shared),
+            Err(panic) => Self::finish_panicked(payload_slot, wake_signal, panic, shared),
             Ok(task::Poll::Ready(result)) => {
                 wake_signal.retire();
-                Self::finish_succeeded(maybe_payload, result);
+                Self::finish_succeeded(payload_slot, result);
                 task::Poll::Ready(())
             }
             Ok(task::Poll::Pending) => task::Poll::Pending,
@@ -234,9 +235,9 @@ where
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
-        let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
+        let payload_slot = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        Self::finish_cancelled(maybe_payload, cause);
+        Self::finish_cancelled(payload_slot, cause);
     }
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
@@ -258,12 +259,12 @@ where
     }
 
     fn finish_panicked(
-        maybe_payload: &mut Option<Payload<F, T, I>>,
+        payload_slot: &mut PayloadSlot<Payload<F, T, I>>,
         wake_signal: Pin<&WakeSignal>,
         panic: TaskPanicPayload,
         shared: &ExecutorShared,
     ) -> task::Poll<()> {
-        let payload = maybe_payload.as_mut().expect("a polled task retains its payload");
+        let payload = payload_slot.as_mut().expect("a polled task retains its payload");
         let result_target = payload.result_target.take().expect("a polled task retains its result target");
         let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.panicked())).err();
 
@@ -272,7 +273,7 @@ where
         if let Err(disposal) = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned() {
             discard_task_panic_payload(disposal);
         }
-        Self::retire_payload(maybe_payload);
+        Self::retire_payload(payload_slot);
         let shutdown = shared.shutdown();
         let (action, panic) = shared.panic_policy().resolve(panic);
         if action == crate::PanicAction::Shutdown {
@@ -286,22 +287,22 @@ where
         task::Poll::Ready(())
     }
 
-    fn finish_succeeded(maybe_payload: &mut Option<Payload<F, T, I>>, result: F::Output) {
-        let payload = maybe_payload.as_mut().expect("a completed task retains its payload");
+    fn finish_succeeded(payload_slot: &mut PayloadSlot<Payload<F, T, I>>, result: F::Output) {
+        let payload = payload_slot.as_mut().expect("a completed task retains its payload");
         let result_target = payload
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
         let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.completed())).err();
-        Self::retire_payload(maybe_payload);
+        Self::retire_payload(payload_slot);
         result_target.completed(result);
         if let Some(panic) = instrumentation_panic {
             resume_unwind(panic);
         }
     }
 
-    fn finish_cancelled(maybe_payload: &mut Option<Payload<F, T, I>>, cause: ShutdownCause) {
-        let Some(payload) = maybe_payload.as_mut() else {
+    fn finish_cancelled(payload_slot: &mut PayloadSlot<Payload<F, T, I>>, cause: ShutdownCause) {
+        let Some(payload) = payload_slot.as_mut() else {
             return;
         };
         let result_target = payload
@@ -311,7 +312,7 @@ where
         let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.cancelled())).err();
         // SAFETY: The future is pinned with Task and destroyed in place.
         let future_panic = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err();
-        Self::retire_payload(maybe_payload);
+        Self::retire_payload(payload_slot);
         result_target.cancelled(cause);
         if let Some(panic) = future_panic {
             discard_task_panic_payload(panic);
@@ -321,12 +322,11 @@ where
         }
     }
 
-    fn retire_payload(maybe_payload: &mut Option<Payload<F, T, I>>) {
+    fn retire_payload(payload_slot: &mut PayloadSlot<Payload<F, T, I>>) {
         // The future is retired and the completion target has been transferred.
         // Diagnostic captures must not prevent delivery of that terminal outcome.
-        // SAFETY: maybe_payload remains pinned with Task. Pin::set drops the
-        // existing payload in place before it writes None.
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| unsafe { Pin::new_unchecked(maybe_payload) }.set(None))) {
+        // SAFETY: payload_slot remains pinned with Task.
+        if let Err(panic) = unsafe { Pin::new_unchecked(payload_slot) }.retire() {
             discard_task_panic_payload(panic);
         }
     }
@@ -368,6 +368,60 @@ where
 
     /// The runtime-owned value that observes each top-level task poll.
     instrumentation: I,
+}
+
+#[derive(Debug)]
+struct PayloadSlot<P> {
+    occupied: bool,
+    payload: MaybeUninit<P>,
+}
+
+impl<P> PayloadSlot<P> {
+    const fn new(payload: P) -> Self {
+        Self {
+            occupied: true,
+            payload: MaybeUninit::new(payload),
+        }
+    }
+
+    fn as_ref(&self) -> Option<&P> {
+        self.occupied.then(|| {
+            // SAFETY: occupied is true only while payload is initialized.
+            unsafe { self.payload.assume_init_ref() }
+        })
+    }
+
+    fn as_mut(&mut self) -> Option<&mut P> {
+        self.occupied.then(|| {
+            // SAFETY: occupied is true only while payload is initialized, and
+            // the owner thread has exclusive access to the slot.
+            unsafe { self.payload.assume_init_mut() }
+        })
+    }
+
+    fn retire(self: Pin<&mut Self>) -> Result<(), TaskPanicPayload> {
+        // SAFETY: The slot remains pinned with Task. Clearing occupied before
+        // drop prevents its Drop implementation from retrying a panicking
+        // user destructor.
+        let this = unsafe { self.get_unchecked_mut() };
+        if !std::mem::replace(&mut this.occupied, false) {
+            return Ok(());
+        }
+        catch_unwind(AssertUnwindSafe(|| {
+            // SAFETY: occupied was true, so payload is initialized. The value
+            // is dropped in place and the flag already records it as retired.
+            unsafe { this.payload.assume_init_drop() };
+        }))
+    }
+}
+
+impl<P> Drop for PayloadSlot<P> {
+    fn drop(&mut self) {
+        if self.occupied {
+            // SAFETY: occupied is true only while payload is initialized.
+            unsafe { self.payload.assume_init_drop() };
+        }
+    }
 }
 
 /// Delivers a terminal task result. Each method consumes the target.
@@ -623,5 +677,27 @@ mod tests {
 
             assert_eq!(drops.load(Ordering::Relaxed), 1);
         }
+    }
+
+    #[test]
+    fn payload_slot_marks_itself_empty_before_a_panicking_drop() {
+        struct PanickingDrop(Arc<AtomicUsize>);
+
+        impl Drop for PanickingDrop {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("payload destructor panic");
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        {
+            let mut slot = pin!(PayloadSlot::new(PanickingDrop(Arc::clone(&drops))));
+            let panic = slot.as_mut().retire().unwrap_err();
+            discard_task_panic_payload(panic);
+            slot.as_mut().retire().unwrap();
+        }
+
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 }

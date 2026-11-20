@@ -13,6 +13,13 @@ pub(crate) enum HookRegistration {
     WorkerSpawn(ErasedHookFn<WorkerSpawn>),
 }
 
+pub(crate) trait RegisterHook<D>: Hook
+where
+    D: ThreadAware + Clone + 'static,
+{
+    fn register(hook: HookFn<Self, D>) -> HookRegistration;
+}
+
 impl HookRegistration {
     pub(crate) const fn is_retained(&self) -> bool {
         matches!(self, Self::TaskSpawn(_) | Self::WorkerSpawn(_))
@@ -31,11 +38,37 @@ impl From<ErasedHookFn<WorkerSpawn>> for HookRegistration {
     }
 }
 
-pub(crate) fn registration<H, D>(hook: HookFn<H, D>) -> HookRegistration
+impl<D> RegisterHook<D> for TaskPanic
 where
-    H: Hook,
+    D: ThreadAware + Clone + 'static,
+{
+    fn register(hook: HookFn<Self, D>) -> HookRegistration {
+        ErasedHookFn::<Self>::from(hook).into()
+    }
+}
+
+impl<D> RegisterHook<D> for WorkerSpawn
+where
+    D: ThreadAware + Clone + 'static,
+{
+    fn register(hook: HookFn<Self, D>) -> HookRegistration {
+        ErasedHookFn::<Self>::from(hook).into()
+    }
+}
+
+impl<D> RegisterHook<D> for TaskSpawn
+where
     D: ThreadAware + Clone + Sync + 'static,
 {
-    let hook: <H as super::private::Sealed>::Erased<D> = hook.into();
-    hook.into()
+    fn register(hook: HookFn<Self, D>) -> HookRegistration {
+        ErasedHookFn::<Self>::from(hook).into()
+    }
+}
+
+pub(crate) fn registration<H, D>(hook: HookFn<H, D>) -> HookRegistration
+where
+    H: Hook + RegisterHook<D>,
+    D: ThreadAware + Clone + 'static,
+{
+    H::register(hook)
 }

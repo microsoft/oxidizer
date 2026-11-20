@@ -52,7 +52,7 @@ mod worker_spawn;
 pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
 pub(crate) use local_hook::{LocalHook, LocalHookGuard, LocalHookStorage};
-pub(crate) use registry::{HookRegistration, registration};
+pub(crate) use registry::{HookRegistration, RegisterHook, registration};
 pub(crate) use retained_hooks::RetainedHooks;
 pub use task_panic::TaskPanic;
 pub(crate) use task_spawn::TaskObservers;
@@ -66,14 +66,5 @@ pub use worker_spawn::WorkerSpawn;
 pub trait Hook: private::Sealed + 'static {}
 
 mod private {
-    use thread_aware::ThreadAware;
-
-    use super::{HookFn, HookRegistration};
-
-    pub(crate) trait Sealed: Sized {
-        type Erased<D>: From<HookFn<Self, D>> + Into<HookRegistration>
-        where
-            Self: super::Hook,
-            D: ThreadAware + Clone + Sync + 'static;
-    }
+    pub(crate) trait Sealed: Sized {}
 }

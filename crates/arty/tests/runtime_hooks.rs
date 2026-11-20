@@ -93,6 +93,50 @@ fn builder_retains_worker_spawn_data_until_shutdown() {
     assert!(lifetime.upgrade().is_none());
 }
 
+#[test]
+fn worker_local_hooks_accept_non_sync_data() {
+    let worker_spawn_calls = Arc::new(AtomicUsize::new(0));
+    let task_panic_calls = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<WorkerSpawn, _>::new(
+            WorkerLocalData {
+                calls: Arc::clone(&worker_spawn_calls),
+                local_calls: Cell::new(0),
+            },
+            |_event, data| {
+                data.local_calls.set(data.local_calls.get() + 1);
+                data.calls.fetch_add(1, Ordering::SeqCst);
+            },
+        ))
+        .on(HookFn::<TaskPanic, _>::new(
+            WorkerLocalData {
+                calls: Arc::clone(&task_panic_calls),
+                local_calls: Cell::new(0),
+            },
+            |event, data| {
+                data.local_calls.set(data.local_calls.get() + 1);
+                data.calls.fetch_add(1, Ordering::SeqCst);
+                event.set_ignore();
+            },
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(worker_spawn_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { panic!("task panic") })
+            .join()
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(task_panic_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
+    runtime.stop().unwrap();
+}
+
 #[derive(Clone)]
 struct SharedLog(Arc<Mutex<Vec<&'static str>>>);
 
@@ -881,6 +925,18 @@ impl ThreadAware for RegistrationLog {
 struct PanicCount(Arc<AtomicUsize>);
 
 impl ThreadAware for PanicCount {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[derive(Clone)]
+struct WorkerLocalData {
+    calls: Arc<AtomicUsize>,
+    local_calls: Cell<usize>,
+}
+
+static_assertions::assert_not_impl_any!(WorkerLocalData: Sync);
+
+impl ThreadAware for WorkerLocalData {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 

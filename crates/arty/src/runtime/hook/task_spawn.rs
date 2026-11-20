@@ -39,7 +39,8 @@ pub trait TaskObserver: 'static {
 /// [`RuntimeScheduler`](crate::task::RuntimeScheduler) and
 /// [`Scheduler`](crate::task::Scheduler), including worker-specific and
 /// relocating submissions. Arty does not create this event for a task that it
-/// rejects before registration. The callback must not panic.
+/// rejects before hook execution. A hook can start shutdown, so registration
+/// can still reject the task after the event. The callback must not panic.
 #[derive(derive_more::Debug)]
 pub struct TaskSpawn {
     pub(super) origin: Option<Thread>,
@@ -264,12 +265,7 @@ impl From<ErasedHookFn<TaskSpawn>> for super::HookRegistration {
     }
 }
 
-impl super::private::Sealed for TaskSpawn {
-    type Erased<D>
-        = ErasedHookFn<Self>
-    where
-        D: ThreadAware + Clone + Sync + 'static;
-}
+impl super::private::Sealed for TaskSpawn {}
 
 #[cfg(test)]
 mod tests {

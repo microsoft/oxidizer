@@ -78,9 +78,4 @@ impl TaskPanic {
 
 impl super::Hook for TaskPanic {}
 
-impl super::private::Sealed for TaskPanic {
-    type Erased<D>
-        = super::hook_fn::ErasedHookFn<Self>
-    where
-        D: thread_aware::ThreadAware + Clone + Sync + 'static;
-}
+impl super::private::Sealed for TaskPanic {}

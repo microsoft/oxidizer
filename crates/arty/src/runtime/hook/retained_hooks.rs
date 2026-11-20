@@ -10,7 +10,7 @@ use super::{ErasedHookFn, HookRegistration, TaskObservers, TaskSpawn, WorkerSpaw
 
 pub(crate) struct ClearedHooks {
     _task_spawn: Arc<Vec<Arc<ErasedHookFn<TaskSpawn>>>>,
-    _worker_spawn: Arc<Vec<Arc<ErasedHookFn<WorkerSpawn>>>>,
+    _worker_spawn: Vec<ErasedHookFn<WorkerSpawn>>,
 }
 
 #[derive(derive_more::Debug)]
@@ -19,7 +19,7 @@ pub(crate) struct RetainedHooks {
     closed: AtomicBool,
     has_task_spawn: AtomicBool,
     task_spawn: ArcSwap<Vec<Arc<ErasedHookFn<TaskSpawn>>>>,
-    worker_spawn: ArcSwap<Vec<Arc<ErasedHookFn<WorkerSpawn>>>>,
+    worker_spawn: Mutex<Vec<ErasedHookFn<WorkerSpawn>>>,
 }
 
 impl RetainedHooks {
@@ -29,7 +29,7 @@ impl RetainedHooks {
         for hook in hooks {
             match hook {
                 HookRegistration::TaskSpawn(hook) => task_spawn.push(Arc::new(hook)),
-                HookRegistration::WorkerSpawn(hook) => worker_spawn.push(Arc::new(hook)),
+                HookRegistration::WorkerSpawn(hook) => worker_spawn.push(hook),
                 HookRegistration::TaskPanic(_) => {}
             }
         }
@@ -39,7 +39,7 @@ impl RetainedHooks {
             closed: AtomicBool::new(false),
             has_task_spawn: AtomicBool::new(has_task_spawn),
             task_spawn: ArcSwap::from_pointee(task_spawn),
-            worker_spawn: ArcSwap::from_pointee(worker_spawn),
+            worker_spawn: Mutex::new(worker_spawn),
         }
     }
 
@@ -53,7 +53,11 @@ impl RetainedHooks {
                 Self::push_to(&self.task_spawn, hook);
                 self.has_task_spawn.store(true, Ordering::Release);
             }
-            HookRegistration::WorkerSpawn(hook) => Self::push_to(&self.worker_spawn, hook),
+            HookRegistration::WorkerSpawn(hook) => self
+                .worker_spawn
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(hook),
             HookRegistration::TaskPanic(_) => {}
         }
         true
@@ -89,7 +93,7 @@ impl RetainedHooks {
         self.closed.store(true, Ordering::Release);
         let cleared = ClearedHooks {
             _task_spawn: self.task_spawn.swap(Arc::new(Vec::new())),
-            _worker_spawn: self.worker_spawn.swap(Arc::new(Vec::new())),
+            _worker_spawn: std::mem::take(&mut *self.worker_spawn.lock().unwrap_or_else(std::sync::PoisonError::into_inner)),
         };
         self.has_task_spawn.store(false, Ordering::Release);
         cleared
@@ -97,7 +101,10 @@ impl RetainedHooks {
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.task_spawn.load().len().saturating_add(self.worker_spawn.load().len())
+        self.task_spawn
+            .load()
+            .len()
+            .saturating_add(self.worker_spawn.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len())
     }
 }
 

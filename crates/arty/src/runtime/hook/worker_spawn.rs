@@ -31,9 +31,4 @@ impl WorkerSpawn {
 
 impl super::Hook for WorkerSpawn {}
 
-impl super::private::Sealed for WorkerSpawn {
-    type Erased<D>
-        = super::hook_fn::ErasedHookFn<Self>
-    where
-        D: thread_aware::ThreadAware + Clone + Sync + 'static;
-}
+impl super::private::Sealed for WorkerSpawn {}

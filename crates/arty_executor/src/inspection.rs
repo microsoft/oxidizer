@@ -104,6 +104,7 @@ where
     D: 'static,
 {
     fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        self.instrumentation.inspect(state, visitor);
         if let Some(description) = (self.inspect)(state) {
             visitor(&description);
         }
@@ -140,6 +141,10 @@ mod tests {
     struct Recorder(Rc<RefCell<Vec<&'static str>>>);
 
     impl TaskInstrumentation for Recorder {
+        fn inspect(&self, _state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+            visitor(&"instrumentation");
+        }
+
         fn poll_start(&mut self) {
             self.0.borrow_mut().push("start");
         }
@@ -166,9 +171,15 @@ mod tests {
         let calls = Rc::new(RefCell::new(Vec::new()));
         let mut instrumentation = InspectWith::new(Recorder(Rc::clone(&calls)), Some);
         let mut description = None;
+        let mut wrapped_description = None;
 
         instrumentation.inspect(TaskState::Ready, &mut |value| {
-            description = value.downcast_ref::<TaskState>().copied();
+            if let Some(value) = value.downcast_ref::<TaskState>() {
+                description = Some(*value);
+            }
+            if let Some(value) = value.downcast_ref::<&'static str>() {
+                wrapped_description = Some(*value);
+            }
         });
         instrumentation.poll_start();
         instrumentation.poll_end(Poll::Pending);
@@ -177,6 +188,7 @@ mod tests {
         instrumentation.cancelled();
 
         assert_eq!(description, Some(TaskState::Ready));
+        assert_eq!(wrapped_description, Some("instrumentation"));
         assert_eq!(*calls.borrow(), ["start", "end", "completed", "panicked", "cancelled"]);
     }
 }
