@@ -11,6 +11,9 @@ use seismograph::recorder::{Configuration, Policy, without_recording};
 
 rallocator::rallocator!(backend = dynamic);
 
+// Without `default`, the dynamic backend falls back to the system allocator.
+const _: &rallocator::Rallocator<rallocator::backend::Dynamic<rallocator::backend::System>> = &GLOBAL;
+
 #[test]
 fn installed_allocator_transfers_blocks_and_records_only_successful_resizes() {
     let mut buffer = std::thread::spawn(|| vec![0x5a_u8; 113]).join().unwrap();

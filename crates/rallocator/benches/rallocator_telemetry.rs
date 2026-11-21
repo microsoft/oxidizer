@@ -12,7 +12,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 
 // SAFETY: The benchmark returns every block to this linked snmalloc instance.
-const ALLOCATOR: rallocator::Rallocator = unsafe { rallocator::Rallocator::new(rallocator::backend::Snmalloc) };
+const ALLOCATOR: rallocator::Rallocator<rallocator::backend::Snmalloc> =
+    unsafe { rallocator::Rallocator::new(rallocator::backend::Snmalloc) };
 
 // Keep the same measured call boundary in both recording modes.
 #[inline(never)]
@@ -47,14 +48,15 @@ fn benchmark(criterion: &mut Criterion) {
     // SAFETY: allocation_pair returns each block to the handle that created it.
     let mimalloc = unsafe { rallocator::Rallocator::new(rallocator::backend::Mimalloc) };
     // SAFETY: The dynamic handle also uses one backend for the whole process.
-    let dynamic = unsafe { rallocator::Rallocator::new(rallocator::backend::Dynamic) };
+    let dynamic = unsafe { rallocator::Rallocator::new(rallocator::backend::Dynamic::new(rallocator::backend::System)) };
     group.bench_function("snmalloc", |b| b.iter(|| allocation_pair(&ALLOCATOR)));
     group.bench_function("mimalloc", |b| b.iter(|| allocation_pair(&mimalloc)));
     group.bench_function("system", |b| b.iter(|| allocation_pair(&System)));
     let name = match std::env::var("RALLOCATOR_DYNAMIC_PERSONALITY").as_deref() {
+        Ok("snmalloc") => "dynamic_snmalloc",
         Ok("mimalloc") => "dynamic_mimalloc",
-        Ok("" | "system") | Err(std::env::VarError::NotPresent) => "dynamic_system",
-        _ => "dynamic_snmalloc",
+        // Unset, empty, and unknown values all select the system allocator.
+        _ => "dynamic_system",
     };
     group.bench_function(name, |b| b.iter(|| allocation_pair(&dynamic)));
     group.finish();

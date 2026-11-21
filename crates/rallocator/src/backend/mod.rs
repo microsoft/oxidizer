@@ -12,14 +12,16 @@ mod dynamic;
 mod macos_mutex;
 mod mimalloc;
 pub(crate) mod snmalloc;
+mod system;
 
 pub use dynamic::Dynamic;
 pub use mimalloc::Mimalloc;
 pub use snmalloc::Snmalloc;
+pub use system::System;
 
 /// A built-in backend for [`Rallocator`](crate::Rallocator).
 ///
-/// This trait is sealed. Only [`Snmalloc`], [`Mimalloc`], and [`Dynamic`] implement it.
+/// This trait is sealed. Only [`System`], [`Snmalloc`], [`Mimalloc`], and [`Dynamic`] implement it.
 #[doc(hidden)]
 pub trait Backend: sealed::Operations {}
 
