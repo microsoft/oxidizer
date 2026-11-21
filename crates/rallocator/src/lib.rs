@@ -121,18 +121,18 @@ macro_rules! rallocator {
         #[global_allocator]
         // SAFETY: Dynamic fixes the backend before returning its first allocation.
         static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::System>> =
-            unsafe { $crate::Rallocator::new($crate::backend::Dynamic::new($crate::backend::System)) };
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::System)) };
     };
     (backend = dynamic, default = snmalloc) => {
         #[global_allocator]
         // SAFETY: Dynamic fixes the backend before returning its first allocation.
         static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::Snmalloc>> =
-            unsafe { $crate::Rallocator::new($crate::backend::Dynamic::new($crate::backend::Snmalloc)) };
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::Snmalloc)) };
     };
     (backend = dynamic, default = mimalloc) => {
         #[global_allocator]
         // SAFETY: Dynamic fixes the backend before returning its first allocation.
         static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::Mimalloc>> =
-            unsafe { $crate::Rallocator::new($crate::backend::Dynamic::new($crate::backend::Mimalloc)) };
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::Mimalloc)) };
     };
 }

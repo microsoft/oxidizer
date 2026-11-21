@@ -15,39 +15,26 @@ mod env;
 /// is unset, empty, or unknown.
 #[derive(Clone, Copy, Debug, Default)]
 #[doc(hidden)]
-pub struct Dynamic<D = System>(D);
-
-impl<D> Dynamic<D> {
-    /// Uses `default` if the environment selects no backend.
-    pub const fn new(default: D) -> Self {
-        Self(default)
-    }
-}
+pub struct Dynamic<D = System>(pub D);
 
 impl<D: Fixed> super::Backend for Dynamic<D> {}
 
 /// A fixed backend that [`Dynamic`] can use as its default.
 pub trait Fixed {
-    /// Returns the cache tag of this backend.
-    fn choice(&self) -> Choice;
+    /// The cache tag of this backend.
+    const CHOICE: Choice;
 }
 
 impl Fixed for System {
-    fn choice(&self) -> Choice {
-        Choice::System
-    }
+    const CHOICE: Choice = Choice::System;
 }
 
 impl Fixed for Snmalloc {
-    fn choice(&self) -> Choice {
-        Choice::Snmalloc
-    }
+    const CHOICE: Choice = Choice::Snmalloc;
 }
 
 impl Fixed for Mimalloc {
-    fn choice(&self) -> Choice {
-        Choice::Mimalloc
-    }
+    const CHOICE: Choice = Choice::Mimalloc;
 }
 
 /// A fixed backend that the process cache can hold.
@@ -112,8 +99,8 @@ fn initialize(cache: &AtomicU8, default: Choice, read: impl FnOnce() -> Setting,
 
 impl<D: Fixed> Dynamic<D> {
     #[inline]
-    fn backend(&self) -> Choice {
-        selected(&SELECTED, |cache| from_environment(cache, self.0.choice()))
+    fn backend() -> Choice {
+        selected(&SELECTED, |cache| from_environment(cache, D::CHOICE))
     }
 }
 
@@ -123,28 +110,28 @@ unsafe impl<D: Fixed> Operations for Dynamic<D> {
     #[inline]
     unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
         // SAFETY: The caller supplies a valid nonzero layout.
-        unsafe { self.backend().allocate::<ZEROED>(layout) }
+        unsafe { Self::backend().allocate::<ZEROED>(layout) }
     }
 
     #[inline]
     unsafe fn deallocate(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: The selected backend owns the block with this layout.
-        unsafe { self.backend().deallocate(ptr, layout) };
+        unsafe { Self::backend().deallocate(ptr, layout) };
     }
 
     #[inline]
     unsafe fn reallocate(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         // SAFETY: The owning backend receives the caller's valid resize.
-        unsafe { self.backend().reallocate(ptr, layout, new_size) }
+        unsafe { Self::backend().reallocate(ptr, layout, new_size) }
     }
 
     unsafe fn reallocate_recorded(&self, ptr: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
         // SAFETY: The owning backend handles the resize and the callback together.
-        unsafe { self.backend().reallocate_recorded(ptr, layout, new_size, record) }
+        unsafe { Self::backend().reallocate_recorded(ptr, layout, new_size, record) }
     }
 
     fn publish_state(&self) {
-        self.backend().publish_state();
+        Self::backend().publish_state();
     }
 }
 

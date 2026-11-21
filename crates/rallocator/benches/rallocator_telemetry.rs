@@ -48,7 +48,7 @@ fn benchmark(criterion: &mut Criterion) {
     // SAFETY: allocation_pair returns each block to the handle that created it.
     let mimalloc = unsafe { rallocator::Rallocator::new(rallocator::backend::Mimalloc) };
     // SAFETY: The dynamic handle also uses one backend for the whole process.
-    let dynamic = unsafe { rallocator::Rallocator::new(rallocator::backend::Dynamic::new(rallocator::backend::System)) };
+    let dynamic = unsafe { rallocator::Rallocator::new(rallocator::backend::Dynamic(rallocator::backend::System)) };
     group.bench_function("snmalloc", |b| b.iter(|| allocation_pair(&ALLOCATOR)));
     group.bench_function("mimalloc", |b| b.iter(|| allocation_pair(&mimalloc)));
     group.bench_function("system", |b| b.iter(|| allocation_pair(&System)));
