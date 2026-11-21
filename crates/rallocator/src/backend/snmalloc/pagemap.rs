@@ -456,7 +456,7 @@ mod tests {
 
         const ITERATIONS: usize = 10_000;
         // SAFETY: This test allocates and frees only through this linked backend.
-        const ALLOCATOR: crate::Rallocator = unsafe { crate::Rallocator::new(crate::backend::Snmalloc) };
+        const ALLOCATOR: crate::Rallocator<crate::backend::Snmalloc> = unsafe { crate::Rallocator::new(crate::backend::Snmalloc) };
         let pointer = Arc::new(AtomicPtr::<u8>::new(ptr::null_mut()));
         // A failed worker must not leave its peer spinning while scope joins.
         // Relaxed cancellation does not synchronize the allocation handoff.

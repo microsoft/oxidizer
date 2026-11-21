@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Whole-process contracts for the default snmalloc backend.
+//! Whole-process contracts for the Rust snmalloc backend.
 
 use GLOBAL as Allocator;
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
-const _: &rallocator::Rallocator = &GLOBAL;
+const _: &rallocator::Rallocator<rallocator::backend::Snmalloc> = &GLOBAL;
 
 #[path = "common/allocator.rs"]
 mod contracts;
