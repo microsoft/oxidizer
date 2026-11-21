@@ -75,11 +75,22 @@ fn stdout_writer() -> std::io::StdoutLock<'static> {
     stdout().lock()
 }
 
+// Coverage is off because tests cannot make the OS refuse to create a thread.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[expect(clippy::needless_pass_by_value, reason = "`Result::map_err` passes the error by value")]
+fn flush_spawn_failure(error: std::io::Error) -> OTelSdkError {
+    OTelSdkError::InternalFailure(error.to_string())
+}
+
 /// Creates a log destination that writes to stdout.
 ///
 /// Optionally filters by severity level (defaults to `Info`). Formatting and writing occur
 /// synchronously on the emitting thread which locks the stdout buffer. The destination holds the
 /// stdout lock while writing, so a slow write can block that thread and other stdout writers.
+///
+/// Shutdown stops new records, waits for records that are being written, and then flushes stdout.
+/// When this work does not finish within the shutdown timeout, shutdown returns a timeout error.
+/// Records that started before shutdown still finish writing after this error.
 ///
 /// # Examples
 ///
@@ -152,22 +163,24 @@ impl<S: stdout_log_destination_builder::IsComplete> IntoLogDestination for Stdou
 #[derive(derive_more::Debug)]
 struct StdoutLogProcessor<F> {
     resource_header: ResourceHeader,
-    // This flag controls admission. An emit that has already observed false can
-    // continue during shutdown. The flag only records shutdown state; it does not
-    // wait for in-flight writes.
-    is_shutdown: AtomicBool,
-    ongoing_emissions: AtomicUsize,
+    // Bit `SHUTDOWN` marks a shutdown. The other bits count the emits in flight, in
+    // units of `ONE_EMISSION`. One atomic holds both values, so its modification order
+    // decides each race between an emit and shutdown: shutdown either rejects the emit
+    // or sees it and waits for it.
+    state: AtomicUsize,
     config: LogFormatConfig,
     #[debug(ignore)]
     make_writer: F,
 }
 
 impl<F> StdoutLogProcessor<F> {
+    const SHUTDOWN: usize = 1;
+    const ONE_EMISSION: usize = 2;
+
     fn new(config: LogFormatConfig, make_writer: F) -> Self {
         Self {
             resource_header: ResourceHeader::new(),
-            is_shutdown: AtomicBool::new(false),
-            ongoing_emissions: AtomicUsize::new(0),
+            state: AtomicUsize::new(0),
             config,
             make_writer,
         }
@@ -177,32 +190,27 @@ impl<F> StdoutLogProcessor<F> {
 impl<F, W> LogProcessor for StdoutLogProcessor<F>
 where
     F: Fn() -> W + Send + Sync + Clone + 'static,
-    W: Write
+    W: Write,
 {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        let try_enter_emit = || {
-            if self.is_shutdown.load(Ordering::SeqCst) {
-                return None;
+        // Relaxed: admission depends only on the modification order of `state`, and
+        // the increment publishes no data.
+        let admitted = self.state.try_update(Ordering::Relaxed, Ordering::Relaxed, |state| {
+            if state & Self::SHUTDOWN == 0 {
+                state.checked_add(Self::ONE_EMISSION)
+            } else {
+                None
             }
-
-            if self.ongoing_emissions.try_update(Ordering::SeqCst, Ordering::SeqCst, |c| c.checked_add(1)).is_err() {
-                return None;
-            }
-
-            let guard = scopeguard::guard((), |_| {
-                self.ongoing_emissions.fetch_sub(1, Ordering::SeqCst);
-            });
-
-            if self.is_shutdown.load(Ordering::SeqCst) {
-                return None;
-            }
-
-            Some(guard)
-        };
-
-        let Some(_in_flight) = try_enter_emit() else {
+        });
+        if admitted.is_err() {
             return;
-        };
+        }
+
+        // The guard also runs when formatting or writing panics, so shutdown does not wait for an emit that ended.
+        let _in_flight = scopeguard::guard((), |()| {
+            // Release: shutdown acquires this decrement before its flush, so the flush covers the writes of this emit.
+            self.state.fetch_sub(Self::ONE_EMISSION, Ordering::Release);
+        });
 
         let mut w = (self.make_writer)();
         let _ = self.resource_header.print_once(&mut w);
@@ -216,47 +224,43 @@ where
     }
 
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
-        // Set for preventing new emissions
-        self.is_shutdown.store(true, Ordering::SeqCst);
+        // Acquire: it pairs with the Release decrement of each finished emit, so the flush below covers their writes.
+        let mut state = self.state.fetch_or(Self::SHUTDOWN, Ordering::Acquire);
 
         let start = Instant::now();
 
         // Wait for the ongoing emissions to finish
-        while self.ongoing_emissions.load(Ordering::SeqCst) > 0 {
-            let poll_interval = std::cmp::min(
-                Duration::from_millis(10),
-                timeout.saturating_sub(start.elapsed()));
-
-            if !poll_interval.is_zero() {
-                std::thread::sleep(poll_interval);
-            }
-
-            if start.elapsed() >= timeout {
+        while state & !Self::SHUTDOWN != 0 {
+            let remaining = timeout.saturating_sub(start.elapsed());
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "Without this exit, shutdown polls a blocked emit forever, so the timeout test hangs.")]
+            if remaining.is_zero() {
                 return Err(OTelSdkError::Timeout(timeout));
             }
+
+            // #[gamma::skip(stmt.delete_call, literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, tag = "equivalent", reason = "The poll interval changes only how often shutdown checks the count; results and timeouts stay the same.")]
+            // #[gamma::skip(iter.min_to_max, tag = "timeout", reason = "Sleeping at least 10 ms past the remaining time stalls the one-minute shutdown tests.")]
+            std::thread::sleep(remaining.min(Duration::from_millis(10)));
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "Without a reload, shutdown never sees the emit finish and waits until its one-minute timeout.")]
+            state = self.state.load(Ordering::Acquire);
         }
 
-        // Optimization - check before spawning a thread
-        if start.elapsed() >= timeout {
-            return Err(OTelSdkError::Timeout(timeout));
-        }
-
-        // Start a new thread and wait until the `timeout`
+        // Start a new thread and wait until the `timeout`. When no time remains,
+        // `recv_timeout` reports a timeout unless the flush has already finished.
         let (tx, rx) = mpsc::channel();
         let make_writer_clone = self.make_writer.clone();
-        match std::thread::Builder::new().spawn(move || {
-            _ = tx.send(make_writer_clone().flush());
-        }) {
-            Ok(_) => {}
-            Err(err) => return Err(OTelSdkError::InternalFailure(err.to_string()))
-        };
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Tests cannot make the OS refuse to create a thread, so the error path is unreachable in tests.")]
+        std::thread::Builder::new()
+            .spawn(move || {
+                _ = tx.send(make_writer_clone().flush());
+            })
+            .map_err(flush_spawn_failure)?;
         match rx.recv_timeout(timeout.saturating_sub(start.elapsed())) {
             Ok(result) => result.map_err(|e| OTelSdkError::InternalFailure(e.to_string())),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(OTelSdkError::InternalFailure("disconnected".to_string())),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(OTelSdkError::Timeout(timeout))
+            // The flush thread drops the sender without a result only when it panics.
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(OTelSdkError::InternalFailure("stdout flush panicked".to_string())),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(OTelSdkError::Timeout(timeout)),
         }
     }
-
 
     fn set_resource(&mut self, resource: &Resource) {
         self.resource_header.set_resource(resource);
@@ -382,7 +386,7 @@ mod tests {
     use std::fmt::Write as StdFmtWrite;
     use std::io::{Error, ErrorKind, Result as IoResult, sink};
     use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::mpsc;
+    use std::sync::Barrier;
     use std::thread;
     use std::time::SystemTime;
 
@@ -409,7 +413,7 @@ mod tests {
     struct RecordingWriter(Arc<Mutex<WriterState>>);
 
     impl RecordingWriter {
-        fn into_factory(self) -> impl Fn() -> Self {
+        fn into_factory(self) -> impl Fn() -> Self + Clone {
             move || self.clone()
         }
 
@@ -430,6 +434,7 @@ mod tests {
         fn flush(&mut self) -> IoResult<()> {
             let mut state = self.0.lock();
             state.flushes += 1;
+            state.flushed_len = state.bytes.len();
             if state.fail_flush {
                 Err(Error::from(ErrorKind::BrokenPipe))
             } else {
@@ -442,8 +447,89 @@ mod tests {
     struct WriterState {
         bytes: Vec<u8>,
         flushes: usize,
+        // Output length at the last flush. Shows which writes a flush covered.
+        flushed_len: usize,
         fail_flush: bool,
         fail_write: bool,
+    }
+
+    /// Blocks the first thread that passes until the test opens the gate.
+    #[derive(Clone)]
+    struct Gate(Arc<GateState>);
+
+    struct GateState {
+        armed: AtomicBool,
+        entered: Barrier,
+        opened: Barrier,
+    }
+
+    impl Gate {
+        fn new() -> Self {
+            Self(Arc::new(GateState {
+                armed: AtomicBool::new(true),
+                entered: Barrier::new(2),
+                opened: Barrier::new(2),
+            }))
+        }
+
+        fn pass(&self) {
+            if self.0.armed.swap(false, Ordering::SeqCst) {
+                self.0.entered.wait();
+                self.0.opened.wait();
+            }
+        }
+
+        fn wait_until_blocked(&self) {
+            self.0.entered.wait();
+        }
+
+        fn open(&self) {
+            self.0.opened.wait();
+        }
+    }
+
+    /// Accepts all writes and blocks its first flush on a gate.
+    struct GatedFlushWriter(Gate);
+
+    impl Write for GatedFlushWriter {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            self.0.pass();
+            Ok(())
+        }
+    }
+
+    struct PanickingFlushWriter;
+
+    impl Write for PanickingFlushWriter {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            panic!("simulated stdout flush failure")
+        }
+    }
+
+    /// Creates a processor whose first writer request blocks on `gate`.
+    fn gated_processor(output: &RecordingWriter, gate: &Gate) -> StdoutLogProcessor<impl Fn() -> RecordingWriter + Clone + use<>> {
+        let output = output.clone();
+        let gate = gate.clone();
+        StdoutLogProcessor::new(LogFormatConfig::default(), move || {
+            gate.pass();
+            output.clone()
+        })
+    }
+
+    fn emit_record(processor: &impl LogProcessor, body: &'static str) {
+        let scope = InstrumentationScope::builder("stdout").build();
+        let mut record = SdkLoggerProvider::builder().build().logger("stdout").create_log_record();
+        record.set_body(body.into());
+        record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+        processor.emit(&mut record, &scope);
     }
 
     #[test]
@@ -608,53 +694,122 @@ mod tests {
         assert_eq!(output.contents(), before_shutdown);
     }
 
-    // when emission is requested, if shutdown is set to true, no new emits are admitted
-    // when emission is requested, if the number of ongoing emits is max usize, no new emits are admitted
-    // when the shutdown is requested, the ongoing emits are completed regardless of the shutdown timeout
-    // when the shutdown is requested, shutdown waits for specified timeout or all emissions to end, then returns to the caller
+    #[test]
+    fn shutdown_waits_for_started_emit_then_flushes_it() {
+        let output = RecordingWriter::default();
+        let gate = Gate::new();
+        let processor = gated_processor(&output, &gate);
+
+        let result = thread::scope(|s| {
+            s.spawn(|| emit_record(&processor, "started-before-shutdown"));
+            // The emit is admitted and is blocked while it gets its writer.
+            gate.wait_until_blocked();
+
+            let shutdown = s.spawn(|| processor.shutdown_with_timeout(Duration::from_mins(1)));
+            // Shutdown rejects emits after it starts. A rejected probe shows that shutdown
+            // started while the first emit was in flight, so shutdown must wait for it.
+            loop {
+                let before = output.contents().len();
+                emit_record(&processor, "probe");
+                if output.contents().len() == before {
+                    break;
+                }
+                thread::yield_now();
+            }
+            gate.open();
+            shutdown.join().unwrap()
+        });
+
+        result.unwrap();
+        let state = output.0.lock();
+        assert!(String::from_utf8_lossy(&state.bytes).contains("started-before-shutdown"));
+        // The shutdown flush must cover the record that was in flight when shutdown started.
+        assert_eq!(state.flushed_len, state.bytes.len());
+    }
 
     #[test]
-    fn started_emits_finish_after_shutdown() {
-        let (emitter_started_tx, emitter_started_rx) = mpsc::channel::<()>();
-        let (emitter_continue_tx, emitter_continue_rx) = mpsc::channel::<()>();
-        let emitter_continue_rx = std::sync::Mutex::new(emitter_continue_rx);
-
+    fn shutdown_times_out_while_started_emit_is_blocked() {
         let output = RecordingWriter::default();
-        let mut processor = StdoutLogProcessor::new(LogFormatConfig::default(), {
-            let output = output.clone();
-            move || {
-                emitter_started_tx.send(()).unwrap();
-                emitter_continue_rx.lock().unwrap().recv().unwrap();
-                output.clone()
-            }
-        });
-        processor.set_resource(&Resource::builder_empty().build());
+        let gate = Gate::new();
+        let processor = gated_processor(&output, &gate);
+        let timeout = Duration::from_millis(10);
 
-        thread::scope(|s| {
-            let emitter_continue_tx = emitter_continue_tx;
-            let t = s.spawn(|| {
-                let scope = InstrumentationScope::builder("stdout").build();
+        let result = thread::scope(|s| {
+            let emitter = s.spawn(|| emit_record(&processor, "started-before-shutdown"));
+            gate.wait_until_blocked();
 
-                let mut record = SdkLoggerProvider::builder().build().logger("stdout").create_log_record();
-                record.set_body("before-shutdown".into());
-                record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+            // The emit stays blocked during the full shutdown, so shutdown can only give up.
+            let result = processor.shutdown_with_timeout(timeout);
 
-                processor.emit(&mut record, &scope);
-            });
-
-            emitter_started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-
-            processor.shutdown_with_timeout(Duration::from_secs(1)).unwrap();
-
-            emitter_continue_tx.send(()).unwrap();
-
-            t.join().unwrap();
+            gate.open();
+            emitter.join().unwrap();
+            result
         });
 
-        assert_eq!(
-            output.contents(),
-            "<Resource: >\n[2026-10-30T09:42:47.000000000Z] before-shutdown [stdout-?]\n"
-        );
+        let Err(OTelSdkError::Timeout(reported)) = result else {
+            panic!("expected Timeout, got {result:?}")
+        };
+        assert_eq!(reported, timeout);
+        // A timed-out shutdown does not cancel a record that was already admitted.
+        assert!(output.contents().contains("started-before-shutdown"));
+        assert_eq!(output.0.lock().flushes, 0);
+    }
+
+    #[test]
+    fn shutdown_flushes_writer() {
+        let output = RecordingWriter::default();
+        let processor = StdoutLogProcessor::new(LogFormatConfig::default(), output.clone().into_factory());
+
+        processor.shutdown_with_timeout(Duration::from_mins(1)).unwrap();
+
+        assert_eq!(output.0.lock().flushes, 1);
+    }
+
+    #[test]
+    fn shutdown_reports_flush_error() {
+        let output = RecordingWriter::default();
+        output.0.lock().fail_flush = true;
+        let processor = StdoutLogProcessor::new(LogFormatConfig::default(), output.into_factory());
+
+        let error = processor.shutdown_with_timeout(Duration::from_mins(1)).unwrap_err();
+
+        let OTelSdkError::InternalFailure(error_message) = &error else {
+            panic!("expected InternalFailure, got {error:?}")
+        };
+        assert_eq!(error_message, "broken pipe");
+    }
+
+    #[test]
+    fn shutdown_reports_flush_panic() {
+        let processor = StdoutLogProcessor::new(LogFormatConfig::default(), || PanickingFlushWriter);
+
+        let error = processor.shutdown_with_timeout(Duration::from_mins(1)).unwrap_err();
+
+        let OTelSdkError::InternalFailure(error_message) = &error else {
+            panic!("expected InternalFailure, got {error:?}")
+        };
+        assert_eq!(error_message, "stdout flush panicked");
+    }
+
+    #[test]
+    fn shutdown_times_out_while_flush_is_blocked() {
+        let gate = Gate::new();
+        let processor = StdoutLogProcessor::new(LogFormatConfig::default(), {
+            let gate = gate.clone();
+            move || GatedFlushWriter(gate.clone())
+        });
+        let timeout = Duration::from_millis(10);
+
+        let result = processor.shutdown_with_timeout(timeout);
+
+        // Release the flush thread so that it does not outlive the test.
+        gate.wait_until_blocked();
+        gate.open();
+
+        let Err(OTelSdkError::Timeout(reported)) = result else {
+            panic!("expected Timeout, got {result:?}")
+        };
+        assert_eq!(reported, timeout);
     }
 
     #[test]
