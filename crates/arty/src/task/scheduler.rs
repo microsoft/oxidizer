@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::Location;
+
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -131,6 +133,7 @@ impl Scheduler {
     /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
+    #[track_caller]
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
@@ -140,14 +143,15 @@ impl Scheduler {
         if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
             return join_handle;
         }
-        let future_factory = match self.spawn_on_current_worker(future_factory) {
+        let location = Location::caller();
+        let future_factory = match self.spawn_on_current_worker(future_factory, location) {
             Ok(join_handle) => return join_handle,
             Err(future_factory) => future_factory,
         };
-        self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory)
+        self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory, location)
     }
 
-    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF) -> Result<JoinHandle<F::Output>, FF>
+    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF, location: &'static Location<'static>) -> Result<JoinHandle<F::Output>, FF>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
@@ -160,7 +164,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let handle = current.spawn(future_factory);
+            let handle = current.spawn(future_factory, location);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -210,6 +214,7 @@ impl Scheduler {
     /// let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     /// scheduler.spawn_anywhere((), |()| async { SendOnly });
     /// ```
+    #[track_caller]
     pub fn spawn_anywhere<D, F, R>(&self, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
@@ -217,11 +222,15 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_relocating(&self.binding.thread, move |cx| {
-            let mut data = data;
-            data.relocate(Some(&source), cx.thread());
-            f(data)
-        })
+        self.dispatcher.spawn_relocating(
+            &self.binding.thread,
+            move |cx| {
+                let mut data = data;
+                data.relocate(Some(&source), cx.thread());
+                f(data)
+            },
+            Location::caller(),
+        )
     }
 
     /// Submits a task to `destination` and relocates its data there.
@@ -282,6 +291,7 @@ impl Scheduler {
     ///     Ok(())
     /// }
     /// ```
+    #[track_caller]
     pub fn spawn_at<D, F, R>(&self, destination: &Thread, data: D, f: fn(D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
@@ -295,11 +305,15 @@ impl Scheduler {
             return JoinHandle::invalid_destination();
         };
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_at_worker_relocating(worker_index, move |cx| {
-            let mut data = data;
-            data.relocate(Some(&source), cx.thread());
-            f(data)
-        })
+        self.dispatcher.spawn_at_worker_relocating(
+            worker_index,
+            move |cx| {
+                let mut data = data;
+                data.relocate(Some(&source), cx.thread());
+                f(data)
+            },
+            Location::caller(),
+        )
     }
 
     /// Runs a function on a thread from a blocking pool.

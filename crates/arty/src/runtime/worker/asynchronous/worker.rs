@@ -1371,7 +1371,7 @@ mod tests {
         }
         let join = worker_context(&worker).dispatcher().spawn(
             |_| std::future::ready(()),
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(std::panic::Location::caller()),
         );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
@@ -1479,7 +1479,7 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        crate::task::preparation::TaskSpawnOptions::new::<()>().register(
+        crate::task::preparation::TaskSpawnOptions::new::<()>(std::panic::Location::caller()).register(
             worker_context(&worker).thread(),
             &worker.tasks,
             async move {
@@ -2151,7 +2151,7 @@ mod tests {
                     std::future::ready(())
                 }
             },
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(std::panic::Location::caller()),
         );
 
         assert!(worker.execute_step().is_break());

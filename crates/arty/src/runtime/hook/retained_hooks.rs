@@ -150,7 +150,7 @@ mod tests {
         let created = Cell::new(false);
         drop(hooks.execute_task_spawn(|| {
             created.set(true);
-            TaskSpawn::new(None, target.clone())
+            TaskSpawn::new(None, target.clone(), std::panic::Location::caller())
         }));
         assert!(!created.get());
 
@@ -159,7 +159,7 @@ mod tests {
             hooks
                 .execute_task_spawn(|| {
                     created.set(true);
-                    TaskSpawn::new(None, target.clone())
+                    TaskSpawn::new(None, target.clone(), std::panic::Location::caller())
                 })
                 .is_none()
         );
@@ -188,8 +188,8 @@ mod tests {
                 calls.0.fetch_add(1, Ordering::Relaxed);
             },
         ))));
-        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone())));
-        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone())));
+        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone(), std::panic::Location::caller())));
+        drop(hooks.execute_task_spawn(|| TaskSpawn::new(None, target.clone(), std::panic::Location::caller())));
         assert_eq!(hooks.len(), 2);
         drop(hooks.clear());
         assert!(!hooks.has_task_spawn());
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(hooks.len(), 0);
         drop(hooks.execute_task_spawn(|| {
             created.set(true);
-            TaskSpawn::new(None, target)
+            TaskSpawn::new(None, target, std::panic::Location::caller())
         }));
 
         assert_eq!(spawn_calls.load(Ordering::Relaxed), 2);

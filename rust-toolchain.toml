@@ -2,6 +2,6 @@
 # Licensed under the MIT License.
 
 [toolchain]
-channel = "1.97"
+channel = "1.100"
 profile = "minimal"
 components = ["clippy", "rustfmt"]

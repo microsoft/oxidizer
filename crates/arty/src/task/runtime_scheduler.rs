@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::Location;
 use std::pin::Pin;
 use std::task::{Context as PollContext, Poll};
 
@@ -113,6 +114,7 @@ impl RuntimeScheduler {
     /// assert_eq!(message, "Hello, Arty");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, Error>
     where
         FF: FnOnce(Context) -> F + Send + 'a,
@@ -135,7 +137,8 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let options = crate::task::preparation::TaskSpawnOptions::with_future_size::<LocalBoxFuture<'static, R>>(size_of::<F>());
+        let options =
+            crate::task::preparation::TaskSpawnOptions::with_future_size::<LocalBoxFuture<'static, R>>(size_of::<F>(), Location::caller());
         let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
@@ -186,6 +189,7 @@ impl RuntimeScheduler {
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Context, D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
@@ -198,7 +202,7 @@ impl RuntimeScheduler {
                 data.relocate(None, cx.thread());
                 future_factory(cx, data)
             },
-            crate::task::preparation::TaskSpawnOptions::new::<F>(),
+            crate::task::preparation::TaskSpawnOptions::new::<F>(Location::caller()),
         )
     }
 

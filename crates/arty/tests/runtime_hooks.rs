@@ -155,6 +155,26 @@ impl ThreadAware for SharedLog {
 }
 
 #[derive(Clone)]
+struct SpawnLocationLog(Arc<Mutex<Vec<(String, u32)>>>);
+
+impl SpawnLocationLog {
+    fn push(&self, location: &'static std::panic::Location<'static>) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((location.file().to_string(), location.line()));
+    }
+
+    fn take(&self) -> Vec<(String, u32)> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+impl ThreadAware for SpawnLocationLog {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[derive(Clone)]
 struct SpawnSourceProbe {
     events: mpsc::Sender<(Option<ThreadId>, ThreadId)>,
     observers: mpsc::Sender<(Option<ThreadId>, ThreadId, ThreadId)>,
@@ -248,6 +268,38 @@ impl TaskObserver for PollRecorder {
         assert_eq!(outcome, self.outcome);
         self.log.push(self.after);
     }
+}
+
+#[test]
+fn task_spawn_reports_the_public_spawn_location() {
+    let locations = SpawnLocationLog(Arc::new(Mutex::new(Vec::new())));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<TaskSpawn, _>::new(locations.clone(), |event, locations| {
+            locations.push(event.location());
+        }))
+        .build()
+        .unwrap();
+
+    let spawn_line = line!() + 1;
+    runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap();
+    assert_eq!(locations.take(), [(file!().to_string(), spawn_line)]);
+
+    let (result, local_spawn_line) = runtime
+        .scheduler()
+        .block_on(|cx| async move {
+            let local_spawn_line = line!() + 1;
+            let result = cx.scheduler().spawn(|_| async { 42 }).await;
+            (result, local_spawn_line)
+        })
+        .unwrap();
+    assert_eq!(result.unwrap(), 42);
+    let observed = locations.take();
+    assert_eq!(observed.len(), 2);
+    assert_eq!(observed[0].0, file!());
+    assert_eq!(observed[1], (file!().to_string(), local_spawn_line));
+
+    runtime.stop().unwrap();
 }
 
 #[test]

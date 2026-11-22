@@ -1,12 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::Location;
+
 use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet};
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct TaskSpawnOptions {
+    location: &'static Location<'static>,
     parent: Option<seismograph::recorder::runtime::TaskId>,
     describe_type: fn() -> seismograph::recorder::runtime::TypeDescriptorId,
     future_size: usize,
@@ -14,17 +17,22 @@ pub(crate) struct TaskSpawnOptions {
 }
 
 impl TaskSpawnOptions {
-    pub(crate) fn new<Body: 'static>() -> Self {
-        Self::with_future_size::<Body>(size_of::<Body>())
+    pub(crate) fn new<Body: 'static>(location: &'static Location<'static>) -> Self {
+        Self::with_future_size::<Body>(size_of::<Body>(), location)
     }
 
-    pub(crate) fn with_future_size<Body: 'static>(future_size: usize) -> Self {
+    pub(crate) fn with_future_size<Body: 'static>(future_size: usize, location: &'static Location<'static>) -> Self {
         Self {
+            location,
             parent: crate::runtime::monitoring::current_task(),
             describe_type: crate::runtime::monitoring::descriptor::<Body>,
             future_size,
             observers: None,
         }
+    }
+
+    pub(crate) const fn location(&self) -> &'static Location<'static> {
+        self.location
     }
 
     pub(crate) fn observed_by(mut self, observers: Option<TaskObservers>) -> Self {
@@ -93,7 +101,7 @@ mod tests {
         let parent = seismograph_runtime::allocate_task_id();
         let options = {
             let _parent = enter_current(parent);
-            TaskSpawnOptions::with_future_size::<ErasedFuture>(37)
+            TaskSpawnOptions::with_future_size::<ErasedFuture>(37, std::panic::Location::caller())
         };
         let _other_parent = enter_current(seismograph_runtime::allocate_task_id());
         set_events(Some(worker.handle().task_events()));

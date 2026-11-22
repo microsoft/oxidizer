@@ -31,7 +31,11 @@ where
     F: Future + 'static,
     F::Output: Send + 'static,
 {
-    prepare_remote(result_pool, future_factory, TaskSpawnOptions::new::<F>())
+    prepare_remote(
+        result_pool,
+        future_factory,
+        TaskSpawnOptions::new::<F>(std::panic::Location::caller()),
+    )
 }
 
 #[test]

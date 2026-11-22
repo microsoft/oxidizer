@@ -226,7 +226,7 @@ mod tests {
         let (factory, join) = prepare_remote(
             &result_pool,
             |_| std::future::ready(42),
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<i32>>(),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<i32>>(std::panic::Location::caller()),
         );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
