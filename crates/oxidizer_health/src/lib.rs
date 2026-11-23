@@ -61,9 +61,13 @@
 //! assert_eq!(publisher.signal().state(), Health::Healthy);
 //! ```
 //!
-//! These thresholds are the client's policy. A new publisher starts `Healthy`. If an untested
-//! dependency must block readiness, publish `Unhealthy` at startup and report `Healthy` after
-//! its first successful check. Reuse the same publisher for failure and recovery. Dropping it
+//! These thresholds are the client's policy. A new publisher starts `Healthy`. Publishing
+//! `Unhealthy` immediately afterward does not prevent a probe from seeing that initial `Healthy`.
+//!
+//! If required dependencies must block readiness at startup, register their components on a new
+//! aggregator before creating any publishers or serving probes. Keep each component alive and
+//! empty until its first successful check. An empty component is `Unhealthy`. After success,
+//! create its publisher and reuse it for later failures and recoveries. Dropping the publisher
 //! removes its contribution. Dropping the last [`Component`] handle unregisters the component.
 //!
 //! # Diagnose a change

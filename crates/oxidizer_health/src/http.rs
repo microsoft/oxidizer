@@ -62,6 +62,8 @@ mod tower_service {
 ///
 /// # Examples
 ///
+/// This example uses the `util` feature of `tower` for `oneshot`.
+///
 /// ```
 /// # fn main() {
 /// # #[cfg(feature = "http")] {
@@ -100,6 +102,9 @@ pub fn service<B>(
 /// Returns an [`http_extensions::RequestHandler`] serving readiness over `aggregator`.
 ///
 /// # Examples
+///
+/// This example uses the `test-util` feature of `http_extensions` to build a fake request body.
+/// A server passes the incoming request directly to the handler.
 ///
 /// ```
 /// # fn main() {

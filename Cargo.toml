@@ -216,6 +216,7 @@ observed_utils = { path = "crates/observed_utils", default-features = false, ver
 ohno = { path = "crates/ohno", default-features = false, version = "0.5.4" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.4" }
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.4" }
+oxidizer_health = { path = "crates/oxidizer_health", default-features = false, version = "0.1.0" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }

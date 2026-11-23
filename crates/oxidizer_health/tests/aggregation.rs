@@ -411,10 +411,13 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
         }
     }
 
-    let mut aggregator = Aggregator::new();
-    let component = aggregator.component("database");
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
     let mut publisher = component.publisher();
-    wait_for_aggregator(&mut aggregator, Health::Healthy);
+    // The component notification follows publication to the root. Observing the state alone
+    // could leave the startup notification in flight when the panic waker subscribes.
+    block_on(component.changed());
+    assert_eq!(aggregator.state(), Health::Healthy);
     let mut monitor = aggregator.monitor();
     let mut changed = pin!(monitor.changed());
     let waker = Waker::from(Arc::new(PanickingWake));
@@ -460,6 +463,10 @@ fn reports_select_signals_by_filter() {
     assert_eq!(report.signal_count(Health::Degraded), 2);
     assert_eq!(report.signals(Health::Degraded).len(), 1);
     assert_eq!(report.signals(Health::Healthy).len(), 0);
+
+    let filtered = block_on(database.report(Filter::HEALTHY));
+    assert_eq!(filtered.signal_count(Health::Degraded), 2);
+    assert!(!format!("{filtered:?}").contains("slow"));
 
     let report = block_on(cache.report(Filter::DEGRADED));
     assert_eq!(report.signal_count(Health::Healthy), 1);

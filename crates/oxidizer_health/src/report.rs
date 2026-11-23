@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{self, Display, Formatter};
+use std::any::type_name;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::iter::FusedIterator;
 use std::sync::Arc;
 use std::{slice, vec};
@@ -111,7 +112,7 @@ impl Snapshot {
 /// assert_eq!(publishers, 1);
 /// # });
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Report {
     name: Arc<str>,
     state: Health,
@@ -160,6 +161,16 @@ impl Report {
             &[]
         };
         Signals { inner: signals.iter() }
+    }
+}
+
+impl Debug for Report {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>())
+            .field("name", &self.name)
+            .field("state", &self.state)
+            .field("counts", &self.counts)
+            .finish_non_exhaustive()
     }
 }
 

@@ -68,9 +68,13 @@ report_failures(&mut publisher, 0);
 assert_eq!(publisher.signal().state(), Health::Healthy);
 ```
 
-These thresholds are the client’s policy. A new publisher starts `Healthy`. If an untested
-dependency must block readiness, publish `Unhealthy` at startup and report `Healthy` after
-its first successful check. Reuse the same publisher for failure and recovery. Dropping it
+These thresholds are the client’s policy. A new publisher starts `Healthy`. Publishing
+`Unhealthy` immediately afterward does not prevent a probe from seeing that initial `Healthy`.
+
+If required dependencies must block readiness at startup, register their components on a new
+aggregator before creating any publishers or serving probes. Keep each component alive and
+empty until its first successful check. An empty component is `Unhealthy`. After success,
+create its publisher and reuse it for later failures and recoveries. Dropping the publisher
 removes its contribution. Dropping the last [`Component`][__link3] handle unregisters the component.
 
 ## Diagnose a change
@@ -120,7 +124,7 @@ Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `fals
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQsRipWHGRG4bFGUY5qAgGvIbwRUMB4UeudUbbmV31MIax_9hZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbU1Xj5yIVBzEbZmEP0kFoTb8bUWpWPMwvTkUbgut1FcPiZglhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
  [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
  [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
  [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
