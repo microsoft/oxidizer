@@ -62,21 +62,22 @@ impl Worker {
         // Acquire: pairs with the Release store when the worker fails or stops.
         self.running.load(Ordering::Acquire)
     }
+
+    /// Requests shutdown and returns the worker thread if the caller can join it.
+    fn request_stop(&mut self) -> Option<JoinHandle<()>> {
+        let thread = self.thread.take()?;
+        // A stopped worker has already reported its startup failure or panic.
+        let _ = self.sender.send(Work::Stop);
+        // A wake callback can release the last owner on the worker itself.
+        (thread.thread().id() != thread::current().id()).then_some(thread)
+    }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        let Some(thread) = self.thread.take() else {
-            return;
-        };
-        // A stopped worker has already reported its startup failure or panic.
-        let _ = self.sender.send(Work::Stop);
-        if thread.thread().id() == thread::current().id() {
-            // A wake callback released the last owner on this thread. The queued stop is
-            // consumed when that callback returns; a worker cannot join itself.
-            return;
-        }
-        if thread.join().is_err() {
+        if let Some(thread) = self.request_stop()
+            && thread.join().is_err()
+        {
             tracing::error!("health aggregation worker terminated unexpectedly");
         }
     }
@@ -138,12 +139,13 @@ mod tests {
     }
 
     #[test]
-    fn last_owner_can_be_released_from_the_worker() {
+    fn shutdown_on_the_worker_requests_stop_without_returning_a_self_join() {
         let (sender, receiver) = mpsc::channel();
         let (owner, release) = mpsc::channel::<Worker>();
         let (done, finished) = mpsc::channel();
         let spawned = thread::spawn(move || {
-            drop(release.recv().unwrap());
+            let mut worker = release.recv().unwrap();
+            assert!(worker.request_stop().is_none());
             assert!(matches!(receiver.try_recv(), Ok(Work::Stop)));
             done.send(()).unwrap();
         });
