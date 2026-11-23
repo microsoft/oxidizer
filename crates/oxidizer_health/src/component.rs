@@ -444,6 +444,7 @@ mod tests {
         first.publish(Health::Unhealthy, [("attempt", 2)]);
         let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients)).collect();
         let mut second = Publisher::register(&clients);
+        second.degraded("retrying");
         second.publish(Health::Unhealthy, [("attempt", 1)]);
         first.publish(Health::Healthy, [("attempt", 3)]);
         advance();
@@ -516,12 +517,24 @@ mod tests {
     fn publisher_removed_before_first_snapshot_does_not_notify() {
         let (work, pending) = mpsc::channel();
         let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let mut aggregate = ProcessAggregate::new(Weak::new());
+        let mut advance = || {
+            assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+            clients.process(&mut aggregate);
+        };
         let changes = clients.changes.subscribe();
-        drop(Publisher::register(&clients));
-        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
-        clients.process(&mut ProcessAggregate::new(Weak::new()));
-        assert!(changes.changed_async().now_or_never().is_none());
-        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), 0);
+        let mut retained = Vec::new();
+        while retained.len() < 2 {
+            drop(Publisher::register(&clients));
+            advance();
+            assert!(changes.changed_async().now_or_never().is_none());
+            assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
+
+            retained.push(Publisher::register(&clients));
+            advance();
+            assert!(changes.changed_async().now_or_never().is_some());
+            assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
+        }
     }
 
     #[test]
