@@ -4,64 +4,37 @@
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![deny(missing_docs)]
 
-//! Application health aggregation.
+//! Component health reports and HTTP readiness checks for Rust services.
 //!
-//! Application code owns [`Publisher`]s beside the workers or clients that detect health
-//! changes. Each publisher publishes a [`Signal`] containing a [`Health`] state and
-//! [`Attribute`]s. A [`Component`] aggregates the publishers of one subsystem, and the
-//! [`Aggregator`] exposes process health and component [`Report`]s.
+//! A service reports the worst state among its components: `Healthy`, `Degraded`, or `Unhealthy`.
+//! For example, if a database is degraded and a cache is healthy, the service is degraded.
+//! Use the overall state for readiness checks and [component reports](Report) to find the reason.
 //!
-//! Aggregation is worst-state-wins at both levels. A component without publishers and an
-//! aggregator without components are `Unhealthy`.
+//! # Quick start
 //!
-//! [`state`](Aggregator::state) is a cheap snapshot read for readiness decisions.
-//! [`changed`](Aggregator::changed) is an edge notification: it resolves after the state or report
-//! data may have changed, after which consumers read the current state. Publishing never waits for
-//! a consumer.
-//! If the aggregation worker cannot run, state reads return `Unhealthy` and the failure is
-//! reported through diagnostics.
-//!
-//! # Examples
+//! Register a component for the database. Use its [`Publisher`] to report slow queries:
 //!
 //! ```
 //! # testing_aids::init_tracing!();
-//! use oxidizer_health::{Aggregator, Attribute, Filter, Health};
+//! use oxidizer_health::{Aggregator, Health};
 //!
-//! # futures::executor::block_on(async {
-//! let mut aggregator = Aggregator::new();
+//! let health = Aggregator::new();
+//! let database = health.component("database");
+//! let mut publisher = database.publisher();
 //!
-//! let startup = aggregator.component("startup");
-//! let database = aggregator.component("database");
-//!
-//! let mut startup_publisher = startup.publisher();
-//! let mut primary_publisher = database.publisher();
-//! let mut replica_publisher = database.publisher();
-//!
-//! startup_publisher.publish(Health::Unhealthy, [("phase", "starting")]);
-//! primary_publisher.degraded("High latency detected");
-//! replica_publisher.publish(Health::Healthy, Vec::<Attribute>::new());
-//!
-//! startup_publisher.publish(Health::Healthy, Vec::<Attribute>::new());
-//! while aggregator.state() != Health::Degraded {
-//!     aggregator.changed().await;
-//! }
-//!
-//! for report in aggregator
-//!     .reports(Filter::DEGRADED | Filter::UNHEALTHY)
-//!     .await
-//! {
-//!     for (signal, publishers) in report.signals(Health::Degraded) {
-//!         println!("{report}: {signal} from {publishers} publishers");
-//!     }
-//! }
-//! # });
+//! publisher.degraded("slow queries");
+//! assert_eq!(publisher.signal().state(), Health::Degraded);
 //! ```
 //!
-//! # Features
+//! Publishing updates the local signal immediately. [`Aggregator::state`] reads the latest
+//! aggregate, so it can briefly report the previous state. A component without publishers is
+//! `Unhealthy`, as is a service without components.
 //!
-//! - `http`: `http::service`, a Tower readiness service.
-//! - `request-handler`: `http::request_handler`, an `http_extensions` readiness request
-//!   handler.
+//! # HTTP readiness
+//!
+//! Health reporting works without HTTP. Enable `http` to use `http::service` with Tower,
+//! or `request-handler` to use `http::request_handler` with `http_extensions`.
+//! Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `false` otherwise.
 
 mod aggregator;
 mod attribute;

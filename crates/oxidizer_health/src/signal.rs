@@ -10,7 +10,7 @@ use crate::{Attribute, Health};
 /// Signals are created by [`Publisher::publish`](crate::Publisher::publish) and inspected through
 /// publishers and reports. Attribute order is not significant for equality. `Signal` does not
 /// implement `Eq` or `Hash` because [`AttributeValue::Double`](crate::AttributeValue::Double) can
-/// contain NaN.
+/// contain `NaN`.
 ///
 /// # Examples
 ///

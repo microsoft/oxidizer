@@ -276,7 +276,7 @@ impl ComponentDispatch {
     }
 }
 
-/// Latest unapplied update of one publisher.
+/// Holds only the latest update while the publisher waits in the queue.
 struct Slot {
     id: u64,
     pending: ArcSwapOption<Signal>,

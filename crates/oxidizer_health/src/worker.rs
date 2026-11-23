@@ -14,7 +14,7 @@ pub(crate) enum Work {
     Stop,
 }
 
-/// A shared worker kept alive by aggregator and component handles.
+/// Both process and component handles keep this worker alive.
 pub(crate) struct Worker {
     sender: Sender<Work>,
     thread: Option<JoinHandle<()>>,

@@ -18,9 +18,8 @@ use crate::{Component, Filter, Health, Reports};
 
 /// The process-level health root.
 ///
-/// The aggregate state is the worst state among the registered components. An aggregator without
-/// components is `Unhealthy`. Clones refer to the same logical aggregator; each clone has an
-/// independent [`changed`](Self::changed) notification cursor.
+/// The process reports the worst state among its registered components, or `Unhealthy` if it has none.
+/// Clones share that state but track [`changed`](Self::changed) notifications independently.
 ///
 /// # Examples
 ///
@@ -57,7 +56,7 @@ pub struct Aggregator {
 }
 
 impl Aggregator {
-    /// Creates an aggregator without components.
+    /// Starts in `Unhealthy` state with no registered components.
     #[must_use]
     pub fn new() -> Self {
         Self::from_shared(AggregatorShared::new())
@@ -80,7 +79,7 @@ impl Aggregator {
         self.shared.component(name)
     }
 
-    /// Returns a read-only handle to this aggregator.
+    /// Subscribes to process health without granting access to register components.
     #[must_use]
     pub fn monitor(&self) -> Monitor {
         Monitor {
@@ -236,7 +235,7 @@ pub(crate) async fn wait(changes: &WatchReceiver<()>) {
         .expect("the notification sender lives as long as the handle");
 }
 
-/// Health of one component as published to the aggregator.
+/// Component state shared with the process health root.
 pub(crate) struct ComponentCell {
     id: u64,
     health: AtomicU8,

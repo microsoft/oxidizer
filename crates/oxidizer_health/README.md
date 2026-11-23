@@ -13,61 +13,36 @@
 
 </div>
 
-Application health aggregation.
+Component health reports and HTTP readiness checks for Rust services.
 
-Application code owns [`Publisher`][__link0]s beside the workers or clients that detect health
-changes. Each publisher publishes a [`Signal`][__link1] containing a [`Health`][__link2] state and
-[`Attribute`][__link3]s. A [`Component`][__link4] aggregates the publishers of one subsystem, and the
-[`Aggregator`][__link5] exposes process health and component [`Report`][__link6]s.
+A service reports the worst state among its components: `Healthy`, `Degraded`, or `Unhealthy`.
+For example, if a database is degraded and a cache is healthy, the service is degraded.
+Use the overall state for readiness checks and [component reports][__link0] to find the reason.
 
-Aggregation is worst-state-wins at both levels. A component without publishers and an
-aggregator without components are `Unhealthy`.
+## Quick start
 
-[`state`][__link7] is a cheap snapshot read for readiness decisions.
-[`changed`][__link8] is an edge notification: it resolves after the state or report
-data may have changed, after which consumers read the current state. Publishing never waits for
-a consumer.
-If the aggregation worker cannot run, state reads return `Unhealthy` and the failure is
-reported through diagnostics.
-
-## Examples
+Register a component for the database. Use its [`Publisher`][__link1] to report slow queries:
 
 ```rust
-use oxidizer_health::{Aggregator, Attribute, Filter, Health};
+use oxidizer_health::{Aggregator, Health};
 
-let mut aggregator = Aggregator::new();
+let health = Aggregator::new();
+let database = health.component("database");
+let mut publisher = database.publisher();
 
-let startup = aggregator.component("startup");
-let database = aggregator.component("database");
-
-let mut startup_publisher = startup.publisher();
-let mut primary_publisher = database.publisher();
-let mut replica_publisher = database.publisher();
-
-startup_publisher.publish(Health::Unhealthy, [("phase", "starting")]);
-primary_publisher.degraded("High latency detected");
-replica_publisher.publish(Health::Healthy, Vec::<Attribute>::new());
-
-startup_publisher.publish(Health::Healthy, Vec::<Attribute>::new());
-while aggregator.state() != Health::Degraded {
-    aggregator.changed().await;
-}
-
-for report in aggregator
-    .reports(Filter::DEGRADED | Filter::UNHEALTHY)
-    .await
-{
-    for (signal, publishers) in report.signals(Health::Degraded) {
-        println!("{report}: {signal} from {publishers} publishers");
-    }
-}
+publisher.degraded("slow queries");
+assert_eq!(publisher.signal().state(), Health::Degraded);
 ```
 
-## Features
+Publishing updates the local signal immediately. [`Aggregator::state`][__link2] reads the latest
+aggregate, so it can briefly report the previous state. A component without publishers is
+`Unhealthy`, as is a service without components.
 
-* `http`: `http::service`, a Tower readiness service.
-* `request-handler`: `http::request_handler`, an `http_extensions` readiness request
-  handler.
+## HTTP readiness
+
+Health reporting works without HTTP. Enable `http` to use `http::service` with Tower,
+or `request-handler` to use `http::request_handler` with `http_extensions`.
+Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `false` otherwise.
 
 
 <hr/>
@@ -75,13 +50,7 @@ for report in aggregator
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJml-Qsqtun4bIbUZo_lts68bddJCu_ULdwQb0v6yJkdVT1lhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
- [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
- [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Signal
- [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health
- [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Attribute
- [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
- [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
- [__link7]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::state
- [__link8]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::changed
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb7K8rHXuppx4bs238ldC7gsQbXYHdH_f8_EIbK4lBPHKMputhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
+ [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
+ [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::state

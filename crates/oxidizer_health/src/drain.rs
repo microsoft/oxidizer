@@ -5,10 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Runs queued work on exactly one caller at a time without blocking the others.
 ///
-/// A caller that enqueues work and finds a drain already running returns immediately; the running
-/// drainer observes the new request and processes the queue again before it stops. This lets
-/// publishers and drop handlers hand updates to the owning actor without waiting for it, while
-/// the actor state is only ever touched by the single active drainer.
+/// If a drain is already running, the caller adds its work and returns. The active caller
+/// processes the new work before it stops. Only that caller touches the actor state.
 #[derive(Debug, Default)]
 pub(crate) struct Drain {
     requests: AtomicUsize,
