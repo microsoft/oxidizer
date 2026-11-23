@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::TaskPlacement;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -148,11 +147,11 @@ impl Scheduler {
         self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory)
     }
 
-    fn spawn_on_current_worker<FF, F, R>(&self, future_factory: FF) -> Result<JoinHandle<R>, FF>
+    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF) -> Result<JoinHandle<F::Output>, FF>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
+        F: Future + 'static,
+        F::Output: Send + 'static,
     {
         asynchronous::LocalWorker::with_scheduler(|current| {
             let Some(current) = current else {
@@ -161,7 +160,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let handle = current.spawn(future_factory, TaskPlacement::SameThread);
+            let handle = current.spawn(future_factory);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -312,12 +311,12 @@ impl Scheduler {
     /// These calls can prevent an async worker from running other tasks and
     /// processing timers. The function runs on a separate pool thread.
     /// A panic in this function returns an error through [`JoinHandle`].
-    /// It does not invoke the configured [`Panic`](crate::runtime::hook::Panic)
+    /// It does not invoke the configured [`TaskPanic`](crate::runtime::hook::TaskPanic)
     /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Uses this scheduler's worker pool. Configure sharing and limits with
-    /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
+    /// [`BlockingPoolPolicy`](crate::runtime::policy::BlockingPoolPolicy).
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.
     /// Functions that already run cannot be interrupted and can finish.
@@ -393,7 +392,7 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let registered = runtime
@@ -424,7 +423,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
-            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
         let (started_tx, started_rx) = mpsc::channel();

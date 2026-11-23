@@ -3,7 +3,6 @@
 
 use std::task::Waker;
 
-use observed::Sink;
 use thread_aware_core::Thread;
 
 use crate::{Executor, PanicPolicy};
@@ -13,7 +12,6 @@ use crate::{Executor, PanicPolicy};
 #[must_use]
 pub struct ExecutorBuilder {
     owner_waker: Waker,
-    sink: Sink,
     thread: Option<Thread>,
     panic_policy: PanicPolicy,
 }
@@ -23,7 +21,6 @@ impl ExecutorBuilder {
     pub fn new() -> Self {
         Self {
             owner_waker: Waker::noop().clone(),
-            sink: Sink::noop(),
             thread: None,
             panic_policy: PanicPolicy::default(),
         }
@@ -39,14 +36,6 @@ impl ExecutorBuilder {
     /// By default, the executor does not notify the owner.
     pub fn owner_waker(mut self, owner_waker: Waker) -> Self {
         self.owner_waker = owner_waker;
-        self
-    }
-
-    /// Sets the observed sink for task lifecycle events.
-    ///
-    /// The default sink is a no-op.
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = sink;
         self
     }
 
@@ -82,7 +71,7 @@ impl ExecutorBuilder {
             );
             thread.id()
         });
-        Executor::new(self.owner_waker, self.sink, thread_id, self.panic_policy)
+        Executor::new(self.owner_waker, thread_id, self.panic_policy)
     }
 }
 

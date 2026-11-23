@@ -77,8 +77,8 @@ fn workers_selects_exactly_the_literal_count() {
     let expected = quote! {
         pub fn run() -> AppResult {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::exactly(4usize))
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
+                .workers(::arty::runtime::policy::WorkersPolicy::exactly(4usize))
+                .monitor(::arty::runtime::policy::MonitorPolicy::disabled())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -102,7 +102,7 @@ fn all_workers_selects_all_available_processors() {
     let expected_main = quote! {
         fn run() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::all())
+                .workers(::arty::runtime::policy::WorkersPolicy::all())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -121,7 +121,7 @@ fn all_workers_selects_all_available_processors() {
         #[::core::prelude::v1::test]
         fn run() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::all())
+                .workers(::arty::runtime::policy::WorkersPolicy::all())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -149,7 +149,7 @@ fn controlled_test_can_select_all_workers() {
         fn run() {
             let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::all())
+                .workers(::arty::runtime::policy::WorkersPolicy::all())
                 .clock(::core::clone::Clone::clone(&__arty_clock_control))
                 .build()
                 .expect("failed to create the runtime for the entry point");
@@ -187,8 +187,8 @@ fn controlled_test_shares_one_clock_and_preserves_qualified_types() {
         fn run() {
             let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .workers(::arty::runtime::WorkersPolicy::exactly(1))
-                .monitor(::arty::runtime::MonitorPolicy::enabled())
+                .workers(::arty::runtime::policy::WorkersPolicy::exactly(1))
+                .monitor(::arty::runtime::policy::MonitorPolicy::enabled())
                 .clock(::core::clone::Clone::clone(&__arty_clock_control))
                 .build()
                 .expect("failed to create the runtime for the entry point");
@@ -257,7 +257,7 @@ fn main_monitor_settings_are_forwarded_exactly() {
         let expected = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::#policy())
+                    .monitor(::arty::runtime::policy::MonitorPolicy::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -287,7 +287,7 @@ fn test_monitor_settings_are_forwarded_exactly() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::#policy())
+                    .monitor(::arty::runtime::policy::MonitorPolicy::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -306,7 +306,7 @@ fn test_monitor_settings_are_forwarded_exactly() {
 
 #[test]
 fn main_panic_settings_are_forwarded_exactly() {
-    for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
+    for policy in [quote!(shutdown), quote!(ignore)] {
         let expansion = main(
             quote!(panic = #policy),
             quote! {
@@ -316,7 +316,7 @@ fn main_panic_settings_are_forwarded_exactly() {
         let expected = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#constant)
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -335,7 +335,7 @@ fn main_panic_settings_are_forwarded_exactly() {
 
 #[test]
 fn test_panic_settings_are_forwarded_exactly() {
-    for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
+    for policy in [quote!(shutdown), quote!(ignore)] {
         let expansion = test(
             quote!(panic = #policy),
             quote! {
@@ -346,7 +346,7 @@ fn test_panic_settings_are_forwarded_exactly() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#constant)
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -407,7 +407,7 @@ fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
         let expected = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::exactly(#workers))
+                    .workers(::arty::runtime::policy::WorkersPolicy::exactly(#workers))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -426,7 +426,7 @@ fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .workers(::arty::runtime::WorkersPolicy::exactly(#workers))
+                    .workers(::arty::runtime::policy::WorkersPolicy::exactly(#workers))
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -445,8 +445,8 @@ fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
 #[test]
 fn worker_policy_unwraps_nested_expression_groups() {
     for (value, expected) in [
-        (quote!(4usize), quote!(::arty::runtime::WorkersPolicy::exactly(4usize))),
-        (quote!(all), quote!(::arty::runtime::WorkersPolicy::all())),
+        (quote!(4usize), quote!(::arty::runtime::policy::WorkersPolicy::exactly(4usize))),
+        (quote!(all), quote!(::arty::runtime::policy::WorkersPolicy::all())),
     ] {
         let value = TokenTree::Group(Group::new(
             Delimiter::None,

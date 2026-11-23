@@ -23,6 +23,8 @@ fn cache_name_id(name: CacheName) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    // Direct event encoding and the name hash are private. Public cache
+    // operations emit multiple events rather than these isolated helper calls.
     use seismograph::recorder::event::{EventClass, EventKind, Events, ObjectId};
     use seismograph::recorder::{Configuration, Policy};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};

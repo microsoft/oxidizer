@@ -194,7 +194,7 @@ fn completion_racing_stop_destroys_each_future_once() {
         let stopper = std::thread::spawn(move || {
             stop_barrier.wait();
             for _ in 0..8 {
-                control.request_stop();
+                control.shutdown();
             }
         });
         let finish_barrier = Arc::clone(&barrier);

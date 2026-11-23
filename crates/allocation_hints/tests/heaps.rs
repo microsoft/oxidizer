@@ -7,18 +7,6 @@ use allocation_hints::heaps::{Heap, Kind, bump, current_thread_id, general};
 use allocation_hints::{active_hint, with_hint};
 
 #[test]
-fn general_options_round_trip() {
-    let options = general::Options::default()
-        .with_locality_segment_bytes(128 * 1024)
-        .with_medium_cache_max_bytes(256 * 1024);
-
-    assert_eq!(
-        (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
-        (128 * 1024, 256 * 1024)
-    );
-}
-
-#[test]
 fn option_defaults_have_exact_documented_values() {
     let general = general::Options::new();
     let bump = bump::Options::new();
@@ -129,11 +117,17 @@ fn bump_option_boundaries_reject_values_outside_the_contract() {
 }
 
 #[test]
-fn heap_accessors_and_debug_report_descriptor() {
-    let options = general::Options::new();
+fn heap_accessors_and_debug_preserve_nondefault_options() {
+    let options = general::Options::default()
+        .with_locality_segment_bytes(128 * 1024)
+        .with_medium_cache_max_bytes(256 * 1024);
     let heap = Heap::general(options);
     let active = with_hint(&heap, || active_hint().unwrap());
 
+    assert_eq!(
+        (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
+        (128 * 1024, 256 * 1024)
+    );
     assert_eq!(
         (heap.id().get(), heap.kind(), active.id(), active.kind(), format!("{heap:?}")),
         (
@@ -165,15 +159,11 @@ fn default_heap_is_general_purpose() {
 }
 
 #[test]
-fn thread_identity_is_nonzero() {
-    assert_ne!(current_thread_id().get(), 0);
-}
-
-#[test]
 fn thread_identities_are_stable_per_thread_and_distinct_between_threads() {
     let current = current_thread_id();
     let other = std::thread::spawn(|| (current_thread_id(), current_thread_id())).join().unwrap();
 
+    assert_ne!(current.get(), 0);
     assert_eq!(other.0, other.1);
     assert_ne!(current, other.0);
 }

@@ -19,13 +19,13 @@ enum WalkAction<'a> {
     Leaves(&'a [Leaf]),
 }
 
-impl<'p> Walk<'_, 'p> {
+impl Walk<'_, '_> {
     /// Returns the first matching leaf without recursive trie descent.
     // Static/dynamic differential and structured-path tests exercise traversal;
     // many local rewrites are equivalent because pending edges backtrack.
-    pub(crate) fn descend_iterative<const VERBS: bool>(&self, mut node: &'p RtNode) -> Option<&'p Leaf> {
+    pub(crate) fn descend_iterative<'r, const VERBS: bool>(&self, mut node: &'r RtNode) -> Option<&'r Leaf> {
         let mut depth = 0;
-        let mut pending: SmallVec<[WalkAction<'p>; 4]> = SmallVec::new();
+        let mut pending: SmallVec<[WalkAction<'r>; 4]> = SmallVec::new();
         let count = self.path.count();
         loop {
             let segment = self.path.segment(depth);
@@ -132,7 +132,7 @@ impl<'p> Walk<'_, 'p> {
     }
 
     /// Selects the first leaf matching the method and custom verb.
-    fn dispatch<const VERBS: bool>(&self, leaves: &'p [Leaf]) -> Option<&'p Leaf> {
+    fn dispatch<'r, const VERBS: bool>(&self, leaves: &'r [Leaf]) -> Option<&'r Leaf> {
         leaves.iter().find(|leaf| {
             leaf.method == self.method
                 && (

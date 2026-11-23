@@ -17,10 +17,11 @@ use seismograph_runtime::snapshot::{
 };
 use seismograph_runtime::worker::WorkerRole;
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
-use thread_aware::Unaware;
+use thread_aware::{Thread, ThreadAware, Unaware};
 
-use crate::runtime::hook::Panic;
-use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, Runtime, WorkersPolicy};
+use crate::runtime::Runtime;
+use crate::runtime::hook::{HookFn, TaskObserver, TaskPanic, TaskSpawn};
+use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
 struct RecorderGuard {
     _lock: MutexGuard<'static, ()>,
@@ -46,7 +47,7 @@ fn runtime(name: &str) -> Runtime {
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .name(name)
-        .on(Panic::IGNORE)
+        .on(TaskPanic::ignore())
         .build()
         .unwrap()
 }
@@ -56,6 +57,41 @@ fn receive<T>(receiver: &mpsc::Receiver<T>) -> T {
         receiver.recv().unwrap()
     } else {
         receiver.recv_timeout(TEST_TIMEOUT).unwrap()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ObservedPoll {
+    Started,
+    Finished(Poll<()>),
+}
+
+#[derive(Clone)]
+struct PollObservation(mpsc::Sender<ObservedPoll>);
+
+impl ThreadAware for PollObservation {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct MonitoredPollObserver {
+    destination: Option<std::thread::ThreadId>,
+    observed: PollObservation,
+}
+
+impl ThreadAware for MonitoredPollObserver {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.destination = Some(destination.id());
+    }
+}
+
+impl TaskObserver for MonitoredPollObserver {
+    fn poll_start(&mut self) {
+        assert_eq!(self.destination, Some(std::thread::current().id()));
+        self.observed.0.send(ObservedPoll::Started).unwrap();
+    }
+
+    fn poll_end(&mut self, outcome: Poll<()>) {
+        self.observed.0.send(ObservedPoll::Finished(outcome)).unwrap();
     }
 }
 
@@ -114,6 +150,39 @@ fn explicit_monitor_policies_preserve_runtime_behavior() {
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();
     }
+}
+
+#[test]
+fn monitored_tasks_forward_poll_observers() {
+    let _recording = RecorderGuard::new();
+    let (observed, observations) = mpsc::channel();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::enabled())
+        .workers(WorkersPolicy::exactly(1))
+        .on(TaskPanic::ignore())
+        .on(HookFn::<TaskSpawn, _>::new(PollObservation(observed), |event, observed| {
+            if event.origin().is_some() {
+                event.observe(MonitoredPollObserver {
+                    destination: None,
+                    observed: observed.clone(),
+                });
+            }
+        }))
+        .build()
+        .unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.scheduler().spawn(async |_| {}).await.unwrap();
+        })
+        .unwrap();
+
+    assert_eq!(
+        [receive(&observations), receive(&observations)],
+        [ObservedPoll::Started, ObservedPoll::Finished(Poll::Ready(()))]
+    );
+    runtime.stop().unwrap();
 }
 
 #[cfg(feature = "macros")]
@@ -414,7 +483,7 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -489,7 +558,7 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
             ..Configuration::default()
         });
         if stops {
-            control.request_stop();
+            control.shutdown();
         }
         release.send(()).unwrap();
         let outcome = running.join();
@@ -969,7 +1038,7 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         .unwrap()
         .id;
 
-    control.request_stop();
+    control.shutdown();
     let stopping = capture(&runtime).state;
     release.send(()).unwrap();
     runtime.stop().unwrap();

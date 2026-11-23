@@ -5,12 +5,8 @@
 
 //! An experimental Rust global allocator for NUMA and mostly thread-local workloads.
 //!
-//! We use it to experiment with allocation hinting, compile-time configuration,
+//! We use it to experiment with allocation hinting, backend selection,
 //! and runtime telemetry through `seismograph`.
-//!
-//! The default backend is a Rust port of [snmalloc](https://github.com/microsoft/snmalloc).
-//! An experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc)
-//! is also available.
 //!
 //! # Why use it
 //!
@@ -19,7 +15,8 @@
 //! Built-in Seismograph integration can record allocation events and expose
 //! allocator state for diagnosing memory use. Enable recording through
 //! [`seismograph::recorder()`](https://docs.rs/seismograph/latest/seismograph/fn.recorder.html)
-//! when diagnostics are needed.
+//! when diagnostics are needed. Every backend records allocation events, including the system allocator.
+//! Only snmalloc and mimalloc provide allocator state snapshots.
 //!
 //! # Usage
 //!
@@ -30,31 +27,32 @@
 //! rallocator = "0.4"
 //! ```
 //!
-//! Call [`rallocator!`] once in your executable to install the global allocator:
+//! Call [`rallocator!`] once in your executable:
 //!
 //! ```rust
 //! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!();
+//! rallocator::rallocator!(); // Uses the system allocator by default.
 //! ```
 //!
-//! Select a backend at compile time with `rallocator!(backend = snmalloc)` or
-//! `rallocator!(backend = mimalloc)`. The default remains snmalloc.
-//! The macro installs [`Rallocator`] with the selected backend.
-//! An allocation must return to the backend that created it.
-//! Both backends record allocation events and provide Seismograph state snapshots.
-//! State observations can be incomplete or stale. Allocator capacity is not application-live memory.
+//! | Personality | Allocator |
+//! | --- | --- |
+//! | `rallocator!(backend = system)` | System allocator (default) |
+//! | `rallocator!(backend = snmalloc)` | Rust port of [snmalloc](https://github.com/microsoft/snmalloc) |
+//! | `rallocator!(backend = mimalloc)` | Experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc) |
+//! | `rallocator!(backend = dynamic)` | Selected at startup |
 //!
-//! With allocation recording enabled, [`Rallocator`] records allocations, successful
-//! resizes, and frees. A resize is one event with the previous and new addresses
-//! and requested sizes. In-place size changes also produce this event.
-//! Failed resizes and calls that keep both the address and size produce no event.
-//! For a move, recording completes before the old block becomes reusable.
-//! A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
+//! Only `dynamic` reads the variable below. Set it before launch. The first allocation fixes the choice for the process.
+//! The optional `default` names the allocator for an unset, empty, or unknown value, for example
+//! `rallocator!(backend = dynamic, default = snmalloc)`. Use `system`, `snmalloc`, or `mimalloc`.
+//! If you omit `default`, `dynamic` uses `system`.
 //!
-//! ```rust
-//! # #![forbid(unsafe_code)]
-//! rallocator::rallocator!(backend = mimalloc);
-//! ```
+//! | `RALLOCATOR_DYNAMIC_PERSONALITY` | Allocator used |
+//! | --- | --- |
+//! | `snmalloc` | Rust snmalloc |
+//! | `mimalloc` | Rust mimalloc |
+//! | `system` | System allocator |
+//! | Unset or empty | The `default` allocator |
+//! | Any other value | The `default` allocator, after a warning on standard error |
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -78,25 +76,31 @@ pub use allocator::Rallocator;
 ///
 /// Supports x86-64 and ARM64 on Linux with 4-KiB kernel pages and Windows 10
 /// version 1809 or later with MSVC, plus macOS 14.4 or later on x86-64
-/// (4-KiB pages) or native ARM64 (16-KiB pages). This allocator is non-hardened.
+/// (4-KiB pages) or native ARM64 (16-KiB pages). The snmalloc and mimalloc
+/// backends are non-hardened.
 ///
 /// Use a single statically linked allocator instance. Allocations must be freed
 /// by the instance that created them, not by independently linked copies in other DLLs.
 ///
-/// # Backend selection
-///
-/// The default is snmalloc. Select a backend through the macro:
+/// # Example
 ///
 /// ```rust
 /// # #![forbid(unsafe_code)]
-/// rallocator::rallocator!(backend = snmalloc);
+/// // Uses snmalloc unless RALLOCATOR_DYNAMIC_PERSONALITY selects another allocator.
+/// rallocator::rallocator!(backend = dynamic, default = snmalloc);
 /// ```
 ///
-/// Use `rallocator!(backend = mimalloc)` for the Rust mimalloc backend.
+/// See the [usage tables](crate#usage) for all personalities and environment values.
 #[macro_export]
 macro_rules! rallocator {
     () => {
-        $crate::rallocator!(backend = snmalloc);
+        $crate::rallocator!(backend = system);
+    };
+    (backend = system) => {
+        #[global_allocator]
+        // SAFETY: The global allocator fixes the backend for all allocation,
+        // resizing, and deallocation calls generated by Rust.
+        static GLOBAL: $crate::Rallocator<$crate::backend::System> = unsafe { $crate::Rallocator::new($crate::backend::System) };
     };
     (backend = snmalloc) => {
         #[global_allocator]
@@ -109,5 +113,26 @@ macro_rules! rallocator {
         // SAFETY: The global allocator fixes the backend for all allocation,
         // resizing, and deallocation calls generated by Rust.
         static GLOBAL: $crate::Rallocator<$crate::backend::Mimalloc> = unsafe { $crate::Rallocator::new($crate::backend::Mimalloc) };
+    };
+    (backend = dynamic) => {
+        $crate::rallocator!(backend = dynamic, default = system);
+    };
+    (backend = dynamic, default = system) => {
+        #[global_allocator]
+        // SAFETY: Dynamic fixes the backend before returning its first allocation.
+        static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::System>> =
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::System)) };
+    };
+    (backend = dynamic, default = snmalloc) => {
+        #[global_allocator]
+        // SAFETY: Dynamic fixes the backend before returning its first allocation.
+        static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::Snmalloc>> =
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::Snmalloc)) };
+    };
+    (backend = dynamic, default = mimalloc) => {
+        #[global_allocator]
+        // SAFETY: Dynamic fixes the backend before returning its first allocation.
+        static GLOBAL: $crate::Rallocator<$crate::backend::Dynamic<$crate::backend::Mimalloc>> =
+            unsafe { $crate::Rallocator::new($crate::backend::Dynamic($crate::backend::Mimalloc)) };
     };
 }

@@ -1,0 +1,66 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+struct Subject { #[flatten(x)] f: T }
+
+---- yields ----
+`#[flatten]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten = "x"] f: T }
+
+---- yields ----
+`#[flatten]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten] #[flatten] f: T }
+
+---- yields ----
+duplicate `#[flatten]` attribute
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten] #[dimension] f: T }
+
+---- yields ----
+`#[flatten]` cannot be combined with `#[dimension]`, `#[unredacted]`, `#[data_class]` or `#[if_none]`; the `observed::VisitFields` implementation of the value routes and redacts each of its fields
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten] #[unredacted] f: T }
+
+---- yields ----
+`#[flatten]` cannot be combined with `#[dimension]`, `#[unredacted]`, `#[data_class]` or `#[if_none]`; the `observed::VisitFields` implementation of the value routes and redacts each of its fields
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten] #[data_class(Euii)] f: T }
+
+---- yields ----
+`#[flatten]` cannot be combined with `#[dimension]`, `#[unredacted]`, `#[data_class]` or `#[if_none]`; the `observed::VisitFields` implementation of the value routes and redacts each of its fields
+
+---- input ----
+#[event("e")]
+struct Subject { #[flatten] #[if_none(drop)] f: Option<T> }
+
+---- yields ----
+`#[flatten]` cannot be combined with `#[dimension]`, `#[unredacted]`, `#[data_class]` or `#[if_none]`; the `observed::VisitFields` implementation of the value routes and redacts each of its fields
+
+---- input ----
+#[event("e")]
+#[counter(f)] struct Subject { #[flatten] f: T }
+
+---- yields ----
+`#[counter(f)]` cannot record field `f`: a `#[flatten]` field holds fields, not a measurement
+
+---- input ----
+#[event("e")]
+#[info("{f}")] struct Subject { #[flatten] f: T }
+
+---- yields ----
+log message references `{f}` but no log attribute with that name exists; available attributes: []

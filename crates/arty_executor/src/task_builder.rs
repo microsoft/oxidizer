@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use observed::context::Transfer;
-
-use crate::inspection::Inspector;
-use crate::{ExecutorShared, TaskCompletion, TaskMetadata, TaskPlacement};
+use crate::{ExecutorShared, TaskCompletion, TaskInstrumentation};
 
 /// Configures a task before registering it with an executor.
 ///
@@ -17,9 +14,8 @@ pub struct TaskBuilder<'a, F, I = ()> {
     shared: &'a ExecutorShared,
     #[debug(skip)]
     future: F,
-    metadata: TaskMetadata,
     #[debug(skip)]
-    inspector: I,
+    instrumentation: I,
 }
 
 impl<'a, F> TaskBuilder<'a, F> {
@@ -27,49 +23,35 @@ impl<'a, F> TaskBuilder<'a, F> {
         Self {
             shared,
             future,
-            metadata: TaskMetadata::default(),
-            inspector: (),
+            instrumentation: (),
         }
     }
 }
 
-impl<F, I> TaskBuilder<'_, F, I> {
-    /// Sets the observed context for task polling, cleanup, and lifecycle events.
-    ///
-    /// By default, the task has no captured context.
-    pub fn context(mut self, context: Transfer) -> Self {
-        self.metadata.context = Some(context);
-        self
-    }
-
-    /// Classifies how the caller selected this executor.
-    ///
-    /// This value affects lifecycle telemetry, not scheduling or worker selection.
-    /// The default is [`TaskPlacement::Any`].
-    pub fn placement(mut self, placement: TaskPlacement) -> Self {
-        self.metadata.placement = placement;
-        self
-    }
-}
-
-#[cfg(feature = "inspection")]
 impl<'a, F, I> TaskBuilder<'a, F, I> {
-    /// Sets a callback that describes the converted future during explicit inspection.
-    ///
-    /// The callback is stored with the future without a separate task allocation.
-    /// Ordinary execution cycles do not call it. Calling this method again replaces
-    /// the previous callback.
-    pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl Inspector<F::IntoFuture> + use<F, I, D, J>>
+    /// Adds a callback that describes the converted future during inspection.
+    pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl TaskInstrumentation + use<F, I, D, J>>
     where
-        F: IntoFuture,
+        I: TaskInstrumentation,
         D: 'static,
-        J: Fn(&F::IntoFuture, crate::TaskState) -> Option<D> + 'static,
+        J: Fn(crate::TaskState) -> Option<D> + 'static,
     {
         TaskBuilder {
             shared: self.shared,
             future: self.future,
-            metadata: self.metadata,
-            inspector: crate::inspection::InspectWith::new(inspect),
+            instrumentation: crate::inspection::InspectWith::new(self.instrumentation, inspect),
+        }
+    }
+
+    /// Sets the runtime-owned behavior attached to this task.
+    pub fn instrument<Q>(self, instrumentation: Q) -> TaskBuilder<'a, F, Q>
+    where
+        Q: TaskInstrumentation,
+    {
+        TaskBuilder {
+            shared: self.shared,
+            future: self.future,
+            instrumentation,
         }
     }
 }
@@ -78,7 +60,7 @@ impl<F, I> TaskBuilder<'_, F, I>
 where
     F: IntoFuture + 'static,
     F::Output: 'static,
-    I: Inspector<F::IntoFuture>,
+    I: TaskInstrumentation,
 {
     /// Registers the task and its completion target.
     ///
@@ -89,33 +71,6 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(
-            self.future,
-            self.metadata,
-            completion,
-            crate::inspection::FutureInspector(self.inspector),
-        );
-    }
-}
-
-impl<F, I> TaskBuilder<'_, F, I>
-where
-    F: IntoFuture + 'static,
-    F::Output: 'static,
-{
-    /// Registers a task whose inspector borrows its future and completion target.
-    ///
-    /// The callback replaces any configured inspector. It runs only during
-    /// explicit inspection or observed polls. The completion target stores
-    /// metadata inline with the task and receives terminal results as usual.
-    #[cfg(feature = "inspection")]
-    pub fn register_with_inspection<T, D, J>(self, completion: T, inspect: J)
-    where
-        T: TaskCompletion<F::Output>,
-        D: 'static,
-        J: Fn(&F::IntoFuture, &T, crate::TaskState) -> Option<D> + 'static,
-    {
-        self.shared
-            .add_task(self.future, self.metadata, completion, crate::inspection::InspectWith::new(inspect));
+        self.shared.add_task(self.future, self.instrumentation, completion);
     }
 }

@@ -19,6 +19,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
+use data_privacy::{DataClass, RedactionEngine};
 use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
@@ -34,6 +35,17 @@ pub(crate) const ERROR: &str = "http.server.request.error";
 pub(crate) const ABANDONED: &str = "http.server.request.abandoned";
 pub(crate) const ACTIVE: &str = "http.server.active_requests";
 pub(crate) const DURATION: &str = "http.server.request.duration";
+
+/// A data class whose values [`public_engine`] prints unchanged.
+pub(crate) const PUBLIC: DataClass = DataClass::new("test", "public");
+
+/// A data class whose values [`public_engine`] erases.
+pub(crate) const SECRET: DataClass = DataClass::new("test", "secret");
+
+/// A redaction engine that prints the values of [`PUBLIC`] unchanged, and erases the values of every other class.
+pub(crate) fn public_engine() -> RedactionEngine {
+    RedactionEngine::builder().suppress_redaction(PUBLIC).build()
+}
 
 /// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
 /// duration is `0`.
@@ -62,8 +74,9 @@ pub(crate) fn duration(value: f64) -> Measurement {
     }
 }
 
-/// One event, as a processor saw it.
-#[derive(Debug, Clone, PartialEq)]
+/// One event, as a processor saw it. Two events are equal if they have the same fields in any order, because
+/// `observed` does not promise an order of the fields.
+#[derive(Debug, Clone)]
 pub(crate) struct Captured {
     pub(crate) name: &'static str,
     pub(crate) severity: Option<Severity>,
@@ -76,6 +89,34 @@ pub(crate) struct Captured {
     pub(crate) measurements: Vec<Measurement>,
     /// The enrichment entries, under their keys.
     pub(crate) enrichments: Vec<(&'static str, Value)>,
+}
+
+impl PartialEq for Captured {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            name,
+            severity,
+            message,
+            logs,
+            dimensions,
+            measurements,
+            enrichments,
+        } = self;
+        *name == other.name
+            && *severity == other.severity
+            && *message == other.message
+            && sorted(logs) == sorted(&other.logs)
+            && sorted(dimensions) == sorted(&other.dimensions)
+            && *measurements == other.measurements
+            && sorted(enrichments) == sorted(&other.enrichments)
+    }
+}
+
+/// `fields` sorted by key, so that a comparison does not depend on the order of the fields.
+pub(crate) fn sorted<'a>(fields: &'a [(&'static str, Value)]) -> Vec<&'a (&'static str, Value)> {
+    let mut sorted: Vec<_> = fields.iter().collect();
+    sorted.sort_by_key(|(key, _)| *key);
+    sorted
 }
 
 impl Captured {
@@ -98,14 +139,23 @@ impl Captured {
 #[derive(Clone)]
 pub(crate) struct Capture {
     interested: fn(&str) -> bool,
+    engine: RedactionEngine,
     events: Arc<Mutex<Vec<Captured>>>,
 }
 
 impl Capture {
-    /// Captures each event whose name `interested` accepts.
+    /// Captures each event whose name `interested` accepts. It prints each classified value
+    /// unchanged.
     pub(crate) fn new(interested: fn(&str) -> bool) -> Self {
+        Self::with_engine(interested, observed_testing::passthrough_redaction_engine())
+    }
+
+    /// Captures each event whose name `interested` accepts, and redacts each classified value with
+    /// `engine`.
+    pub(crate) fn with_engine(interested: fn(&str) -> bool, engine: RedactionEngine) -> Self {
         Self {
             interested,
+            engine,
             events: Arc::default(),
         }
     }
@@ -131,7 +181,7 @@ impl EventProcessor for Capture {
     }
 
     fn process(&self, event: &EventView<'_>) {
-        let engine = observed_testing::passthrough_redaction_engine();
+        let engine = &self.engine;
         let mut captured = Captured {
             name: event.name(),
             severity: event.severity(),
@@ -142,7 +192,7 @@ impl EventProcessor for Capture {
             enrichments: Vec::new(),
         };
         let _ = event.visit_fields(&mut |descriptor: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            let value = value(&engine);
+            let value = value(engine);
             if let Some(log) = descriptor.log() {
                 captured.logs.push((log.key(), value.clone()));
             }
@@ -161,7 +211,7 @@ impl EventProcessor for Capture {
             ControlFlow::Continue(())
         });
         let _ = event.visit_enrichments(&mut |descriptor: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            captured.enrichments.push((descriptor.field_name(), value(&engine)));
+            captured.enrichments.push((descriptor.field_name(), value(engine)));
             ControlFlow::Continue(())
         });
         self.events.lock().unwrap().push(captured);
@@ -224,6 +274,61 @@ pub(crate) fn probe_sink(probe: &Probe) -> Sink {
     Sink::builder(SinkId::new("probe"))
         .clock(SimpleClock::new_frozen())
         .processors(vec![Arc::new(probe.clone())])
+        .build()
+}
+
+/// Stops the visit of the fields of `http.server.request.complete` at the first field whose log key starts with a
+/// prefix. It records the log key of each field that the visit still reaches after that field.
+#[derive(Clone)]
+pub(crate) struct StopAt {
+    prefix: &'static str,
+    after_stop: Arc<Mutex<Option<Vec<&'static str>>>>,
+}
+
+impl StopAt {
+    pub(crate) fn new(prefix: &'static str) -> Self {
+        Self {
+            prefix,
+            after_stop: Arc::default(),
+        }
+    }
+
+    /// The log keys of the fields that the visit reached after the stop, or `None` if the visit did not stop.
+    pub(crate) fn after_stop(&self) -> Option<Vec<&'static str>> {
+        self.after_stop.lock().unwrap().clone()
+    }
+}
+
+impl EventProcessor for StopAt {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() == COMPLETE
+    }
+
+    fn process(&self, event: &EventView<'_>) {
+        let mut after_stop = self.after_stop.lock().unwrap();
+        let _ = event.visit_fields(&mut |descriptor: &FieldDescriptor, _: &FieldValueFn<'_>| {
+            let key = descriptor.log().map_or_else(|| descriptor.field_name(), |log| log.key());
+            if let Some(after) = after_stop.as_mut() {
+                after.push(key);
+            } else if key.starts_with(self.prefix) {
+                *after_stop = Some(Vec::new());
+            } else {
+                return ControlFlow::Continue(());
+            }
+            ControlFlow::Break(())
+        });
+    }
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+/// A sink whose one processor is `stop`.
+pub(crate) fn stop_sink(stop: &StopAt) -> Sink {
+    Sink::builder(SinkId::new("stop"))
+        .clock(SimpleClock::new_frozen())
+        .processors(vec![Arc::new(stop.clone())])
         .build()
 }
 

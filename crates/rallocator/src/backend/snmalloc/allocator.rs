@@ -8,8 +8,7 @@ use crate::backend::snmalloc::{classes, observation, thread};
 
 /// Selects the Rust snmalloc backend for [`Rallocator`](crate::Rallocator).
 ///
-/// This is the default backend. Install it with
-/// `rallocator!(backend = snmalloc)` or `rallocator!()`.
+/// Install it with `rallocator!(backend = snmalloc)`.
 #[derive(Clone, Copy, Debug, Default)]
 #[doc(hidden)]
 pub struct Snmalloc;

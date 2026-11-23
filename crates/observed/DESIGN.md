@@ -23,7 +23,10 @@ Rust services and libraries need structured telemetry that is:
 ## Requirements
 
 1. **Typed, compile-time validated events/enrichment.** Every telemetry event is a Rust struct.
-   Field names and types are checked at compile time. No string-based, unvalidated telemetry.
+   Field types are checked at compile time. Field names are checked at compile time too, except
+   the names that a hand-written `VisitFields` implementation gives to the fields of a
+   `#[flatten]` field. Those names can come from configuration, but not from user input,
+   because each name stays in memory until the process ends. No string-based, unvalidated telemetry.
    NOTE: We decided to limit v1 to typed events/enrichment only, without allowing arbitrary
    key-value pairs. If there is demand for it, we can add it later.
 
@@ -172,20 +175,24 @@ Rust services and libraries need structured telemetry that is:
    static `&'static str` values generated at compile time by proc macros. There is no runtime
    string interpolation that could enable injection attacks. This covers typed events; a
    `DynEvent` adaptor's body is runtime text that no `RedactionEngine` sees, so the adaptor
-   must pre-sanitize it.
+   must pre-sanitize it. A `#[flatten]` field takes the names of its fields from the
+   `VisitFields` implementation of its type. A hand-written implementation can build them at
+   run time, for example from configuration. `observed` does not check those names, so the
+   implementation must keep user input out of them.
 
 ### Privacy
 
 1. **Redaction-by-construction.** The core privacy guarantee: attribute values should reach an exporter only after an explicit classification decision.
-   Every field in `#[event(...)]` and `#[derive(Enrichment)]` follows one of three paths:
+   Every field in `#[event(...)]` and `#[derive(Enrichment)]`, except a `#[flatten]` field, follows one of three paths:
    - **Default** - the type must implement `RedactedDisplay` (e.g. via `#[classified(...)]`). If it doesn't, compilation fails.
    - **`data_class = <expr>`** - wraps the value in `Sensitive::new(value, expr)` before redaction, for types that don't carry their own classification.
    - **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`. Used for primitives and other values the caller has already deemed safe to emit.
 
    `data_class` and `unredacted` are mutually exclusive (compile error if both specified). `EnrichmentEntry::unclassified`
    is a further caller-controlled bypass: the value is stored pre-converted and no redactor ever sees it. A `DynEvent` adaptor
-   is a different case - its field getters receive the same per-processor `&dyn Redactor` as typed events, so its fields are
-   redacted when it applies that redactor; what `observed` cannot do is enforce it, because the adaptor writes the getter.
+   or a hand-written `VisitFields` implementation for a `#[flatten]` field is a different case - its field getters receive the
+   same per-processor `&dyn Redactor` as typed events, so its fields are redacted when it applies that redactor; what `observed`
+   cannot do is enforce it, because the adaptor or the implementation writes the getter.
    The dynamic event *body* is the genuine exception and reaches exporters verbatim.
 
 1. **Data classification annotations.** Attributes carrying personal or sensitive data must be labeled with an appropriate `DataClass`.
@@ -231,7 +238,10 @@ An event can produce any combination of signals defined by its schema. The trace
 
 #### Metrics
 
-1. **A metric is produced only when an event or an event field is marked as a metric type.** If there is no such attribute in an event, the event produces no metrics.
+1. **A metric is produced only when an event or an event field is marked as a metric type.** A `#[flatten]` field passes on
+   the fields of its type with their measurements. So an event can produce a metric with no instrument attribute of its own.
+   The event-level counter of a flattened `#[event]` (a fieldless `#[counter]`) does not pass through. If the event has no such
+   attribute and no flattened type has a field with a measurement, the event produces no metrics.
 
 1. **Metric dimensions are strictly opt-in.** An event field or enrichment field becomes a metric
    dimension only when it is explicitly marked with `#[dimension(metric = "...")]`. Unmarked fields are
@@ -261,7 +271,10 @@ In summary, the routing is determined by annotations on the event struct:
 | Instrument attribute(s) only | No | Yes (per instrument) |
 | Neither | No | No |
 
-A signal-less event (no severity attribute and no instrument attribute) is accepted by the macro. It carries only its name, fields, and enrichment,
+A `#[flatten]` field whose type has a field with a measurement adds that metric to each row. For example, an event with only
+a flattened value that records a histogram produces that histogram and no log.
+
+A signal-less event (no severity attribute, no instrument attribute, and no flattened measurement) is accepted by the macro. It carries only its name, fields, and enrichment,
 which is useful for events routed by a processor that selects on the event name rather than on a signal.
 
 ## Technical details
@@ -293,6 +306,7 @@ Field-level attributes control routing and redaction. By default, every field is
 | instrument `<field>` | Leading positional field name inside `#[counter(...)]` / `#[updown_counter(...)]` / `#[gauge(...)]` / `#[histogram(...)]`, naming the field whose value IS the metric value | The referenced field must not also be a metric dimension; it must be `#[unredacted]` and a numeric primitive `Value` can carry (`u128`/`i128` are unsupported); `#[counter(x)]` requires an unsigned integer, `#[updown_counter(x)]` a signed one, and `gauge`/`histogram` accept any supported numeric type including floats |
 | `#[data_class(<expr>)]` | Data-classification expression; wraps the value in `Sensitive::new(value, expr)` before redaction | Mutually exclusive with `#[unredacted]` |
 | `#[unredacted]` | Bypass redaction; the type must implement `Into<Value>` | Mutually exclusive with `#[data_class(...)]` |
+| `#[flatten]` | Visit the fields of the value as fields of the event. The type must implement `VisitFields`, and that implementation routes and redacts each of its fields | Cannot be combined with the other field attributes, and no instrument can name the field. If the type is an `#[event]`, its fields reach the log only if it has a severity attribute |
 
 ### Sinks and Keys
 
