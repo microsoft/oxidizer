@@ -49,6 +49,9 @@ testing_aids = { path = "../testing_aids" }
 name = "observed_arty_task_spawn"
 harness = false
 
+[[example]]
+name = "observed_arty_basic"
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
