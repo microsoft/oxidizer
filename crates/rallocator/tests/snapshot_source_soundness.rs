@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use seismograph::snapshot::{SnapshotContext, SnapshotOptions, Source, SourceData, SourceId};
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
 static MODE: AtomicUsize = AtomicUsize::new(0);
 static CACHE: Mutex<Option<Vec<u8>>> = Mutex::new(None);

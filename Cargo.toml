@@ -105,9 +105,9 @@ cachet_memory = { path = "crates/cachet_memory", default-features = false, versi
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.6.1" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.6.1" }
 cc = { version = "1.2", default-features = false }
-cfg_aliases = { version = "0.2.2", default-features = false }
+cfg_aliases = { version = "0.2.2", default-features = false }   
 chrono = { version = "0.4.40", default-features = false }
-chumsky = { version = "0.13.0", default-features = false }
+chumsky = { version = "0.14.2", default-features = false }
 clap = { version = "4.6.4", default-features = false }
 # The latest command-group release still uses nix 0.27 on Unix; accept the duplicate until upstream updates.
 command-group = { version = "5.0.1", default-features = false }
