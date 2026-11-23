@@ -44,7 +44,7 @@ impl DispatcherClient {
         self.core.worker_index(thread_id)
     }
 
-    pub(crate) fn workers(&self) -> &Workers {
+    pub(crate) fn workers(&self) -> Workers {
         self.core.workers()
     }
 
