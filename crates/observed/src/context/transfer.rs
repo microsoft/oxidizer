@@ -111,12 +111,76 @@ impl Transfer {
         TransferGuard::new(self.enrichment.apply_owned())
     }
 
+    /// Creates reusable state for integrations that bracket repeated task polls.
+    ///
+    /// Create the scope on the thread that will use it. Call
+    /// [`TransferScope::apply_current_thread`] before each poll and
+    /// [`TransferScope::restore_current_thread`] after each poll. The scope
+    /// retains restoration storage, so transfers with many sink slots do not
+    /// allocate on every poll.
+    pub fn into_scope(self) -> TransferScope {
+        TransferScope::new(self)
+    }
+
     pub(crate) fn apply_state(&self) -> ApplyState {
         self.enrichment.apply_state()
     }
 
     pub(crate) fn apply_current_thread_borrowed<'a>(&'a self, state: &'a mut ApplyState) -> impl Sized + 'a {
         ThreadBoundGuard::new(self.enrichment.apply(state))
+    }
+}
+
+/// Reusable, thread-bound state that brackets repeated task polls.
+///
+/// The scope belongs to the thread that created it. It cannot move to another
+/// thread. Dropping an active scope restores the prior enrichment.
+#[derive(Debug)]
+#[must_use]
+pub struct TransferScope {
+    transfer: Transfer,
+    state: ApplyState,
+    active: bool,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl TransferScope {
+    fn new(transfer: Transfer) -> Self {
+        let state = transfer.apply_state();
+        Self {
+            transfer,
+            state,
+            active: false,
+            _not_send: PhantomData,
+        }
+    }
+
+    /// Applies the captured enrichment to the current thread.
+    ///
+    /// A repeated call while the scope is active does nothing.
+    pub fn apply_current_thread(&mut self) {
+        if self.active {
+            return;
+        }
+        self.transfer.enrichment.apply_start(&mut self.state);
+        self.active = true;
+    }
+
+    /// Restores the enrichment that was active before the last application.
+    ///
+    /// A call while the scope is inactive does nothing.
+    pub fn restore_current_thread(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.transfer.enrichment.apply_end(&mut self.state);
+        self.active = false;
+    }
+}
+
+impl Drop for TransferScope {
+    fn drop(&mut self) {
+        self.restore_current_thread();
     }
 }
 

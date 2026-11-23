@@ -8,12 +8,16 @@
 mod support;
 
 use std::future::poll_fn;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use std::thread::ThreadId;
 
+use arty::core::{Thread, ThreadAware};
 use arty::runtime::Runtime;
+use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::policy::WorkersPolicy;
-use observed::enrichment::{EnrichFutureExt, Enrichment, EnrichmentEntry};
+use observed::context::{Transfer, TransferScope};
+use observed::enrichment::{EnrichFnExt, EnrichFutureExt, Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed::{FlushError, Sink};
@@ -24,6 +28,7 @@ use support::stop_bounded;
 assert_impl_all!(ObservedOptions: Clone, Send, Sync);
 assert_not_impl_any!(ObservedOptions: Copy);
 assert_not_impl_any!(observed::context::TransferGuard: Send, Sync);
+assert_not_impl_any!(TransferScope: Send, Sync);
 
 struct IgnoreEvents;
 
@@ -57,6 +62,79 @@ fn active_keys(sink: &Sink) -> Vec<String> {
     sink.current_enrichments().iter().map(|entry| entry.key().to_string()).collect()
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct RestorationObservation {
+    thread: ThreadId,
+    outcome: Poll<()>,
+    keys: Vec<String>,
+}
+
+#[derive(Clone, Default)]
+struct RestorationLog(Arc<Mutex<Vec<RestorationObservation>>>);
+
+impl RestorationLog {
+    fn take(&self) -> Vec<RestorationObservation> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+#[derive(Clone)]
+struct RestorationProbeFactory {
+    sink: Sink,
+    worker_context: Transfer,
+    observations: RestorationLog,
+}
+
+impl ThreadAware for RestorationProbeFactory {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.sink.relocate(source, destination);
+        self.worker_context.relocate(source, destination);
+    }
+}
+
+struct RestorationProbe {
+    sink: Sink,
+    worker_context: TransferScope,
+    observations: RestorationLog,
+}
+
+impl RestorationProbe {
+    fn new(factory: RestorationProbeFactory) -> Self {
+        Self {
+            sink: factory.sink,
+            worker_context: factory.worker_context.into_scope(),
+            observations: factory.observations,
+        }
+    }
+}
+
+impl TaskObserver for RestorationProbe {
+    fn poll_start(&mut self) {
+        self.worker_context.apply_current_thread();
+    }
+
+    fn poll_end(&mut self, outcome: Poll<()>) {
+        self.observations
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(RestorationObservation {
+                thread: std::thread::current().id(),
+                outcome,
+                keys: active_keys(&self.sink),
+            });
+        self.worker_context.restore_current_thread();
+    }
+}
+
+fn restoration_probe(factory: RestorationProbeFactory) -> HookFn<TaskSpawn, RestorationProbeFactory> {
+    HookFn::new(factory, |event, factory| {
+        if active_keys(&factory.sink) == ["parent"] {
+            event.observe_with(factory.clone(), RestorationProbe::new);
+        }
+    })
+}
+
 #[test]
 fn options_convert_from_sink() {
     let sink = sink();
@@ -68,8 +146,15 @@ fn options_convert_from_sink() {
 #[test]
 fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() {
     let sink = sink();
+    let observations = RestorationLog::default();
+    let worker_context = (|| sink.transfer_context()).enrich(&sink, Layer("worker", 0))();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
+        .on(restoration_probe(RestorationProbeFactory {
+            sink: sink.clone(),
+            worker_context,
+            observations: observations.clone(),
+        }))
         .enable_observed(sink.clone())
         .build()
         .unwrap();
@@ -84,7 +169,7 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
 
     let parent = scheduler.spawn_at(
         &source,
-        (scheduler.clone(), target.clone(), sink.clone()),
+        (scheduler.clone(), target.clone(), sink),
         |(scheduler, target, sink)| async move {
             async {
                 scheduler
@@ -112,10 +197,21 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
     );
     runtime.scheduler().block_on(async move |_| parent.await).unwrap().unwrap();
 
-    let context_probe = scheduler.spawn_at(&target, sink, |sink| async move {
-        assert!(active_keys(&sink).is_empty());
-    });
-    runtime.scheduler().block_on(async move |_| context_probe.await).unwrap().unwrap();
+    assert_eq!(
+        observations.take(),
+        [
+            RestorationObservation {
+                thread: target.id(),
+                outcome: Poll::Pending,
+                keys: vec!["worker".to_owned()],
+            },
+            RestorationObservation {
+                thread: target.id(),
+                outcome: Poll::Ready(()),
+                keys: vec!["worker".to_owned()],
+            },
+        ]
+    );
 
     stop_bounded(runtime);
 }

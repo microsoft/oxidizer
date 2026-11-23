@@ -6,7 +6,7 @@ use std::task::Poll;
 use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
 use observed::Sink;
-use observed::context::{Transfer, TransferGuard};
+use observed::context::{Transfer, TransferScope};
 use thread_aware::ThreadAware;
 
 /// Configures Observed sink integration for an Arty runtime.
@@ -78,24 +78,24 @@ fn capture_enrichment(event: &mut TaskSpawn, options: &ObservedOptions) {
 }
 
 struct ObservedTask {
-    transfer: Transfer,
-    guard: Option<TransferGuard>,
+    scope: TransferScope,
 }
 
 impl ObservedTask {
     fn new(transfer: Transfer) -> Self {
-        Self { transfer, guard: None }
+        Self {
+            scope: transfer.into_scope(),
+        }
     }
 }
 
 impl TaskObserver for ObservedTask {
     fn poll_start(&mut self) {
-        self.guard = None;
-        self.guard = Some(self.transfer.apply_current_thread());
+        self.scope.apply_current_thread();
     }
 
     fn poll_end(&mut self, _outcome: Poll<()>) {
-        self.guard = None;
+        self.scope.restore_current_thread();
     }
 }
 
@@ -123,8 +123,13 @@ mod tests {
     const MEASURED_POLLS: usize = 1_000;
 
     #[test]
-    fn repeated_poll_scopes_do_not_allocate() {
-        let sink = Sink::builder("allocation_test").build();
+    fn repeated_composite_poll_scopes_do_not_allocate() {
+        let sink = Sink::composite([
+            Sink::builder("allocation_test_1").build(),
+            Sink::builder("allocation_test_2").build(),
+            Sink::builder("allocation_test_3").build(),
+            Sink::builder("allocation_test_4").build(),
+        ]);
         let mut observer = ObservedTask::new(sink.transfer_context());
         observer.poll_start();
         observer.poll_end(Poll::Pending);
