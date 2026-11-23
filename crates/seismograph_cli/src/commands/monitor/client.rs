@@ -11,7 +11,7 @@ use seismograph_protocol::io::MonitorIo;
 use seismograph_protocol::message::{RecorderActivity, RecordingConfiguration, Request, Response, SnapshotOptions};
 use seismograph_protocol::monitor::MonitorDescriptor;
 use seismograph_protocol::transport::Connection;
-use seismograph_protocol::{read_control_response, read_response, write_request};
+use seismograph_protocol::{read_control_response, read_response, read_response_with_limit, write_request};
 
 use super::Error;
 use super::app::Instance;
@@ -146,6 +146,23 @@ pub(super) fn capture_snapshot_and_stop(io: &MonitorIo, descriptor: &MonitorDesc
     }
 }
 
+pub(super) fn capture_snapshot_bounded(
+    io: &MonitorIo,
+    descriptor: &MonitorDescriptor,
+    options: Option<SnapshotOptions>,
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<Vec<u8>, Error> {
+    let request = options.map_or(Request::CaptureSnapshotAndStop, Request::CaptureSnapshot);
+    let mut stream = connected_stream(io, descriptor)?;
+    stream.set_read_timeout(Some(timeout)).map_err(Error::Io)?;
+    write_request(&mut stream, 2, &request).map_err(Error::Protocol)?;
+    match check_response(read_response_with_limit(&mut stream, max_bytes))? {
+        Response::Snapshot(bytes) => Ok(bytes),
+        _ => Err(Error::UnexpectedResponse),
+    }
+}
+
 pub(super) fn clear_event_buffers(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<(), Error> {
     match command(io, descriptor, &Request::ClearEventBuffers)? {
         Response::Acknowledged => Ok(()),
@@ -223,12 +240,15 @@ fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) ->
     if snapshot {
         stream.set_read_timeout(None).map_err(Error::Io)?;
     }
-    let (request_id, response) = if snapshot {
+    check_response(if snapshot {
         read_response(&mut stream)
     } else {
         read_control_response(&mut stream)
-    }
-    .map_err(Error::Protocol)?;
+    })
+}
+
+fn check_response(response: Result<(u64, Response), seismograph_protocol::Error>) -> Result<Response, Error> {
+    let (request_id, response) = response.map_err(Error::Protocol)?;
     if request_id != 2 {
         return Err(Error::UnexpectedResponse);
     }

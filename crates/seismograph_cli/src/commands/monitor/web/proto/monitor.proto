@@ -1,0 +1,273 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package seismograph.monitor.v1;
+
+import "google/api/annotations.proto";
+
+// Local proxy for the operating system's Seismograph monitor endpoints.
+service Monitor {
+  rpc Discover(Empty) returns (Applications) {
+    option (google.api.http) = { get: "/api/v1/applications" };
+  }
+  rpc Activity(Target) returns (RecorderActivity) {
+    option (google.api.http) = { get: "/api/v1/applications/{id}/activity" };
+  }
+  rpc Record(RecordRequest) returns (Recording) {
+    option (google.api.http) = { put: "/api/v1/applications/{id}/recording" body: "recording" };
+  }
+  rpc Clear(Target) returns (Empty) {
+    option (google.api.http) = { post: "/api/v1/applications/{id}/clear" };
+  }
+  rpc Capture(CaptureRequest) returns (Snapshot) {
+    option (google.api.http) = { post: "/api/v1/applications/{id}/capture" body: "*" };
+  }
+  rpc Open(NativeSnapshot) returns (Snapshot) {
+    option (google.api.http) = { post: "/api/v1/snapshots" body: "*" };
+  }
+  rpc Inspect(InspectRequest) returns (Page) {
+    option (google.api.http) = { get: "/api/v1/snapshots/{id}/sections/{section}" };
+  }
+  rpc Filter(FilterRequest) returns (Snapshot) {
+    option (google.api.http) = { put: "/api/v1/snapshots/{id}/filter" body: "*" };
+  }
+  rpc Download(SnapshotId) returns (NativeSnapshot) {
+    option (google.api.http) = { get: "/api/v1/snapshots/{id}/file" };
+  }
+}
+
+message Empty {}
+message Target { string id = 1; }
+message Applications {
+  repeated Application applications = 1;
+  repeated string warnings = 2;
+  string monitor_version = 3;
+}
+message Application {
+  string id = 1;
+  string name = 2;
+  string instance = 3;
+  uint32 pid = 4;
+  string owner = 5;
+  string server_version = 6;
+  Recording recording = 7;
+}
+message Policy {
+  bool enabled = 1;
+  bool capture_backtraces = 2;
+  uint32 sampling_one_in = 3;
+}
+message Recording {
+  Policy allocations = 1;
+  Policy general_events = 2;
+  Policy arc_dereferences = 3;
+  Policy runtime_tasks = 4;
+  Policy io = 5;
+  Policy cache = 6;
+  uint32 event_capacity_per_thread = 7;
+}
+message RecordRequest {
+  string id = 1;
+  Recording recording = 2;
+}
+message RecorderActivity {
+  Recording recording = 1;
+  uint64 session_id = 2;
+  uint64 total_events = 3;
+  uint64 retained_events = 4;
+  uint64 lost_events = 5;
+  uint64 allocated_bytes = 6;
+  repeated uint64 class_events = 7;
+  repeated LiveThread threads = 8;
+  uint64 thread_count = 9;
+}
+message LiveThread {
+  uint64 id = 1;
+  string name = 2;
+  uint64 total_events = 3;
+  uint64 retained_events = 4;
+  uint64 lost_events = 5;
+  bool retired = 6;
+  uint64 capacity = 7;
+}
+message CaptureRequest {
+  string id = 1;
+  CaptureMode mode = 2;
+}
+enum CaptureMode {
+  CAPTURE_MODE_UNSPECIFIED = 0;
+  CONTINUE = 1;
+  CLEAR = 2;
+  STOP = 3;
+}
+message SnapshotId { string id = 1; }
+message NativeSnapshot {
+  string name = 1;
+  bytes data = 2;
+}
+message Snapshot {
+  string id = 1;
+  string name = 2;
+  repeated Section sections = 3;
+  repeated string warnings = 4;
+  repeated Field filter_summary = 5;
+  string view_id = 6;
+  string saved_path = 7;
+}
+message Section {
+  string id = 1;
+  string title = 2;
+}
+message InspectRequest {
+  string id = 1;
+  string section = 2;
+  uint32 offset = 3;
+  // Slash-separated row indices. Omit to list rows at the root of the section.
+  // Runtime also accepts r/<runtime>/<worker or unbound>[/<task>[/<operation label>]].
+  string parent = 4;
+  // Show the full stack instead of the application stack.
+  bool full_stack = 5;
+  string view_id = 6;
+  string sort_by = 7;
+  bool descending = 8;
+}
+message FilterRequest {
+  string id = 1;
+  string include = 2;
+  string exclude = 3;
+  bool include_unknown = 4;
+  bool full_stack = 5;
+}
+message Page {
+  repeated Row rows = 1;
+  uint32 total = 2;
+  repeated Timeline timelines = 3;
+  repeated Histogram histograms = 4;
+  // The selected worker or task, when browsing runtime details.
+  Row subject = 5;
+}
+message Row {
+  string title = 1;
+  repeated Field fields = 2;
+  repeated string stack = 3;
+  bool has_children = 4;
+  repeated LabeledStack related_stacks = 13;
+  oneof model {
+    RuntimeWorker runtime_worker = 5;
+    RuntimeTask runtime_task = 6;
+    Thread thread = 7;
+    AllocationHotspot allocation_hotspot = 8;
+    IoResource io_resource = 9;
+    CacheTier cache_tier = 10;
+    PrimitiveGroup primitive_group = 11;
+    TaskOccurrence task_occurrence = 12;
+  }
+}
+message LabeledStack {
+  string title = 1;
+  repeated string frames = 2;
+}
+message Field {
+  string name = 1;
+  string value = 2;
+}
+message Execution {
+  uint64 polls = 1;
+  optional uint64 median_poll_nanos = 2;
+  optional uint64 max_poll_nanos = 3;
+  optional double executing_fraction = 4;
+}
+message Timeline {
+  string title = 1;
+  uint64 start_nanos = 2;
+  uint64 end_nanos = 3;
+  repeated Occupancy bins = 4;
+}
+message Occupancy {
+  optional double fraction = 1;
+}
+message Histogram {
+  string title = 1;
+  repeated DurationBucket buckets = 2;
+}
+message DurationBucket {
+  uint64 lower_nanos = 1;
+  uint64 upper_nanos = 2;
+  uint64 count = 3;
+}
+message TaskOccurrence {
+  // An operation associated with this task by retained poll boundaries.
+  uint64 object_id = 1;
+  uint64 thread_id = 2;
+  uint64 sequence = 3;
+  uint64 timestamp_nanos = 4;
+  string description = 5;
+  string identity = 6;
+  bool relative_stack_known = 7;
+}
+message RuntimeWorker {
+  uint64 runtime_id = 1;
+  string runtime_name = 2;
+  optional uint64 worker_id = 3;
+  string role = 4;
+  string state = 5;
+  optional uint64 thread_id = 6;
+  optional uint64 current_task = 7;
+  uint64 observed_tasks = 8;
+  Execution execution = 9;
+}
+message RuntimeTask {
+  uint64 runtime_id = 1;
+  uint64 task_id = 2;
+  optional uint64 parent_id = 3;
+  optional uint64 future_size_bytes = 4;
+  string state = 5;
+  repeated uint64 worker_ids = 6;
+  Execution execution = 7;
+  string activity_state = 8;
+  optional uint64 running_nanos = 9;
+  optional uint64 ready_nanos = 10;
+  optional uint64 poll_worker_id = 11;
+  bool repoll_requested = 12;
+  optional uint64 type_descriptor_id = 13;
+}
+message Thread {
+  uint64 id = 1;
+  string name = 2;
+  uint64 total = 3;
+  uint64 retained = 4;
+  uint64 lost = 5;
+}
+message AllocationHotspot {
+  uint64 allocations = 1;
+  uint64 allocated_bytes = 2;
+  uint64 live_allocations = 3;
+  uint64 live_bytes = 4;
+}
+message IoResource {
+  uint64 id = 1;
+  string kind = 2;
+  uint64 reads = 3;
+  uint64 writes = 4;
+  uint64 completed = 5;
+  uint64 errors = 6;
+  uint64 canceled = 7;
+  uint64 requested_bytes = 8;
+  uint64 completed_bytes = 9;
+}
+message CacheTier {
+  uint64 id = 1;
+  bool fallback = 2;
+  uint64 events = 3;
+  uint64 hits = 4;
+  uint64 misses = 5;
+  uint64 errors = 6;
+}
+message PrimitiveGroup {
+  string kind = 1;
+  uint64 events = 2;
+  uint64 objects = 3;
+  uint64 contentions = 4;
+}

@@ -24,6 +24,7 @@ mod runtime_timeline;
 mod snapshot;
 mod task_events;
 mod ui;
+pub(crate) mod web;
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;

@@ -33,17 +33,42 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
+arty = { workspace = true, features = ["rt"] }
+arty_tokio.workspace = true
+bytes.workspace = true
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 crossterm.workspace = true
+getrandom.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 jiff = { workspace = true, default-features = true }
+pbjson.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
+prost = { workspace = true, features = ["derive"] }
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
+rest_over_grpc = { workspace = true, features = ["serving"] }
+routerama.workspace = true
 seismograph.workspace = true
 seismograph_protocol.workspace = true
 seismograph_rallocator.workspace = true
 seismograph_runtime.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tonic = { workspace = true, features = ["codegen"] }
+tonic-prost.workspace = true
+tower-service.workspace = true
+
+[build-dependencies]
+pbjson-build.workspace = true
+protox.workspace = true
+rest_over_grpc = { workspace = true, features = ["build"] }
+tonic-prost-build.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 tempfile.workspace = true
 

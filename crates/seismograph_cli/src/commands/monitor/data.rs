@@ -2421,7 +2421,7 @@ impl AllocationSnapshot {
     }
 }
 
-fn average_bytes(hotspot: &AllocationHotspot) -> u64 {
+pub(super) fn average_bytes(hotspot: &AllocationHotspot) -> u64 {
     hotspot.allocated_bytes.checked_div(hotspot.allocations).unwrap_or_default()
 }
 

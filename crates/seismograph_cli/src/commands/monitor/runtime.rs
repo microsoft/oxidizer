@@ -51,6 +51,7 @@ pub(super) struct RuntimeTaskSummary {
     pub(super) state: String,
     pub(super) worker_ids: Vec<u64>,
     pub(super) spawn_stack: Vec<String>,
+    pub(super) application_spawn_stack: Vec<String>,
     pub(super) metrics: ExecutionMetrics,
     pub(super) activity: TaskActivitySummary,
 }
@@ -239,6 +240,7 @@ impl RuntimeMonitorSnapshot {
                     if task.row.spawn_stack.is_empty() {
                         let stack = event.call_stack.iter().map(|address| address.get()).collect::<Vec<_>>();
                         task.row.spawn_stack = primitive_stack(&stack, &lookups, AllocationStackFilter::All);
+                        task.row.application_spawn_stack = primitive_stack(&stack, &lookups, AllocationStackFilter::Application);
                     }
                 }
                 EventKind::TaskPollStarted => {
@@ -1320,7 +1322,7 @@ mod tests {
         assert_eq!(worker.observed_tasks, 1);
         assert_eq!(worker.metrics.executing_fraction, None);
         assert_eq!(worker.tasks[0].activity, TaskActivitySummary::default());
-        assert_eq!(worker.tasks[0].metrics.ready_samples.as_ref(), []);
+        assert!(worker.tasks[0].metrics.ready_samples.is_empty());
     }
 
     #[test]

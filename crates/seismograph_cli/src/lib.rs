@@ -14,6 +14,28 @@
 //! For live data, [start a monitor in your application](https://github.com/microsoft/oxidizer/blob/main/crates/seismograph/README.md#live-monitoring)
 //! before running `seismograph monitor`.
 //! To open a saved snapshot, run `seismograph view capture.seismograph`.
+//!
+//! Run `seismograph monitor-web` to use the browser monitor. Open the URL that the command prints.
+//! The server listens only on this computer. The URL contains a secret that grants access to local recorder controls.
+//! Do not share that URL. Press `Ctrl+C` to stop the server.
+//!
+//! The browser monitor finds live applications, shows recorder activity, and lets you change recording policies.
+//! You can capture, inspect, download, and open native `.seismograph` files.
+//! The proxy saves live captures in the directory where you run the command.
+//! The server keeps the four most recent snapshots open. Switch between them in the top bar.
+//! Select an area below the snapshot title to inspect its data.
+//! Select an application in the left pane to return to live monitoring.
+//! The snapshot tabs, area tabs, and application list stay available as you scroll.
+//! Use the arrow keys to move between rows in a grid. Press Enter to open details.
+//! If you capture the same application again, the active tab keeps your view and stack filter.
+//! Select a row to open its details without replacing the earlier views.
+//! In Primitives, each set of details opens below its parent grid.
+//! Select a Runtime worker to see its tasks.
+//! Select Arrange views to move or resize snapshot panes. The browser saves each section's layout.
+//! Use a fixed `--port` to keep the same layout after a server restart.
+//! Use a column heading to sort. Use the grid header to filter the current page.
+//! Metrics in the task, primitive operation, and allocation hot spot grids sort across all pages.
+//! The web monitor supports snapshots up to 64 MiB. Use the terminal monitor for larger captures.
 
 mod allocation_identities;
 mod allocator_sources;
@@ -45,6 +67,8 @@ struct Cli {
 enum Command {
     /// Opens the live application monitor.
     Monitor(commands::monitor::VerbArgs),
+    /// Starts the local browser monitor.
+    MonitorWeb(commands::monitor::web::Args),
     /// Opens a saved native snapshot in the read-only interactive viewer.
     View(commands::monitor::ViewArgs),
 }
@@ -93,6 +117,7 @@ fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Monitor(args) => run_monitor(args).map_err(Into::into),
+        Command::MonitorWeb(args) => commands::monitor::web::run(&args),
         Command::View(args) => run_view(args).map_err(Into::into),
     }
 }

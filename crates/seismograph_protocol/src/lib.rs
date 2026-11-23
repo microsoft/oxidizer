@@ -163,7 +163,19 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     let maximum = { MAX_SNAPSHOT_BYTES };
     #[cfg(not(target_pointer_width = "64"))]
     let maximum = MAX_SNAPSHOT_BYTES;
-    let frame = read_frame(reader, maximum)?;
+    read_response_with_limit(reader, maximum)
+}
+
+/// Reads one response with a caller-supplied payload limit in bytes.
+///
+/// The reader checks the advertised payload size before it allocates the body.
+///
+/// # Errors
+///
+/// Returns [`Error::MessageTooLarge`] if the payload exceeds the limit, or an
+/// error if reading or decoding fails. Discard the reader after an error.
+pub fn read_response_with_limit(reader: &mut impl Read, max_payload_bytes: usize) -> Result<(u64, Response), Error> {
+    let frame = read_frame(reader, max_payload_bytes)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
@@ -178,8 +190,7 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
 /// Returns [`Error::MessageTooLarge`] for a larger payload, or an error when
 /// reading or decoding fails. Discard the reader after an error.
 pub fn read_control_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
-    let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
-    message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
+    read_response_with_limit(reader, MAX_CONTROL_BYTES)
 }
 
 fn message_length(length: usize) -> Result<u32, Error> {

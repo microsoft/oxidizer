@@ -21,6 +21,17 @@ fn monitor_rejects_redirected_output() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "command help requires a subprocess")]
+fn monitor_web_is_available_without_entering_terminal_mode() {
+    let result = Command::new(env!("CARGO_BIN_EXE_seismograph"))
+        .args(["monitor-web", "--help"])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8(result.stdout).unwrap().contains("--port <PORT>"));
+}
+
+#[test]
 #[cfg_attr(miri, ignore = "filesystem and subprocess behavior is exercised by native tests")]
 fn view_requires_a_path_and_reports_file_errors() {
     let binary = env!("CARGO_BIN_EXE_seismograph");
