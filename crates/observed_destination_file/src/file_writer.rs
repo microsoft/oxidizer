@@ -3,27 +3,22 @@
 
 //! Native writer creation boundary, replaced by memory-backed writers in tests.
 
-#![cfg_attr(
-    test,
-    expect(
-        unexpected_cfgs,
-        reason = "fakeable emits a test-util feature check, but the macro and fakes are only compiled under cfg(test)"
-    )
-)]
-
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
-#[cfg(feature = "rolling_file")]
+#[cfg(any(test, feature = "rolling_file"))]
 use crate::FileLimit;
 
 /// Opens native output writers; tests substitute the registration/I/O boundary.
-#[cfg_attr(test, fakeable::fakeable(fake_impl = crate::file_writer::fakes::FakeFileWriterOpener))]
+#[cfg_attr(
+    any(test, feature = "test-util"),
+    fakeable::fakeable(fake_impl = crate::file_writer::fakes::FakeFileWriterOpener)
+)]
 #[derive(Debug, Clone)]
 pub(crate) struct FileWriterOpener {}
 
-#[cfg_attr(test, fakeable::fakeable)]
+#[cfg_attr(any(test, feature = "test-util"), fakeable::fakeable)]
 impl FileWriterOpener {
     pub(crate) fn new() -> Self {
         Self {}
@@ -43,7 +38,7 @@ impl FileWriterOpener {
         Ok(Box::new(file))
     }
 
-    #[cfg(feature = "rolling_file")]
+    #[cfg(any(test, feature = "rolling_file"))]
     #[expect(
         clippy::unused_self,
         reason = "Instance methods allow fakeable to substitute writer creation in tests"
@@ -70,28 +65,34 @@ impl FileWriterOpener {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod fakes {
+/// Memory-backed replacement for the files that destinations open.
+#[cfg(any(test, feature = "test-util"))]
+pub mod fakes {
     use std::io::{self, Cursor, Error, ErrorKind, Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
 
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
 
-    #[cfg(feature = "rolling_file")]
+    #[cfg(any(test, feature = "rolling_file"))]
     use crate::FileLimit;
 
-    /// Memory-backed opener for registration and worker assertions.
-    /// Clones and all opened writers share one stream, regardless of path.
+    /// Records how a destination opens its output and keeps that output in memory.
+    ///
+    /// Pass it to a destination's `writer_opener` method in place of the native
+    /// file system. Clones and all writers that it opens share one stream,
+    /// regardless of the path. The fake does not rotate or compress output.
     #[derive(Debug, Clone)]
-    pub(crate) struct FakeFileWriterOpener {
+    pub struct FakeFileWriterOpener {
         contents: Arc<Mutex<Cursor<Vec<u8>>>>,
         calls: Arc<Mutex<Vec<OpenCall>>>,
         open_error: Option<ErrorKind>,
     }
 
     impl FakeFileWriterOpener {
-        pub(crate) fn new(contents: &str) -> Self {
+        /// Creates a fake whose output starts with `contents`, as an existing file does.
+        #[must_use]
+        pub fn new(contents: &str) -> Self {
             Self {
                 contents: Arc::new(Mutex::new(Cursor::new(contents.as_bytes().to_vec()))),
                 calls: Arc::new(Mutex::new(Vec::new())),
@@ -99,16 +100,26 @@ pub(crate) mod fakes {
             }
         }
 
-        pub(crate) fn open_error(mut self, error: ErrorKind) -> Self {
+        /// Makes each open attempt fail with an I/O error of this kind.
+        ///
+        /// The fake still records the attempt in [`calls`](Self::calls).
+        #[must_use]
+        pub fn open_error(mut self, error: ErrorKind) -> Self {
             self.open_error = Some(error);
             self
         }
 
-        pub(crate) fn output(&self) -> String {
-            String::from_utf8(self.contents.lock().get_ref().clone()).unwrap()
+        /// Returns the current output as text.
+        ///
+        /// Invalid UTF-8 sequences become `U+FFFD`.
+        #[must_use]
+        pub fn output(&self) -> String {
+            String::from_utf8_lossy(self.contents.lock().get_ref()).into_owned()
         }
 
-        pub(crate) fn calls(&self) -> Vec<OpenCall> {
+        /// Returns the open attempts, oldest first.
+        #[must_use]
+        pub fn calls(&self) -> Vec<OpenCall> {
             self.calls.lock().clone()
         }
 
@@ -120,7 +131,7 @@ pub(crate) mod fakes {
             self.open_writer(overwrite)
         }
 
-        #[cfg(feature = "rolling_file")]
+        #[cfg(any(test, feature = "rolling_file"))]
         pub(crate) fn open_rolling(
             &self,
             path: &Path,
@@ -152,18 +163,29 @@ pub(crate) mod fakes {
         }
     }
 
-    /// Recorded options only; the fake does not execute rotation or compression.
+    /// An open attempt and the options that the destination passed with it.
+    ///
+    /// The fake records these options but does not apply rotation or compression.
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub(crate) enum OpenCall {
+    #[non_exhaustive]
+    pub enum OpenCall {
+        /// A single-file destination opened `path`.
         File {
+            /// The configured log file path.
             path: PathBuf,
+            /// Whether the destination truncates existing contents.
             overwrite: bool,
         },
-        #[cfg(feature = "rolling_file")]
+        /// A rolling destination opened `path`.
+        #[cfg(any(test, feature = "rolling_file"))]
         Rolling {
+            /// The configured active log file path.
             path: PathBuf,
+            /// The configured rotation size limit in bytes.
             max_file_size: usize,
+            /// The configured retention limit for rotated files.
             file_limit: FileLimit,
+            /// Whether the destination compresses rotated files.
             compression: bool,
         },
     }

@@ -17,6 +17,10 @@
 //!   with configurable retention (age or count) and optional compression.
 //!   Requires the `rolling_file` feature.
 //!
+//! The `test-util` feature adds the `fakes` module. Its fake writer replaces
+//! the native file system in tests, through the `writer_opener` method of each
+//! destination.
+//!
 //! Internally, log records are forwarded to a background thread through a
 //! bounded [`performables`](https://docs.rs/performables/) channel, avoiding
 //! mutex contention on the hot (emit) path. When the channel is full, the newest
@@ -36,6 +40,10 @@
 //!   files can be compressed when the `rolling_file` feature is enabled.
 //!   Rotation is checked as buffered writes reach the rotating writer; a file
 //!   can exceed the limit by a write batch or an oversized write.
+//!   Known issue: `file-rotate` 0.9.0 ignores errors when it opens the active
+//!   file, and it panics when it cannot create the parent directory. Thus,
+//!   registration can succeed without a usable output file. A future
+//!   `file-rotate` version is expected to fix this.
 //! * Logging is asynchronous. The emit path clones the SDK log record and
 //!   attempts a non-blocking send to a bounded channel. If that channel is full
 //!   or disconnected, the newest record is dropped and the caller is not
@@ -90,14 +98,14 @@ mod file_dest;
 mod file_writer;
 mod messages;
 mod processor;
-#[cfg(feature = "rolling_file")]
+#[cfg(any(test, feature = "rolling_file"))]
 mod rolling_file_dest;
-#[cfg(test)]
-mod tests;
 mod worker;
 
 pub use file_dest::{FileLogDestination, FileLogDestinationBuilder, file_logs};
-#[cfg(feature = "rolling_file")]
+#[cfg(any(test, feature = "test-util"))]
+pub use file_writer::fakes;
+#[cfg(any(test, feature = "rolling_file"))]
 pub use rolling_file_dest::{FileLimit, RollingFileLogDestination, RollingFileLogDestinationBuilder, rolling_file_logs};
 pub(crate) use worker::{DEFAULT_BUFFER_SIZE, DEFAULT_FLUSH_ACK_TIMEOUT, DEFAULT_FLUSH_INTERVAL, DEFAULT_QUEUE_CAPACITY};
 

@@ -6,6 +6,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::fs;
+#[cfg(feature = "rolling_file")]
+use std::io::Read as _;
 use std::io::{Error, ErrorKind};
 #[cfg(feature = "rolling_file")]
 use std::path::{Path, PathBuf};
@@ -13,6 +15,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::time::SystemTime;
 
+#[cfg(feature = "rolling_file")]
+use flate2::read::GzDecoder;
 use observed_destination_core::{IntoLogDestination, LogFormatConfig, LoggerProviderBuilderExt};
 #[cfg(feature = "rolling_file")]
 use observed_destination_file::{FileLimit, rolling_file_logs};
@@ -181,12 +185,16 @@ fn native_rotation_retains_newest_archive_and_compresses_when_requested() {
         let archives = archive_paths(&directory, &path);
         assert_eq!(archives.len(), 1);
         let archive = fs::read(&archives[0]).unwrap();
-        if compression {
+        let archive = if compression {
             assert_eq!(archives[0].extension().unwrap(), "gz");
-            assert!(archive.starts_with(&[0x1f, 0x8b]));
+            // Decode the archive to prove that it holds the rotated records as valid gzip.
+            let mut decoded = String::new();
+            GzDecoder::new(archive.as_slice()).read_to_string(&mut decoded).unwrap();
+            decoded
         } else {
-            assert!(String::from_utf8(archive).unwrap().contains("WARN: record 2:"));
-        }
+            String::from_utf8(archive).unwrap()
+        };
+        assert!(archive.contains("WARN: record 2:"));
         assert!(fs::read_to_string(&path).unwrap().contains("WARN: newest record\n"));
         directory.close().unwrap();
     }

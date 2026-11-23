@@ -6,13 +6,11 @@
 use std::time::Duration;
 
 use observed_destination_core::{LogFormatConfig, LoggerProviderBuilderExt};
+use observed_destination_file::fakes::FakeFileWriterOpener;
+use observed_destination_file::file_logs;
 use opentelemetry::logs::{AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-
-use crate::file_logs;
-use crate::file_writer::FileWriterOpener;
-use crate::file_writer::fakes::FakeFileWriterOpener;
 
 #[test]
 #[cfg_attr(
@@ -28,7 +26,7 @@ fn force_flush_writes_records_with_resource_configured_after_registration() {
                 .format_config(LogFormatConfig::minimal())
                 .flush_ack_timeout(Duration::from_secs(12))
                 .build()
-                .writer_opener(FileWriterOpener::fake(factory.clone())),
+                .writer_opener(factory.clone()),
         )
         .unwrap()
         .with_resource(Resource::builder_empty().with_service_name("example").build())
@@ -65,7 +63,7 @@ fn shutdown_flushes_pending_records() {
             file_logs("application.log")
                 .format_config(LogFormatConfig::minimal())
                 .build()
-                .writer_opener(FileWriterOpener::fake(factory.clone())),
+                .writer_opener(factory.clone()),
         )
         .unwrap()
         .build();
@@ -97,7 +95,7 @@ fn custom_buffer_sizes_preserve_records_across_flush_and_shutdown() {
                     .buffer_size(buffer_size)
                     .format_config(LogFormatConfig::minimal())
                     .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+                    .writer_opener(factory.clone()),
             )
             .unwrap()
             .build();

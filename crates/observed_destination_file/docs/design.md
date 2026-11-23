@@ -69,12 +69,16 @@ writer thread starts.
 For rolling output, `FileWriterOpener::open_rolling` calls
 `file_rotate::FileRotate::new` with the path, size limit, retention limit, and
 compression choice. Registration first rejects a zero `max_file_size` with
-`FileLogInitError`, because `file-rotate` asserts a positive limit. Ages of
-10,000 years or more map to `file_rotate::suffix::FileLimit::Unlimited`, because
-`file-rotate` panics when it cannot subtract the age from the current date.
-In `file-rotate` 0.8.0, the constructor suppresses file-open errors and can panic
-if directory creation fails. Registration can thus succeed without a usable
-output file.
+`FileLogInitError`, because `file-rotate` asserts a positive limit.
+`FileLimit::Age` maps directly to `file_rotate::suffix::FileLimit::Age`.
+`file-rotate` keeps an archive when its age limit reaches past the earliest
+representable time, so very large ages, such as `Duration::MAX`, keep all archives.
+
+Known issue: in `file-rotate` 0.9.0, `FileRotate::new` ignores errors when it
+opens the active file, and it panics if the path has no parent directory or if it
+cannot create that directory. Registration can thus succeed without a usable
+output file. A future `file-rotate` version is expected to return these errors;
+when it does, `open_rolling` will return them as `FileLogInitError`.
 
 After the opener returns successfully, registration creates the channels,
 starts one worker thread, and adds a `SeverityFilter` around

@@ -71,8 +71,6 @@ pub enum FileLimit {
     /// Delete the oldest files if the rotated file count exceeds this limit.
     MaxFiles(usize),
     /// Delete files whose timestamp suffix is older than this duration.
-    ///
-    /// Ages of 10,000 years or more keep all rotated files.
     Age(Duration),
 }
 
@@ -82,21 +80,11 @@ impl Default for FileLimit {
     }
 }
 
-/// Shortest age that keeps all rotated files.
-///
-/// No rotated file can be this old. `file-rotate` subtracts the age from the
-/// current time and panics when the result is outside the Chrono date range
-/// (about 262,000 years from year zero). Thus, longer ages use the `Unlimited` policy.
-const UNLIMITED_AGE: Duration = Duration::from_hours(24 * 365 * 10_000);
-
 impl From<FileLimit> for file_rotate::suffix::FileLimit {
     fn from(value: FileLimit) -> Self {
         match value {
             FileLimit::MaxFiles(files) => Self::MaxFiles(files),
-            FileLimit::Age(age) if age >= UNLIMITED_AGE => Self::Unlimited,
-            // `file-rotate` expresses age retention with `chrono::Duration`. Convert here so the
-            // public API stays on `std::time::Duration`.
-            FileLimit::Age(age) => Self::Age(chrono::Duration::from_std(age).expect("ages below UNLIMITED_AGE fit chrono::Duration")),
+            FileLimit::Age(age) => Self::Age(age),
         }
     }
 }
@@ -192,10 +180,15 @@ impl LogDestination for RollingFileLogDestination {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl RollingFileLogDestination {
-    pub(crate) fn writer_opener(mut self, opener: FileWriterOpener) -> Self {
-        self.writer_opener = opener;
+    /// Writes the output to `fake` in place of the native file system.
+    ///
+    /// The fake records the rotation options but does not rotate or compress output.
+    /// Requires the `test-util` feature. Use it only in tests.
+    #[must_use]
+    pub fn writer_opener(mut self, fake: crate::fakes::FakeFileWriterOpener) -> Self {
+        self.writer_opener = FileWriterOpener::fake(fake);
         self
     }
 }
@@ -212,7 +205,6 @@ impl<S: rolling_file_log_destination_builder::IsComplete> IntoLogDestination for
 mod tests {
     use std::io::{Error, ErrorKind};
 
-    use chrono::Duration as ChronoDuration;
     use file_rotate::suffix::FileLimit as RotationFileLimit;
     use observed_destination_core::LoggerProviderBuilderExt;
     use ohno::ErrorExt as _;
@@ -230,21 +222,14 @@ mod tests {
             RotationFileLimit::from(FileLimit::MaxFiles(3)),
             RotationFileLimit::MaxFiles(3)
         ));
-        let just_below_unlimited = UNLIMITED_AGE.checked_sub(Duration::from_secs(1)).unwrap();
-        for (age, expected) in [
-            (Duration::from_mins(1), ChronoDuration::minutes(1)),
-            (just_below_unlimited, ChronoDuration::from_std(just_below_unlimited).unwrap()),
-        ] {
+
+        // The rotating writer handles ages beyond the representable date range, so
+        // even the largest age stays an age limit.
+        for age in [Duration::from_mins(1), Duration::MAX] {
             let RotationFileLimit::Age(actual) = RotationFileLimit::from(FileLimit::Age(age)) else {
                 panic!("expected age-based retention");
             };
-            assert_eq!(actual, expected);
-        }
-
-        // Ages that no rotated file can reach keep all files instead of an age the
-        // rotating writer cannot subtract from the current date.
-        for age in [UNLIMITED_AGE, Duration::MAX] {
-            assert!(matches!(RotationFileLimit::from(FileLimit::Age(age)), RotationFileLimit::Unlimited));
+            assert_eq!(actual, age);
         }
     }
 
@@ -275,7 +260,7 @@ mod tests {
                 rolling_file_logs("application.log")
                     .flush_interval(Duration::ZERO)
                     .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+                    .writer_opener(factory.clone()),
             )
             .unwrap_err();
         let init_error = error.downcast_ref::<FileLogInitError>().unwrap();
@@ -293,7 +278,7 @@ mod tests {
                 rolling_file_logs("application.log")
                     .max_file_size(0)
                     .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+                    .writer_opener(factory.clone()),
             )
             .unwrap_err();
 
@@ -320,7 +305,7 @@ mod tests {
                     .compression(compression)
                     .format_config(LogFormatConfig::minimal())
                     .into_log_destination()
-                    .writer_opener(FileWriterOpener::fake(factory.clone()));
+                    .writer_opener(factory.clone());
                 let provider = SdkLoggerProvider::builder().register(destination).unwrap().build();
                 let logger = provider.logger("test");
                 for severity in [Severity::Info, Severity::Warn] {
@@ -353,11 +338,7 @@ mod tests {
     fn registration_reports_file_open_errors() {
         let factory = FakeFileWriterOpener::new("").open_error(ErrorKind::PermissionDenied);
         let error = SdkLoggerProvider::builder()
-            .register(
-                rolling_file_logs("application.log")
-                    .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
-            )
+            .register(rolling_file_logs("application.log").build().writer_opener(factory.clone()))
             .unwrap_err();
 
         let init_error = error.downcast_ref::<FileLogInitError>().unwrap();

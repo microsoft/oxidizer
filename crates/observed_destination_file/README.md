@@ -22,6 +22,10 @@ This crate provides two destination flavors:
   with configurable retention (age or count) and optional compression.
   Requires the `rolling_file` feature.
 
+The `test-util` feature adds the `fakes` module. Its fake writer replaces
+the native file system in tests, through the `writer_opener` method of each
+destination.
+
 Internally, log records are forwarded to a background thread through a
 bounded [`performables`][__link1] channel, avoiding
 mutex contention on the hot (emit) path. When the channel is full, the newest
@@ -41,6 +45,10 @@ reported in the destination output.
   files can be compressed when the `rolling_file` feature is enabled.
   Rotation is checked as buffered writes reach the rotating writer; a file
   can exceed the limit by a write batch or an oversized write.
+  Known issue: `file-rotate` 0.9.0 ignores errors when it opens the active
+  file, and it panics when it cannot create the parent directory. Thus,
+  registration can succeed without a usable output file. A future
+  `file-rotate` version is expected to fix this.
 * Logging is asynchronous. The emit path clones the SDK log record and
   attempts a non-blocking send to a bounded channel. If that channel is full
   or disconnected, the newest record is dropped and the caller is not
@@ -96,7 +104,7 @@ for ownership, failure policy, and testing boundaries.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTlblZRytQbMbGCASL_fQhRIbLhrHNy8pUEMbQuq_w9pi9GJhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbsS6VDC9C8AIbeABVz_oKj1AbaRSuwMjUnbob6usYcLaM6rBhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
  [__link0]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
  [__link1]: https://docs.rs/performables/
  [__link2]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs

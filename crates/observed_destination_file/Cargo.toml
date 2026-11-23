@@ -32,13 +32,14 @@ allowed_external_types = [
 all-features = true
 
 [features]
-rolling_file = ["dep:file-rotate", "dep:chrono"]
+rolling_file = ["dep:file-rotate"]
+test-util = ["dep:fakeable"]
 
 [dependencies]
 
 # 3rd-party
 bon = { workspace = true }
-chrono = { workspace = true, optional = true }
+fakeable = { workspace = true, optional = true }
 file-rotate = { workspace = true, optional = true }
 log = { workspace = true }
 # ox-sdk
@@ -50,9 +51,15 @@ performables = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]
-fakeable = { workspace = true }
+fakeable = { path = "../fakeable" }
+file-rotate = { workspace = true }
+flate2 = { workspace = true, features = ["rust_backend"] }
 tempfile = { workspace = true }
-tick = { workspace = true, features = ["test-util"] }
+tick = { path = "../tick", features = ["test-util"] }
+
+[[test]]
+name = "pipeline"
+required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

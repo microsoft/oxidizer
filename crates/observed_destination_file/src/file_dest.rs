@@ -120,10 +120,14 @@ impl LogDestination for FileLogDestination {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl FileLogDestination {
-    pub(crate) fn writer_opener(mut self, opener: FileWriterOpener) -> Self {
-        self.writer_opener = opener;
+    /// Writes the output to `fake` in place of the native file system.
+    ///
+    /// Requires the `test-util` feature. Use it only in tests.
+    #[must_use]
+    pub fn writer_opener(mut self, fake: crate::fakes::FakeFileWriterOpener) -> Self {
+        self.writer_opener = FileWriterOpener::fake(fake);
         self
     }
 }
@@ -174,7 +178,7 @@ mod tests {
                 file_logs("application.log")
                     .flush_interval(Duration::ZERO)
                     .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+                    .writer_opener(factory.clone()),
             )
             .unwrap_err();
 
@@ -193,7 +197,7 @@ mod tests {
                     .overwrite(true)
                     .queue_capacity(0)
                     .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+                    .writer_opener(factory.clone()),
             )
             .unwrap_err();
 
@@ -211,7 +215,7 @@ mod tests {
         let _destination = file_logs("application.log")
             .overwrite(true)
             .into_log_destination()
-            .writer_opener(FileWriterOpener::fake(factory.clone()));
+            .writer_opener(factory.clone());
 
         assert!(factory.calls().is_empty());
         assert_eq!(factory.output(), "existing contents\n");
@@ -235,7 +239,7 @@ mod tests {
                         .format_config(LogFormatConfig::minimal())
                         .flush_ack_timeout(Duration::from_secs(12))
                         .build()
-                        .writer_opener(FileWriterOpener::fake(factory.clone())),
+                        .writer_opener(factory.clone()),
                 )
                 .unwrap()
                 .build();
@@ -274,7 +278,7 @@ mod tests {
             .format_config(LogFormatConfig::minimal())
             .flush_ack_timeout(Duration::from_secs(12))
             .build()
-            .writer_opener(FileWriterOpener::fake(factory.clone()));
+            .writer_opener(factory.clone());
 
         let provider = SdkLoggerProvider::builder()
             .with_resource(Resource::builder_empty().build())
@@ -308,11 +312,7 @@ mod tests {
         let factory = FakeFileWriterOpener::new("").open_error(ErrorKind::PermissionDenied);
 
         let err = SdkLoggerProvider::builder()
-            .register(
-                file_logs("application.log")
-                    .build()
-                    .writer_opener(FileWriterOpener::fake(factory.clone())),
-            )
+            .register(file_logs("application.log").build().writer_opener(factory.clone()))
             .unwrap_err();
 
         let init_error = err.downcast_ref::<FileLogInitError>().unwrap();
