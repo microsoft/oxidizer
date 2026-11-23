@@ -14,7 +14,7 @@ use std::thread;
 use arty::core::Thread;
 use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
-use arty::runtime::{Error, Runtime, RuntimeBuilder, Workers};
+use arty::runtime::{Error, Runtime, RuntimeBuilder};
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
 #[cfg(test)]
@@ -288,7 +288,7 @@ fn worker_snapshot_outlives_control_and_runtime() {
         .scheduler()
         .block_on(async |cx| (cx.control().clone(), cx.thread().clone()))
         .unwrap();
-    let mut workers: Workers = control.workers();
+    let mut workers = control.workers();
     drop(control);
     runtime.stop().unwrap();
 
