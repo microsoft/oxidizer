@@ -10,24 +10,26 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::future::{pending, ready};
+use std::hint::black_box;
 use std::io::{self, ErrorKind};
 use std::ops::ControlFlow;
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
-use data_privacy::{DataClass, RedactionEngine};
+use data_privacy::{DataClass, RedactionEngine, Sensitive};
 use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
-use http_telemetry::{Telemetry, TelemetryLayer};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, RequestHandler};
+use http_telemetry::{Client, Server, Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
 use observed::{Enrichment, FlushError, Severity, Sink, SinkId, Value};
+use templated_uri::{BaseUri, EscapedString, templated};
 use tick::{ClockControl, SimpleClock};
 
 pub(crate) const COMPLETE: &str = "http.server.request.complete";
@@ -35,6 +37,14 @@ pub(crate) const ERROR: &str = "http.server.request.error";
 pub(crate) const ABANDONED: &str = "http.server.request.abandoned";
 pub(crate) const ACTIVE: &str = "http.server.active_requests";
 pub(crate) const DURATION: &str = "http.server.request.duration";
+pub(crate) const CLIENT_COMPLETE: &str = "http.client.request.complete";
+pub(crate) const CLIENT_ERROR: &str = "http.client.request.error";
+pub(crate) const CLIENT_ABANDONED: &str = "http.client.request.abandoned";
+pub(crate) const CLIENT_DURATION: &str = "http.client.request.duration";
+pub(crate) const TOTAL_COMPLETE: &str = "http.client.request.total.complete";
+pub(crate) const TOTAL_ERROR: &str = "http.client.request.total.error";
+pub(crate) const TOTAL_ABANDONED: &str = "http.client.request.total.abandoned";
+pub(crate) const TOTAL_DURATION: &str = "http.client.request.total_duration";
 
 /// A data class whose values [`public_engine`] prints unchanged.
 pub(crate) const PUBLIC: DataClass = DataClass::new("test", "public");
@@ -49,8 +59,14 @@ pub(crate) fn public_engine() -> RedactionEngine {
 
 /// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
 /// duration is `0`.
-pub(crate) fn server(sink: Sink) -> TelemetryLayer {
+pub(crate) fn server(sink: Sink) -> TelemetryLayer<Server> {
     Telemetry::server(sink).clock(SimpleClock::new_frozen())
+}
+
+/// A client layer over `sink` with a frozen clock. If a test does not set its own clock, each
+/// duration is `0`.
+pub(crate) fn client(sink: Sink) -> TelemetryLayer<Client> {
+    Telemetry::client(sink).clock(SimpleClock::new_frozen())
 }
 
 /// The value that one field records in a metric, and the description of that metric.
@@ -69,6 +85,28 @@ pub(crate) fn duration(value: f64) -> Measurement {
         instrument: DURATION,
         kind: InstrumentKind::Histogram,
         description: "Duration of HTTP server requests.",
+        unit: "s",
+        value: Value::F64(value),
+    }
+}
+
+/// The value of the metric `http.client.request.duration` for `value` seconds.
+pub(crate) fn client_duration(value: f64) -> Measurement {
+    Measurement {
+        instrument: CLIENT_DURATION,
+        kind: InstrumentKind::Histogram,
+        description: "Duration of HTTP client requests.",
+        unit: "s",
+        value: Value::F64(value),
+    }
+}
+
+/// The value of the metric `http.client.request.total_duration` for `value` seconds.
+pub(crate) fn total_duration(value: f64) -> Measurement {
+    Measurement {
+        instrument: TOTAL_DURATION,
+        kind: InstrumentKind::Histogram,
+        description: "Total duration of HTTP client requests, including all retries and hedged attempts.",
         unit: "s",
         value: Value::F64(value),
     }
@@ -236,6 +274,79 @@ pub(crate) fn capture_sink() -> (Sink, Capture) {
     (sink_with(&capture), capture)
 }
 
+/// Reads each field that `reads` accepts and every enrichment of each event whose name `interested`
+/// accepts, and keeps nothing. Thus the measurements do not include the work of keeping the events.
+pub(crate) struct ReadAll {
+    pub(crate) engine: RedactionEngine,
+    pub(crate) interested: fn(&str) -> bool,
+    pub(crate) reads: fn(&FieldDescriptor) -> bool,
+}
+
+impl EventProcessor for ReadAll {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        (self.interested)(description.name())
+    }
+
+    fn process(&self, event: &EventView<'_>) {
+        let _ = event.visit_fields(&mut |descriptor: &FieldDescriptor, value: &FieldValueFn<'_>| {
+            if (self.reads)(descriptor) {
+                black_box(value(&self.engine));
+            }
+            ControlFlow::Continue(())
+        });
+        let _ = event.visit_enrichments(&mut |_: &FieldDescriptor, value: &FieldValueFn<'_>| {
+            black_box(value(&self.engine));
+            ControlFlow::Continue(())
+        });
+    }
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+/// A sink with `count` processors that each read every field of every event. Their engine prints
+/// the values of [`PUBLIC`] unchanged, and erases the values of every other data class.
+pub(crate) fn reading_sink(count: usize) -> Sink {
+    Sink::builder(SinkId::new("reading"))
+        .clock(SimpleClock::new_frozen())
+        .processors(
+            (0..count)
+                .map(|_| {
+                    Arc::new(ReadAll {
+                        engine: public_engine(),
+                        interested: |_| true,
+                        reads: |_| true,
+                    }) as Arc<dyn EventProcessor>
+                })
+                .collect(),
+        )
+        .build()
+}
+
+/// Receives every event and reads none of its fields.
+pub(crate) struct Interested;
+
+impl EventProcessor for Interested {
+    fn is_interested(&self, _: &EventDescription) -> bool {
+        true
+    }
+
+    fn process(&self, _: &EventView<'_>) {}
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+/// A sink whose one processor receives every event and reads none of its fields.
+pub(crate) fn interested_sink() -> Sink {
+    Sink::builder(SinkId::new("interested"))
+        .clock(SimpleClock::new_frozen())
+        .processors(vec![Arc::new(Interested)])
+        .build()
+}
+
 /// Tells the sink whether it is interested, with an answer that the test can change. It records
 /// the name of each event that it receives.
 #[derive(Clone, Default)]
@@ -332,6 +443,26 @@ pub(crate) fn stop_sink(stop: &StopAt) -> Sink {
         .build()
 }
 
+/// Sends `request` to `handler`, which responds or returns an error at the first poll.
+pub(crate) fn send(handler: &impl RequestHandler, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
+    let future = pin!(handler.execute(request));
+    let Poll::Ready(result) = future.poll(&mut Context::from_waker(Waker::noop())) else {
+        unreachable!("the handler finishes at the first poll, and the layer does not wait");
+    };
+    result
+}
+
+/// Sends `request` to `handler`, which never responds. Then polls the future once and drops it.
+pub(crate) fn abandon(handler: &impl RequestHandler, request: HttpRequest) {
+    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
+    let future = pin!(handler.execute(request));
+    assert!(
+        future.poll(&mut Context::from_waker(Waker::noop())).is_pending(),
+        "the handler never responds"
+    );
+}
+
 /// A request with `method` and `version`, and an empty body.
 pub(crate) fn request(method: Method, version: Version) -> HttpRequest {
     Request::builder()
@@ -353,6 +484,43 @@ pub(crate) fn get_to(uri: &'static str) -> HttpRequest {
     Request::get(Uri::from_static(uri))
         .body(HttpBodyBuilder::new_fake().empty())
         .unwrap()
+}
+
+/// A `PURGE` request, which `http.request.method` records as `_OTHER`.
+pub(crate) fn purge() -> HttpRequest {
+    with_method(b"PURGE")
+}
+
+/// A request with a method that `http` has no constant for, and that is longer than 15 bytes.
+/// `http` keeps such a method on the heap.
+pub(crate) fn long_extension_method() -> HttpRequest {
+    with_method(b"LONG-EXTENSION-METHOD")
+}
+
+/// A request over HTTP/1.1 to `/books/1` with `method`. The URI keeps the static text, so a clone of
+/// its path does not allocate.
+fn with_method(method: &[u8]) -> HttpRequest {
+    let mut request = get_to("/books/1");
+    *request.method_mut() = Method::from_bytes(method).unwrap();
+    request
+}
+
+/// The path of one book. The book has the data class [`SECRET`].
+#[templated(template = "/books/{book}")]
+#[derive(Clone)]
+pub(crate) struct BookPath {
+    pub(crate) book: Sensitive<EscapedString>,
+}
+
+/// A `GET` request over HTTP/1.1 to `https://example.com/books/1`, built from [`BookPath`] with
+/// `HttpRequestBuilder`, so the request has the template of its path.
+pub(crate) fn get_book() -> HttpRequest {
+    let uri = templated_uri::Uri::default()
+        .with_base(BaseUri::from_static("https://example.com"))
+        .with_path_and_query(BookPath {
+            book: Sensitive::new(EscapedString::from_static("1"), SECRET),
+        });
+    HttpRequestBuilder::new_fake().get(uri).build().unwrap()
 }
 
 /// An enrichment with the metric dimension `tenant`.
@@ -400,8 +568,8 @@ pub(crate) fn responding_after(clock: &ClockControl, elapsed: Duration, status: 
     })
 }
 
-/// Responds to each request with its status, and with the headers and the body of the request. It
-/// does not allocate, so a benchmark can build the response body before the measurement.
+/// Responds to each request with its status, and with the version, the headers and the body of the
+/// request. It does not allocate, so a benchmark can build the response body before the measurement.
 pub(crate) struct Echoing(pub(crate) StatusCode);
 
 impl Service<HttpRequest> for Echoing {
@@ -411,6 +579,7 @@ impl Service<HttpRequest> for Echoing {
         let (parts, body) = input.into_parts();
         let mut response = HttpResponse::new(body);
         *response.status_mut() = self.0;
+        *response.version_mut() = parts.version;
         *response.headers_mut() = parts.headers;
         ready(Ok(response))
     }

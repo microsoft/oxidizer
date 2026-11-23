@@ -15,7 +15,7 @@ use future_assert::FutureTestExt;
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Version};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
-use http_telemetry::{Telemetry, TelemetryLayer};
+use http_telemetry::{Server, Telemetry, TelemetryLayer};
 use layered::{Layer, Service};
 use observed::{Severity, Sink, Value};
 use ohno::ErrorExt;
@@ -24,7 +24,7 @@ const BODY: &str = "http.response.body.content";
 
 /// Sends `request` through a server layer that `configure` sets up, to [`Echoing`] with 200. Returns the response
 /// body and a capture of every event except the deltas of `http.server.active_requests`.
-fn respond(configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer, request: HttpRequest) -> (HttpBody, Capture) {
+fn respond(configure: impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server>, request: HttpRequest) -> (HttpBody, Capture) {
     let (sink, capture) = common::capture_sink();
     let service = configure(server(sink)).layer(Echoing(StatusCode::OK));
     let body = service.execute(request).unwrap_ready().unwrap().into_body();
@@ -32,7 +32,7 @@ fn respond(configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer, request: Ht
 }
 
 /// A server layer that logs the bodies of `types`.
-fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer) -> TelemetryLayer {
+fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server> {
     move |layer| layer.response_body_media_types(types.iter().copied()).unwrap()
 }
 

@@ -3,7 +3,7 @@
 
 [package]
 name = "http_telemetry"
-description = "Automatic telemetry collection for incoming HTTP requests."
+description = "Automatic telemetry collection for incoming and outgoing HTTP requests."
 version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "telemetry", "logging", "metrics"]
@@ -33,6 +33,7 @@ allowed_external_types = [
     "observed::sink::core::Sink",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
+    "ohno::error_label::ErrorLabel",
     "routerama::route_table::RouteTable",
     "templated_uri::base_path::BasePath",
     "tick::simple_clock::SimpleClock",
@@ -72,6 +73,10 @@ metabench = { path = "../metabench" }
 observed_testing = { path = "../observed_testing" }
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[[bench]]
+name = "http_telemetry_client"
+harness = false
 
 [[bench]]
 name = "http_telemetry_server"

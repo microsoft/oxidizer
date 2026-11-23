@@ -17,10 +17,10 @@ use data_privacy::RedactionEngine;
 use future_assert::FutureTestExt;
 use http::{Method, StatusCode};
 use http_extensions::{HttpRequest, HttpResponse};
-use http_telemetry::TelemetryLayer;
+use http_telemetry::{Server, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
-use routerama::HttpMethod;
+use routerama::{HttpMethod, RouteTable};
 use tick::SimpleClock;
 
 #[routerama::resolver]
@@ -35,13 +35,16 @@ enum Route<'p> {
     GetReview { book: &'p str, review: &'p str },
     #[route(PURGE, "/cache/{key}")]
     Purge { key: &'p str },
-    /// A route that `routed` adds at run time.
+    /// A route that `resolver` adds at run time.
     Plugin { name: String },
 }
 
-fn routed(sink: Sink) -> TelemetryLayer {
-    let resolver = Route::builder().add_plugin(HttpMethod::GET, "/plugins/{name}").build().unwrap();
-    server(sink).route_resolver(resolver)
+fn resolver() -> impl RouteTable + Send + Sync + 'static {
+    Route::builder().add_plugin(HttpMethod::GET, "/plugins/{name}").build().unwrap()
+}
+
+fn routed(sink: Sink) -> TelemetryLayer<Server> {
+    server(sink).route_resolver(resolver())
 }
 
 fn request(method: &str, uri: &'static str) -> HttpRequest {
@@ -169,6 +172,20 @@ fn each_processor_redacts_parameter_with_its_own_redactor() {
         [printing, erasing].map(|capture| capture.single().log("http.route.parameter.book").cloned()),
         [Some(Value::from("rust")), Some(Value::from(""))]
     );
+}
+
+#[test]
+fn parameters_configured_before_resolver_are_logged() {
+    let (sink, capture) = common::capture_sink();
+    server(sink)
+        .route_parameter_data_classes([("book", PUBLIC)])
+        .route_resolver(resolver())
+        .layer(common::responding(StatusCode::OK))
+        .execute(common::get_to("/books/1"))
+        .unwrap_ready()
+        .unwrap();
+
+    assert_eq!(capture.single().log("http.route.parameter.book").cloned(), Some(Value::from("1")));
 }
 
 #[test]

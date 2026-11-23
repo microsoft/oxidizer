@@ -12,7 +12,7 @@ use observed::processing::FieldVisitorFn;
 use observed::{Text, Value, VisitFields, event};
 use routerama::RouteHit;
 
-use super::HeaderValues;
+use super::request::HeaderValues;
 use super::route_fields::RouteParameter;
 
 /// Produces the event `http.server.request.complete` when the handler returned a response and its body

@@ -15,7 +15,7 @@ use future_assert::FutureTestExt;
 use http::header::HOST;
 use http::{HeaderValue, StatusCode};
 use http_extensions::HttpRequest;
-use http_telemetry::TelemetryLayer;
+use http_telemetry::{Server, TelemetryLayer};
 use layered::{Layer, Service};
 use observed::Value;
 use templated_uri::BasePath;
@@ -44,7 +44,7 @@ fn server_fields(request: HttpRequest) -> [(Option<Value>, Option<Value>); 2] {
 
 /// The names of the events that the server layer that `configure` sets up emits for a request to
 /// `uri`.
-fn event_names(configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer, uri: &'static str) -> Vec<&'static str> {
+fn event_names(configure: impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server>, uri: &'static str) -> Vec<&'static str> {
     let capture = Capture::new(|_| true);
     configure(server(common::sink_with(&capture)))
         .layer(common::responding(StatusCode::OK))
@@ -100,7 +100,7 @@ fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
 
 #[test]
 fn excluded_paths_match_raw_path_and_subpaths_ignoring_ascii_case() {
-    let rows: [(&[&'static str], &'static str, bool); 10] = [
+    let rows: [(&[&'static str], &'static str, bool); 11] = [
         (&["/health/"], "/health", true),
         (&["/health/"], "/HEALTH/live", true),
         (&["/Health/"], "/health?probe=1", true),
@@ -111,9 +111,10 @@ fn excluded_paths_match_raw_path_and_subpaths_ignoring_ascii_case() {
         (&["/health/"], "/api/health", false),
         (&["/health/"], "/%68ealth", false),
         (&["/health/"], "/hea", false),
+        (&["/health/"], "/status", false),
     ];
     let excluded = |paths: &[&'static str], uri| {
-        let configure = |layer: TelemetryLayer| layer.excluded_paths(paths.iter().map(|path| BasePath::from_static(path)));
+        let configure = |layer: TelemetryLayer<Server>| layer.excluded_paths(paths.iter().map(|path| BasePath::from_static(path)));
         event_names(configure, uri).is_empty()
     };
 
@@ -125,7 +126,7 @@ fn excluded_paths_match_raw_path_and_subpaths_ignoring_ascii_case() {
 
 #[test]
 fn excluded_paths_replace_earlier_paths() {
-    let configure = |layer: TelemetryLayer| {
+    let configure = |layer: TelemetryLayer<Server>| {
         layer
             .excluded_paths([BasePath::from_static("/health/")])
             .excluded_paths([BasePath::from_static("/metrics/")])

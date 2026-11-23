@@ -18,7 +18,7 @@ use future_assert::FutureTestExt;
 use http::header::RETRY_AFTER;
 use http::{HeaderName, HeaderValue, StatusCode};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
-use http_telemetry::TelemetryLayer;
+use http_telemetry::{Server, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
 use tick::SimpleClock;
@@ -116,7 +116,7 @@ fn header_values_are_taken_when_request_starts_and_when_handler_returns() {
 
 #[test]
 fn request_or_response_headers_alone_are_logged() {
-    let logged = |configure: fn(TelemetryLayer) -> TelemetryLayer| {
+    let logged = |configure: fn(TelemetryLayer<Server>) -> TelemetryLayer<Server>| {
         let capture = Capture::new(|name| name == COMPLETE);
         configure(server(common::sink_with(&capture)))
             .layer(Echoing(StatusCode::OK))

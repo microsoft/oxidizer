@@ -12,72 +12,27 @@ mod common;
 
 use std::borrow::Borrow;
 use std::hint::black_box;
-use std::ops::ControlFlow;
-use std::pin::pin;
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
+use std::task::Poll;
 
-use common::{ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, Responding, SECRET, Step, Tenant};
+use common::{
+    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, ReadAll, Responding, SECRET, Step, Tenant, abandon, interested_sink, reading_sink,
+    send,
+};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
 use http::header::{CONTENT_TYPE, RETRY_AFTER};
-use http::{HeaderName, HeaderValue, Method, Request, StatusCode, Uri, Version};
+use http::{HeaderName, HeaderValue, Request, StatusCode, Uri};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
-use observed::metadata::{EventDescription, FieldDescriptor};
-use observed::processing::{EventProcessor, EventView, FieldValueFn};
-use observed::{FlushError, Sink, SinkId};
+use observed::{Sink, SinkId};
 use templated_uri::BasePath;
 use tick::SimpleClock;
 
 const GROUP: &str = "http_telemetry_server/request";
 const CASE: &str = "get";
-
-/// Reads every field and every enrichment of each event whose name `interested` accepts, and keeps
-/// nothing. Thus the measurements do not include the work of keeping the events.
-struct ReadAll {
-    engine: RedactionEngine,
-    interested: fn(&str) -> bool,
-}
-
-impl EventProcessor for ReadAll {
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        (self.interested)(description.name())
-    }
-
-    fn process(&self, event: &EventView<'_>) {
-        let mut read = |_: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            black_box(value(&self.engine));
-            ControlFlow::Continue(())
-        };
-        let _ = event.visit_fields(&mut read);
-        let _ = event.visit_enrichments(&mut read);
-    }
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
-/// A sink with `count` processors that each read every field of every event. Their engine prints
-/// the values of [`PUBLIC`] unchanged, and erases the values of every other data class.
-fn reading_sink(count: usize) -> Sink {
-    Sink::builder(SinkId::new("reading"))
-        .clock(SimpleClock::new_frozen())
-        .processors(
-            (0..count)
-                .map(|_| {
-                    Arc::new(ReadAll {
-                        engine: common::public_engine(),
-                        interested: |_| true,
-                    }) as Arc<dyn EventProcessor>
-                })
-                .collect(),
-        )
-        .build()
-}
 
 /// A sink with one processor that reads every field of each event whose name `interested`
 /// accepts.
@@ -87,66 +42,9 @@ fn filtered_sink(interested: fn(&str) -> bool) -> Sink {
         .processors(vec![Arc::new(ReadAll {
             engine: RedactionEngine::default(),
             interested,
+            reads: |_| true,
         })])
         .build()
-}
-
-/// Receives every event and reads none of its fields.
-struct Interested;
-
-impl EventProcessor for Interested {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
-    }
-
-    fn process(&self, _: &EventView<'_>) {}
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
-/// A sink whose one processor receives every event and reads none of its fields.
-fn interested_sink() -> Sink {
-    Sink::builder(SinkId::new("interested"))
-        .clock(SimpleClock::new_frozen())
-        .processors(vec![Arc::new(Interested)])
-        .build()
-}
-
-/// A `PURGE` request, which `http.request.method` records as `_OTHER`.
-fn purge() -> HttpRequest {
-    common::request(
-        Method::from_bytes(b"PURGE").expect("PURGE is a valid method name"),
-        Version::HTTP_11,
-    )
-}
-
-/// A request with a method that `http` has no constant for, and that is longer than 15 bytes.
-/// `http` keeps such a method on the heap.
-fn long_extension_method() -> HttpRequest {
-    let method = Method::from_bytes(b"LONG-EXTENSION-METHOD").expect("LONG-EXTENSION-METHOD is a valid method name");
-    common::request(method, Version::HTTP_11)
-}
-
-/// Sends `request` to `handler`, which responds or returns an error at the first poll.
-fn send(handler: &impl RequestHandler, request: HttpRequest) -> Result<HttpResponse, HttpError> {
-    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
-    let future = pin!(handler.execute(request));
-    let Poll::Ready(result) = future.poll(&mut Context::from_waker(Waker::noop())) else {
-        unreachable!("the handler finishes at the first poll, and the layer does not wait");
-    };
-    result
-}
-
-/// Sends `request` to `handler`, which never responds. Then polls the future once and drops it.
-fn abandon(handler: &impl RequestHandler, request: HttpRequest) {
-    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
-    let future = pin!(handler.execute(request));
-    assert!(
-        future.poll(&mut Context::from_waker(Waker::noop())).is_pending(),
-        "the handler never responds"
-    );
 }
 
 /// The server middleware over `sink`, in front of [`Responding`]. The stack already got one
@@ -394,13 +292,13 @@ fn abandoned<S: Borrow<Telemetry<NeverResponding>>>(stack: S, request: HttpReque
 }
 
 #[metabench::benchmark(METHOD_ORIGINAL_READ, GROUP, "method_original_read")]
-#[bench::purge(Box::new(responding_stack(reading_sink(2))), purge())]
+#[bench::purge(Box::new(responding_stack(reading_sink(2))), common::purge())]
 fn method_original_read<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(LONG_METHOD, GROUP, "long_method")]
-#[bench::long_extension_method(Box::new(responding_stack(interested_sink())), long_extension_method())]
+#[bench::long_extension_method(Box::new(responding_stack(interested_sink())), common::long_extension_method())]
 fn long_method<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -428,7 +326,7 @@ fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(
     Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))),
     common::get_to("ftp://example.com/books/1")
 )]
-#[bench::purge(Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))), purge())]
+#[bench::purge(Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))), common::purge())]
 fn active_requests_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -588,12 +486,16 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     });
     let stack = responding_stack(reading_sink(2));
     group.bench_function(BenchmarkId::new(METHOD_ORIGINAL_READ.benchmark_name(), "purge"), |bencher| {
-        bencher.iter_batched(purge, |request| method_original_read(&stack, request).0, BatchSize::SmallInput);
+        bencher.iter_batched(
+            common::purge,
+            |request| method_original_read(&stack, request).0,
+            BatchSize::SmallInput,
+        );
     });
     let stack = responding_stack(interested_sink());
     group.bench_function(BenchmarkId::new(LONG_METHOD.benchmark_name(), "long_extension_method"), |bencher| {
         bencher.iter_batched(
-            long_extension_method,
+            common::long_extension_method,
             |request| long_method(&stack, request).0,
             BatchSize::SmallInput,
         );
@@ -617,7 +519,11 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     group.bench_function(BenchmarkId::new(ACTIVE_REQUESTS_ONLY.benchmark_name(), "purge"), |bencher| {
-        bencher.iter_batched(purge, |request| active_requests_only(&stack, request).0, BatchSize::SmallInput);
+        bencher.iter_batched(
+            common::purge,
+            |request| active_requests_only(&stack, request).0,
+            BatchSize::SmallInput,
+        );
     });
     let stack = responding_stack(filtered_sink(|name| name != ACTIVE));
     group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {

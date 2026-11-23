@@ -712,7 +712,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0ln95Baxpa0b38KaVl3eFr0bei6yo0MfQlMbmdeNHfsx5EJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbPh5YwcrhD5IbA8hdFeOUGgUbMczx3qultnEb6lovnWmarSRhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient::post

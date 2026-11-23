@@ -167,9 +167,11 @@ fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["executor", "std"] }
 http_compression = { path = "../http_compression", features = ["brotli", "deflate", "gzip", "zstd"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
+http_telemetry = { path = "../http_telemetry" }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
+observed = { path = "../observed" }
 observed_destination_core = { workspace = true }
 observed_destination_stdout = { workspace = true }
 ohno = { workspace = true, features = ["test-util", "app-err"] }

@@ -23,7 +23,7 @@ use http::header::CONTENT_TYPE;
 use http::{HeaderValue, Method, StatusCode, Version};
 use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
-use http_telemetry::{Telemetry, TelemetryLayer};
+use http_telemetry::{Server, Telemetry, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 use observed::{Severity, Sink, Value};
 use ohno::{ErrorExt, Labeled};
@@ -32,14 +32,14 @@ use tick::ClockControl;
 const BODY: &str = "http.request.body.content";
 
 /// A server layer that logs the request bodies of `types`.
-fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer) -> TelemetryLayer {
+fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server> {
     move |layer| layer.request_body_media_types(types.iter().copied()).unwrap()
 }
 
 /// Sends `request` through a server layer that `configure` sets up, to `handler`, which responds at the first poll.
 /// Returns the response body and a capture of every event except the deltas of `http.server.active_requests`.
 fn respond(
-    configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer,
+    configure: impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server>,
     handler: impl RequestHandler,
     request: HttpRequest,
 ) -> (HttpBody, Capture) {

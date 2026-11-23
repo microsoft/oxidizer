@@ -4,13 +4,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
-//! Automatic telemetry collection for incoming HTTP requests.
+//! Automatic telemetry collection for incoming and outgoing HTTP requests.
 //!
-//! The crate produces telemetry about incoming HTTP requests in the form of [`observed`] events.
-//! [`Telemetry::server`] returns a layer, which builds the [`Telemetry`] middleware around a
-//! service ([`layered::Layer`]). `(layer, handler).into_service()` wraps the handler in the
-//! middleware. If the tuple has other layers, put this layer first, so that the middleware also
-//! produces telemetry about the requests that another layer responds to.
+//! The crate produces telemetry about HTTP requests in the form of [`observed`] events. A layer
+//! builds the [`Telemetry`] middleware around a service ([`layered::Layer`]), and
+//! `(layer, handler).into_service()` wraps the handler in the middleware.
+//!
+//! On a server, [`Telemetry::server`] returns the layer, and the handler is the application. If
+//! the tuple has other layers, put this layer first, so that the middleware also produces
+//! telemetry about the requests that another layer responds to.
 //!
 //! ```
 //! use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
@@ -30,11 +32,37 @@
 //! # }
 //! ```
 //!
-//! # Events
+//! On a client, [`Telemetry::client`] returns the layer, and the handler sends the request. A layer
+//! with [`report_total_duration(true)`](TelemetryLayer::report_total_duration) reports each request
+//! as a whole. Put such a layer outside retries and hedging, and a second layer inside them, so that
+//! the events cover each request and each of its attempts.
+//!
+//! ```
+//! use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
+//! use http_telemetry::Telemetry;
+//! use layered::{Execute, Stack};
+//! use observed::Sink;
+//!
+//! # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
+//! let total = Telemetry::client(sink.clone()).report_total_duration(true);
+//! let attempt = Telemetry::client(sink);
+//! let handler = Execute::new(move |_request: HttpRequest| {
+//!     let response = HttpResponse::new(body_builder.empty());
+//!     async move { Ok::<_, HttpError>(response) }
+//! });
+//!
+//! let service = (total, attempt, handler).into_service();
+//! # let _ = service;
+//! # }
+//! ```
+//!
+//! # Server
+//!
+//! ## Server events
 //!
 //! When a request ends, the middleware emits one of these events to an [`observed::Sink`], except
 //! in the cases listed under
-//! [When the middleware emits no event](#when-the-middleware-emits-no-event).
+//! [When the server middleware emits no event](#when-the-server-middleware-emits-no-event).
 //! [When a request ends](#when-a-request-ends) describes the end of a request whose response has a
 //! body.
 //!
@@ -57,9 +85,9 @@
 //! | `http.request.body.content` | string | The start of the request body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer::request_body_media_types) cover the `Content-Type` of the request. |
 //! | `http.response.body.content` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer::response_body_media_types) cover the `Content-Type` of the response. |
 //!
-//! # Metrics
+//! ## Server metrics
 //!
-//! ## Metric: `http.server.request.duration`
+//! ### Metric: `http.server.request.duration`
 //!
 //! | Name | Instrument Type | Unit (UCUM) | Description |
 //! |---|---|---|---|
@@ -83,7 +111,7 @@
 //! the request. The query does not take part. Give the middleware a resolver with the same routes
 //! as the application, so that both match a request to the same route.
 //!
-//! ## Metric: `http.server.active_requests`
+//! ### Metric: `http.server.active_requests`
 //!
 //! | Name | Instrument Type | Unit (UCUM) | Description |
 //! |---|---|---|---|
@@ -103,7 +131,7 @@
 //! the response body is dropped while its thread panics, or if a processor panics while the
 //! middleware emits.
 //!
-//! # When a request ends
+//! ## When a request ends
 //!
 //! The middleware wraps the response body, and the request ends when the body ends. The body ends
 //! when one of these occurs:
@@ -125,7 +153,7 @@
 //! - A response to `CONNECT` with a status from 200 to 299.
 //! - A response with a status from 100 to 199, 204 or 304.
 //!
-//! # Bodies
+//! ## Bodies
 //!
 //! The middleware logs no body of a direction while the list of media types of that direction is
 //! empty, which is the default. If the list is not empty, the middleware always logs a body whose
@@ -157,20 +185,98 @@
 //! The copy of a body grows only with the bytes that arrive, up to the size limit, so the length
 //! that a client declares does not decide how much memory the middleware uses.
 //!
-//! # When the middleware emits no event
+//! ## When the server middleware emits no event
 //!
 //! - The URI path of the request matches one of the
 //!   [`excluded_paths`](TelemetryLayer::excluded_paths).
 //! - The request future or the response body is dropped while its thread panics.
 //! - There is no destination interested in processing the event further.
 //!
+//! # Client
+//!
+//! A client request ends when the handler returns. The middleware does not read or wrap the
+//! response body.
+//!
+//! ## Client events
+//!
+//! When a request ends, the middleware emits one of these events to an [`observed::Sink`], except
+//! in the cases listed under
+//! [When the client middleware emits no event](#when-the-client-middleware-emits-no-event). A
+//! layer emits the events of an attempt, or, with
+//! [`report_total_duration(true)`](TelemetryLayer::report_total_duration), the events of a whole
+//! request.
+//!
+//! | Event | Severity | Message | When |
+//! |---|---|---|---|
+//! | `http.client.request.complete` | Debug | `HTTP request attempt completed` | The handler returned a response, with any status. |
+//! | `http.client.request.error` | Warn | `HTTP request attempt failed` | The handler returned an error or panicked. |
+//! | `http.client.request.abandoned` | Warn | `HTTP request attempt abandoned` | The caller dropped the request future before the handler returned. |
+//! | `http.client.request.total.complete` | Debug | `HTTP request completed` | As `http.client.request.complete`, for a whole request. |
+//! | `http.client.request.total.error` | Warn | `HTTP request failed` | As `http.client.request.error`, for a whole request. |
+//! | `http.client.request.total.abandoned` | Warn | `HTTP request abandoned` | As `http.client.request.abandoned`, for a whole request. |
+//!
+//! Each event has the [attributes](#metric-httpclientrequestduration) of its metric,
+//! `http.client.request.duration` or `http.client.request.total_duration`, and these fields:
+//!
+//! | Field | Type | Description | Examples | Presence |
+//! |---|---|---|---|---|
+//! | `http.client.request.duration` | double | HTTP request duration in seconds. | `0.012` | In the events of an attempt. |
+//! | `http.client.request.total_duration` | double | HTTP request duration in seconds. | `0.012` | In the events of a whole request. |
+//! | `http.request.method_original` | string | The method of the request. | `PURGE` | If `http.request.method` is `_OTHER`. |
+//! | `url.path.redacted` | string | The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated](templated_uri::templated) path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`](templated_uri::Uri::DATA_CLASS). | `/books/1` | If the request URI has a path. |
+//! | `exception.message` | string | The message of the error that the handler returned. | `the review has no text` | If the handler returned an error. |
+//!
+//! The middleware does not redact `exception.message`, so the logs can contain personal data from
+//! the message of an error.
+//!
+//! A layer inside retries or hedging reports each attempt. If a timeout cuts an attempt, or a
+//! hedged attempt loses, the attempt is dropped, so its event is `http.client.request.abandoned`
+//! at Warn. A log processor can skip that event by its name.
+//!
+//! ## Client metrics
+//!
+//! ### Metric: `http.client.request.duration`
+//!
+//! | Name | Instrument Type | Unit (UCUM) | Description |
+//! |---|---|---|---|
+//! | `http.client.request.duration` | Histogram | `s` | Duration of HTTP client requests. |
+//!
+//! | Attribute | Type | Description | Examples | Presence |
+//! |---|---|---|---|---|
+//! | `http.request.method` | string | HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`. | `GET`; `POST`; `_OTHER` | Always |
+//! | `url.scheme` | string | The scheme of the request URI. `_OTHER` if the URI has no scheme. | `http`; `https`; `ftp`; `_OTHER` | Always |
+//! | `server.address` | string | Host of the request URI. An IPv6 address keeps its brackets. | `example.com`; `[2001:db8::1]` | If the request URI has a host. |
+//! | `server.port` | int | Port of the request URI, else 80 for `http` and 443 for `https`. | `443`; `8080` | If the request URI has a host, and the port is known. |
+//! | `url.template` | string | The template of the request URI: the [`UriTemplateLabel`](http_extensions::UriTemplateLabel) of the request, else the label or the template of its [templated](templated_uri::templated) path, else `unknown`. | `/books/{book}`; `get_book`; `unknown` | Always |
+//! | `network.protocol.name` | string | The protocol of the response. | `http` | If the handler returned a response. |
+//! | `network.protocol.version` | string | Version of the HTTP protocol of the response. `_OTHER` for a version other than 1.0, 1.1, 2 and 3. | `1.1`; `2` | If the handler returned a response. |
+//! | `http.response.status_code` | int | HTTP response status code. | `200`; `503` | If the handler returned a response. |
+//! | `error.type` | string | Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`](http_extensions::HttpError) and the kind of each I/O error, unless the layer has [its own function](TelemetryLayer::error_labels_with). A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`. | `validation`; `io.connection_refused`; `panic`; `abandoned` | If the request ended with an error, a panic or a drop. |
+//!
+//! The `url.template` of a request whose URI is given as text is `unknown`, because its path has no
+//! template. To record a template, build the URI from a [templated](templated_uri::templated) type, or
+//! add a [`UriTemplateLabel`](http_extensions::UriTemplateLabel) to the extensions of the request.
+//!
+//! ### Metric: `http.client.request.total_duration`
+//!
+//! | Name | Instrument Type | Unit (UCUM) | Description |
+//! |---|---|---|---|
+//! | `http.client.request.total_duration` | Histogram | `s` | Total duration of HTTP client requests, including all retries and hedged attempts. |
+//!
+//! It has the attributes of `http.client.request.duration`.
+//!
+//! ## When the client middleware emits no event
+//!
+//! - The request future is dropped while its thread panics.
+//! - There is no destination interested in processing the event further.
+//!
 //! # Panics
 //!
-//! If the handler panics, or the response body panics while the server reads a frame from it, the
-//! middleware emits the error event and then resumes the panic with its payload. If a processor
-//! panics while the middleware emits an event, the processor panic reaches the caller, and the
-//! processors after it do not get the event. If this happens while the middleware reports a panic,
-//! the processor panic replaces that panic.
+//! If the handler panics, or a response body on the server panics while the server reads a frame
+//! from it, the middleware emits the error event and then resumes the panic with its payload. If a
+//! processor panics while the middleware emits an event, the processor panic reaches the caller,
+//! and the processors after it do not get the event. If this happens while the middleware reports a
+//! panic, the processor panic replaces that panic.
 //!
 //! # Enrichment with custom dimensions
 //!
@@ -207,8 +313,12 @@
 //! # }
 //! ```
 
+mod client;
+mod drop_guard;
 mod server;
+mod shared;
 mod telemetry;
 
-pub use server::MediaTypeError;
+pub use client::Client;
+pub use server::{MediaTypeError, Server};
 pub use telemetry::{Telemetry, TelemetryLayer};
