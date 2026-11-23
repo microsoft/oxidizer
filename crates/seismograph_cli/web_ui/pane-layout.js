@@ -1,35 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-export const columns = 12;
-
-export function paneOrder(ids, order = []) {
-  const known = new Set(ids);
-  return [...new Set([...order.filter(id => known.has(id)), ...ids])];
+export function dockLayoutKey(section, ids) {
+  return `seismograph.dockview.v1:${section}:${[...ids].sort().join(",")}`;
 }
 
-export function movePane(order, id, target) {
-  if (id === target || !order.includes(id) || !order.includes(target)) return order;
-  const next = order.filter(item => item !== id);
-  next.splice(order.indexOf(target), 0, id);
-  return next;
+export function readDockLayout(json, ids) {
+  if (json === null) return null;
+  const layout = JSON.parse(json);
+  const wanted = new Set(ids);
+  const entries = Object.entries(layout?.panels ?? {});
+  if (!layout?.grid?.root || entries.length !== wanted.size ||
+      entries.some(([id, pane]) => !wanted.has(id) || pane?.contentComponent !== "report")) {
+    throw new Error("The saved layout does not match these panes.");
+  }
+  if (layout.floatingGroups?.length || layout.popoutGroups?.length || layout.edgeGroups) {
+    throw new Error("The saved layout contains panes outside the workspace.");
+  }
+  return layout;
 }
 
-export function paneSize(width, height) {
+export function dockPlacement(section, ids, index, width, height) {
+  if (!index) return {};
+  if (section === "runtime" && ids[index] === "task-detail") {
+    return { position: { direction: "below" }, initialHeight: Math.max(180, Math.round(height * .42)) };
+  }
+  const towardRight = width >= 540 && section !== "primitives" && index === 1;
   return {
-    width: Math.min(columns, Math.max(3, Math.round(width))),
-    ...(Number.isFinite(height) && { height: Math.min(1200, Math.max(112, Math.round(height))) }),
+    position: { referencePanel: ids[index - 1], direction: towardRight ? "right" : "below" },
+    ...(towardRight
+      ? { initialWidth: Math.round(width * (section === "runtime" ? .66 : .5)) }
+      : { initialHeight: Math.max(180, Math.min(260, Math.round(height / 3))) }),
   };
-}
-
-export function readLayouts(json) {
-  if (!json) return {};
-  const value = JSON.parse(json);
-  if (!value || Array.isArray(value) || typeof value !== "object") return {};
-  return Object.fromEntries(Object.entries(value).flatMap(([group, layout]) => {
-    if (!layout || !Array.isArray(layout.order) || !layout.sizes || typeof layout.sizes !== "object") return [];
-    const sizes = Object.fromEntries(Object.entries(layout.sizes).flatMap(([id, size]) =>
-      Number.isFinite(size?.width) ? [[id, paneSize(size.width, size.height)]] : []));
-    return [[group, { order: layout.order.filter(id => typeof id === "string"), sizes }]];
-  }));
 }

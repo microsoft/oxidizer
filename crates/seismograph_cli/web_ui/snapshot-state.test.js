@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addSnapshot, closeSnapshot, pickDrillRow, readPage, resolveDrillRow, selectedRow } from "./snapshot-state.js";
+import { addSnapshot, closeSnapshot, pickDrillRow, readPage, resolveDrillRow, selectedRow, snapshotGroups } from "./snapshot-state.js";
 
 test("refresh follows a thread even when rows with the same title change order", () => {
   const first = { title: "Worker", thread: { id: "1" }, hasChildren: true };
@@ -26,6 +26,14 @@ test("deep drill-down uses page offsets and keeps a leaf when its stack display 
   });
 });
 
+test("going to another page keeps details open for the same snapshot", () => {
+  const row = { title: "Thread 8", thread: { id: "8" }, hasChildren: true };
+  const saved = pickDrillRow({ data: { rows: [row] }, offset: 0 }, row, "capture-1");
+  const nextPage = { data: { rows: [{ title: "Thread 8", thread: { id: "58" } }] }, offset: 50 };
+  assert.deepEqual(resolveDrillRow(nextPage, saved, "capture-1"), { row, path: "0" });
+  assert.equal(resolveDrillRow(nextPage, saved, "capture-2"), null);
+});
+
 test("refresh keeps the current page until the new snapshot has fewer pages", async () => {
   const calls = [];
   const load = async offset => {
@@ -46,11 +54,38 @@ test("primitive drill-down keeps the selected operation after the grid changes o
 });
 
 test("recapture keeps the current view and makes the old capture independently selectable", () => {
-  const first = addSnapshot({ tabs: [] }, { id: "1" }, "app");
-  const next = addSnapshot(first, { id: "2" }, "app");
+  const app = { id: "app", name: "Worker" };
+  const first = addSnapshot({ tabs: [] }, { id: "1" }, app);
+  const next = addSnapshot(first, { id: "2" }, app);
   assert.equal(next.tabs[1].viewKey, first.tabs[0].viewKey);
   assert.notEqual(next.tabs[0].viewKey, next.tabs[1].viewKey);
   assert.equal(closeSnapshot(next, "2").active, "1");
-  const third = addSnapshot({ ...next, active: "1" }, { id: "3" }, "app");
+  const third = addSnapshot({ ...next, active: "1" }, { id: "3" }, app);
   assert.equal(new Set(third.tabs.map(tab => tab.viewKey)).size, 3);
+});
+
+test("captures stay with their source instance after it exits, even if another process has the same name", () => {
+  const former = { id: "former", name: "Worker", pid: 42 };
+  const current = { id: "current", name: "Worker", pid: 42 };
+  const first = addSnapshot({ tabs: [] }, { id: "4", name: "worker-42-long-name.seismograph" }, former);
+  const opened = addSnapshot(first, { id: "7", name: "saved.seismograph" }, null);
+  const next = addSnapshot(opened, { id: "9", name: "worker-42-second-name.seismograph" }, current);
+  const { applications, files } = snapshotGroups([current], next.tabs);
+  assert.deepEqual(applications.map(({ id, online, snapshots }) => [id, online, snapshots.map(tab => tab.label)]), [
+    ["current", true, ["Snapshot 2"]],
+    ["former", false, ["Snapshot 1"]],
+  ]);
+  assert.equal(applications[1].snapshots[0].snapshot.name, "worker-42-long-name.seismograph");
+  assert.deepEqual(files.map(tab => tab.label), ["saved"]);
+  assert.equal(addSnapshot(closeSnapshot(next, "9"), { id: "10" }, current).tabs.at(-1).label, "Snapshot 3");
+});
+
+test("recapture follows the source app even after a different capture was selected", () => {
+  const a = { id: "a", name: "A" };
+  const b = { id: "b", name: "B" };
+  const first = addSnapshot({ tabs: [] }, { id: "1" }, a);
+  const selectedB = addSnapshot(first, { id: "2" }, b);
+  const recaptured = addSnapshot(selectedB, { id: "3" }, a);
+  assert.equal(recaptured.tabs.at(-1).viewKey, first.tabs[0].viewKey);
+  assert.equal(closeSnapshot(recaptured, "3").active, "1");
 });

@@ -1,23 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { rate, sample } from "./activity.js";
 import { api, token, upload } from "./api.js";
 import { Fields, Snapshot } from "./snapshot.jsx";
-import { addSnapshot, closeSnapshot } from "./snapshot-state.js";
+import { addSnapshot, captureFor, closeSnapshot, snapshotGroups } from "./snapshot-state.js";
 import { DataGrid, Detail, revealDetail } from "./data-grid.jsx";
-import { PaneLayoutProvider } from "./pane-workspace.jsx";
+import { MonitorLayout } from "./monitor-layout.jsx";
+import { TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
 import "./monitor.css";
+import "./dock-theme.css";
 
 const groups = [
   ["allocations", "Allocations"], ["generalEvents", "Primitives"], ["arcDereferences", "Arc dereferences"],
   ["runtimeTasks", "Runtime tasks"], ["io", "I/O"], ["cache", "Cache"],
 ];
+const liveViews = [{ id: "activity", title: "Activity" }, { id: "threads", title: "Threads" }, { id: "recording", title: "Recording" }];
 const format = new Intl.NumberFormat();
 const count = value => format.format(BigInt(value ?? 0));
 const amount = value => `${format.format(Number(value ?? 0) / 1024 ** 2)} MiB`;
+const smallRate = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const formatRate = value => value > 0 && value < .1 ? "<0.1" : value < 10 ? smallRate.format(value) : format.format(Math.round(value));
 const displayName = app => app.instance ? `${app.name} (${app.instance})` : app.name;
 const recording = value => groups.some(([key]) => value?.[key]?.enabled);
 
@@ -62,6 +67,7 @@ function App() {
   const restoreFocus = useRef(false);
   const found = usePoll(token ? api.discover : null, 3000, refresh);
   const apps = found.data?.applications ?? [];
+  const { applications, files } = snapshotGroups(apps, workspace.tabs);
   const current = apps.find(app => app.id === selected);
   const viewKey = showingSnapshot ? `snapshot:${capture.viewKey}` : selected ? `live:${selected}` : "applications";
 
@@ -100,20 +106,20 @@ function App() {
     });
   }
 
-  async function showCapture(appId, snapshot) {
-    const filter = capture?.source === appId ? capture.filter : null;
+  async function showCapture(app, snapshot) {
+    const filter = captureFor(workspace, app.id)?.filter;
     if (filter) {
       try {
         snapshot = await api.filter(snapshot.id, filter);
       } catch (error) {
         rememberView(true);
-        setWorkspace(value => addSnapshot(value, snapshot, appId, filter));
+        setWorkspace(value => addSnapshot(value, snapshot, app));
         setSnapshotView(true);
         throw new Error(`The snapshot opened without its stack filter. ${error.message}`, { cause: error });
       }
     }
     rememberView(true);
-    setWorkspace(value => addSnapshot(value, snapshot, appId, filter));
+    setWorkspace(value => addSnapshot(value, snapshot, app, filter));
     setSnapshotView(true);
   }
 
@@ -136,6 +142,17 @@ function App() {
     setSnapshotView(false);
   }
 
+  function snapshotList(tabs, label) {
+    if (!tabs.length) return null;
+    return <ul className="snapshot-links" aria-label={label}>
+      {tabs.map(({ snapshot, label }) => <li key={snapshot.id}>
+        <button type="button" title={snapshot.name} disabled={!!busy}
+          aria-current={showingSnapshot && snapshot.id === workspace.active ? "page" : undefined}
+          onClick={() => selectSnapshot(snapshot.id)}>{label}</button>
+      </li>)}
+    </ul>;
+  }
+
   return <>
     <a className="skip" href="#workspace">Skip to content</a>
     <header className="masthead">
@@ -143,41 +160,46 @@ function App() {
         event.preventDefault();
         if (!running.current) selectApplication(null);
       }}><svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><path d="M2 17h6l4-9 5 17 4-12 3 4h6" /></svg>
-        <span>Seismograph<small>PROCESS MONITOR</small>        </span></a>
-      <span className="connection"><i className={found.data && !found.error ? "online" : ""} /> Local proxy
-        {found.data?.monitorVersion && <span className="muted"> · v{found.data.monitorVersion}</span>}</span>
+        <span>Seismograph</span></a>
+      <span className="connection"><span className={`connection-dot${found.data && !found.error ? " online" : ""}`} aria-hidden="true" />
+        {found.error ? "Proxy unavailable" : found.data ? "Connected" : token ? "Connecting" : "Not connected"}
+        {found.data?.monitorVersion && <span className="muted">v{found.data.monitorVersion}</span>}</span>
       <button disabled={!token || !!busy} onClick={() => file.current.click()}>Open snapshot</button>
       <input ref={file} type="file" accept=".seismograph" hidden onChange={readFile} />
     </header>
-    {!!workspace.tabs.length && <nav className="capture-tabs" aria-label="Snapshot tabs">
-      <span>Snapshots</span>
-      {workspace.tabs.map(({ snapshot }) => <button key={snapshot.id} disabled={!!busy}
-        title={snapshot.name} aria-current={showingSnapshot && snapshot.id === workspace.active ? "page" : undefined}
-        onClick={() => selectSnapshot(snapshot.id)}>{snapshot.name}</button>)}
-    </nav>}
     {!token ? <main id="workspace" className="locked">
       <h1>Connect to the local proxy</h1>
       <p>Run <code>seismograph monitor-web</code> and open the full URL from the terminal.</p>
-    </main> : <div className="layout">
-      <aside className="sidebar">
+    </main> : <MonitorLayout sidebar={
+      <aside className="sidebar" id="application-list">
         <div className="sidebar-top"><h2>Applications <span>{apps.length}</span></h2>
-          <button onClick={() => setRefresh(value => value + 1)} aria-label="Refresh applications" title="Refresh applications">↻</button></div>
+          <button className="quiet" onClick={() => setRefresh(value => value + 1)} aria-label="Refresh applications" title="Refresh applications">↻</button></div>
         {found.error && <p className="error" role="alert">{found.error}</p>}
         {!found.data && !found.error && <p className="muted" role="status">Finding applications…</p>}
-        <DataGrid label="applications" rows={apps} rowKey={app => app.id} selected={showingSnapshot ? null : selected}
+        <DataGrid label="applications" rows={applications} rowKey={app => app.id} selected={showingSnapshot ? null : selected}
           onSelect={app => selectApplication(app.id)}
-          columns={[{ name: "Application", value: displayName }, { name: "PID", value: app => app.pid }]}
+          columns={[{ name: "Application", value: displayName }, { name: "PID", numeric: true, value: app => app.online ? app.pid : "Offline" }]}
+          canSelectRow={app => app.online}
+          renderChildren={app => snapshotList(app.snapshots, `Snapshots for ${displayName(app)}`)}
           disabled={!!busy} empty={found.data ? "No applications found. Start an application with a Seismograph monitor." : ""} />
+        {!!files.length && <section className="snapshot-files">
+          <h2>Opened files</h2>
+          {snapshotList(files, "Opened snapshot files")}
+        </section>}
         {!!found.data?.warnings?.length && <details><summary>Discovery warnings ({found.data.warnings.length})</summary>
           <ul>{found.data.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
       </aside>
+    }>
       <main id="workspace" ref={main} tabIndex={-1}>
         {error && <div className="error notice" role="alert">{error}<button onClick={() => setError("")}>Dismiss</button></div>}
         {busy && <p className="working" role="status">{busy}…</p>}
         {!showingSnapshot && selected && !current && !found.error && <p className="notice" role="status">The selected application is no longer available.</p>}
         {current && <Live key={current.id} app={current} hidden={showingSnapshot} busy={busy} action={action}
           onCapture={showCapture} disconnect={() => selectApplication(null, true)} />}
-        {workspace.tabs.map(tab => <Snapshot key={tab.viewKey} snapshot={tab.snapshot} active={showingSnapshot && tab === capture}
+        {workspace.tabs.map(tab => <Snapshot key={tab.viewKey} snapshot={tab.snapshot} label={tab.label}
+          source={tab.application ? displayName(tab.application) : null}
+          onLive={apps.some(app => app.id === tab.source) ? () => selectApplication(tab.source, true) : undefined}
+          active={showingSnapshot && tab === capture}
           appliedFilter={tab.filter} onFilter={updateFilter} onClose={() => {
             rememberView(true);
             setWorkspace(value => closeSnapshot(value, tab.snapshot.id));
@@ -188,16 +210,17 @@ function App() {
           <button disabled={!!busy} onClick={() => file.current.click()}>Open a saved snapshot</button>
         </div>}
       </main>
-    </div>}
+    </MonitorLayout>}
   </>;
 }
 
 function Live({ app, action, busy, onCapture, disconnect, hidden }) {
+  const tabId = useId();
   const [load] = useState(() => signal => api.activity(app.id, signal));
   const [generation, setGeneration] = useState(0);
   const { data, past, time, pastTime, error, history } = usePoll(load, 1000, generation, sample);
+  const [section, setSection] = useState("activity");
   const [editing, setEditing] = useState(false);
-  const [showThreads, setShowThreads] = useState(false);
   const [threadId, setThreadId] = useState(null);
   const config = data?.recording ?? app.recording;
   const threads = data?.threads ?? [];
@@ -210,17 +233,25 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
   const threadColumns = [
     { name: "Thread", value: threadName },
     { name: "State", value: thread => thread.retired ? "Exited" : "Active" },
-    { name: "Events/s", value: thread => threadRate(thread) == null ? "—" : count(threadRate(thread)), sortValue: threadRate },
-    { name: "Retained", value: thread => count(thread.retainedEvents), sortValue: thread => thread.retainedEvents ?? "0" },
-    { name: "Lost", value: thread => count(thread.lostEvents), sortValue: thread => thread.lostEvents ?? "0" },
+    { name: "Events/s", numeric: true, value: thread => {
+      const value = threadRate(thread);
+      return value == null ? null : formatRate(value);
+    }, sortValue: threadRate },
+    { name: "Retained", numeric: true, value: thread => count(thread.retainedEvents), sortValue: thread => thread.retainedEvents ?? "0" },
+    { name: "Lost", numeric: true, value: thread => count(thread.lostEvents), sortValue: thread => thread.lostEvents ?? "0" },
   ];
   const selectedThread = threads.find(thread => thread.id === threadId);
 
   async function capture(mode) {
-    const warnings = { CLEAR: "Capture and clear retained events?", STOP: "Capture, stop recording, and release the event buffers?" };
+    const warnings = { CLEAR: "Capture and clear retained events?",
+      STOP: `Capture, stop recording, and release the event buffers?${editing ? " Unsaved policy edits will be discarded." : ""}` };
     if (warnings[mode] && !window.confirm(warnings[mode])) return;
     await action("Capturing snapshot", async () => {
-      try { await onCapture(app.id, await api.capture(app.id, mode)); }
+      try {
+        const snapshot = await api.capture(app.id, mode);
+        if (mode === "STOP") setEditing(false);
+        await onCapture(app, snapshot);
+      }
       finally { setGeneration(value => value + 1); }
     });
   }
@@ -234,47 +265,27 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
   }
 
   return <section className="live" aria-label="Live application" hidden={hidden}>
-    <div className="page-heading"><div><h1 className="view-title" tabIndex={-1}>{displayName(app)}</h1>
-      <p className="muted">PID {app.pid} · {app.owner} · Seismograph {app.serverVersion || "unknown"}</p></div>
-      <button disabled={!!busy} onClick={disconnect}>Disconnect</button>
-    </div>
-    {error && <p className="error" role="alert">Live activity is not current. {error}</p>}
-    <div className="stats">
+    <ViewHeading kind="Live" title={displayName(app)}
+      context={[`PID ${app.pid}`, app.owner, app.serverVersion && `Seismograph ${app.serverVersion}`].filter(Boolean).join(" · ")}>
+      <div className="actions live-actions">
+        <button className="primary" disabled={!!busy} onClick={() => capture("CONTINUE")}>Capture snapshot</button>
+        <button className="quiet" disabled={!!busy} onClick={disconnect}>Disconnect</button>
+      </div>
+    </ViewHeading>
+    {error && <p className="error notice" role="alert">Live activity is not current. {error}</p>}
+    <dl className="stats">
       {[
-        ["State", recording(config) ? "Recording" : "Off"], ["Retained events", data && count(data.retainedEvents)],
+        ["State", config && (recording(config) ? "Recording" : "Off")], ["Retained events", data && count(data.retainedEvents)],
         ["Lost events", data && count(data.lostEvents)], ["Recorder memory", data && amount(data.allocatedBytes)],
         ["Threads", data && count(data.threadCount)],
-      ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value ?? "—"}</strong></div>)}
-    </div>
-    <div className="actions">
-      <button className="primary" disabled={!!busy} onClick={() => capture("CONTINUE")}>Capture snapshot</button>
-      <button disabled={!!busy} onClick={() => capture("STOP")}>Capture and stop</button>
-      <button disabled={!!busy} onClick={() => capture("CLEAR")}>Capture and clear</button>
-      <button disabled={!!busy || !config} onClick={() => setEditing(value => !value)} aria-expanded={editing}>Recording policies</button>
-      <button disabled={!!busy} onClick={clear}>Clear buffers</button>
-    </div>
-    {editing && <Policies initial={config} busy={busy} close={() => setEditing(false)} save={async value => {
-      const saved = await action("Saving recording policies", async () => {
-        await api.record(app.id, value);
-        setGeneration(value => value + 1);
-      });
-      if (saved) setEditing(false);
-    }} />}
-    <div className="surface activity">
-      <div className="section-heading"><h2>Live activity</h2>
-        <button onClick={() => setShowThreads(value => !value)} aria-expanded={showThreads}>
-          {showThreads ? "Hide" : "Show"} threads ({count(threads.length)})
-        </button></div>
-      <ActivityChart history={history ?? []} stale={!!error} />
-      <div className="rates">
-        {groups.map(([key, title], index) => {
-          const value = error ? null : history?.at(-1)?.rates[index];
-          return <div key={key}><span className={`event-series series-${index}`}>{title}</span>
-            <strong>{value == null ? "—" : `${count(value)} /s`}</strong>
-            {data?.classEvents && <small>{count(data.classEvents[index])} total</small>}</div>;
-        })}
-      </div>
-      <div className={`detail-layout${selectedThread ? " with-detail" : ""}`} hidden={!showThreads}>
+      ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? "—"}</dd></div>)}
+    </dl>
+    <div className="snapshot-toolbar"><ViewTabs id={tabId} label="Live sections" items={liveViews} selected={section} onSelect={setSection} /></div>
+    <ViewPanel id={tabId} item="activity" selected={section}>
+      <ActivityTracks history={history ?? []} totals={data?.classEvents} stale={!!error} />
+    </ViewPanel>
+    <ViewPanel id={tabId} item="threads" selected={section}>
+      <div className={`detail-layout${selectedThread ? " with-detail" : ""}`}>
         <DataGrid label="live threads" rows={threads} rowKey={thread => thread.id} selected={threadId}
           columns={threadColumns} onSelect={(thread, trigger) => {
             setThreadId(thread.id);
@@ -282,38 +293,78 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
           }} empty="No recorded threads." />
         {selectedThread && <Detail id="live-thread" title={threadName(selectedThread)} close={() => setThreadId(null)}>
           <Fields fields={[
-            ...threadColumns.slice(1).map(column => ({ name: column.name, value: column.value(selectedThread) })),
+            ...threadColumns.slice(1).map(column => ({ name: column.name, value: column.value(selectedThread) ?? "—" })),
             { name: "Total events", value: count(selectedThread.totalEvents) },
             { name: "Capacity", value: count(selectedThread.capacity) },
           ]} />
         </Detail>}
       </div>
-    </div>
+    </ViewPanel>
+    <ViewPanel id={tabId} item="recording" selected={section}>
+      <div className="actions recorder-actions">
+        <button disabled={!!busy || !config || editing} onClick={() => setEditing(true)}>Edit policies</button>
+        <button disabled={!!busy} onClick={() => capture("STOP")}>Capture and stop</button>
+        <button disabled={!!busy} onClick={() => capture("CLEAR")}>Capture and clear</button>
+        <button className="danger" disabled={!!busy} onClick={clear}>Clear buffers</button>
+      </div>
+      {editing ? <Policies initial={config} busy={busy} close={() => setEditing(false)} save={async value => {
+        const saved = await action("Saving recording policies", async () => {
+          await api.record(app.id, value);
+          setGeneration(value => value + 1);
+        });
+        if (saved) setEditing(false);
+      }} /> : <div className="surface table-scroll">
+        <table aria-label="Recording policies">
+          <thead><tr><th scope="col">Event class</th><th scope="col">Enabled</th><th scope="col">Backtraces</th><th scope="col">Sample rate</th></tr></thead>
+          <tbody>{groups.map(([key, title]) => {
+            const policy = config?.[key];
+            return <tr key={key}><th scope="row">{title}</th><td>{policy ? policy.enabled ? "On" : "Off" : "—"}</td>
+              <td>{policy ? policy.captureBacktraces ? "On" : "Off" : "—"}</td>
+              <td>{policy?.samplingOneIn ? `1 in ${count(policy.samplingOneIn)}` : "—"}</td></tr>;
+          })}</tbody>
+        </table>
+      </div>}
+    </ViewPanel>
   </section>;
 }
 
-function ActivityChart({ history, stale }) {
-  if (history.length < 2) return null;
-  const start = history[0].time;
-  const span = history.at(-1).time - start;
-  const ceiling = Math.max(1, ...history.flatMap(point => point.rates));
-  return <figure className={stale ? "activity-chart stale" : "activity-chart"}>
-    <figcaption>{stale ? "Last available history" : "Recorder activity history"} · {count(ceiling)} events/s max · {Math.round(span / 1000)} s</figcaption>
-    <svg viewBox="0 0 640 96" preserveAspectRatio="none" aria-hidden="true">
-      <path className="grid-lines" d="M0 1H640 M0 48H640 M0 95H640" />
-      {groups.map(([key], index) => {
-        let penDown = false;
-        const line = history.map(point => {
-          const value = point.rates[index];
-          if (value == null) { penDown = false; return ""; }
-          const command = penDown ? "L" : "M";
-          penDown = true;
-          return `${command}${(640 * (point.time - start) / span).toFixed(1)} ${(95 - 94 * value / ceiling).toFixed(1)}`;
-        }).join(" ");
-        return <path key={key} className={`series-${index}`} d={line} />;
-      })}
-    </svg>
-  </figure>;
+function ActivityTracks({ history, totals, stale }) {
+  const start = history[0]?.time;
+  const span = history.length > 1 ? history.at(-1).time - start : 0;
+  const peak = Math.max(0, ...history.flatMap(point => point.rates));
+  const ceiling = peak || 1;
+  return <div className={`table-scroll activity${stale ? " stale" : ""}`} tabIndex={0} role="region" aria-label="Activity tracks">
+    <table className="event-rates">
+      <caption>Recorder activity{span > 0 ? ` · ${stale ? "Last available history · " : ""}${formatRate(peak)} events/s peak across tracks` : " · Waiting for activity samples"}</caption>
+      <thead><tr><th scope="col">Event class</th><th scope="col" aria-label="Elapsed time">
+        {span > 0 && <TimeRuler seconds={span / 1000} />}
+      </th><th scope="col" className="track-count">Events/s</th><th scope="col" className="track-count" aria-label="Total this session">Total</th></tr></thead>
+      <tbody>{groups.map(([key, title], index) => {
+        const value = stale ? null : history.at(-1)?.rates[index];
+        return <tr key={key}>
+          <th scope="row" className="track-label"><span className={`event-series series-${index}`}>{title}</span></th>
+          <td className="track-cell">{span > 0 && <TrackLine history={history} index={index} start={start} span={span} ceiling={ceiling} />}</td>
+          <td className="track-count">{value == null ? "—" : formatRate(value)}</td>
+          <td className="track-count">{totals?.[index] == null ? "—" : count(totals[index])}</td>
+        </tr>;
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+function TrackLine({ history, index, start, span, ceiling }) {
+  let penDown = false;
+  const path = history.map(point => {
+    const value = point.rates[index];
+    if (value == null) { penDown = false; return ""; }
+    const position = `${(640 * (point.time - start) / span).toFixed(1)} ${(28 - 26 * value / ceiling).toFixed(1)}`;
+    const segment = penDown ? `L${position}` : `M${position}h.01`;
+    penDown = true;
+    return segment;
+  }).join(" ");
+  return <svg className="track-plot" viewBox="0 0 640 30" preserveAspectRatio="none" aria-hidden="true">
+    <path className={`series-${index}`} d={path} strokeLinecap="round" />
+  </svg>;
 }
 
 function Policies({ initial, save, close, busy }) {
@@ -346,4 +397,4 @@ function Policies({ initial, save, close, busy }) {
   </form>;
 }
 
-createRoot(document.getElementById("root")).render(<PaneLayoutProvider><App /></PaneLayoutProvider>);
+createRoot(document.getElementById("root")).render(<App />);

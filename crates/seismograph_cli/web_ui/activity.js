@@ -4,7 +4,7 @@
 export function rate(current, previous, elapsedMs) {
   if (elapsedMs <= 0) return null;
   const delta = BigInt(current ?? 0) - BigInt(previous ?? 0);
-  return delta < 0n ? null : Math.round(Number(delta) * 1000 / elapsedMs);
+  return delta < 0n ? null : Number(delta) * 1000 / elapsedMs;
 }
 
 export function sample(data, previous, now) {

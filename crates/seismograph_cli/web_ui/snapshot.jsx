@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { api, download } from "./api.js";
 import { DataGrid, Detail, revealDetail } from "./data-grid.jsx";
 import { PaneWorkspace } from "./pane-workspace.jsx";
+import { CloseButton, TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
 import { useSnapshotPage } from "./snapshot-page.js";
 import { pageSize, pickDrillRow, resolveDrillRow } from "./snapshot-state.js";
 
@@ -32,6 +33,8 @@ const labels = {
   parentId: "Parent task", io: "I/O", pollWorkerId: "Poll worker", observedTasks: "Observed tasks",
   maxPollNanos: "Maximum poll (ns)", medianPollNanos: "Median poll (ns)",
   runningNanos: "Running for (ns)", readyNanos: "Ready for (ns)", executingFraction: "Observed execution",
+  workerIds: "Worker IDs", currentTask: "Current task", typeDescriptorId: "Type descriptor ID",
+  timestampNanos: "Timestamp (ns)", relativeStackKnown: "Relative stack known",
 };
 const label = key => labels[key] ?? key.replace(/[A-Z]/g, match => ` ${match.toLowerCase()}`).replace(/^./, c => c.toUpperCase());
 const format = new Intl.NumberFormat();
@@ -40,47 +43,50 @@ function formatValue(key, value) {
   if (key === "executingFraction") return `${(value * 100).toFixed(1)}%`;
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
-  if (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value) && !key.endsWith("Id") && key !== "id")) {
+  if (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value) &&
+      !key.endsWith("Id") && key !== "id" && key !== "currentTask")) {
     return format.format(typeof value === "string" ? BigInt(value) : value);
   }
   return String(value);
 }
 
 const models = {
-  runtimeWorker: { required: { runtimeId: "0", observedTasks: "0" }, optional: ["workerId", "threadId", "currentTask"] },
-  runtimeTask: {
-    required: { runtimeId: "0", taskId: "0", workerIds: [], repollRequested: false },
-    optional: ["parentId", "futureSizeBytes", "runningNanos", "readyNanos", "pollWorkerId", "typeDescriptorId"],
-  },
-  thread: { required: { id: "0", total: "0", retained: "0", lost: "0" }, optional: [] },
-  allocationHotspot: { required: { allocations: "0", allocatedBytes: "0", liveAllocations: "0", liveBytes: "0" }, optional: [] },
-  ioResource: { required: { id: "0", reads: "0", writes: "0", completed: "0", errors: "0", canceled: "0", requestedBytes: "0", completedBytes: "0" }, optional: [] },
-  cacheTier: { required: { id: "0", fallback: false, events: "0", hits: "0", misses: "0", errors: "0" }, optional: [] },
-  primitiveGroup: { required: { events: "0", objects: "0", contentions: "0" }, optional: [] },
-  taskOccurrence: { required: { objectId: "0", threadId: "0", sequence: "0", timestampNanos: "0", relativeStackKnown: false }, optional: [] },
+  runtimeWorker: { runtimeId: "0", observedTasks: "0" },
+  runtimeTask: { runtimeId: "0", taskId: "0", workerIds: [], repollRequested: false },
+  thread: { id: "0", total: "0", retained: "0", lost: "0" },
+  allocationHotspot: { allocations: "0", allocatedBytes: "0", liveAllocations: "0", liveBytes: "0" },
+  ioResource: { id: "0", reads: "0", writes: "0", completed: "0", errors: "0", canceled: "0", requestedBytes: "0", completedBytes: "0" },
+  cacheTier: { id: "0", fallback: false, events: "0", hits: "0", misses: "0", errors: "0" },
+  primitiveGroup: { events: "0", objects: "0", contentions: "0" },
+  taskOccurrence: { objectId: "0", threadId: "0", sequence: "0", timestampNanos: "0", relativeStackKnown: false },
 };
 
 function rowFields(row) {
-  for (const [type, definition] of Object.entries(models)) {
+  for (const [type, defaults] of Object.entries(models)) {
     const model = row[type];
     if (!model) continue;
     const { execution, ...properties } = model;
-    const values = { ...definition.required, ...Object.fromEntries(definition.optional.map(key => [key, null])), ...properties };
+    const values = { ...defaults, ...properties };
+    if (type === "runtimeTask") {
+      values.state = taskState(model);
+      delete values.activityState;
+    }
     if (execution) {
-      Object.assign(values, { polls: "0", executingFraction: null, medianPollNanos: null, maxPollNanos: null }, execution);
+      Object.assign(values, { polls: "0" }, execution);
     }
     return [
-      ...Object.entries(values).map(([key, value]) => ({ name: label(key), value: formatValue(key, value), raw: value })),
+      ...Object.entries(values).filter(([, value]) => value != null)
+        .map(([key, value]) => ({ name: label(key), value: formatValue(key, value), raw: value })),
       ...(row.fields ?? []),
     ];
   }
   return row.fields ?? [];
 }
 
-export function Snapshot({ snapshot, active, appliedFilter, onFilter, onClose, action, busy }) {
+export function Snapshot({ snapshot, label, source, onLive, active, appliedFilter, onFilter, onClose, action, busy }) {
+  const tabId = useId();
   const [section, setSection] = useState("overview");
   const [fullStack, setFullStack] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [filter, setFilter] = useState(appliedFilter ?? initialFilter);
   const activeSection = snapshot.sections.find(item => item.id === section) ?? snapshot.sections[0];
@@ -94,20 +100,18 @@ export function Snapshot({ snapshot, active, appliedFilter, onFilter, onClose, a
   }
 
   return <section id={`snapshot-${snapshot.id}`} className="snapshot" aria-label="Snapshot" hidden={!active}>
-    <div className="page-heading snapshot-heading"><h2 className="view-title" tabIndex={-1} title={snapshot.name}>{snapshot.name}</h2>
+    <ViewHeading kind={source ? null : "Snapshot"} title={label} filename={snapshot.name} context={source ?? "Opened file"}>
       <div className="actions">
-        <button aria-pressed={editing} onClick={() => setEditing(value => !value)}>{editing ? "Done arranging" : "Arrange views"}</button>
+        {onLive && <button type="button" className="quiet" disabled={!!busy} onClick={onLive}>Live view</button>}
         <button disabled={!!busy} title={snapshot.savedPath ? `Saved to ${snapshot.savedPath}` : undefined}
           onClick={() => action("Downloading snapshot", () => download(snapshot.id, snapshot.name))}>Download</button>
-        <button aria-expanded={showFilter} onClick={() => setShowFilter(value => !value)}>Stack filter</button>
-        <button disabled={!!busy} onClick={onClose}>Close snapshot</button>
+        <CloseButton disabled={!!busy} onClick={onClose} label="Close snapshot" />
       </div>
-    </div>
+    </ViewHeading>
     <div className="snapshot-toolbar">
-      <nav className="sections" aria-label="Snapshot sections">{snapshot.sections.map(item =>
-        <button key={item.id} aria-current={activeSection.id === item.id ? "page" : undefined} onClick={() => setSection(item.id)}>{item.title}</button>
-      )}</nav>
+      <ViewTabs id={tabId} label="Snapshot sections" items={snapshot.sections} selected={activeSection.id} onSelect={setSection} />
       <div className="actions">
+        <button className="quiet" aria-expanded={showFilter} onClick={() => setShowFilter(value => !value)}>Stack filter</button>
         <label><input type="checkbox" checked={fullStack} onChange={event => setFullStack(event.target.checked)} /> Full stacks</label>
         <details className="snapshot-help"><summary aria-label={`About ${activeSection.title}`}>Help</summary>
           <p>{help[activeSection.id]}{snapshot.savedPath && <span className="saved-path">Saved to <code>{snapshot.savedPath}</code></span>}</p>
@@ -130,25 +134,26 @@ export function Snapshot({ snapshot, active, appliedFilter, onFilter, onClose, a
         <button type="button" disabled={!!busy} onClick={() => applyFilter(initialFilter)}>Reset filter</button>
       </div>
     </form>}
-    <SnapshotOverview snapshot={snapshot} active={active && activeSection.id === "overview"} editing={editing} />
-    <RuntimePanel snapshot={snapshot} active={active && activeSection.id === "runtime"} fullStack={fullStack} editing={editing} />
-    {snapshot.sections.filter(item => !["overview", "runtime"].includes(item.id)).map(item =>
-      <SnapshotSection key={item.id} snapshot={snapshot} section={item} active={active && activeSection.id === item.id}
-        fullStack={fullStack} editing={editing} />
-    )}
+    {snapshot.sections.map(item => {
+      const selected = activeSection.id === item.id;
+      const props = { snapshot, active: active && selected, fullStack };
+      return <ViewPanel key={item.id} id={tabId} item={item.id} selected={activeSection.id}>
+        {item.id === "overview" ? <SnapshotOverview {...props} />
+          : item.id === "runtime" ? <RuntimePanel {...props} />
+          : <SnapshotSection {...props} section={item} />}
+      </ViewPanel>;
+    })}
   </section>;
 }
 
-function SnapshotOverview({ snapshot, active, editing }) {
+function SnapshotOverview({ snapshot, active }) {
   const page = useSnapshotPage({ snapshot, section: "overview", offset: 0, fullStack: false, by: "", descending: false, active });
-  return <PaneWorkspace group="overview" editing={editing} hidden={!active} panes={[
-    { id: "summary", title: "Snapshot summary", content: <>
+  return <div hidden={!active}>
       <PageStatus page={page} label="Overview" />
       <div className="overview-stats">{page.data?.rows?.map(row => <section key={row.title} className="surface" aria-label={row.title}>
         <h3>{row.title}</h3><Fields fields={rowFields(row)} />
       </section>)}</div>
-    </> },
-  ]} />;
+  </div>;
 }
 
 function useReportLevel(options, offset, picked, sort, previous) {
@@ -167,7 +172,7 @@ const listLabels = {
   cache: ["Cache tiers", "operations"],
 };
 
-function SnapshotSection({ snapshot, section, active, fullStack, editing }) {
+function SnapshotSection({ snapshot, section, active, fullStack }) {
   const [picked, setPicked] = useState([]);
   const [offsets, setOffsets] = useState([]);
   const [sorting, setSorting] = useState({ by: Object.values(reportSorts[section.id] ?? {})[0] ?? "", descending: true });
@@ -194,6 +199,7 @@ function SnapshotSection({ snapshot, section, active, fullStack, editing }) {
     const sortKeys = depth === 1 && (section.id !== "allocations" || level.parent === "0") ? reportSorts[section.id] : undefined;
     return <>
       <ReportGrid page={level.page} label={label} selected={level.selection?.row} sortKeys={sortKeys}
+        controls={<PageControls page={level.page} label={`${label} pages`} onChange={offset => changeOffset(depth, offset)} />}
         serverSort={{ ...sorting, onChange: value => { setSorting(value); changeOffset(depth, 0); } }}
         onSelect={(row, trigger) => {
           if (level.selection?.row !== row) {
@@ -202,12 +208,11 @@ function SnapshotSection({ snapshot, section, active, fullStack, editing }) {
           }
           revealDetail(trigger, ids[depth + 1]);
         }} />
-      <PageControls page={level.page} label={`${label} pages`} onChange={offset => changeOffset(depth, offset)} />
     </>;
   }
 
   const panes = [{
-    id: ids[0], title: labels[0], width: primitive ? 12 : 6,
+    id: ids[0], title: labels[0],
     content: <section className="runtime-pane" aria-label={labels[0]}>{grid(root, 0, labels[0])}</section>,
   }, ...ids.slice(1).map((id, depth) => {
     const level = levels[depth];
@@ -219,7 +224,7 @@ function SnapshotSection({ snapshot, section, active, fullStack, editing }) {
     const title = selectionTitle && (!depth || levels[depth - 1].selection)
       && (context ? `${context}: ${selectionTitle}` : selectionTitle);
     return {
-      id, title: labels[depth + 1] ?? `${section.title} details`, width: primitive || depth > 0 ? 12 : 6,
+      id, title: primitive ? ["Operations", "Hotspots", "Stack"][depth] : `${section.title} details`,
       content: title && <Detail id={id} title={title} close={() => close(depth)}>
         {chosen ? <>
           <RowDetails row={chosen} openStack={!chosen.hasChildren} />
@@ -230,7 +235,7 @@ function SnapshotSection({ snapshot, section, active, fullStack, editing }) {
     };
   })];
 
-  return <PaneWorkspace group={section.id} editing={editing} hidden={!active} panes={panes} />;
+  return <PaneWorkspace group={section.id} hidden={!active} panes={panes} />;
 }
 
 function PageStatus({ page, label }) {
@@ -252,7 +257,7 @@ function PageControls({ page, label, onChange }) {
   </nav>;
 }
 
-function ReportGrid({ page, label, selected, onSelect, sortKeys, serverSort }) {
+function ReportGrid({ page, label, selected, onSelect, sortKeys, serverSort, controls }) {
   const rows = page.data?.rows ?? [];
   const entries = rows.map((row, index) => ({ row, index, fields: new Map(rowFields(row).map(field => [field.name, field])) }));
   const preferred = ["Events", "Objects", "Contentions", "Occurrences", "State", "Retained", "Lost",
@@ -262,19 +267,19 @@ function ReportGrid({ page, label, selected, onSelect, sortKeys, serverSort }) {
   const columns = [
     { name: "Item", value: ({ row }) => row.title },
     ...fieldNames.map(name => ({
-      name, sortKey: sortKeys?.[name], value: ({ fields }) => fields.get(name)?.value,
+      name, numeric: entries.some(({ fields }) => /^-?\d[\d.,]*%?$/.test(fields.get(name)?.value ?? "")),
+      sortKey: sortKeys?.[name], value: ({ fields }) => fields.get(name)?.value,
       sortValue: ({ fields }) => {
         const field = fields.get(name);
         return field && ("raw" in field ? field.raw : field.value);
       },
     })),
   ];
-  return <>
-    <PageStatus page={page} label={label} />
-    <DataGrid label={label} rows={entries} columns={columns} rowKey={({ index }) => index}
+  return <DataGrid label={label} rows={entries} columns={columns} rowKey={({ index }) => index}
+      controls={page.data?.total > pageSize ? controls : null}
+      status={page.data ? undefined : { loading: !page.error, content: <PageStatus page={page} label={label} /> }}
       selected={selected ? rows.indexOf(selected) : undefined} onSelect={({ row }, trigger) => onSelect(row, trigger)}
-      paged={page.data?.total > pageSize} empty={page.data ? "No retained data in this view." : ""} serverSort={serverSort} />
-  </>;
+      paged={page.data?.total > pageSize} empty={page.data ? "No retained data in this view." : ""} serverSort={serverSort} />;
 }
 
 function RowDetails({ row, stackTitle = "Stack trace", openStack = false }) {
@@ -297,27 +302,31 @@ function taskId(row) {
 const workerColumns = [
   { name: "Worker", value: row => row.title },
   { name: "State", value: row => row.runtimeWorker.state || row.runtimeWorker.role },
-  { name: "Observed tasks", value: row => formatValue("observedTasks", row.runtimeWorker.observedTasks ?? "0"),
+  { name: "Observed tasks", numeric: true, value: row => formatValue("observedTasks", row.runtimeWorker.observedTasks ?? "0"),
     sortValue: row => row.runtimeWorker.observedTasks ?? "0" },
 ];
+const taskViews = [{ id: "operations", title: "Operations" }, { id: "timing", title: "Timing" }, { id: "metadata", title: "Metadata" }];
+const taskState = task => task.activityState && task.activityState !== "Unknown" ? task.activityState : task.state;
+
 const taskColumns = [
   { name: "Task", value: row => row.title, sortKey: "task" },
-  { name: "State", value: ({ runtimeTask: task }) =>
-    task.activityState && task.activityState !== "Unknown" ? task.activityState : task.state || "Unknown" },
-  { name: "Polls", sortKey: "polls", value: row => formatValue("polls", row.runtimeTask.execution?.polls ?? "0") },
-  { name: "Future bytes", sortKey: "future", value: row => formatValue("futureSizeBytes", row.runtimeTask.futureSizeBytes) },
-  { name: "Observed execution", sortKey: "executing", value: row => formatValue("executingFraction", row.runtimeTask.execution?.executingFraction) },
-  { name: "Median poll (ns)", sortKey: "median", value: row => formatValue("medianPollNanos", row.runtimeTask.execution?.medianPollNanos) },
-  { name: "Maximum poll (ns)", sortKey: "maximum", value: row => formatValue("maxPollNanos", row.runtimeTask.execution?.maxPollNanos) },
+  { name: "State", value: row => taskState(row.runtimeTask) },
+  { name: "Polls", numeric: true, sortKey: "polls", value: row => formatValue("polls", row.runtimeTask.execution?.polls ?? "0") },
+  { name: "Future bytes", numeric: true, sortKey: "future", value: row => row.runtimeTask.futureSizeBytes == null ? null : formatValue("futureSizeBytes", row.runtimeTask.futureSizeBytes) },
+  { name: "Execution", numeric: true, sortKey: "executing", value: row => row.runtimeTask.execution?.executingFraction == null ? null : formatValue("executingFraction", row.runtimeTask.execution.executingFraction) },
+  { name: "Median (ns)", numeric: true, sortKey: "median", value: row => row.runtimeTask.execution?.medianPollNanos == null ? null : formatValue("medianPollNanos", row.runtimeTask.execution.medianPollNanos) },
+  { name: "Max (ns)", numeric: true, sortKey: "maximum", value: row => row.runtimeTask.execution?.maxPollNanos == null ? null : formatValue("maxPollNanos", row.runtimeTask.execution.maxPollNanos) },
 ];
 const operationColumns = [
   { name: "Operation", value: row => row.title },
-  { name: "Inferred events", value: row => row.fields?.[0]?.value },
+  { name: "Inferred events", numeric: true, value: row => row.fields?.find(field => field.name === "Inferred events")?.value },
 ];
 
-function RuntimePanel({ snapshot, fullStack, active, editing }) {
+function RuntimePanel({ snapshot, fullStack, active }) {
+  const taskTabsId = useId();
   const [pickedWorker, setWorker] = useState(null);
   const [task, setTask] = useState(null);
+  const [taskView, setTaskView] = useState("operations");
   const [operation, setOperation] = useState(null);
   const [workerOffset, setWorkerOffset] = useState(0);
   const [taskOffset, setTaskOffset] = useState(0);
@@ -339,7 +348,8 @@ function RuntimePanel({ snapshot, fullStack, active, editing }) {
   const selectedTask = detail.data?.subject ?? tasks.data?.rows?.find(row => taskId(row) === task);
   const selectedOccurrence = occurrences.data?.rows?.find(row => occurrenceKey(row) === occurrence);
 
-  function selectWorker(row) {
+  function selectWorker(row, trigger) {
+    revealDetail(trigger, "runtime-tasks");
     const path = workerPath(row);
     if (path === worker?.path) return;
     setWorker({ path, title: row.title });
@@ -350,25 +360,25 @@ function RuntimePanel({ snapshot, fullStack, active, editing }) {
   }
 
   function selectTask(row, trigger) {
+    revealDetail(trigger, "runtime-task");
     const id = taskId(row);
     if (id === task) return;
     setTask(id);
+    setTaskView("operations");
     setOperation(null);
     setOccurrence(null);
     setOperationOffset(0);
-    revealDetail(trigger, "runtime-task");
   }
 
-  return <PaneWorkspace group="runtime" editing={editing} hidden={!active} panes={[
-    { id: "workers", title: "Workers", width: 4, wideWidth: 3, content: <section className="runtime-pane" aria-label="Workers">
-      <h3>Workers</h3>
+  return <PaneWorkspace group="runtime" hidden={!active} panes={[
+    { id: "workers", title: "Workers", content: <section className="runtime-pane" aria-label="Workers">
       <PageStatus page={workers} label="workers" />
       <DataGrid label="workers" rows={workers.data?.rows ?? []} rowKey={workerPath} selected={worker?.path} onSelect={selectWorker}
         columns={workerColumns} paged={workers.data?.total > pageSize} empty={workers.data ? "No workers in this snapshot." : ""} />
       <PageControls page={workers} label="Worker pages" onChange={setWorkerOffset} />
     </section> },
-    { id: "tasks", title: "Tasks", width: 8, wideWidth: 5, content: <section className="runtime-pane" aria-label="Tasks">
-      <h3>{worker ? `Tasks · ${tasks.data?.subject?.title ?? worker.title}` : "Tasks"}</h3>
+    { id: "tasks", title: "Tasks", content: <section className="runtime-pane" aria-label="Tasks" data-inspection="runtime-tasks">
+      {worker && <h3>{tasks.data?.subject?.title ?? worker.title}</h3>}
       {!worker ? <p className="muted">Select a worker to see its tasks.</p> : <>
         {tasks.data?.subject && <details className="runtime-worker-details">
           <summary>Worker details</summary>
@@ -382,20 +392,19 @@ function RuntimePanel({ snapshot, fullStack, active, editing }) {
         <PageControls page={tasks} label="Task pages" onChange={setTaskOffset} />
       </>}
     </section> },
-    { id: "task-detail", title: "Task details", wideWidth: 4, content: task && <Detail id="runtime-task"
+    { id: "task-detail", title: "Task details", content: task && <Detail id="runtime-task"
       title={`${selectedTask?.title ?? `Task ${task}`} details`} close={() => {
       setTask(null);
       setOperation(null);
       setOccurrence(null);
     }}>
       {tasks.error?.status === 404 ? <p className="muted">Select an available worker to inspect its tasks.</p> : <>
-        {selectedTask && !detail.error && <>
-          <RowDetails row={selectedTask} stackTitle="Spawn stack" />
-          <RuntimeCharts timelines={detail.data?.timelines ?? []} histograms={detail.data?.histograms ?? []} />
-        </>}
-        <h4>Inferred operations</h4>
-        <PageStatus page={detail} label="task details" />
+        {selectedTask && <TaskSummary task={selectedTask.runtimeTask} />}
+        <ViewTabs id={taskTabsId} label="Task details" items={taskViews} selected={taskView} onSelect={setTaskView} inspector />
+        <ViewPanel id={taskTabsId} item="operations" selected={taskView}>
         <DataGrid label="inferred operations" rows={detail.data?.rows ?? []} rowKey={row => row.title} selected={operation}
+          controls={detail.data?.total > pageSize ? <PageControls page={detail} label="Operation pages" onChange={setOperationOffset} /> : null}
+          status={detail.data ? undefined : { loading: !detail.error, content: <PageStatus page={detail} label="inferred operations" /> }}
           columns={operationColumns} paged={detail.data?.total > pageSize} empty={detail.data ? "No inferred operations for this task." : ""}
           onSelect={(row, trigger) => {
             setOperation(row.title);
@@ -403,7 +412,6 @@ function RuntimePanel({ snapshot, fullStack, active, editing }) {
             setOccurrenceOffset(0);
             revealDetail(trigger, "runtime-operation");
           }} />
-        <PageControls page={detail} label="Operation pages" onChange={setOperationOffset} />
         {operation && detail.data && <Detail id="runtime-operation" heading="h4" title={`${operation} occurrences`} close={() => {
           setOperation(null);
           setOccurrence(null);
@@ -417,9 +425,27 @@ function RuntimePanel({ snapshot, fullStack, active, editing }) {
             <RowDetails row={selectedOccurrence} openStack />
           </Detail>}
         </Detail>}
+        </ViewPanel>
+        <ViewPanel id={taskTabsId} item="timing" selected={taskView}>
+          <PageStatus page={detail} label="timing" />
+          {detail.data && ((detail.data.timelines?.length || detail.data.histograms?.length)
+            ? <RuntimeCharts timelines={detail.data.timelines ?? []} histograms={detail.data.histograms ?? []} />
+            : <p className="muted">No timing data for this task.</p>)}
+        </ViewPanel>
+        <ViewPanel id={taskTabsId} item="metadata" selected={taskView}>
+          {selectedTask ? <RowDetails row={selectedTask} stackTitle="Spawn stack" openStack /> : <PageStatus page={detail} label="metadata" />}
+        </ViewPanel>
       </>}
     </Detail> },
   ]} />;
+}
+
+function TaskSummary({ task }) {
+  return <dl className="stats task-summary">
+    <div><dt>State</dt><dd>{taskState(task) ?? "Unknown"}</dd></div>
+    <div><dt>Polls</dt><dd>{task.execution ? formatValue("polls", task.execution.polls ?? "0") : "Unknown"}</dd></div>
+    <div><dt>Observed execution</dt><dd>{formatValue("executingFraction", task.execution?.executingFraction)}</dd></div>
+  </dl>;
 }
 
 function occurrenceKey({ taskOccurrence }) {
@@ -440,38 +466,55 @@ export function Fields({ fields }) {
 
 function RuntimeCharts({ timelines, histograms }) {
   if (!timelines.length && !histograms.length) return null;
+  // The report API uses the same observation window for every timeline in a page.
+  const observation = timelines[0];
   return <div className="runtime-charts">
-    {timelines.map(timeline => {
-      const start = BigInt(timeline.startNanos ?? 0);
-      const duration = Number(BigInt(timeline.endNanos) - start) / 1e9;
-      return <figure key={timeline.title}><figcaption>{timeline.title} · {format.format(duration)} s</figcaption>
-        <svg viewBox={`0 0 ${timeline.bins.length * 10} 60`} preserveAspectRatio="none" role="img"
-          aria-label={`${timeline.title}. Gaps mean no observation.`}>
+    {observation && <section className="timing-tracks" aria-label="Timing tracks">
+      <div className="timing-track"><span>Elapsed time</span>
+        <TimeRuler seconds={Number(BigInt(observation.endNanos) - BigInt(observation.startNanos ?? 0)) / 1e9} />
+      </div>
+      {timelines.map(timeline => <figure className="timing-track" key={timeline.title}><figcaption>{timeline.title}</figcaption>
+        <svg className="track-plot" viewBox={`0 0 ${timeline.bins.length * 10} 60`} preserveAspectRatio="none" role="img"
+          aria-label={`${timeline.title}. Gray marks mean no observation.`}>
           {timeline.bins.map(({ fraction }, index) => {
-            const height = fraction == null ? 1 : Math.max(2, fraction * 57);
-            return <rect key={index} className={fraction == null ? "unknown" : ""} x={index * 10} y={60 - height} width="8" height={height}>
-              <title>{fraction == null ? "No observation" : `${(fraction * 100).toFixed(1)}% observed`}</title>
+            const height = fraction == null ? 3 : Math.max(2, fraction * 57);
+            return <rect key={index} className={fraction == null ? "unknown" : fraction === 0 ? "zero" : undefined}
+              x={index * 10} y={60 - height} width="9" height={height}>
+              <title>{fraction == null ? "No observation"
+                : `${(fraction * 100).toFixed(1)}% ${timeline.title.startsWith("Ready intervals") ? "ready" : "observed"}`}</title>
             </rect>;
           })}
         </svg>
-      </figure>;
-    })}
-    {histograms.map(histogram => {
-      const max = Math.max(1, ...histogram.buckets.map(bucket => Number(bucket.count ?? 0)));
+      </figure>)}
+      {timelines.some(timeline => timeline.bins.some(bin => bin.fraction == null)) &&
+        <p className="timing-track-note">Gray marks indicate no observation.</p>}
+    </section>}
+    {!!histograms.length && <div className="histograms">{histograms.map(histogram => {
+      const counts = histogram.buckets.map(bucket => BigInt(bucket.count ?? 0));
+      const max = Math.max(1, ...counts.map(Number));
+      const range = bucket => {
+        const start = format.format(BigInt(bucket.lowerNanos ?? 0));
+        return bucket.upperNanos === "18446744073709551615"
+          ? `At least ${start} ns`
+          : `${start}–${format.format(BigInt(bucket.upperNanos))} ns`;
+      };
       return <figure key={histogram.title}><figcaption>{histogram.title}</figcaption>
         <svg viewBox={`0 0 ${histogram.buckets.length * 40} 60`} preserveAspectRatio="none" aria-hidden="true">
           {histogram.buckets.map((bucket, index) => {
-            const height = bucket.count ? Math.max(2, Number(bucket.count) * 58 / max) : 1;
-            return <rect key={index} className={bucket.count ? "" : "unknown"} x={index * 40} y={60 - height} width="32" height={height} />;
+            const count = counts[index];
+            const height = count > 0n ? Math.max(2, Number(count) * 58 / max) : 1;
+            return <rect key={index} className={count > 0n ? undefined : "empty-bucket"} x={index * 40} y={60 - height} width="32" height={height}>
+              <title>{range(bucket)}: {format.format(count)}</title>
+            </rect>;
           })}
         </svg>
         <details><summary>Exact bucket counts</summary>
-          <Fields fields={histogram.buckets.map(bucket => ({
-            name: `${format.format(BigInt(bucket.lowerNanos ?? 0))}–${format.format(BigInt(bucket.upperNanos))} ns`,
+          <Fields fields={histogram.buckets.filter((_, index) => counts[index] > 0n).map(bucket => ({
+            name: range(bucket),
             value: format.format(BigInt(bucket.count ?? 0)),
           }))} />
         </details>
       </figure>;
-    })}
+    })}</div>}
   </div>;
 }

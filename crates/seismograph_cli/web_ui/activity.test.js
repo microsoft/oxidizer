@@ -17,3 +17,9 @@ test("activity establishes a new baseline after reset or a failed read", () => {
   assert.deepEqual(sample({ sessionId: "8", classEvents: ["4"] }, next, 2100).history, []);
   assert.deepEqual(sample({ sessionId: "7", classEvents: ["121"] }, { ...next, error: "Unavailable" }, 3100).history, []);
 });
+
+test("sparse event classes keep a nonzero rate", () => {
+  const first = sample({ sessionId: "7", classEvents: ["10"] }, {}, 100);
+  const second = sample({ sessionId: "7", classEvents: ["11"] }, first, 4100);
+  assert.deepEqual(second.history, [{ time: 4100, rates: [0.25] }]);
+});

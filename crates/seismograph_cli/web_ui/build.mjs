@@ -5,8 +5,11 @@ import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
 
 const assets = "../src/commands/monitor/web/assets";
-const notices = await Promise.all(["react", "react-dom", "scheduler"].map(name =>
-  readFile(`node_modules/${name}/LICENSE`, "utf8").then(license => license.trim())
+const notices = await Promise.all([
+  "react/LICENSE", "react-dom/LICENSE", "scheduler/LICENSE",
+  "dockview-react/LICENCE.md", "dockview/LICENCE.md", "dockview-core/LICENCE.md",
+].map(path =>
+  readFile(`node_modules/${path}`, "utf8").then(license => license.trim())
 ));
 const license = [...new Set(notices)].join("\n\n");
 await build({
@@ -15,6 +18,6 @@ await build({
   minify: true,
   jsx: "automatic",
   legalComments: "inline",
-  banner: { js: `/* React, React DOM, and Scheduler license:\n${license}\n*/` },
+  banner: { js: `/* Third-party licenses:\n${license}\n*/`, css: `/* Dockview license:\n${notices[3]}\n*/` },
   outfile: `${assets}/monitor.js`,
 });

@@ -1,175 +1,122 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
-import { columns, movePane, paneOrder, paneSize, readLayouts } from "./pane-layout.js";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { DockviewDefaultTab, DockviewReact } from "dockview-react";
+import "dockview-react/dist/styles/dockview.css";
+import { dockLayoutKey, dockPlacement, readDockLayout } from "./pane-layout.js";
 
-const storageKey = "seismograph.panes.v1";
-const Layouts = createContext(null);
-const emptyLayout = { order: [], sizes: {} };
+const PaneContents = createContext([]);
+const docks = new WeakMap();
 
-export function PaneLayoutProvider({ children }) {
-  const [stored, setStored] = useState(() => {
-    try {
-      return { layouts: readLayouts(localStorage.getItem(storageKey)), warning: "" };
-    } catch (error) {
-      return { layouts: {}, warning: `Saved layouts could not be loaded. ${error.message}` };
-    }
-  });
-  const { layouts, warning } = stored;
-  const [changed, setChanged] = useState(false);
-  useEffect(() => {
-    if (!changed) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(layouts));
-      setStored(value => value.warning ? { ...value, warning: "" } : value);
-    } catch (error) {
-      setStored(value => ({ ...value, warning: `Layouts could not be saved in this browser. ${error.message}` }));
-    }
-  }, [layouts, changed]);
-
-  function update(group, change) {
-    setStored(value => {
-      const current = value.layouts[group] ?? emptyLayout;
-      const next = change(current);
-      return { ...value, layouts: { ...value.layouts, [group]: next } };
-    });
-    setChanged(true);
-  }
-  return <Layouts.Provider value={{ layouts, warning, update }}>{children}</Layouts.Provider>;
+function ReportPane({ api }) {
+  const pane = useContext(PaneContents).find(item => item.id === api.id);
+  return <div className="dock-report" data-dock-pane={api.id}>{pane?.content}</div>;
 }
 
-export function PaneWorkspace({ group, panes, editing, hidden }) {
-  const instructions = useId();
-  const { layouts, warning, update } = useContext(Layouts);
-  const layout = layouts[group] ?? emptyLayout;
-  const ids = panes.map(pane => pane.id);
-  const order = paneOrder(ids, layout.order);
-  const visible = order.filter(id => panes.find(pane => pane.id === id).content);
-  const grid = useRef(null);
-  const resize = useRef(null);
-  const drag = useRef(null);
-  const [preview, setPreview] = useState(null);
-  const [dragging, setDragging] = useState(null);
-  const [target, setTarget] = useState(null);
+function ReportTab(props) {
+  return <DockviewDefaultTab {...props} hideClose />;
+}
 
-  function saveSize(id, size) {
-    update(group, current => ({ ...current, sizes: { ...current.sizes, [id]: size } }));
+const components = { report: ReportPane };
+const noTabActions = () => [];
+
+export function revealDockedPane(detail) {
+  const id = detail.closest("[data-dock-pane]")?.dataset.dockPane;
+  const pane = id && docks.get(detail.closest(".pane-workspace"))?.getPanel(id);
+  if (pane && !pane.api.isVisible) pane.api.setActive();
+}
+
+export function PaneWorkspace({ group, panes, hidden }) {
+  const workspace = useRef(null);
+  const layout = useRef(null);
+  const [api, setApi] = useState(null);
+  const [warning, setWarning] = useState("");
+  const available = panes.filter(pane => pane.content);
+  const ids = available.map(pane => pane.id);
+  const key = dockLayoutKey(group, ids);
+
+  function addMissingPanels(dock) {
+    available.forEach(({ id, title }, index) => {
+      if (dock.getPanel(id)) return;
+      dock.addPanel({
+        id, title, component: "report", renderer: "always", minimumHeight: 112, minimumWidth: 132,
+        ...dockPlacement(group, ids, index, dock.width, dock.height),
+      });
+    });
   }
 
-  function move(id, destination) {
-    if (!destination || destination === id) return;
-    update(group, current => ({ ...current, order: movePane(paneOrder(ids, current.order), id, destination) }));
-  }
-
-  function startResize(event, id, size) {
-    if (event.button !== 0 || !event.isPrimary) return;
-    event.preventDefault();
-    const handle = event.currentTarget;
-    handle.focus();
-    const pane = handle.closest(".workspace-pane");
-    const cells = getComputedStyle(grid.current).gridTemplateColumns.split(" ");
-    const unit = cells.length === columns ? parseFloat(cells[0]) + parseFloat(getComputedStyle(grid.current).columnGap) : 0;
-    resize.current = { id, size, unit, height: pane.getBoundingClientRect().height, x: event.clientX, y: event.clientY };
-    handle.setPointerCapture(event.pointerId);
-  }
-
-  function calculateSize(event) {
-    const start = resize.current;
-    const width = start.unit > 0 ? start.size.width + (event.clientX - start.x) / start.unit : start.size.width;
-    return paneSize(width, start.height + event.clientY - start.y);
-  }
-
-  function finishResize(event, commit) {
-    if (!resize.current) return;
-    if (commit && (event.clientX !== resize.current.x || event.clientY !== resize.current.y)) {
-      saveSize(resize.current.id, calculateSize(event));
+  useLayoutEffect(() => {
+    if (!api || hidden || layout.current === key) return;
+    const existing = new Set(api.panels.map(panel => panel.id));
+    // Opening a pane can restore its last position. Closing one leaves the remaining panes in place.
+    if (ids.some(id => !existing.has(id))) {
+      try {
+        const saved = readDockLayout(localStorage.getItem(key), ids);
+        if (saved) api.fromJSON(saved, { reuseExistingPanels: true });
+      } catch (error) {
+        setWarning(`Could not restore the saved layout. ${error.message}`);
+      }
     }
-    resize.current = null;
-    setPreview(null);
+    for (const panel of api.panels) {
+      if (!ids.includes(panel.id)) api.removePanel(panel);
+    }
+    addMissingPanels(api);
+    layout.current = key;
+  }, [api, hidden, key]);
+
+  useEffect(() => {
+    if (!api || hidden) return;
+    const subscription = api.onDidLayoutChange(({ reasons }) => {
+      if (layout.current !== key || api.width === 0 ||
+          (!reasons.has("geometry") && !reasons.has("structure"))) return;
+      try {
+        localStorage.setItem(key, JSON.stringify(api.toJSON()));
+      } catch (error) {
+        setWarning(`Could not save the layout. ${error.message}`);
+      }
+    });
+    return () => subscription.dispose();
+  }, [api, hidden, key]);
+
+  function resetLayout() {
+    if (!api) return;
+    try {
+      const prefix = `seismograph.dockview.v1:${group}:`;
+      for (let index = localStorage.length - 1; index >= 0; index--) {
+        const saved = localStorage.key(index);
+        if (saved?.startsWith(prefix)) localStorage.removeItem(saved);
+      }
+      setWarning("");
+    } catch (error) {
+      setWarning(`Could not clear the saved layout. ${error.message}`);
+    }
+    api.clear();
+    addMissingPanels(api);
   }
 
-  function moveTarget(event) {
-    const element = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-pane-id]");
-    return element?.parentElement === grid.current ? element.dataset.paneId : null;
-  }
-
-  function finishMove(event, commit) {
-    if (drag.current && commit) move(drag.current, moveTarget(event));
-    drag.current = null;
-    setDragging(null);
-    setTarget(null);
-  }
-
-  return <div className="pane-workspace" hidden={hidden}>
-    {editing && <div className="actions pane-layout-tools">
-      <span className="muted" id={instructions}>Drag a handle or use its arrow keys. Press Home on Resize to restore its size.</span>
-      <button onClick={() => update(group, () => emptyLayout)}>Reset layout</button>
+  const minHeight = `${(group === "primitives" ? Math.max(ids.length, 2) : Math.max(ids.length - 1, 2)) * 9}rem`;
+  return <div className="pane-workspace" ref={workspace} hidden={hidden}>
+    {group !== "overview" && <div className="actions pane-layout-tools">
+      <button type="button" className="quiet" title="Drag a pane tab to dock it. Drag a divider to resize." onClick={resetLayout}>Reset layout</button>
     </div>}
     {warning && <p className="error" role="status">{warning}</p>}
-    <div className="pane-grid" ref={grid}>
-      {visible.map((id, index) => {
-        const { title, content, width = columns, wideWidth } = panes.find(pane => pane.id === id);
-        const custom = preview?.id === id ? preview.size : layout.sizes[id];
-        const style = {
-          "--pane-width": custom?.width,
-          "--default-pane-width": width,
-          "--wide-pane-width": wideWidth,
-          "--pane-height": custom?.height ? `${custom.height}px` : undefined,
-        };
-        function currentWidth(element) {
-          const span = getComputedStyle(element.closest(".workspace-pane")).gridColumnEnd.match(/^span (\d+)$/);
-          return custom?.width ?? (span ? Number(span[1]) : width);
-        }
-        function resizeWithKey(event) {
-          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
+    {(!hidden || api) && <PaneContents.Provider value={panes}>
+      <div className="dock-container" style={{ "--dock-min-height": minHeight }} onKeyDownCapture={event => {
+        // Report selection owns pane removal, not Dockview's tab deletion shortcut.
+        if ((event.key === "Delete" || event.key === "Backspace") && event.target.closest(".dv-tab")) {
           event.preventDefault();
-          const height = custom?.height ?? event.currentTarget.closest(".workspace-pane").getBoundingClientRect().height;
-          const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-          const heightChange = event.key === "ArrowDown" ? 24 : event.key === "ArrowUp" ? -24 : 0;
-          if (event.key === "Home") {
-            update(group, current => {
-              const { [id]: _, ...sizes } = current.sizes;
-              return { ...current, sizes };
-            });
-          } else {
-            saveSize(id, paneSize(currentWidth(event.currentTarget) + delta, heightChange ? height + heightChange : custom?.height));
-          }
+          event.stopPropagation();
         }
-        return <div key={id} data-pane-id={id} className="workspace-pane" style={style} data-sized={custom?.height ? "" : undefined}
-          data-drop-target={target === id && dragging !== id ? "" : undefined}>
-          {editing && <div className="actions pane-handles">
-            <button type="button" className="pane-move" aria-label={`Move ${title}`} aria-describedby={instructions}
-              onPointerDown={event => {
-                if (event.button !== 0 || !event.isPrimary) return;
-                event.preventDefault();
-                event.currentTarget.focus();
-                drag.current = id;
-                setDragging(id);
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }}
-              onPointerMove={event => drag.current === id && setTarget(moveTarget(event))}
-              onPointerUp={event => finishMove(event, true)}
-              onPointerCancel={event => finishMove(event, false)}
-              onLostPointerCapture={event => finishMove(event, false)}
-              onKeyDown={event => {
-                const delta = ["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : ["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : 0;
-                if (!delta) return;
-                event.preventDefault();
-                move(id, visible[index + delta]);
-              }}>Move</button>
-            <button type="button" className="pane-resize" aria-label={`Resize ${title}`} aria-describedby={instructions}
-              onPointerDown={event => startResize(event, id, { width: currentWidth(event.currentTarget) })}
-              onPointerMove={event => resize.current?.id === id && setPreview({ id, size: calculateSize(event) })}
-              onPointerUp={event => finishResize(event, true)}
-              onPointerCancel={event => finishResize(event, false)}
-              onLostPointerCapture={event => finishResize(event, false)}
-              onKeyDown={resizeWithKey}>Resize</button>
-            <small>{title}</small>
-          </div>}
-          <div className="workspace-pane-body">{content}</div>
-        </div>;
-      })}
-    </div>
+      }}>
+        <DockviewReact className="dockview-theme-light monitor-dock" components={components}
+          defaultTabComponent={ReportTab} getTabContextMenuItems={noTabActions}
+          disableFloatingGroups keyboardNavigation
+          onReady={({ api: dock }) => {
+            docks.set(workspace.current, dock);
+            setApi(dock);
+          }} />
+      </div>
+    </PaneContents.Provider>}
   </div>;
 }

@@ -1,0 +1,48 @@
+/* Copyright (c) Microsoft Corporation. Licensed under the MIT License. */
+
+:is(.monitor-dock, .monitor-split) {
+  --dv-sash-color: color-mix(in srgb, var(--border), var(--muted) 18%);
+  --dv-active-sash-color: var(--accent);
+  --dv-active-sash-transition-delay: 0s;
+}
+
+.monitor-dock.dockview-theme-light {
+  --dv-tabs-and-actions-container-height: 2.15rem;
+  --dv-group-view-background-color: var(--panel);
+  --dv-tabs-and-actions-container-background-color: var(--surface);
+  --dv-separator-border: var(--border);
+  --dv-drag-over-background-color: #235dac33;
+  --dv-drag-over-border: 1px solid var(--accent);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--surface);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--surface);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* The visible tab covers the rail line and shares the pane's fill. */
+.monitor-dock .dv-groupview > .dv-tabs-and-actions-container {
+  box-shadow: inset 0 -1px var(--border);
+}
+
+.monitor-dock .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab {
+  cursor: grab;
+  border-right: 1px solid var(--border);
+}
+
+.monitor-dock .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab:active {
+  cursor: grabbing;
+}
+
+.monitor-dock .dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-active-tab {
+  box-shadow: inset 0 2px var(--accent);
+}
+
+.monitor-split > .dv-split-view-container > .dv-sash-container > .dv-sash:focus-visible {
+  background-color: var(--dv-active-sash-color);
+  outline: 2px solid var(--focus);
+}
