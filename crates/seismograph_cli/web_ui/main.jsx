@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { rate, sample } from "./activity.js";
-import { api, token, upload } from "./api.js";
-import { Fields, Snapshot } from "./snapshot.jsx";
+import { api, isAccessKey, setAccessKey, token, upload } from "./api.js";
+import { Snapshot } from "./snapshot.jsx";
 import { addSnapshot, captureFor, closeSnapshot, snapshotGroups } from "./snapshot-state.js";
-import { DataGrid, Detail, revealDetail } from "./data-grid.jsx";
+import { DataGrid } from "./data-grid.jsx";
 import { MonitorLayout } from "./monitor-layout.jsx";
-import { TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
+import { DetailCard, TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
 import "./monitor.css";
 import "./dock-theme.css";
 
@@ -52,6 +52,8 @@ function usePoll(load, interval, generation = 0, update = withResponse) {
 function withResponse(data) { return { data }; }
 
 function App() {
+  const [accessKey, setKey] = useState(() => token);
+  const [signInError, setSignInError] = useState("");
   const [selected, setSelected] = useState(null);
   const [workspace, setWorkspace] = useState({ tabs: [], active: null });
   const [snapshotView, setSnapshotView] = useState(false);
@@ -65,11 +67,39 @@ function App() {
   const main = useRef(null);
   const positions = useRef(new Map());
   const restoreFocus = useRef(false);
-  const found = usePoll(token ? api.discover : null, 3000, refresh);
+  const discover = useCallback(async signal => {
+    try {
+      return await api.discover(signal);
+    } catch (error) {
+      if (!signal.aborted && error.status === 401) {
+        setAccessKey(null);
+        setKey(null);
+        setSelected(null);
+        setWorkspace({ tabs: [], active: null });
+        setSnapshotView(false);
+        positions.current.clear();
+        setSignInError("The access key is not valid. Enter the key from the current terminal.");
+      }
+      throw error;
+    }
+  }, []);
+  const found = usePoll(accessKey ? discover : null, 3000, refresh);
   const apps = found.data?.applications ?? [];
   const { applications, files } = snapshotGroups(apps, workspace.tabs);
   const current = apps.find(app => app.id === selected);
   const viewKey = showingSnapshot ? `snapshot:${capture.viewKey}` : selected ? `live:${selected}` : "applications";
+
+  function signIn(event) {
+    event.preventDefault();
+    const key = String(new FormData(event.currentTarget).get("access-key")).trim().toLowerCase();
+    if (!isAccessKey(key)) {
+      setSignInError("Enter the 64-character access key from the terminal.");
+      return;
+    }
+    setAccessKey(key);
+    setSignInError("");
+    setKey(key);
+  }
 
   function rememberView(focusHeading = false) {
     positions.current.set(viewKey, main.current.scrollTop);
@@ -158,18 +188,23 @@ function App() {
     <header className="masthead">
       <a className="brand" href="/" onClick={event => {
         event.preventDefault();
-        if (!running.current) selectApplication(null);
+        if (accessKey && !running.current) selectApplication(null);
       }}><svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><path d="M2 17h6l4-9 5 17 4-12 3 4h6" /></svg>
         <span>Seismograph</span></a>
       <span className="connection"><span className={`connection-dot${found.data && !found.error ? " online" : ""}`} aria-hidden="true" />
-        {found.error ? "Proxy unavailable" : found.data ? "Connected" : token ? "Connecting" : "Not connected"}
+        {!accessKey ? "Not connected" : found.error ? "Proxy unavailable" : found.data ? "Connected" : "Connecting"}
         {found.data?.monitorVersion && <span className="muted">v{found.data.monitorVersion}</span>}</span>
-      <button disabled={!token || !!busy} onClick={() => file.current.click()}>Open snapshot</button>
+      <button disabled={!accessKey || !!busy} onClick={() => file.current.click()}>Open snapshot</button>
       <input ref={file} type="file" accept=".seismograph" hidden onChange={readFile} />
     </header>
-    {!token ? <main id="workspace" className="locked">
+    {!accessKey ? <main id="workspace" className="locked">
       <h1>Connect to the local proxy</h1>
-      <p>Run <code>seismograph monitor-web</code> and open the full URL from the terminal.</p>
+      <p>Enter the access key from the terminal.</p>
+      <form className="actions" onSubmit={signIn}>
+        <label>Access key <input name="access-key" type="password" autoComplete="off" required /></label>
+        <button className="primary">Connect</button>
+      </form>
+      {signInError && <p className="error" role="alert">{signInError}</p>}
     </main> : <MonitorLayout sidebar={
       <aside className="sidebar" id="application-list">
         <div className="sidebar-top"><h2>Applications <span>{apps.length}</span></h2>
@@ -221,7 +256,6 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
   const { data, past, time, pastTime, error, history } = usePoll(load, 1000, generation, sample);
   const [section, setSection] = useState("activity");
   const [editing, setEditing] = useState(false);
-  const [threadId, setThreadId] = useState(null);
   const config = data?.recording ?? app.recording;
   const threads = data?.threads ?? [];
   const priorThreads = new Map((past?.threads ?? []).map(thread => [thread.id, thread]));
@@ -239,8 +273,9 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
     }, sortValue: threadRate },
     { name: "Retained", numeric: true, value: thread => count(thread.retainedEvents), sortValue: thread => thread.retainedEvents ?? "0" },
     { name: "Lost", numeric: true, value: thread => count(thread.lostEvents), sortValue: thread => thread.lostEvents ?? "0" },
+    { name: "Total events", numeric: true, value: thread => count(thread.totalEvents), sortValue: thread => thread.totalEvents ?? "0" },
+    { name: "Capacity", numeric: true, value: thread => count(thread.capacity), sortValue: thread => thread.capacity ?? "0" },
   ];
-  const selectedThread = threads.find(thread => thread.id === threadId);
 
   async function capture(mode) {
     const warnings = { CLEAR: "Capture and clear retained events?",
@@ -273,32 +308,18 @@ function Live({ app, action, busy, onCapture, disconnect, hidden }) {
       </div>
     </ViewHeading>
     {error && <p className="error notice" role="alert">Live activity is not current. {error}</p>}
-    <dl className="stats">
-      {[
-        ["State", config && (recording(config) ? "Recording" : "Off")], ["Retained events", data && count(data.retainedEvents)],
-        ["Lost events", data && count(data.lostEvents)], ["Recorder memory", data && amount(data.allocatedBytes)],
-        ["Threads", data && count(data.threadCount)],
-      ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? "—"}</dd></div>)}
-    </dl>
+    <DetailCard fields={[
+      ["State", config && (recording(config) ? "Recording" : "Off")], ["Retained events", data && count(data.retainedEvents)],
+      ["Lost events", data && count(data.lostEvents)], ["Recorder memory", data && amount(data.allocatedBytes)],
+      ["Threads", data && count(data.threadCount)],
+    ].map(([name, value]) => ({ name, value: value ?? "—" }))} />
     <div className="snapshot-toolbar"><ViewTabs id={tabId} label="Live sections" items={liveViews} selected={section} onSelect={setSection} /></div>
     <ViewPanel id={tabId} item="activity" selected={section}>
       <ActivityTracks history={history ?? []} totals={data?.classEvents} stale={!!error} />
     </ViewPanel>
     <ViewPanel id={tabId} item="threads" selected={section}>
-      <div className={`detail-layout${selectedThread ? " with-detail" : ""}`}>
-        <DataGrid label="live threads" rows={threads} rowKey={thread => thread.id} selected={threadId}
-          columns={threadColumns} onSelect={(thread, trigger) => {
-            setThreadId(thread.id);
-            revealDetail(trigger, "live-thread");
-          }} empty="No recorded threads." />
-        {selectedThread && <Detail id="live-thread" title={threadName(selectedThread)} close={() => setThreadId(null)}>
-          <Fields fields={[
-            ...threadColumns.slice(1).map(column => ({ name: column.name, value: column.value(selectedThread) ?? "—" })),
-            { name: "Total events", value: count(selectedThread.totalEvents) },
-            { name: "Capacity", value: count(selectedThread.capacity) },
-          ]} />
-        </Detail>}
-      </div>
+      <DataGrid label="live threads" rows={threads} rowKey={thread => thread.id}
+        columns={threadColumns} empty="No recorded threads." />
     </ViewPanel>
     <ViewPanel id={tabId} item="recording" selected={section}>
       <div className="actions recorder-actions">

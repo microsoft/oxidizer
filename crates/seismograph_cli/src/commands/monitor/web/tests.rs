@@ -7,7 +7,45 @@ use http_body_util::{BodyExt as _, Full};
 use rest_over_grpc::serving::serve_http;
 use serde_json::{Value, json};
 
-use super::Server;
+use super::{InstanceToken, Server, advertise};
+
+#[test]
+fn startup_prints_a_clean_address_and_shows_the_key_only_for_manual_sign_in() {
+    let origin = "http://127.0.0.1:12345";
+    let token = InstanceToken("test-key".to_owned());
+    let clean = format!("Open {origin}/\n");
+    let manual = format!("{clean}Access key: test-key\n");
+
+    let mut output = Vec::new();
+    advertise(&mut output, origin, &token, None::<fn(&str) -> std::io::Result<()>>).unwrap();
+    assert_eq!(String::from_utf8(output).unwrap(), manual);
+
+    let mut output = Vec::new();
+    advertise(
+        &mut output,
+        origin,
+        &token,
+        Some(|url: &str| {
+            assert_eq!(url, format!("{origin}/#test-key"));
+            Ok(())
+        }),
+    )
+    .unwrap();
+    assert_eq!(String::from_utf8(output).unwrap(), clean);
+
+    let mut output = Vec::new();
+    advertise(
+        &mut output,
+        origin,
+        &token,
+        Some(|_: &str| Err(std::io::Error::other("launcher failed"))),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        format!("{clean}Could not open the browser. Open the address above.\nAccess key: test-key\n")
+    );
+}
 
 async fn request(server: &Server, method: &str, path: &str, body: Value) -> (StatusCode, Value) {
     let request = Request::builder()

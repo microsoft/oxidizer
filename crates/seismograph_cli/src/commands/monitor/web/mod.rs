@@ -44,7 +44,7 @@ mod transcoder {
 mod tests;
 
 use std::convert::Infallible;
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::Duration;
@@ -76,6 +76,9 @@ pub(crate) struct Args {
     /// Local port. Use 0 to let the operating system choose a free port.
     #[arg(long, default_value_t = 0)]
     port: u16,
+    /// Open the default browser and sign in.
+    #[arg(long)]
+    open: bool,
 }
 
 pub(crate) fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -84,7 +87,7 @@ pub(crate) fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .workers(WorkersPolicy::exactly(2))
         .tokio_compat_with(tokio.handle())
         .build()?;
-    let result = runtime.scheduler().block_on(async |_| serve(args.port).await);
+    let result = runtime.scheduler().block_on(async |_| serve(args).await);
     let shutdown = runtime.stop();
     tokio.shutdown_timeout(Duration::from_secs(1));
     result??;
@@ -92,8 +95,8 @@ pub(crate) fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn serve(port: u16) -> io::Result<()> {
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;
+async fn serve(args: &Args) -> io::Result<()> {
+    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, args.port)).await?;
     let authority = listener.local_addr()?.to_string();
     let token = InstanceToken::generate()?;
     let server = Arc::new(Server::new(&authority, &token.0));
@@ -105,7 +108,8 @@ async fn serve(port: u16) -> io::Result<()> {
         result = &mut shutdown => return result,
         () = std::future::ready(()) => {}
     }
-    writeln!(io::stdout().lock(), "Open http://{authority}/#{}", token.0)?;
+    let open_browser = |url: &str| open::that_detached(url);
+    advertise(&mut io::stdout().lock(), &server.origin, &token, args.open.then_some(open_browser))?;
     let mut connections = JoinSet::new();
     loop {
         tokio::select! {
@@ -127,6 +131,22 @@ async fn serve(port: u16) -> io::Result<()> {
             }
         }
     }
+}
+
+fn advertise<F>(output: &mut impl Write, origin: &str, token: &InstanceToken, open_browser: Option<F>) -> io::Result<()>
+where
+    F: FnOnce(&str) -> io::Result<()>,
+{
+    writeln!(output, "Open {origin}/")?;
+    if let Some(open_browser) = open_browser {
+        output.flush()?;
+        // A fragment passes the key to the page without including it in an HTTP request.
+        if open_browser(&format!("{origin}/#{}", token.0)).is_ok() {
+            return Ok(());
+        }
+        writeln!(output, "Could not open the browser. Open the address above.")?;
+    }
+    writeln!(output, "Access key: {}", token.0)
 }
 
 struct InstanceToken(String);
@@ -232,7 +252,7 @@ impl Server {
                 .get(header::AUTHORIZATION)
                 .is_none_or(|value| value != self.authorization.as_str())
             {
-                return text(StatusCode::UNAUTHORIZED, "Open the full URL printed by seismograph monitor-web.");
+                return text(StatusCode::UNAUTHORIZED, "Use the access key from seismograph monitor-web.");
             }
             let path = request.uri().path();
             let native = NativeFile::resolver().resolve(request.method().as_str(), path);

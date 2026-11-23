@@ -6,6 +6,19 @@ export function CloseButton({ label, onClick, disabled }) {
     onClick={onClick} disabled={disabled}><span aria-hidden="true">×</span></button>;
 }
 
+export function DetailCard({ title, fields }) {
+  if (!title && !fields.length) return null;
+  const named = fields.filter(field => field.name);
+  const notes = fields.filter(field => !field.name);
+  return <div className="detail-card">
+    {title && <h3>{title}</h3>}
+    {!!named.length && <dl className="detail-fields">{named.map(({ name, value }, index) => <div key={index}>
+      <dt>{name}</dt><dd>{value}</dd>
+    </div>)}</dl>}
+    {!!notes.length && <ul className="detail-notes">{notes.map(({ value }, index) => <li key={index}>{value}</li>)}</ul>}
+  </div>;
+}
+
 export function ViewHeading({ kind, title, filename, context, children }) {
   return <div className="page-heading">
     <div className="heading-copy">

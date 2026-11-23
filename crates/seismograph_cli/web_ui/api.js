@@ -2,11 +2,19 @@
 // Licensed under the MIT License.
 
 const authKey = "seismograph.monitor.token";
+export const isAccessKey = value => /^[a-f0-9]{64}$/i.test(value);
+export let token = sessionStorage.getItem(authKey);
+
+export function setAccessKey(value) {
+  token = value;
+  if (value) sessionStorage.setItem(authKey, value);
+  else sessionStorage.removeItem(authKey);
+}
+
 const hash = location.hash.slice(1);
-export const token = /^[a-f0-9]{64}$/.test(hash) ? hash : sessionStorage.getItem(authKey);
-if (hash && token === hash) {
-  sessionStorage.setItem(authKey, token);
+if (isAccessKey(hash)) {
   history.replaceState(null, "", "/");
+  setAccessKey(hash.toLowerCase());
 }
 
 async function request(path, { method = "GET", data, signal } = {}) {

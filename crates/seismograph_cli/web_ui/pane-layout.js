@@ -23,7 +23,7 @@ export function readDockLayout(json, ids) {
 export function dockPlacement(section, ids, index, width, height) {
   if (!index) return {};
   if (section === "runtime" && ids[index] === "task-detail") {
-    return { position: { direction: "below" }, initialHeight: Math.max(180, Math.round(height * .42)) };
+    return { position: { direction: "below" }, initialHeight: Math.max(180, Math.min(280, Math.round(height * .42))) };
   }
   const towardRight = width >= 540 && section !== "primitives" && index === 1;
   return {

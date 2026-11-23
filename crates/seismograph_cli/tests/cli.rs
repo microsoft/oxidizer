@@ -28,7 +28,9 @@ fn monitor_web_is_available_without_entering_terminal_mode() {
         .output()
         .unwrap();
     assert!(result.status.success());
-    assert!(String::from_utf8(result.stdout).unwrap().contains("--port <PORT>"));
+    let help = String::from_utf8(result.stdout).unwrap();
+    assert!(help.contains("--port <PORT>"));
+    assert!(help.contains("--open"));
 }
 
 #[test]

@@ -5,7 +5,8 @@ import { useId, useState } from "react";
 import { api, download } from "./api.js";
 import { DataGrid, Detail, revealDetail } from "./data-grid.jsx";
 import { PaneWorkspace } from "./pane-workspace.jsx";
-import { CloseButton, TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
+import { timingSeries } from "./runtime-timing.js";
+import { CloseButton, DetailCard, TimeRuler, ViewHeading, ViewPanel, ViewTabs } from "./view-chrome.jsx";
 import { useSnapshotPage } from "./snapshot-page.js";
 import { pageSize, pickDrillRow, resolveDrillRow } from "./snapshot-state.js";
 
@@ -119,7 +120,7 @@ export function Snapshot({ snapshot, label, source, onLive, active, appliedFilte
       </div>
     </div>
     {snapshot.warnings?.map(warning => <p className="notice" key={warning}>{warning}</p>)}
-    {!!snapshot.filterSummary?.length && <Fields fields={snapshot.filterSummary} />}
+    {!!snapshot.filterSummary?.length && <DetailCard fields={snapshot.filterSummary} />}
     {showFilter && <form className="surface" onSubmit={event => { event.preventDefault(); applyFilter(filter); }}>
       <h3>Stack filter</h3>
       <p className="muted">Separate rules with spaces or commas. Use <code>crate:name</code>, <code>module:name::path</code>, or <code>function:name::path</code>.</p>
@@ -150,9 +151,9 @@ function SnapshotOverview({ snapshot, active }) {
   const page = useSnapshotPage({ snapshot, section: "overview", offset: 0, fullStack: false, by: "", descending: false, active });
   return <div hidden={!active}>
       <PageStatus page={page} label="Overview" />
-      <div className="overview-stats">{page.data?.rows?.map(row => <section key={row.title} className="surface" aria-label={row.title}>
-        <h3>{row.title}</h3><Fields fields={rowFields(row)} />
-      </section>)}</div>
+      <div className="overview-stats">{page.data?.rows?.map(row =>
+        <DetailCard key={row.title} title={row.title} fields={rowFields(row)} />
+      )}</div>
   </div>;
 }
 
@@ -284,7 +285,7 @@ function ReportGrid({ page, label, selected, onSelect, sortKeys, serverSort, con
 
 function RowDetails({ row, stackTitle = "Stack trace", openStack = false }) {
   return <>
-    <Fields fields={rowFields(row)} />
+    <DetailCard fields={rowFields(row)} />
     {!!row.stack?.length && <Stack key={row.title} title={stackTitle} frames={row.stack} open={openStack} />}
     {row.relatedStacks?.map(({ title, frames }) => <Stack key={title} title={title} frames={frames} />)}
   </>;
@@ -382,8 +383,8 @@ function RuntimePanel({ snapshot, fullStack, active }) {
       {!worker ? <p className="muted">Select a worker to see its tasks.</p> : <>
         {tasks.data?.subject && <details className="runtime-worker-details">
           <summary>Worker details</summary>
-          <Fields fields={rowFields(tasks.data.subject)} />
-          <RuntimeCharts timelines={tasks.data.timelines ?? []} histograms={tasks.data.histograms ?? []} />
+          <DetailCard fields={rowFields(tasks.data.subject)} />
+          <RuntimeCharts {...timingSeries(tasks.data)} />
         </details>}
         <PageStatus page={tasks} label="tasks" />
         <DataGrid label="tasks" rows={tasks.data?.rows ?? []} rowKey={taskId} selected={task} onSelect={selectTask}
@@ -399,10 +400,11 @@ function RuntimePanel({ snapshot, fullStack, active }) {
       setOccurrence(null);
     }}>
       {tasks.error?.status === 404 ? <p className="muted">Select an available worker to inspect its tasks.</p> : <>
-        {selectedTask && <TaskSummary task={selectedTask.runtimeTask} />}
         <ViewTabs id={taskTabsId} label="Task details" items={taskViews} selected={taskView} onSelect={setTaskView} inspector />
+        {selectedTask && taskView !== "metadata" && <TaskSummary task={selectedTask.runtimeTask} />}
         <ViewPanel id={taskTabsId} item="operations" selected={taskView}>
-        <DataGrid label="inferred operations" rows={detail.data?.rows ?? []} rowKey={row => row.title} selected={operation}
+        {detail.data && !detail.data.total ? <p className="muted">No inferred operations.</p> :
+          <DataGrid label="inferred operations" rows={detail.data?.rows ?? []} rowKey={row => row.title} selected={operation}
           controls={detail.data?.total > pageSize ? <PageControls page={detail} label="Operation pages" onChange={setOperationOffset} /> : null}
           status={detail.data ? undefined : { loading: !detail.error, content: <PageStatus page={detail} label="inferred operations" /> }}
           columns={operationColumns} paged={detail.data?.total > pageSize} empty={detail.data ? "No inferred operations for this task." : ""}
@@ -411,7 +413,7 @@ function RuntimePanel({ snapshot, fullStack, active }) {
             setOccurrence(null);
             setOccurrenceOffset(0);
             revealDetail(trigger, "runtime-operation");
-          }} />
+          }} />}
         {operation && detail.data && <Detail id="runtime-operation" heading="h4" title={`${operation} occurrences`} close={() => {
           setOperation(null);
           setOccurrence(null);
@@ -428,9 +430,7 @@ function RuntimePanel({ snapshot, fullStack, active }) {
         </ViewPanel>
         <ViewPanel id={taskTabsId} item="timing" selected={taskView}>
           <PageStatus page={detail} label="timing" />
-          {detail.data && ((detail.data.timelines?.length || detail.data.histograms?.length)
-            ? <RuntimeCharts timelines={detail.data.timelines ?? []} histograms={detail.data.histograms ?? []} />
-            : <p className="muted">No timing data for this task.</p>)}
+          {detail.data && <RuntimeCharts {...timingSeries(detail.data)} empty={<p className="muted">No timing data for this task.</p>} />}
         </ViewPanel>
         <ViewPanel id={taskTabsId} item="metadata" selected={taskView}>
           {selectedTask ? <RowDetails row={selectedTask} stackTitle="Spawn stack" openStack /> : <PageStatus page={detail} label="metadata" />}
@@ -441,11 +441,15 @@ function RuntimePanel({ snapshot, fullStack, active }) {
 }
 
 function TaskSummary({ task }) {
-  return <dl className="stats task-summary">
-    <div><dt>State</dt><dd>{taskState(task) ?? "Unknown"}</dd></div>
-    <div><dt>Polls</dt><dd>{task.execution ? formatValue("polls", task.execution.polls ?? "0") : "Unknown"}</dd></div>
-    <div><dt>Observed execution</dt><dd>{formatValue("executingFraction", task.execution?.executingFraction)}</dd></div>
-  </dl>;
+  const state = taskState(task);
+  const { execution } = task;
+  const fields = [
+    ...(state && state !== "Unknown" ? [{ name: "State", value: state }] : []),
+    ...(execution ? [{ name: "Polls", value: formatValue("polls", execution.polls ?? "0") }] : []),
+    ...(execution?.executingFraction != null
+      ? [{ name: "Observed execution", value: formatValue("executingFraction", execution.executingFraction) }] : []),
+  ];
+  return fields.length ? <div className="task-summary"><DetailCard fields={fields} /></div> : null;
 }
 
 function occurrenceKey({ taskOccurrence }) {
@@ -453,19 +457,37 @@ function occurrenceKey({ taskOccurrence }) {
 }
 
 function Stack({ title, frames = [], open }) {
-  return frames.length ? <details open={open}><summary>{title} ({frames.length} frames)</summary>
-    <ol className="stack">{frames.map((frame, index) => <li key={index}>{frame}</li>)}</ol>
-  </details> : <p className="muted">{title}: unavailable</p>;
+  const [copyResult, setCopyResult] = useState(null);
+  if (!frames.length) return <p className="muted">{title}: unavailable</p>;
+  const text = frames.join("\n");
+
+  async function copy() {
+    try {
+      if (!navigator.clipboard) {
+        setCopyResult({ text, message: "Select and copy the text." });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      setCopyResult({ text, message: "Copied" });
+    } catch {
+      setCopyResult({ text, message: "Could not copy. Select and copy the text." });
+    }
+  }
+
+  return <details open={open}>
+    <summary>{title} ({frames.length} frames)</summary>
+    <div className="stack-trace">
+      <div className="actions stack-actions">
+        <small role="status">{copyResult?.text === text ? copyResult.message : ""}</small>
+        <button type="button" aria-label={`Copy ${title}`} onClick={copy}>Copy</button>
+      </div>
+      <textarea className="stack-text" aria-label={title} readOnly value={text} rows={Math.min(8, frames.length)} />
+    </div>
+  </details>;
 }
 
-export function Fields({ fields }) {
-  return fields.length ? <dl className="fields">{fields.map(({ name, value }, index) => <div key={index}>
-    {name && <dt>{name}</dt>}<dd>{value}</dd>
-  </div>)}</dl> : null;
-}
-
-function RuntimeCharts({ timelines, histograms }) {
-  if (!timelines.length && !histograms.length) return null;
+function RuntimeCharts({ timelines, histograms, empty }) {
+  if (!timelines.length && !histograms.length) return empty ?? null;
   // The report API uses the same observation window for every timeline in a page.
   const observation = timelines[0];
   return <div className="runtime-charts">
@@ -489,32 +511,41 @@ function RuntimeCharts({ timelines, histograms }) {
       {timelines.some(timeline => timeline.bins.some(bin => bin.fraction == null)) &&
         <p className="timing-track-note">Gray marks indicate no observation.</p>}
     </section>}
-    {!!histograms.length && <div className="histograms">{histograms.map(histogram => {
-      const counts = histogram.buckets.map(bucket => BigInt(bucket.count ?? 0));
-      const max = Math.max(1, ...counts.map(Number));
-      const range = bucket => {
-        const start = format.format(BigInt(bucket.lowerNanos ?? 0));
-        return bucket.upperNanos === "18446744073709551615"
-          ? `At least ${start} ns`
-          : `${start}–${format.format(BigInt(bucket.upperNanos))} ns`;
-      };
-      return <figure key={histogram.title}><figcaption>{histogram.title}</figcaption>
-        <svg viewBox={`0 0 ${histogram.buckets.length * 40} 60`} preserveAspectRatio="none" aria-hidden="true">
-          {histogram.buckets.map((bucket, index) => {
-            const count = counts[index];
-            const height = count > 0n ? Math.max(2, Number(count) * 58 / max) : 1;
-            return <rect key={index} className={count > 0n ? undefined : "empty-bucket"} x={index * 40} y={60 - height} width="32" height={height}>
-              <title>{range(bucket)}: {format.format(count)}</title>
-            </rect>;
-          })}
-        </svg>
-        <details><summary>Exact bucket counts</summary>
-          <Fields fields={histogram.buckets.filter((_, index) => counts[index] > 0n).map(bucket => ({
-            name: range(bucket),
-            value: format.format(BigInt(bucket.count ?? 0)),
-          }))} />
-        </details>
-      </figure>;
-    })}</div>}
+    {!!histograms.length && <div className="histograms">{histograms.map(histogram =>
+      <DurationHistogram key={histogram.title} {...histogram} />
+    )}</div>}
   </div>;
+}
+
+function durationRange({ lowerNanos = "0", upperNanos = "0" }) {
+  const start = format.format(BigInt(lowerNanos));
+  return upperNanos === "18446744073709551615"
+    ? `At least ${start} ns`
+    : `${start}–${format.format(BigInt(upperNanos))} ns`;
+}
+
+function DurationHistogram({ title, buckets }) {
+  if (buckets.length === 1) {
+    const [bucket] = buckets;
+    return <figure><figcaption>{title}</figcaption>
+      <p className="muted">{format.format(bucket.count)} {bucket.count === 1n ? "sample" : "samples"} · {durationRange(bucket)}</p>
+    </figure>;
+  }
+  const max = Math.max(...buckets.map(bucket => Number(bucket.count)));
+  return <figure><figcaption>{title}</figcaption>
+    <svg viewBox={`0 0 ${buckets.length * 40} 60`} preserveAspectRatio="none" aria-hidden="true">
+      {buckets.map((bucket, index) => {
+        const height = bucket.count > 0n ? Math.max(2, Number(bucket.count) * 58 / max) : 1;
+        return <rect key={index} className={bucket.count > 0n ? undefined : "empty-bucket"}
+          x={index * 40} y={60 - height} width="32" height={height}>
+          <title>{durationRange(bucket)}: {format.format(bucket.count)}</title>
+        </rect>;
+      })}
+    </svg>
+    <details><summary>Exact bucket counts</summary>
+      <dl className="detail-fields">{buckets.map((bucket, index) => bucket.count > 0n &&
+        <div key={index}><dt>{durationRange(bucket)}</dt><dd>{format.format(bucket.count)}</dd></div>
+      )}</dl>
+    </details>
+  </figure>;
 }

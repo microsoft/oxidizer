@@ -95,10 +95,6 @@ main { padding: .5rem .65rem; min-width: 0; min-height: 0; overflow: auto; conta
 .heading-title .view-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .view-kind, .view-context { color: var(--muted); font-size: .85rem }
 .view-context { margin-top: .1rem; overflow-wrap: anywhere }
-.stats { display: flex; flex-wrap: wrap; gap: .2rem 1rem; padding: .18rem 0 .45rem }
-.stats > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .35rem }
-.stats dd { font-weight: 600 }
-.task-summary { padding: 0; gap: .15rem .9rem }
 .inspector-tabs { border-bottom: 1px solid var(--border) }
 dd, td { font-variant-numeric: tabular-nums }
 .live-actions { justify-content: flex-end }
@@ -138,32 +134,49 @@ dd, td { font-variant-numeric: tabular-nums }
 .snapshot-help summary { list-style: none; padding: .18rem .45rem; color: var(--muted) }
 .snapshot-help p { position: absolute; z-index: 1; right: 0; top: 100%; width: min(23rem, 75vw); padding: .5rem; background: var(--panel); border: 1px solid var(--border); border-radius: .35rem }
 .saved-path { display: block; margin-top: .35rem; overflow-wrap: anywhere }
-.overview-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .4rem }
+.overview-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: .4rem }
 .table-scroll { overflow: auto }
 table { width: 100%; border-collapse: collapse }
 th, td { text-align: left; padding: .16rem .4rem }
 thead th { color: var(--muted); font-weight: 550; white-space: nowrap; border-bottom: 1px solid var(--border) }
 .detail-pane summary { margin-top: .2rem }
 summary { cursor: pointer }
-.fields { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin-top: .15rem }
-.fields > div { max-width: 100%; overflow-wrap: anywhere }
+.detail-card {
+  min-width: 0; display: grid; align-content: start; gap: .3rem; padding: .35rem .5rem;
+  background: var(--background); border: 1px solid var(--border); border-radius: .2rem;
+}
+.detail-fields {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 8rem), 1fr));
+  gap: .25rem .7rem;
+}
+.detail-fields > div { min-width: 0; overflow-wrap: anywhere }
+.detail-notes { margin: 0; padding-inline-start: 1.15rem; overflow-wrap: anywhere }
+.detail-card dd { font-weight: 550 }
+.task-summary .detail-card { width: fit-content; max-width: 100% }
+.task-summary .detail-fields { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem }
+.task-summary .detail-fields > div { max-width: 100% }
+.live > .detail-card, .snapshot > .detail-card { margin-bottom: .4rem }
+.runtime-worker-details > .detail-card { margin-top: .3rem }
+.detail-card + details { margin-top: .3rem }
 dt { font-size: .85rem }
 dd { margin: 0 }
-.stack { padding-left: 1.4rem; margin-block: .2rem; overflow-wrap: anywhere; font: .9rem/1.45 ui-monospace, monospace }
+.stack-trace { min-width: 0; display: grid; gap: .25rem; margin-top: .25rem }
+.stack-actions { justify-content: flex-end }
+.stack-text { display: block; min-height: 0; white-space: pre; overflow: auto; font: .9rem/1.45 ui-monospace, monospace }
 .pagination { justify-content: center }
 .filter-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .7rem }
 .filter-fields label { align-items: stretch; flex-direction: column }
-.data-grid, .list-pane, .detail-layout { min-width: 0; display: grid; gap: .35rem; align-content: start }
-.detail-layout { grid-template-columns: minmax(0, 1fr); align-items: start }
+.data-grid, .list-pane { min-width: 0; display: grid; gap: .35rem; align-content: start }
 .pane-workspace { margin-top: .3rem; min-width: 0 }
 .pane-layout-tools { justify-content: flex-end; margin-bottom: .2rem }
 .dock-container { height: max(var(--dock-min-height), calc(100cqh - 9rem)); min-width: 0 }
 .monitor-dock { height: 100%; width: 100% }
 .dock-report { height: 100%; overflow: auto; scroll-padding-top: .25rem; container-type: inline-size; scrollbar-color: #aab5c0 var(--surface) }
 .dock-report .grid-scroll { max-height: none; overflow: visible }
-.grid-filter input { flex: 0 1 14rem; min-width: 6rem; max-width: 100% }
 .grid-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem }
 .grid-tools nav { margin-left: auto }
+.grid-filter-input { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; max-width: 100% }
+.grid-filter-input input { width: min(14rem, 100%); min-width: 0 }
 .grid-empty { color: var(--muted) }
 .grid-scroll { overflow: auto; max-height: min(40vh, 30rem) }
 .grid-table thead { position: sticky; top: 0; background: var(--surface); z-index: 1 }
@@ -182,6 +195,14 @@ dd { margin: 0 }
 .sort-mark.sorted { color: var(--text); opacity: 1 }
 .grid-table button { padding: .08rem .25rem; margin-left: -.25rem; text-align: left; border-color: transparent; background: transparent }
 .grid-table thead button { white-space: nowrap }
+.grid-title { display: flex; align-items: center; gap: .2rem }
+.grid-title > button:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.grid-title .grid-filter-toggle {
+  flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; margin: 0;
+}
+.grid-filter-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3 }
+.grid-filter-toggle.active, .grid-filter-toggle[aria-expanded=true] { background: var(--selected); color: var(--accent) }
+.grid-filter-toggle.active svg { fill: currentColor }
 .grid-table .row-link { display: block; max-width: min(23rem, 100%); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .sidebar .grid-table { table-layout: fixed }
 .sidebar .grid-table .numeric { width: 4.2rem }
@@ -193,7 +214,6 @@ dd { margin: 0 }
 .detail-pane > .section-heading { min-height: 1.8rem; align-items: start }
 .detail-pane > .section-heading h3, .detail-pane > .section-heading h4, .detail-pane > .section-heading h5 { align-self: center }
 .detail-pane .detail-pane, .detail-pane [role=tabpanel] > .detail-pane { padding: .35rem 0 0; border-top: 1px solid var(--border); margin-top: .35rem }
-.live .detail-pane { background: var(--panel); border: 1px solid var(--border) }
 .runtime-worker-details { border-top: 1px solid var(--border); padding-top: .3rem }
 .runtime-charts { display: grid; gap: .45rem; margin-top: .3rem }
 .timing-tracks { background: var(--background); border: 1px solid var(--border) }
@@ -204,21 +224,17 @@ dd { margin: 0 }
 .timing-track-note { color: var(--muted); padding: .2rem .4rem; border-top: 1px solid var(--border) }
 .timing-track rect.unknown { fill: var(--muted) }
 .timing-track rect.zero { fill: var(--accent); opacity: .5 }
-.histograms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .45rem }
+.histograms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .35rem; max-width: 44rem }
 .histograms figure { margin: 0; padding: .3rem .4rem; background: var(--background); border: 1px solid var(--border); min-width: 0 }
 .histograms svg { display: block; width: 100%; height: 2.25rem; margin-block: .2rem; fill: var(--accent) }
 .runtime-charts rect.empty-bucket { fill: var(--accent); opacity: .25 }
-@container (min-width: 34rem) {
-  .detail-layout.with-detail { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) }
-}
 @container (max-width: 28rem) {
   .timing-track { grid-template-columns: minmax(0, 1fr); gap: .1rem }
 }
 @container (max-width: 32rem) {
-  .live .detail-layout .grid-table :is(th, td) { padding-inline: .25rem }
-  .live .detail-layout .grid-table .row-link { white-space: normal; overflow-wrap: anywhere }
-  .live .detail-layout .grid-table .sort-mark:not(.sorted) { display: none }
-  .live .detail-layout .grid-scroll { scrollbar-color: #aab5c0 var(--surface) }
+  .live .grid-table :is(th, td) { padding-inline: .25rem }
+  .live .grid-table .sort-mark:not(.sorted) { display: none }
+  .live .grid-scroll { scrollbar-color: #aab5c0 var(--surface) }
 }
 @media (max-width: 650px) {
   .connection { display: none }
