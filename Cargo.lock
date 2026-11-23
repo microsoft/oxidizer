@@ -3982,6 +3982,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidizer_health"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bitflags 2.13.2",
+ "bytesbuf",
+ "ctor",
+ "futures",
+ "http",
+ "http_extensions",
+ "layered",
+ "performables",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
+ "tick",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

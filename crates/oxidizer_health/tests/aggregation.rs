@@ -1,0 +1,508 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Contract tests for publisher, component, and aggregator behavior.
+
+use std::collections::HashSet;
+use std::pin::pin;
+use std::sync::{Arc, Mutex, mpsc};
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use futures::executor::block_on;
+use oxidizer_health::{Aggregator, Attribute, AttributeValue, Component, Filter, Health};
+use thread_aware::{ThreadAware, ThreadBuilder};
+
+testing_aids::init_tracing!();
+
+struct BlockingWake {
+    entered: mpsc::Sender<()>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl Wake for BlockingWake {
+    fn wake(self: Arc<Self>) {
+        self.entered.send(()).expect("test is waiting for the wake");
+        self.release
+            .lock()
+            .expect("release lock is not poisoned")
+            .recv()
+            .expect("test releases the waker");
+    }
+}
+
+fn is_ready(future: impl Future<Output = ()>) -> bool {
+    let mut future = pin!(future);
+    future.as_mut().poll(&mut Context::from_waker(Waker::noop())) == Poll::Ready(())
+}
+
+fn wait_for_component(component: &mut Component, state: Health) {
+    block_on(async {
+        while component.state() != state {
+            component.changed().await;
+        }
+    });
+}
+
+fn wait_for_aggregator(aggregator: &mut Aggregator, state: Health) {
+    block_on(async {
+        while aggregator.state() != state {
+            aggregator.changed().await;
+        }
+    });
+}
+
+#[test]
+fn empty_aggregator_and_component_are_unhealthy() {
+    let aggregator = Aggregator::default();
+    assert_eq!(aggregator.state(), Health::Unhealthy);
+
+    let component = aggregator.component("database");
+    assert_eq!(component.state(), Health::Unhealthy);
+    assert_eq!(aggregator.state(), Health::Unhealthy);
+}
+
+#[test]
+fn worst_publisher_and_component_win() {
+    let mut aggregator = Aggregator::new();
+    let database = aggregator.component("database");
+    let cache = aggregator.component("cache");
+    let mut primary = database.publisher();
+    let mut replica = database.publisher();
+    let _cache = cache.publisher();
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+
+    replica.degraded("lagging");
+    wait_for_aggregator(&mut aggregator, Health::Degraded);
+    assert_eq!(database.state(), Health::Degraded);
+    assert_eq!(aggregator.state(), Health::Degraded);
+
+    primary.publish(Health::Unhealthy, Vec::<Attribute>::new());
+    wait_for_aggregator(&mut aggregator, Health::Unhealthy);
+    assert_eq!(database.state(), Health::Unhealthy);
+    assert_eq!(cache.state(), Health::Healthy);
+    assert_eq!(aggregator.state(), Health::Unhealthy);
+
+    primary.publish(Health::Healthy, Vec::<Attribute>::new());
+    replica.publish(Health::Healthy, Vec::<Attribute>::new());
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+}
+
+#[test]
+fn dropping_publishers_and_components_converges() {
+    let mut aggregator = Aggregator::new();
+    let healthy = aggregator.component("healthy");
+    let _healthy_publisher = healthy.publisher();
+    let mut failing = aggregator.component("failing");
+    let mut failing_publisher = failing.publisher();
+    failing_publisher.degraded("broken");
+    wait_for_aggregator(&mut aggregator, Health::Degraded);
+
+    drop(failing_publisher);
+    wait_for_component(&mut failing, Health::Unhealthy);
+    wait_for_aggregator(&mut aggregator, Health::Unhealthy);
+
+    drop(failing);
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+    assert_eq!(block_on(aggregator.reports(Filter::ALL)).len(), 1);
+}
+
+#[test]
+fn dropping_a_publisher_does_not_wait_for_a_notification_consumer() {
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    let publisher = component.publisher();
+    block_on(component.changed());
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (returned_tx, returned_rx) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    }));
+    let mut changed = pin!(component.changed());
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+    let worker = thread::spawn(move || {
+        drop(publisher);
+        returned_tx.send(()).unwrap();
+    });
+
+    let returned = returned_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let _ = release_tx.send(());
+    worker.join().unwrap();
+    assert!(notified, "the component change must notify its consumer");
+    assert!(returned, "publisher cleanup must not wait for the consumer");
+}
+
+#[test]
+fn publishing_does_not_wait_for_a_notification_consumer() {
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    block_on(component.changed());
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (returned_tx, returned_rx) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    }));
+    let mut changed = pin!(component.changed());
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+    let worker = thread::spawn(move || {
+        publisher.degraded("slow");
+        returned_tx.send(()).unwrap();
+    });
+
+    let returned = returned_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let _ = release_tx.send(());
+    worker.join().unwrap();
+    assert!(notified, "the component change must notify its consumer");
+    assert!(returned, "publishing must not wait for the consumer");
+}
+
+#[test]
+fn last_component_handle_unregisters_during_an_in_flight_publish() {
+    let aggregator = Aggregator::new();
+    let component = aggregator.component("database");
+    let mut monitor = aggregator.monitor();
+    let mut publisher = component.publisher();
+    block_on(monitor.changed());
+    assert_eq!(monitor.state(), Health::Healthy);
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    }));
+    let mut changed = pin!(monitor.changed());
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+    let worker = thread::spawn(move || publisher.degraded("slow"));
+    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    drop(component);
+    let remaining = block_on(aggregator.reports(Filter::ALL)).len();
+    let _ = release_tx.send(());
+    worker.join().unwrap();
+
+    assert!(notified, "the aggregate change must notify its consumer");
+    assert_eq!(remaining, 0);
+}
+
+#[test]
+fn publisher_outliving_component_only_changes_local_signal() {
+    let aggregator = Aggregator::new();
+    let component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    drop(component);
+
+    publisher.degraded("orphaned");
+    assert_eq!(publisher.signal().state(), Health::Degraded);
+    assert_eq!(publisher.clone().signal().state(), Health::Healthy);
+    assert_eq!(aggregator.state(), Health::Unhealthy);
+}
+
+#[test]
+fn component_is_idempotent_by_name() {
+    let aggregator = Aggregator::new();
+    let mut first = aggregator.component("database");
+    let mut publisher = aggregator.component(String::from("database")).publisher();
+    publisher.degraded("slow");
+    wait_for_component(&mut first, Health::Degraded);
+    assert_eq!(block_on(aggregator.reports(Filter::ALL)).len(), 1);
+}
+
+#[test]
+#[should_panic(expected = "empty")]
+fn empty_component_name_panics() {
+    let _component = Aggregator::new().component("");
+}
+
+#[test]
+fn cloned_publisher_is_independent_and_healthy() {
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    let mut original = component.publisher();
+    original.degraded("slow");
+
+    let clone = original.clone();
+    assert_eq!(clone.signal().state(), Health::Healthy);
+    wait_for_component(&mut component, Health::Degraded);
+
+    drop(original);
+    wait_for_component(&mut component, Health::Healthy);
+    drop(clone);
+    wait_for_component(&mut component, Health::Unhealthy);
+}
+
+#[test]
+fn component_remains_live_after_aggregator_is_dropped() {
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    drop(aggregator);
+
+    let mut publisher = component.publisher();
+    wait_for_component(&mut component, Health::Healthy);
+    publisher.degraded("slow");
+    wait_for_component(&mut component, Health::Degraded);
+    drop(publisher);
+    wait_for_component(&mut component, Health::Unhealthy);
+}
+
+#[test]
+fn equal_signal_does_not_notify() {
+    let aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    block_on(component.changed());
+    publisher.publish(Health::Degraded, [("a", 1_i64), ("b", 2_i64)]);
+    block_on(component.changed());
+
+    publisher.publish(Health::Degraded, [("b", 2_i64), ("a", 1_i64)]);
+    assert!(!is_ready(component.changed()));
+}
+
+#[test]
+fn every_handle_has_its_own_cursor() {
+    let mut aggregator = Aggregator::new();
+    let mut aggregator_clone = aggregator.clone();
+    let mut monitor = aggregator.monitor();
+    let mut monitor_clone = monitor.clone();
+    assert!(!is_ready(aggregator.changed()));
+    assert!(!is_ready(monitor.changed()));
+
+    let mut component = aggregator.component("database");
+    let mut component_clone = component.clone();
+    block_on(aggregator.changed());
+    block_on(aggregator_clone.changed());
+    block_on(monitor.changed());
+    block_on(monitor_clone.changed());
+    let _publisher = component.publisher();
+
+    block_on(aggregator.changed());
+    block_on(monitor.changed());
+    block_on(monitor_clone.changed());
+    block_on(component.changed());
+    block_on(component_clone.changed());
+    assert!(!is_ready(monitor.changed()));
+    assert_eq!(monitor.state(), Health::Healthy);
+}
+
+#[test]
+fn relocated_handles_observe_updates_from_the_original_publisher() {
+    let aggregator = Aggregator::new();
+    let component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    let mut root = aggregator.clone();
+    let mut subsystem = component;
+    let mut monitor = aggregator.monitor();
+    let source = ThreadBuilder::default().build(thread::current().id());
+    thread::scope(|scope| {
+        let (ready, relocated) = mpsc::channel();
+        let observer = scope.spawn(move || {
+            let destination = ThreadBuilder::default().build(thread::current().id());
+            root.relocate(Some(&source), &destination);
+            subsystem.relocate(Some(&source), &destination);
+            monitor.relocate(Some(&source), &destination);
+            ready.send(()).unwrap();
+            wait_for_aggregator(&mut root, Health::Degraded);
+            wait_for_component(&mut subsystem, Health::Degraded);
+            assert_eq!(monitor.state(), Health::Degraded);
+        });
+        relocated.recv().unwrap();
+        publisher.degraded("slow replica");
+        observer.join().unwrap();
+    });
+}
+
+#[test]
+fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
+    let mut aggregator = Aggregator::new();
+    let component = aggregator.component("database");
+    let monitor = aggregator.monitor();
+    let mut publisher = component.publisher();
+    publisher.degraded("slow replica");
+    wait_for_aggregator(&mut aggregator, Health::Degraded);
+
+    for diagnostic in [
+        format!("{aggregator:?}"),
+        format!("{monitor:?}"),
+        format!("{component:?}"),
+        format!("{publisher:?}"),
+    ] {
+        assert!(diagnostic.contains("Degraded"), "{diagnostic}");
+    }
+    assert!(format!("{component:?}").contains("database"));
+    assert!(format!("{publisher:?}").contains("slow replica"));
+}
+
+#[test]
+fn monitor_keeps_reading_reports_after_the_aggregator_handle_drops() {
+    let aggregator = Aggregator::new();
+    let mut monitor = aggregator.monitor();
+    let component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    drop(aggregator);
+
+    publisher.publish(Health::Degraded, [("reason", Box::<str>::from("slow replica"))]);
+    block_on(async {
+        while monitor.state() != Health::Degraded {
+            monitor.changed().await;
+        }
+        let report = monitor.reports(Filter::DEGRADED).await.next().expect("database remains registered");
+        let (signal, count) = report
+            .signals(Health::Degraded)
+            .next()
+            .expect("report includes the degraded publisher");
+        assert_eq!(report.name(), "database");
+        assert_eq!(count, 1);
+        let [reason] = signal.attributes() else {
+            panic!("expected a single diagnostic attribute");
+        };
+        assert_eq!(reason.name().as_ref(), "reason");
+        assert_eq!(reason.value(), &AttributeValue::from("slow replica"));
+    });
+}
+
+#[test]
+#[cfg_attr(panic = "abort", ignore = "requires a worker panic to unwind without terminating the process")]
+fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
+    struct PanickingWake;
+    impl Wake for PanickingWake {
+        fn wake(self: Arc<Self>) {
+            panic!("simulated consumer failure");
+        }
+    }
+
+    let mut aggregator = Aggregator::new();
+    let component = aggregator.component("database");
+    let mut publisher = component.publisher();
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+    let mut monitor = aggregator.monitor();
+    let mut changed = pin!(monitor.changed());
+    let waker = Waker::from(Arc::new(PanickingWake));
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+    // Both signals are healthy: the worker failure, not the published state, must close readiness.
+    publisher.publish(Health::Healthy, [("revision", 2_i64)]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while aggregator.state() == Health::Healthy && Instant::now() < deadline {
+        thread::yield_now();
+    }
+    assert_eq!(aggregator.state(), Health::Unhealthy);
+    assert_eq!(component.state(), Health::Unhealthy);
+}
+
+#[test]
+fn reports_select_signals_by_filter() {
+    let aggregator = Aggregator::new();
+    let mut database = aggregator.component("database");
+    let mut cache = aggregator.component("cache");
+    let mut primary = database.publisher();
+    let mut replica = database.publisher();
+    let _cache = cache.publisher();
+    primary.degraded("slow");
+    replica.degraded("slow");
+    wait_for_component(&mut cache, Health::Healthy);
+
+    let report = block_on(async {
+        loop {
+            let report = database.report(Filter::DEGRADED).await;
+            if report.signal_count(Health::Degraded) == 2 {
+                break report;
+            }
+            database.changed().await;
+        }
+    });
+    let names: HashSet<_> = block_on(aggregator.reports(Filter::DEGRADED))
+        .map(|report| report.name().to_owned())
+        .collect();
+    assert_eq!(names, HashSet::from(["database".to_owned(), "cache".to_owned()]));
+
+    assert_eq!(report.state(), Health::Degraded);
+    assert_eq!(report.signal_count(Health::Degraded), 2);
+    assert_eq!(report.signals(Health::Degraded).len(), 1);
+    assert_eq!(report.signals(Health::Healthy).len(), 0);
+
+    let report = block_on(cache.report(Filter::DEGRADED));
+    assert_eq!(report.signal_count(Health::Healthy), 1);
+    assert_eq!(report.signals(Health::Healthy).len(), 0);
+    assert_eq!(block_on(cache.report(Filter::HEALTHY)).signals(Health::Healthy).len(), 1);
+}
+
+#[test]
+fn a_burst_of_publishers_converges_after_a_blocked_consumer_resumes() {
+    let aggregator = Aggregator::new();
+    let mut blocker = aggregator.component("observer");
+    let mut trigger = blocker.publisher();
+    block_on(blocker.changed());
+    let (entered, waiting) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        entered,
+        release: Mutex::new(resume),
+    }));
+    let mut changed = pin!(blocker.changed());
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+    trigger.degraded("pause");
+    waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+
+    let component = aggregator.component("clients");
+    let publishers: Vec<_> = (0..512).map(|_| component.publisher()).collect();
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let count = block_on(component.report(Filter::HEALTHY)).signal_count(Health::Healthy);
+        if count == publishers.len() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "only {count} publishers contributed to the report");
+        thread::yield_now();
+    }
+}
+
+#[test]
+fn concurrent_publishers_converge_to_latest_signals() {
+    let mut aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
+    let workers: Vec<_> = (0..4)
+        .map(|_| {
+            let mut publisher = component.publisher();
+            thread::spawn(move || {
+                for round in 0..1_000 {
+                    if round % 2 == 0 {
+                        publisher.degraded("flapping");
+                    } else {
+                        publisher.publish(Health::Unhealthy, Vec::<Attribute>::new());
+                    }
+                }
+                publisher.publish(Health::Healthy, Vec::<Attribute>::new());
+                publisher
+            })
+        })
+        .collect();
+    let publishers: Vec<_> = workers.into_iter().map(|worker| worker.join().unwrap()).collect();
+
+    let report = block_on(async {
+        loop {
+            let report = component.report(Filter::ALL).await;
+            if report.signal_count(Health::Healthy) == publishers.len() {
+                break report;
+            }
+            component.changed().await;
+        }
+    });
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+    assert_eq!(report.signal_count(Health::Healthy), publishers.len());
+
+    drop(publishers);
+    wait_for_aggregator(&mut aggregator, Health::Unhealthy);
+}

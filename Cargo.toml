@@ -92,6 +92,7 @@ azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
 backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
+bitflags = { version = "2.13.2", default-features = false }
 bolero = { version = "0.13.4", default-features = false }
 bon = { version = "3.10.3", default-features = false }
 brotli = { version = "9.0.0", default-features = false }
