@@ -3,7 +3,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-/// Operational state of a publisher, component, or process.
+/// A health state reported by a publisher or computed for a component or process.
 ///
 /// States are ordered from best to worst, so aggregation selects the maximum:
 /// `Healthy < Degraded < Unhealthy`.

@@ -26,8 +26,8 @@ Register a component for the database. Use its [`Publisher`][__link1] to report 
 ```rust
 use oxidizer_health::{Aggregator, Health};
 
-let health = Aggregator::new();
-let database = health.component("database");
+let aggregator = Aggregator::new();
+let database = aggregator.component("database");
 let mut publisher = database.publisher();
 
 publisher.degraded("slow queries");
@@ -57,8 +57,8 @@ fn report_failures(publisher: &mut Publisher, failures: u32) {
     publisher.publish(state, [("consecutive_failures", i64::from(failures))]);
 }
 
-let health = Aggregator::new();
-let database = health.component("database");
+let aggregator = Aggregator::new();
+let database = aggregator.component("database");
 let mut publisher = database.publisher();
 
 report_failures(&mut publisher, 3);
@@ -120,7 +120,7 @@ Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `fals
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb1pAvmHTR880bJvZcIoO3E8Ub0Kg5yC4zWFsbglPThKC0M2lhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQsRipWHGRG4bFGUY5qAgGvIbwRUMB4UeudUbbmV31MIax_9hZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
  [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
  [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
  [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor

@@ -18,8 +18,8 @@
 //! # testing_aids::init_tracing!();
 //! use oxidizer_health::{Aggregator, Health};
 //!
-//! let health = Aggregator::new();
-//! let database = health.component("database");
+//! let aggregator = Aggregator::new();
+//! let database = aggregator.component("database");
 //! let mut publisher = database.publisher();
 //!
 //! publisher.degraded("slow queries");
@@ -50,8 +50,8 @@
 //!     publisher.publish(state, [("consecutive_failures", i64::from(failures))]);
 //! }
 //!
-//! let health = Aggregator::new();
-//! let database = health.component("database");
+//! let aggregator = Aggregator::new();
+//! let database = aggregator.component("database");
 //! let mut publisher = database.publisher();
 //!
 //! report_failures(&mut publisher, 3);
@@ -89,9 +89,9 @@
 //!     }
 //! }
 //! # futures::executor::block_on(async {
-//! #     let health = oxidizer_health::Aggregator::new();
-//! #     let database = health.component("database");
-//! #     let mut monitor = health.monitor();
+//! #     let aggregator = oxidizer_health::Aggregator::new();
+//! #     let database = aggregator.component("database");
+//! #     let mut monitor = aggregator.monitor();
 //! #     let mut publisher = database.publisher();
 //! #     publisher.degraded("slow queries");
 //! #     while monitor.state() != Health::Degraded { monitor.changed().await; }
