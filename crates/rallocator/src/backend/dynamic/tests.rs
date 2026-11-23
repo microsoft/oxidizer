@@ -8,7 +8,7 @@ use super::*;
 use crate::backend::{mimalloc, snmalloc};
 
 #[cfg(unix)]
-fn lookup(setting: Option<&str>) -> Option<Choice> {
+fn lookup(setting: Option<&str>) -> Setting {
     let value = setting.map(|name| std::ffi::CString::new(name).unwrap());
     // SAFETY: The optional C string remains live throughout parsing.
     unsafe {
@@ -20,7 +20,7 @@ fn lookup(setting: Option<&str>) -> Option<Choice> {
 }
 
 #[cfg(windows)]
-fn lookup(setting: Option<&str>) -> Option<Choice> {
+fn lookup(setting: Option<&str>) -> Setting {
     let value: Vec<_> = setting.unwrap_or_default().encode_utf16().collect();
     env::read_with(|key, buffer| {
         for (i, unit) in "RALLOCATOR_DYNAMIC_PERSONALITY\0".encode_utf16().enumerate() {
@@ -41,31 +41,41 @@ fn losing_initializer_uses_the_backend_published_during_its_lookup() {
     let cache = AtomicU8::new(0);
     let loser = initialize(
         &cache,
+        Choice::System,
         || {
-            let winner = initialize(&cache, || Some(Choice::Mimalloc), || panic!("valid setting"));
+            let winner = initialize(
+                &cache,
+                Choice::Snmalloc,
+                || Setting::Known(Choice::Mimalloc),
+                |_| panic!("valid setting"),
+            );
             assert_eq!(winner, Choice::Mimalloc);
-            None
+            Setting::Unknown
         },
-        || panic!("only the winner reports an invalid setting"),
+        |_| panic!("only the winner reports an invalid setting"),
     );
     assert_eq!(loser, Choice::Mimalloc);
 }
 
 #[test]
 fn each_setting_freezes_one_backend_and_warns_only_on_initialization() {
-    for (setting, expected, warnings) in [
-        (None, Choice::System, 0),
-        (Some(""), Choice::System, 0),
-        (Some("snmalloc"), Choice::Snmalloc, 0),
-        (Some("mimalloc"), Choice::Mimalloc, 0),
-        (Some("system"), Choice::System, 0),
-        (Some("mimalloc-extra"), Choice::Snmalloc, 1),
-        (Some("SYSTEM"), Choice::Snmalloc, 1),
+    for (setting, default, expected, warns) in [
+        (None, Choice::System, Choice::System, false),
+        (None, Choice::Snmalloc, Choice::Snmalloc, false),
+        (Some(""), Choice::Mimalloc, Choice::Mimalloc, false),
+        (Some("snmalloc"), Choice::Mimalloc, Choice::Snmalloc, false),
+        (Some("mimalloc"), Choice::System, Choice::Mimalloc, false),
+        (Some("system"), Choice::Snmalloc, Choice::System, false),
+        (Some("mimalloc-extra"), Choice::System, Choice::System, true),
+        (Some("SYSTEM"), Choice::Snmalloc, Choice::Snmalloc, true),
+        (Some("bogus"), Choice::Mimalloc, Choice::Mimalloc, true),
     ] {
         let cache = AtomicU8::new(0);
-        let mut warned = 0;
-        let first = selected(&cache, |cache| initialize(cache, || lookup(setting), || warned += 1));
-        assert_eq!((first, warned), (expected, warnings));
+        let mut warning = None;
+        let first = selected(&cache, |cache| {
+            initialize(cache, default, || lookup(setting), |fallback| warning = Some(fallback))
+        });
+        assert_eq!((first, warning), (expected, warns.then_some(expected)));
 
         let layout = Layout::from_size_align(83, 64).unwrap();
         let address = std::thread::scope(|scope| {
@@ -116,25 +126,32 @@ fn each_setting_freezes_one_backend_and_warns_only_on_initialization() {
 
 #[test]
 fn invalid_setting_writes_the_fallback_diagnostic_to_the_supplied_output() {
-    let (mut reader, writer) = std::io::pipe().unwrap();
-    #[cfg(unix)]
-    let output = std::os::fd::AsRawFd::as_raw_fd(&writer);
-    #[cfg(windows)]
-    let output = std::os::windows::io::AsRawHandle::as_raw_handle(&writer);
-    let cache = AtomicU8::new(0);
-    assert_eq!(
-        initialize(
-            &cache,
-            || lookup(Some("invalid")),
-            env::stderr_warning(|_| env::write_warning(output))
-        ),
-        Choice::Snmalloc
-    );
-    drop(writer);
-    let mut message = String::new();
-    reader.read_to_string(&mut message).unwrap();
-    assert_eq!(
-        message,
-        "rallocator: unknown RALLOCATOR_DYNAMIC_PERSONALITY. Use snmalloc, mimalloc, or system. Using snmalloc.\n"
-    );
+    for (default, name) in [
+        (Choice::System, "system"),
+        (Choice::Snmalloc, "snmalloc"),
+        (Choice::Mimalloc, "mimalloc"),
+    ] {
+        let (mut reader, writer) = std::io::pipe().unwrap();
+        #[cfg(unix)]
+        let output = std::os::fd::AsRawFd::as_raw_fd(&writer);
+        #[cfg(windows)]
+        let output = std::os::windows::io::AsRawHandle::as_raw_handle(&writer);
+        let cache = AtomicU8::new(0);
+        assert_eq!(
+            initialize(
+                &cache,
+                default,
+                || lookup(Some("invalid")),
+                env::stderr_warning(|_, fallback| env::write_warning(output, fallback))
+            ),
+            default
+        );
+        drop(writer);
+        let mut message = String::new();
+        reader.read_to_string(&mut message).unwrap();
+        assert_eq!(
+            message,
+            format!("rallocator: unknown RALLOCATOR_DYNAMIC_PERSONALITY. Use snmalloc, mimalloc, or system. Using {name}.\n")
+        );
+    }
 }
