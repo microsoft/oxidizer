@@ -238,10 +238,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn histogram_records_all_samples() {
         let description = MetricDescription::new("test.request.size", InstrumentKind::Histogram, "Request payload size", "By");
 
@@ -269,10 +267,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn counter_accumulates_increments() {
         let batches = record_samples(&md("test.requests", InstrumentKind::Counter), &[3.0, 7.0]);
 
@@ -293,10 +289,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn gauge_records_latest_value() {
         let batches = record_samples(&md("test.queue_depth", InstrumentKind::Gauge), &[3.0, 7.0]);
 
@@ -316,10 +310,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn up_down_counter_accumulates_increments_and_decrements() {
         // Both signs must accumulate on the same instrument rather than replace its value.
         let batches = record_samples(&md("test.active_requests", InstrumentKind::UpDownCounter), &[3.0, -1.0]);

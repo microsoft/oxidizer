@@ -280,12 +280,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_ignores_events_without_a_log_signal() {
         let exporter = InMemoryLogExporter::default();
         let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
@@ -303,10 +297,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_omits_absent_source_metadata() {
         let exporter = InMemoryLogExporter::default();
         let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
@@ -324,10 +316,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn borrowed_log_metadata_and_keys_are_not_copied() {
         for owned in [false, true] {
             let exporter = InMemoryLogExporter::default();
@@ -372,10 +362,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn severity_filter_skips_conversion_independently_for_each_destination() {
         let info_exporter = InMemoryLogExporter::default();
         let error_exporter = InMemoryLogExporter::default();
@@ -412,12 +400,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel LoggerProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_drop_preserves_retained_provider() {
         let provider = SdkLoggerProvider::builder().build();
         let processor = LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
@@ -428,7 +410,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "SDK log emission reads the system clock")]
+    #[cfg_attr(
+        miri,
+        ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+    )]
     fn sdk_handles_keep_provider_usable_after_processor_drop() {
         let exporter = InMemoryLogExporter::default();
         let provider = SdkLoggerProvider::builder()
@@ -460,12 +445,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_flush_preserves_provider_failures() {
         let provider = SdkLoggerProvider::builder()
             .with_batch_exporter(InMemoryLogExporter::default())
@@ -483,10 +462,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
-    )]
     fn event_with_low_severity_not_reaches_logging_provider() {
         #[derive(Debug)]
         struct Probe {
@@ -556,10 +531,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
-    )]
     fn disabled_event_is_not_emitted_as_log() {
         use opentelemetry_sdk::logs::InMemoryLogExporter;
 

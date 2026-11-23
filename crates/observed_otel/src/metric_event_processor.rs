@@ -156,12 +156,6 @@ mod tests {
     use crate::test_support::{LogOnly, TestRequestCount, UnsourcedEvent};
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_processor_ignores_events_without_metrics() {
         let exporter = InMemoryMetricExporter::default();
         let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
@@ -186,12 +180,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_processor_drop_keeps_a_retained_provider_running() {
         let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(InMemoryMetricExporter::default())
@@ -205,12 +193,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_processor_flush_preserves_provider_failures() {
         let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(InMemoryMetricExporter::default())
@@ -230,7 +212,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
     fn redacted_dynamic_measurement_is_not_recorded_as_a_number() {
         struct DynamicMetricEvent {
@@ -456,10 +438,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_event_is_recorded_via_meter() {
         let metrics = emit_test_request(&InMemoryMetricExporter::default());
 
@@ -495,10 +475,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn event_level_metric_without_field_is_recorded_via_meter() {
         let metrics = emit_test_request_count(&InMemoryMetricExporter::default());
 
@@ -530,10 +508,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn multi_metric_event_reuses_collection_without_changing_dimensions() {
         let metrics = emit_test_multi_metric(&InMemoryMetricExporter::default());
 
@@ -573,10 +549,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn enrichment_dimension_field_is_recorded_as_dimension() {
         let metrics = emit_test_request_with_enrichment(&InMemoryMetricExporter::default());
 
@@ -601,10 +575,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
-    )]
     fn disabled_event_is_not_emitted_as_metric() {
         #[event("test.disabled_metric", disabled)]
         #[info]

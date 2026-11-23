@@ -45,10 +45,8 @@ struct TestRequest {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn log_and_metric_destinations_keep_independent_resource_overlays() {
     static ID: SinkId = SinkId::new("builder_log_metric");
 
@@ -163,7 +161,7 @@ fn destination_registration_preserves_initialization_errors() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
 )]
 fn metric_description_and_unit_reach_otel_exporter() {
     use observed_otel::builder;
@@ -203,7 +201,7 @@ fn metric_description_and_unit_reach_otel_exporter() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
 )]
 fn flush_pushes_metrics_to_exporter() {
     let exporter = InMemoryMetricExporter::default();
@@ -238,7 +236,7 @@ fn flush_pushes_metrics_to_exporter() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
 )]
 fn drop_flushes_metrics_to_exporter() {
     let exporter = InMemoryMetricExporter::default();
@@ -272,10 +270,6 @@ fn drop_flushes_metrics_to_exporter() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
-)]
 fn flush_is_idempotent_and_non_terminating() {
     let exporter = InMemoryMetricExporter::default();
     let sink = observed_otel::builder()
@@ -294,10 +288,8 @@ fn flush_is_idempotent_and_non_terminating() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn raw_processors_receive_events_and_flush() {
     // Noop sink has no providers; flush returns Ok.
     let noop = Sink::noop();
@@ -333,7 +325,7 @@ fn raw_processors_receive_events_and_flush() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "FIXME: pass tick::Clock into Sink so EventView timestamps do not call SystemTime::now() under Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
 fn composite_of_two_emitters_fans_out_to_both() {
     static APP: SinkId = SinkId::new("composite_fanout_app");
@@ -389,10 +381,8 @@ fn composite_of_two_emitters_fans_out_to_both() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn composite_enrichment_respects_child_isolation_and_scope() {
     use opentelemetry_sdk::logs::SdkLogRecord;
 
@@ -471,10 +461,8 @@ fn composite_enrichment_respects_child_isolation_and_scope() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn extend_redaction_applies_only_to_that_log_destination() {
     use data_privacy::Sensitive;
     use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
@@ -535,10 +523,8 @@ fn extend_redaction_applies_only_to_that_log_destination() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn extend_redaction_applies_only_to_that_metric_destination() {
     use data_privacy::Sensitive;
     use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
@@ -630,10 +616,8 @@ impl EventSampler for DropEvent {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
 )]
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 fn second_builder_event_sampler_replaces_first() {
     let logs = InMemoryLogExporter::default();
     let sink = observed_otel::builder()

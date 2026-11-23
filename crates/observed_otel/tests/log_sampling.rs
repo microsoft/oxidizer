@@ -254,7 +254,10 @@ fn assert_captured_context(observation: &Observation, request: &str, span_contex
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn continued_log_preserves_otel_context() {
     let span_context = SpanContext::new(
         TraceId::from(1_u128),
@@ -303,7 +306,10 @@ fn continued_log_preserves_otel_context() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn unsampled_destination_preserves_ambient_context() {
     let probe = LogProbe::default();
     let sink = builder().log(probe.clone()).clock(SimpleClock::new_frozen()).build().unwrap();
@@ -330,7 +336,10 @@ impl LogSampler for Discard {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn empty_log_batch_discards_one_destination() {
     let sampled = LogProbe::default();
     let unsampled = LogProbe::default();
@@ -350,7 +359,10 @@ fn empty_log_batch_discards_one_destination() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn log_sampler_receives_complete_record_before_processors() {
     let probe = LogProbe::default();
     let sampled = Arc::new(Mutex::<_>::new(Vec::new()));
@@ -390,7 +402,10 @@ fn log_sampler_receives_complete_record_before_processors() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn saved_log_preserves_context_across_suppression_changes() {
     let pending = Arc::new(Mutex::<_>::new(None::<LogSamplingContext>));
     let sampler_pending = Arc::clone(&pending);
@@ -455,7 +470,10 @@ fn saved_log_preserves_context_across_suppression_changes() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn many_log_batch_preserves_contexts_across_threads() {
     let pending = Mutex::<_>::new(Vec::new());
     let sampled = LogProbe::default();
@@ -500,7 +518,10 @@ fn many_log_batch_preserves_contexts_across_threads() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn destination_sampler_replacement_reaches_both_builders() {
     for processors_only in [false, true] {
         let probe = LogProbe::default();
@@ -536,7 +557,10 @@ fn destination_sampler_replacement_reaches_both_builders() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn log_sampler_receives_complete_redacted_record() {
     let sampler = |expected: &'static str| {
         let pending = Mutex::<_>::new(None);
@@ -597,10 +621,7 @@ fn log_sampler_receives_complete_redacted_record() {
     }
 }
 
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn sink_drop_discards_saved_records_before_provider_shutdown() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -619,10 +640,7 @@ fn sink_drop_discards_saved_records_before_provider_shutdown() {
     );
 }
 
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn saved_record_does_not_keep_provider_alive() {
     let saved = Arc::new(Mutex::<_>::new(None));
     let sampler_saved = Arc::clone(&saved);
@@ -646,7 +664,10 @@ fn saved_record_does_not_keep_provider_alive() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination completion reads the clock and metric export uses SDK threads")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
+)]
 fn late_log_sampling_does_not_change_metric_delivery() {
     let logs = LogProbe::default();
     let metrics = InMemoryMetricExporter::default();
@@ -678,7 +699,10 @@ fn late_log_sampling_does_not_change_metric_delivery() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn processor_mutation_reaches_later_processor() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -696,7 +720,10 @@ fn processor_mutation_reaches_later_processor() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn flush_sends_saved_records_in_order() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -733,7 +760,10 @@ fn flush_sends_saved_records_in_order() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn flush_with_suppressed_telemetry_sends_saved_records() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -756,10 +786,7 @@ fn flush_with_suppressed_telemetry_sends_saved_records() {
     assert_eq!(probe.attribute_values("value"), [Some(AnyValue::Int(1))]);
 }
 
-// TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-// https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn flush_with_no_saved_records_flushes_provider() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -774,7 +801,10 @@ fn flush_with_no_saved_records_flushes_provider() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn flush_sends_saved_records_before_returning_provider_error() {
     let probe = LogProbe {
         fail_flush: true,
@@ -796,7 +826,10 @@ fn flush_sends_saved_records_before_returning_provider_error() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
+)]
 fn sample_runs_while_sampler_flush_runs() {
     struct PausedFlush {
         sampler: SaveUntilFlush,

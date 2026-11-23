@@ -298,10 +298,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel InMemoryLogExporter calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock to set the log's observed timestamp. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_only_fields_and_enrichments_are_excluded_from_logs() {
         use opentelemetry::logs::AnyValue;
         use tick::SimpleClock;
@@ -404,7 +402,10 @@ mod tests {
     /// `metric_dest.with_scope(InstrumentationScope)` flows through to the
     /// `OTel` meter, surfacing on exported metrics' `InstrumentationScope`.
     #[test]
-    #[cfg_attr(miri, ignore)]
+    #[cfg_attr(
+        miri,
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
+    )]
     fn metric_with_scope_propagates_to_meter() {
         use crate::MetricDestinationExt;
 
@@ -442,10 +443,8 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "OTel MeterProviderBuilder eagerly calls current_exe (readlink/GetModuleFileNameW), unsupported by Miri isolation"
+        ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
     )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_with_scope_accepts_string_name() {
         use crate::MetricDestinationExt;
 

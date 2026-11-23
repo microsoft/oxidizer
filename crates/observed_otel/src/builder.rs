@@ -215,7 +215,6 @@ mod tests {
     /// Without `.id(...)`, the resulting sink falls back to the
     /// `observed::Sink::builder` placeholder id.
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn build_without_id_uses_placeholder() {
         let sink = crate::builder()
             .log(memory_logs(InMemoryLogExporter::default()))
@@ -229,7 +228,6 @@ mod tests {
 
     /// `.id(...)` propagates onto the resulting sink's id.
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn id_propagates_to_emitter() {
         let sink = crate::builder()
             .id("custom")

@@ -120,7 +120,10 @@ struct Context {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
+)]
 fn full_provider_records_metadata_and_redacted_dimensions() {
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
@@ -200,7 +203,6 @@ fn full_provider_records_metadata_and_redacted_dimensions() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
 fn provider_is_owned_even_when_no_instruments_are_cached() {
     let calls = Arc::new(Mutex::<_>::new(Vec::new()));
     let sink = observed_otel::builder()
@@ -228,7 +230,6 @@ fn provider_is_owned_even_when_no_instruments_are_cached() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
 fn provider_flush_errors_are_surfaced_and_do_not_skip_drop() {
     let calls = Arc::new(Mutex::<_>::new(Vec::new()));
     let sink = observed_otel::builder()
@@ -256,7 +257,10 @@ fn provider_flush_errors_are_surfaced_and_do_not_skip_drop() {
 }
 
 #[test]
-#[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
+#[cfg_attr(
+    miri,
+    ignore = "OpenTelemetry reads the wall clock when metric aggregation starts. This test runs natively and under cargo careful."
+)]
 fn sink_drop_exports_pending_metrics_and_keeps_shared_provider_usable() {
     let exporter = InMemoryMetricExporter::default();
     let reader = PeriodicReader::builder(exporter.clone())
