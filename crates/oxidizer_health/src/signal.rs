@@ -102,6 +102,8 @@ mod tests {
     #[test]
     fn equality_respects_duplicate_counts() {
         assert_ne!(signal([("a", 1), ("a", 1), ("b", 2)]), signal([("a", 1), ("b", 2), ("b", 2)]));
+        assert_ne!(signal([("a", 1)]), signal([("a", 1), ("b", 2)]));
+        assert_ne!(signal([("a", 1), ("b", 2)]), signal([("a", 1), ("b", 3)]));
     }
 
     #[test]
@@ -119,5 +121,24 @@ mod tests {
     fn display_lists_attributes() {
         assert_eq!(Signal::healthy().to_string(), "Healthy");
         assert_eq!(signal([("a", 1), ("b", 2)]).to_string(), "Degraded (a=1, b=2)");
+    }
+
+    #[test]
+    fn display_propagates_short_writes() {
+        use std::fmt::Write;
+
+        struct Limited(usize);
+        impl Write for Limited {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.0 = self.0.checked_sub(s.len()).ok_or(fmt::Error)?;
+                Ok(())
+            }
+        }
+        let signal = signal([("a", 1), ("b", 2)]);
+        let len = signal.to_string().len();
+        for capacity in 0..len {
+            assert!(write!(Limited(capacity), "{signal}").is_err());
+        }
+        write!(Limited(len), "{signal}").unwrap();
     }
 }

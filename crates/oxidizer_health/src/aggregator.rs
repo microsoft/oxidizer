@@ -57,10 +57,7 @@ impl Aggregator {
     /// Starts in `Unhealthy` state with no registered components.
     #[must_use]
     pub fn new() -> Self {
-        Self::from_shared(AggregatorShared::new())
-    }
-
-    fn from_shared(shared: Arc<AggregatorShared>) -> Self {
+        let shared = AggregatorShared::new();
         let changes = shared.changes.subscribe();
         Self { shared, changes }
     }
@@ -246,6 +243,13 @@ pub(crate) struct AggregatorShared {
     changes: WatchSender<()>,
 }
 
+pub(crate) fn next_id(counter: &AtomicU64) -> u64 {
+    // Relaxed: IDs ensure uniqueness only. Reusing an ID could remove a different registration.
+    counter
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("health registration IDs exhausted")
+}
+
 struct RegistryEntry {
     owner: Weak<ComponentOwner>,
     shared: Weak<ComponentShared>,
@@ -262,13 +266,10 @@ impl AggregatorShared {
     fn new() -> Arc<Self> {
         let (changes, _) = watch(());
         Arc::new_cyclic(|root| Self {
-            next_component: AtomicU64::new(0),
+            next_component: AtomicU64::default(),
             registry: Mutex::new(HashMap::new()),
-            worker: Worker::new(ProcessAggregate {
-                root: Weak::clone(root),
-                components: HashMap::new(),
-                counts: [0; Health::COUNT],
-            }),
+            worker: Worker::new(ProcessAggregate::new(Weak::clone(root))),
+            // #[gamma::skip(expr.increment, tag = "equivalent", reason = "Both 2 and 3 decode to Unhealthy; the raw byte is private and subsequent writes replace it.")]
             health: AtomicU8::new(health_bits(Health::Unhealthy)),
             changes,
         })
@@ -290,10 +291,9 @@ impl AggregatorShared {
         }
 
         registry.retain(|_, component| component.owner.strong_count() > 0);
-        // Relaxed: the identifier only needs to be unique.
-        let id = self.next_component.fetch_add(1, Ordering::Relaxed);
+        let id = next_id(&self.next_component);
         let name: Arc<str> = Arc::from(name);
-        let shared = ComponentShared::new(Arc::clone(&name), id, &self.worker);
+        let shared = ComponentShared::new(Arc::clone(&name), id, self.worker.sender());
         let owner = ComponentOwner::new(Arc::clone(&shared), Arc::clone(&self.worker));
         registry.insert(
             name,
@@ -326,10 +326,19 @@ impl AggregatorShared {
 }
 
 impl ProcessAggregate {
+    pub(crate) fn new(root: Weak<AggregatorShared>) -> Self {
+        Self {
+            root,
+            components: HashMap::new(),
+            counts: [0; Health::COUNT],
+        }
+    }
+
     pub(crate) fn set(&mut self, id: u64, state: Health) {
         if let Some(previous) = self.components.insert(id, state) {
             self.counts[previous.index()] -= 1;
         }
+
         self.counts[state.index()] += 1;
         self.notify();
     }
@@ -349,5 +358,51 @@ impl ProcessAggregate {
             root.health.store(health_bits(Health::worst(&self.counts)), Ordering::Release);
             root.changes.send_replace(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::FutureExt;
+
+    use super::*;
+
+    #[test]
+    fn process_transitions_publish_the_worst_remaining_state() {
+        let mut root = Aggregator::new();
+        let mut model = ProcessAggregate::new(Arc::downgrade(&root.shared));
+        for (id, state, expected) in [
+            (1, Some(Health::Healthy), Health::Healthy),
+            (2, Some(Health::Degraded), Health::Degraded),
+            (1, Some(Health::Unhealthy), Health::Unhealthy),
+            (1, None, Health::Degraded),
+            (2, Some(Health::Healthy), Health::Healthy),
+            (2, None, Health::Unhealthy),
+        ] {
+            if let Some(state) = state {
+                model.set(id, state);
+            } else {
+                model.remove(id);
+            }
+            assert_eq!(root.changed().now_or_never(), Some(()));
+            assert_eq!(root.state(), expected);
+        }
+    }
+
+    #[test]
+    fn last_registration_id_can_be_allocated_once_without_wrapping() {
+        let ids = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(next_id(&ids), u64::MAX - 1);
+        if cfg!(panic = "unwind") {
+            std::panic::catch_unwind(|| next_id(&ids)).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn registration_reclaims_retired_names() {
+        let root = Aggregator::new();
+        drop(root.component("retired"));
+        let _live = root.component("live");
+        assert!(!root.shared.registry.lock().unwrap().contains_key("retired"));
     }
 }

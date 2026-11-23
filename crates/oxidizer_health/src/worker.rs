@@ -93,7 +93,7 @@ fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>, mut aggregate: Proce
                     component.process(&mut aggregate);
                 }
             }
-            Work::Stop => break,
+            Work::Stop => return,
         }
     }
 }
@@ -109,6 +109,8 @@ impl Drop for Running {
 
 #[cfg(test)]
 mod tests {
+    use testing_aids::tracing_logs::Capture;
+
     use super::*;
 
     #[test]
@@ -118,5 +120,34 @@ mod tests {
         assert!(!worker.is_running());
         drop(worker);
         assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected)));
+    }
+
+    #[test]
+    fn shutdown_stops_and_joins_the_worker_and_reports_a_failed_join() {
+        for &fail in if cfg!(panic = "unwind") { &[false, true][..] } else { &[false][..] } {
+            let capture = Capture::new();
+            let _guard = tracing::subscriber::set_default(capture.subscriber());
+            let (sender, receiver) = mpsc::channel();
+            let spawned = thread::spawn(move || {
+                assert!(matches!(receiver.recv_timeout(std::time::Duration::from_secs(2)), Ok(Work::Stop)));
+                assert!(!fail, "worker failed");
+            });
+            drop(Worker::from_spawn(sender, Arc::default(), Ok(spawned)));
+            assert_eq!(capture.output().contains("terminated unexpectedly"), fail);
+        }
+    }
+
+    #[test]
+    fn last_owner_can_be_released_from_the_worker() {
+        let (sender, receiver) = mpsc::channel();
+        let (owner, release) = mpsc::channel::<Worker>();
+        let (done, finished) = mpsc::channel();
+        let spawned = thread::spawn(move || {
+            drop(release.recv().unwrap());
+            assert!(matches!(receiver.try_recv(), Ok(Work::Stop)));
+            done.send(()).unwrap();
+        });
+        owner.send(Worker::from_spawn(sender, Arc::default(), Ok(spawned))).unwrap();
+        finished.recv().unwrap();
     }
 }

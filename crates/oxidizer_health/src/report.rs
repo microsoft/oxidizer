@@ -252,6 +252,16 @@ mod tests {
         assert_eq!(snapshot.counts, [0, 3, 0]);
         assert_eq!(snapshot.signals[Health::Degraded.index()].len(), 2);
         assert_eq!(snapshot.state(), Health::Degraded);
+        let report = Report::new(Arc::from("clients"), Arc::new(snapshot), Filter::ALL);
+        let mut groups: Vec<_> = report
+            .signals(Health::Degraded)
+            .map(|(signal, n)| (signal.to_string(), n))
+            .collect();
+        groups.sort();
+        assert_eq!(
+            groups,
+            [("Degraded (reason=busy)".to_owned(), 1), ("Degraded (reason=slow)".to_owned(), 2)]
+        );
     }
 
     #[test]
