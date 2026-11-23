@@ -78,6 +78,10 @@ fn sink(capture: &Arc<Capture>) -> Sink {
         .build()
 }
 
+fn enrichment_keys(sink: &Sink) -> Vec<String> {
+    sink.current_enrichments().iter().map(|entry| entry.key().to_string()).collect()
+}
+
 #[test]
 fn gamma_round2_future_enrichment_keeps_values_order_and_restores_each_poll() {
     let capture = Arc::new(Capture::default());
@@ -137,6 +141,36 @@ fn gamma_round2_composite_transfer_restores_each_childs_independent_chain() {
     );
     assert!(first.current_enrichments().is_empty());
     assert!(second.current_enrichments().is_empty());
+}
+
+#[test]
+fn gamma_round2_transfer_scope_repeats_safely_and_restores_on_drop() {
+    let capture = Arc::new(Capture::default());
+    let sink = sink(&capture);
+    let transfer = (|| sink.transfer_context()).enrich(&sink, Layer("captured", 1))();
+
+    (|| {
+        assert_eq!(enrichment_keys(&sink), ["prior"]);
+        let mut scope = transfer.into_scope();
+
+        scope.apply_current_thread();
+        assert_eq!(enrichment_keys(&sink), ["captured"]);
+        scope.apply_current_thread();
+        assert_eq!(enrichment_keys(&sink), ["captured"]);
+
+        scope.restore_current_thread();
+        assert_eq!(enrichment_keys(&sink), ["prior"]);
+        scope.restore_current_thread();
+        assert_eq!(enrichment_keys(&sink), ["prior"]);
+
+        scope.apply_current_thread();
+        assert_eq!(enrichment_keys(&sink), ["captured"]);
+        drop(scope);
+        assert_eq!(enrichment_keys(&sink), ["prior"]);
+    })
+    .enrich(&sink, Layer("prior", 2))();
+
+    assert!(sink.current_enrichments().is_empty());
 }
 
 #[test]
