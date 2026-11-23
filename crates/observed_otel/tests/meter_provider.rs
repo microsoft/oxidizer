@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Full providers remain responsible for metering and lifecycle independently of the cache.
 
-use performables::arc::Arc;
-use performables::sync::mutex::Mutex;
 use std::error::Error;
 use std::io;
 use std::sync::Arc as StdArc;
@@ -18,6 +17,8 @@ use opentelemetry::metrics::{InstrumentProvider, Meter, MeterProvider};
 use opentelemetry::{InstrumentationScope, KeyValue};
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ScopeMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+use performables::arc::Arc;
+use performables::sync::mutex::Mutex;
 use tick::SimpleClock;
 
 const PRIVATE: DataClass = DataClass::new("test", "private");
@@ -90,16 +91,9 @@ impl Drop for DropOrderMeter {
 #[test]
 fn cached_meter_is_released_before_provider() {
     let calls = Arc::new(Mutex::<_>::new(Vec::new()));
-    let processor = MetricEventProcessor::new(
-        DropOrderProvider(Arc::clone(&calls)),
-        RedactionEngine::builder().build(),
-        None,
-    );
+    let processor = MetricEventProcessor::new(DropOrderProvider(Arc::clone(&calls)), RedactionEngine::builder().build(), None);
     drop(processor);
-    assert_eq!(
-        *calls.lock(),
-        ["meter", "flush", "cache-drop", "provider-drop"]
-    );
+    assert_eq!(*calls.lock(), ["meter", "flush", "cache-drop", "provider-drop"]);
 }
 
 #[event("external.request")]
@@ -129,9 +123,7 @@ struct Context {
 #[cfg_attr(miri, ignore = "SDK resource detection uses current_exe")]
 fn full_provider_records_metadata_and_redacted_dimensions() {
     let exporter = InMemoryMetricExporter::default();
-    let provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(exporter.clone())
-        .build();
+    let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
     let scope = InstrumentationScope::builder("external.host")
         .with_version("1.2.3")
         .with_schema_url("https://example.com/schema")
@@ -196,11 +188,7 @@ fn full_provider_records_metadata_and_redacted_dimensions() {
         };
         assert!(attributes.contains(&KeyValue::new("outcome", "success")));
         assert!(attributes.contains(&KeyValue::new("region", "test")));
-        assert!(
-            attributes
-                .iter()
-                .any(|attribute| attribute.key.as_str() == "classified")
-        );
+        assert!(attributes.iter().any(|attribute| attribute.key.as_str() == "classified"));
         assert!(!attributes.iter().any(|attribute| {
             attribute.value.to_string().contains("must-not-escape")
                 || attribute.key.as_str() == "request_id"
@@ -260,12 +248,7 @@ fn provider_flush_errors_are_surfaced_and_do_not_skip_drop() {
     let failure = &error.failures()[0];
     assert_eq!(failure.processor(), "otel-metrics");
     assert_eq!(
-        failure
-            .source()
-            .unwrap()
-            .downcast_ref::<io::Error>()
-            .unwrap()
-            .kind(),
+        failure.source().unwrap().downcast_ref::<io::Error>().unwrap().kind(),
         io::ErrorKind::Other
     );
     drop(sink);
@@ -277,7 +260,7 @@ fn provider_flush_errors_are_surfaced_and_do_not_skip_drop() {
 fn sink_drop_exports_pending_metrics_and_keeps_shared_provider_usable() {
     let exporter = InMemoryMetricExporter::default();
     let reader = PeriodicReader::builder(exporter.clone())
-        .with_interval(Duration::from_secs(3600))
+        .with_interval(Duration::from_hours(1))
         .build();
     let provider = SdkMeterProvider::builder().with_reader(reader).build();
     let sink = observed_otel::builder()
@@ -315,11 +298,7 @@ fn sink_drop_exports_pending_metrics_and_keeps_shared_provider_usable() {
     assert_eq!(point.count(), 1);
     assert!((point.sum() - 4.5).abs() < f64::EPSILON);
 
-    provider
-        .meter("shared")
-        .f64_counter("after.drop")
-        .build()
-        .add(2.0, &[]);
+    provider.meter("shared").f64_counter("after.drop").build().add(2.0, &[]);
     provider.force_flush().unwrap();
     let batches = exporter.get_finished_metrics().unwrap();
     let after = batches

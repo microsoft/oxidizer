@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 // TODO(doc-coverage): remove once `missing_docs` is promoted to [workspace.lints.rust].
 #![deny(missing_docs)]
 
-//! # Observed Otel - Sink Pipeline Builders
+//! # OpenTelemetry sinks for Observed
 //!
 //! This crate builds [`observed::Sink`] values and processor lists from log and metric destinations.
 //! Destination implementations live in companion crates such as `observed_destination_stdout`.
@@ -37,8 +38,7 @@
 //! sink independently and compose them with [`observed::Sink::composite`].
 //!
 //! Each sink owns its own enrichment slot; entries pushed on one sink
-//! are not automatically visible on another. See the "Limitations" section
-//! of the API usability analysis for the tradeoff and workarounds.
+//! are not automatically visible on another.
 //!
 //! ## Custom meter providers
 //!
@@ -84,6 +84,7 @@
 //! emit!(sink, Request);
 //! sink.flush()?; // Flushes the retained provider.
 //! drop(sink); // Flushes best-effort and releases this sink's provider ownership.
+//!
 //! # Ok(())
 //! # }
 //! ```
@@ -126,9 +127,7 @@ pub use destination_overlay::DestinationOverlay;
 pub use inst_scope_helpers::IntoInstrumentationScope;
 pub use log_event_processor::LogEventProcessor;
 pub use metric_event_processor::MetricEventProcessor;
-pub use processor_builder::{
-    ErasedLogDestination, ErasedMetricDestination, ProcessorBuilder, processor_builder,
-};
+pub use processor_builder::{ErasedLogDestination, ErasedMetricDestination, ProcessorBuilder, processor_builder};
 pub use redaction_policy::RedactionPolicy;
 
 #[cfg(test)]

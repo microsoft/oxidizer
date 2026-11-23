@@ -1,14 +1,12 @@
 // Copyright (c) Microsoft Corporation.
-
-use performables::arc::Arc;
+// Licensed under the MIT License.
 
 use observed::processing::EventProcessor;
-use observed_destination_core::{
-    DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination,
-};
+use observed_destination_core::{DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::{LoggerProviderBuilder, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{MeterProviderBuilder, SdkMeterProvider};
+use performables::arc::Arc;
 
 use crate::redaction_policy::engine_from_layers;
 use crate::sampling::LogSampler;
@@ -40,7 +38,7 @@ pub fn processor_builder() -> ProcessorBuilder {
 ///
 /// Terminate with [`build`](Self::build), which returns a
 /// [`DestinationResult<Vec<Arc<dyn EventProcessor>>>`] because destination
-/// setup (opening a file, connecting an ETW provider, etc.) can fail.
+/// setup, such as opening a file, can fail.
 #[must_use]
 pub struct ProcessorBuilder {
     processors: Vec<Arc<dyn EventProcessor>>,
@@ -64,19 +62,14 @@ impl ProcessorBuilder {
     /// Adds a raw processor. Included in the output of [`build`](Self::build)
     /// alongside any destination-derived processors.
     pub fn processor(mut self, processor: impl EventProcessor + 'static) -> Self {
-        self.processors
-            .push(Arc::new(processor).coerce::<dyn EventProcessor>(|arc| arc));
+        self.processors.push(Arc::new(processor).coerce::<dyn EventProcessor>(|arc| arc));
         self
     }
 
     /// Adds multiple raw processors. Included in the output of
     /// [`build`](Self::build) alongside any destination-derived processors.
-    pub fn processors(
-        mut self,
-        processors: impl IntoIterator<Item = impl Into<Arc<dyn EventProcessor>>>,
-    ) -> Self {
-        self.processors
-            .extend(processors.into_iter().map(Into::into));
+    pub fn processors(mut self, processors: impl IntoIterator<Item = impl Into<Arc<dyn EventProcessor>>>) -> Self {
+        self.processors.extend(processors.into_iter().map(Into::into));
         self
     }
 
@@ -118,12 +111,13 @@ impl ProcessorBuilder {
     /// them in the corresponding processors, and returns the full processor
     /// list (raw processors first, then destination-derived ones).
     ///
-    /// Returns a [`DestinationResult`] because destination setup (e.g. opening
-    /// a file, connecting an ETW provider) can fail.
-    ///
     /// Each assembled processor owns its provider. [`EventProcessor::flush`]
     /// sends buffered telemetry without shutting the provider down.
     /// See [`LogEventProcessor`] and [`MetricEventProcessor`] for shutdown behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns the destination's error if a log or metric destination fails to register.
     ///
     /// # Instrumentation scope
     ///
@@ -141,12 +135,7 @@ impl ProcessorBuilder {
             redaction,
             resource,
         } = self;
-        let dest_processors = assemble_processors(
-            log_destinations,
-            metric_destinations,
-            redaction,
-            resource.as_ref(),
-        )?;
+        let dest_processors = assemble_processors(log_destinations, metric_destinations, redaction, resource.as_ref())?;
         processors.extend(dest_processors);
         Ok(processors)
     }
@@ -184,10 +173,7 @@ fn assemble_processors(
         builder = (dest.apply)(builder)?;
         let provider = builder.build();
 
-        processors.push(
-            Arc::new(LogEventProcessor::new(provider, dest_engine, dest.sampler))
-                .coerce::<dyn EventProcessor>(|arc| arc),
-        );
+        processors.push(Arc::new(LogEventProcessor::new(provider, dest_engine, dest.sampler)).coerce::<dyn EventProcessor>(|arc| arc));
     }
 
     // Same per-destination treatment for metric destinations, plus
@@ -206,14 +192,8 @@ fn assemble_processors(
         builder = (dest.apply)(builder)?;
         let provider = builder.build();
 
-        processors.push(
-            Arc::new(MetricEventProcessor::new(
-                provider,
-                dest_engine,
-                dest.scope_override,
-            ))
-            .coerce::<dyn EventProcessor>(|arc| arc),
-        );
+        processors
+            .push(Arc::new(MetricEventProcessor::new(provider, dest_engine, dest.scope_override)).coerce::<dyn EventProcessor>(|arc| arc));
     }
 
     Ok(processors)
@@ -311,9 +291,7 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::logs::InMemoryLogExporter;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-    use opentelemetry_sdk::metrics::data::{
-        AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
-    };
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
 
     use crate::test_support::TestRequestCount;
 
@@ -371,13 +349,7 @@ mod tests {
                 }
             );
         })
-        .enrich(
-            &sink,
-            RoutedEnrichment {
-                tenant: 7,
-                request_id: 42,
-            },
-        )();
+        .enrich(&sink, RoutedEnrichment { tenant: 7, request_id: 42 })();
         sink.flush().unwrap();
 
         let logs = log_exporter.get_emitted_logs().unwrap();
@@ -394,14 +366,8 @@ mod tests {
         // Excluded fields must not leak under either metric names or default field names.
         for (key, _) in &attributes {
             let key = key.as_str();
-            assert!(
-                !key.starts_with("metric."),
-                "metric attribute in log: {key}"
-            );
-            assert!(
-                !matches!(key, "region" | "tenant"),
-                "excluded field in log: {key}"
-            );
+            assert!(!key.starts_with("metric."), "metric attribute in log: {key}");
+            assert!(!matches!(key, "region" | "tenant"), "excluded field in log: {key}");
         }
 
         let exported_metrics = metric_exporter.get_finished_metrics().unwrap();

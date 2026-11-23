@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![allow(
     clippy::unwrap_used,
@@ -15,15 +16,11 @@ use std::fmt::{self, Display};
 
 use data_privacy::DataClass;
 use observed::enrichment::EnrichFnExt;
-use observed::{
-    Enrichment, EventSampler, EventSamplingContext, EventSamplingDecision, Sink, SinkId, emit,
-    event,
-};
+use observed::{Enrichment, EventSampler, EventSamplingContext, EventSamplingDecision, Sink, SinkId, emit, event};
 use observed_destination_core::{DestinationResult, LogDestination};
 use observed_destination_memory::{memory_logs, memory_metrics};
 use observed_otel::{
-    ErasedLogDestination, ErasedMetricDestination, LogDestinationExt, MetricDestinationExt,
-    RedactionPolicy, processor_builder,
+    ErasedLogDestination, ErasedMetricDestination, LogDestinationExt, MetricDestinationExt, RedactionPolicy, processor_builder,
 };
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::Resource;
@@ -64,9 +61,7 @@ fn log_and_metric_destinations_keep_independent_resource_overlays() {
         ])
         .build();
     // A disjoint key distinguishes replacement from merging successive overlays.
-    let obsolete = Resource::builder_empty()
-        .with_attribute(KeyValue::new("obsolete", true))
-        .build();
+    let obsolete = Resource::builder_empty().with_attribute(KeyValue::new("obsolete", true)).build();
     let log_resource = Resource::builder_empty()
         .with_attribute(KeyValue::new("service.name", "logs"))
         .build();
@@ -120,14 +115,8 @@ fn log_and_metric_destinations_keep_independent_resource_overlays() {
     let metrics = metric_exporter.get_finished_metrics().unwrap();
     assert_eq!(logs.len(), 1);
     assert_eq!(metrics.len(), 1);
-    for (resource, service) in [
-        (logs[0].resource.as_ref(), "logs"),
-        (metrics[0].resource(), "metrics"),
-    ] {
-        assert_eq!(
-            resource.get(&Key::from_static_str("service.name")),
-            Some(service.into())
-        );
+    for (resource, service) in [(logs[0].resource.as_ref(), "logs"), (metrics[0].resource(), "metrics")] {
+        assert_eq!(resource.get(&Key::from_static_str("service.name")), Some(service.into()));
         assert_eq!(
             resource.get(&Key::from_static_str("deployment.environment.name")),
             Some("test".into()),
@@ -155,10 +144,7 @@ fn destination_registration_preserves_initialization_errors() {
     struct FailingLogDestination(InitializationError);
 
     impl LogDestination for FailingLogDestination {
-        fn register(
-            self,
-            _builder: LoggerProviderBuilder,
-        ) -> DestinationResult<LoggerProviderBuilder> {
+        fn register(self, _builder: LoggerProviderBuilder) -> DestinationResult<LoggerProviderBuilder> {
             Err(Box::new(self.0))
         }
     }
@@ -186,12 +172,7 @@ fn metric_description_and_unit_reach_otel_exporter() {
 
     #[event("test.documented")]
     #[info("Documented metric")]
-    #[histogram(
-        size_bytes,
-        name = "test.request.size",
-        desc = "Request payload size",
-        unit = "By"
-    )]
+    #[histogram(size_bytes, name = "test.request.size", desc = "Request payload size", unit = "By")]
     struct TestDocumentedMetric {
         #[unredacted]
         size_bytes: f64,
@@ -251,10 +232,7 @@ fn flush_pushes_metrics_to_exporter() {
         rm.scope_metrics()
             .any(|sm| sm.metrics().any(|m| m.name() == "test.request.duration"))
     });
-    assert!(
-        found,
-        "expected to find test.request.duration histogram, got: {metrics:?}"
-    );
+    assert!(found, "expected to find test.request.duration histogram, got: {metrics:?}");
 }
 
 #[test]
@@ -290,10 +268,7 @@ fn drop_flushes_metrics_to_exporter() {
         rm.scope_metrics()
             .any(|sm| sm.metrics().any(|m| m.name() == "test.request.duration"))
     });
-    assert!(
-        found,
-        "expected Drop-based flush to deliver metrics, got: {metrics:?}"
-    );
+    assert!(found, "expected Drop-based flush to deliver metrics, got: {metrics:?}");
 }
 
 #[test]
@@ -507,11 +482,7 @@ fn extend_redaction_applies_only_to_that_log_destination() {
     use opentelemetry_sdk::logs::SdkLogRecord;
 
     fn read_secret(record: &SdkLogRecord) -> &AnyValue {
-        &record
-            .attributes_iter()
-            .find(|(key, _)| key.as_str() == "secret")
-            .unwrap()
-            .1
+        &record.attributes_iter().find(|(key, _)| key.as_str() == "secret").unwrap().1
     }
 
     #[event("redacted.event")]
@@ -527,14 +498,8 @@ fn extend_redaction_applies_only_to_that_log_destination() {
     let passthrough_exporter = InMemoryLogExporter::default();
     let passthrough_clone = passthrough_exporter.clone();
 
-    let baseline = RedactionPolicy::new().class(
-        TEST_DC,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Erase),
-    );
-    let passthrough_overlay = RedactionPolicy::new().class(
-        TEST_DC,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-    );
+    let baseline = RedactionPolicy::new().class(TEST_DC, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
+    let passthrough_overlay = RedactionPolicy::new().class(TEST_DC, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
     let sink = observed_otel::builder()
         .redaction(baseline)
@@ -564,10 +529,7 @@ fn extend_redaction_applies_only_to_that_log_destination() {
         read_secret(&passthrough_logs[0].record),
         &AnyValue::String("plaintext-secret".into())
     );
-    assert_eq!(
-        read_secret(&erase_logs[0].record),
-        &AnyValue::String("".into())
-    );
+    assert_eq!(read_secret(&erase_logs[0].record), &AnyValue::String("".into()));
 }
 
 #[test]
@@ -595,14 +557,8 @@ fn extend_redaction_applies_only_to_that_metric_destination() {
     let erase_metrics = InMemoryMetricExporter::default();
     let passthrough_metrics = InMemoryMetricExporter::default();
 
-    let baseline = RedactionPolicy::new().class(
-        TEST_DC,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Erase),
-    );
-    let passthrough_overlay = RedactionPolicy::new().class(
-        TEST_DC,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-    );
+    let baseline = RedactionPolicy::new().class(TEST_DC, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
+    let passthrough_overlay = RedactionPolicy::new().class(TEST_DC, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
     let sink = builder()
         .redaction(baseline)
@@ -624,17 +580,13 @@ fn extend_redaction_applies_only_to_that_metric_destination() {
     );
     sink.flush().unwrap();
 
-    assert_eq!(
-        read_metric_secret(&passthrough_metrics),
-        Value::from("plaintext-secret")
-    );
+    assert_eq!(read_metric_secret(&passthrough_metrics), Value::from("plaintext-secret"));
     assert_eq!(read_metric_secret(&erase_metrics), Value::from(""));
 }
 
+#[cfg(test)]
 fn read_metric_secret(exporter: &InMemoryMetricExporter) -> Value {
-    use opentelemetry_sdk::metrics::data::{
-        AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
-    };
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
 
     let metrics = exporter.get_finished_metrics().unwrap();
     let metric = metrics

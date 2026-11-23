@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::ops::ControlFlow;
 
@@ -84,11 +85,8 @@ impl EventProcessor for LogEventProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
         !description.is_disabled()
             && description.log().is_some_and(|log| {
-                self.logger.event_enabled(
-                    observed_utils::otel_severity_of(log.severity()),
-                    "",
-                    Some(log.name()),
-                )
+                self.logger
+                    .event_enabled(observed_utils::otel_severity_of(log.severity()), "", Some(log.name()))
             })
     }
 
@@ -141,10 +139,7 @@ impl EventProcessor for LogEventProcessor {
             record.add_attribute(KEY_CODE_LINE_NUMBER.clone(), AnyValue::Int(i64::from(line)));
         }
         if let Some(crate_name) = event.source_crate() {
-            record.add_attribute(
-                KEY_CODE_NAMESPACE.clone(),
-                AnyValue::String(crate_name.into()),
-            );
+            record.add_attribute(KEY_CODE_NAMESPACE.clone(), AnyValue::String(crate_name.into()));
         }
 
         if let Some(sampler) = &self.sampler {
@@ -159,23 +154,18 @@ impl EventProcessor for LogEventProcessor {
         if let Some(sampler) = &self.sampler {
             self.emit_batch(sampler.flush());
         }
-        self.provider
-            .force_flush()
-            .map_err(|e| FlushError::new("otel-logs", e))
+        self.provider.force_flush().map_err(|e| FlushError::new("otel-logs", e))
     }
 }
 
 /// Pre-computed `OTel` key for source file path attribute.
-static KEY_CODE_FILE_PATH: opentelemetry::Key =
-    opentelemetry::Key::from_static_str("code.file.path");
+static KEY_CODE_FILE_PATH: opentelemetry::Key = opentelemetry::Key::from_static_str("code.file.path");
 
 /// Pre-computed `OTel` key for source line number attribute.
-static KEY_CODE_LINE_NUMBER: opentelemetry::Key =
-    opentelemetry::Key::from_static_str("code.line.number");
+static KEY_CODE_LINE_NUMBER: opentelemetry::Key = opentelemetry::Key::from_static_str("code.line.number");
 
 /// Pre-computed `OTel` key for source crate name attribute.
-static KEY_CODE_NAMESPACE: opentelemetry::Key =
-    opentelemetry::Key::from_static_str("code.namespace");
+static KEY_CODE_NAMESPACE: opentelemetry::Key = opentelemetry::Key::from_static_str("code.namespace");
 
 #[cfg(test)]
 mod tests {
@@ -195,9 +185,7 @@ mod tests {
     use observed_destination_core::{SeverityFilter, severity_of_level};
     use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider};
     use opentelemetry_sdk::Resource;
-    use opentelemetry_sdk::logs::{
-        InMemoryLogExporter, SdkLogRecord, SdkLoggerProvider, SimpleLogProcessor,
-    };
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLogRecord, SdkLoggerProvider, SimpleLogProcessor};
 
     use crate::LogEventProcessor;
     use crate::test_support::{LogOnly, UnsourcedEvent};
@@ -251,9 +239,7 @@ mod tests {
         }
 
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            visitor(&FieldDescriptor::log_only(ALLOCATION_KEY), &|_| {
-                Value::from(7_i64)
-            })
+            visitor(&FieldDescriptor::log_only(ALLOCATION_KEY), &|_| Value::from(7_i64))
         }
 
         fn description(&self) -> EventDescription {
@@ -275,25 +261,15 @@ mod tests {
         value: i64,
     }
 
-    fn allocation_test_processor(
-        exporter: InMemoryLogExporter,
-        level: log::LevelFilter,
-    ) -> LogEventProcessor {
+    fn allocation_test_processor(exporter: InMemoryLogExporter, level: log::LevelFilter) -> LogEventProcessor {
         let provider = SdkLoggerProvider::builder()
-            .with_log_processor(SeverityFilter::new(
-                severity_of_level(level),
-                SimpleLogProcessor::new(exporter),
-            ))
+            .with_log_processor(SeverityFilter::new(severity_of_level(level), SimpleLogProcessor::new(exporter)))
             .build();
         LogEventProcessor::new(provider, RedactionEngine::builder().build(), None)
     }
 
     fn attribute<'a>(record: &'a SdkLogRecord, key: &str) -> &'a AnyValue {
-        &record
-            .attributes_iter()
-            .find(|(name, _)| name.as_str() == key)
-            .unwrap()
-            .1
+        &record.attributes_iter().find(|(name, _)| name.as_str() == key).unwrap().1
     }
 
     fn string(value: &AnyValue) -> &str {
@@ -312,9 +288,7 @@ mod tests {
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_ignores_events_without_a_log_signal() {
         let exporter = InMemoryLogExporter::default();
-        let provider = SdkLoggerProvider::builder()
-            .with_simple_exporter(exporter.clone())
-            .build();
+        let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
         let processor = LogEventProcessor::new(provider, RedactionEngine::builder().build(), None);
 
         // Bypass Sink's interest check to reach the processor's missing-log branch.
@@ -335,9 +309,7 @@ mod tests {
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_omits_absent_source_metadata() {
         let exporter = InMemoryLogExporter::default();
-        let provider = SdkLoggerProvider::builder()
-            .with_simple_exporter(exporter.clone())
-            .build();
+        let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
         let processor = LogEventProcessor::new(provider, RedactionEngine::builder().build(), None);
 
         processor.process(&EventView::new_synthetic(
@@ -360,10 +332,7 @@ mod tests {
         for owned in [false, true] {
             let exporter = InMemoryLogExporter::default();
             let sink = Sink::builder(SinkId::new("metadata-copy-test"))
-                .processors(vec![Arc::new(allocation_test_processor(
-                    exporter.clone(),
-                    log::LevelFilter::Info,
-                ))])
+                .processors(vec![Arc::new(allocation_test_processor(exporter.clone(), log::LevelFilter::Info))])
                 .clock(tick::SimpleClock::new_frozen())
                 .build();
             let event = AllocationTestEvent {
@@ -372,47 +341,29 @@ mod tests {
                 conversions: AtomicUsize::new(0),
             };
 
-            (|| emit_dyn_event(&sink, &event))
-                .enrich(&sink, AllocationTestEnrichment { value: 11 })();
+            (|| emit_dyn_event(&sink, &event)).enrich(&sink, AllocationTestEnrichment { value: 11 })();
             sink.flush().unwrap();
 
             let logs = exporter.get_emitted_logs().unwrap();
             assert_eq!(logs.len(), 1);
             let record = &logs[0].record;
             assert_eq!(record.event_name(), Some("allocation-test"));
-            assert_eq!(
-                record.severity_number(),
-                Some(opentelemetry::logs::Severity::Info)
-            );
+            assert_eq!(record.severity_number(), Some(opentelemetry::logs::Severity::Info));
             assert_eq!(attribute(record, ALLOCATION_KEY), &AnyValue::Int(7));
-            assert_eq!(
-                attribute(record, ALLOCATION_ENRICHMENT_KEY),
-                &AnyValue::Int(11)
-            );
+            assert_eq!(attribute(record, ALLOCATION_ENRICHMENT_KEY), &AnyValue::Int(11));
             assert_eq!(attribute(record, "code.line.number"), &AnyValue::Int(42));
             for expected in [ALLOCATION_KEY, ALLOCATION_ENRICHMENT_KEY] {
-                let key = &record
-                    .attributes_iter()
-                    .find(|(key, _)| key.as_str() == expected)
-                    .unwrap()
-                    .0;
+                let key = &record.attributes_iter().find(|(key, _)| key.as_str() == expected).unwrap().0;
                 assert_eq!(key.as_str().as_ptr(), expected.as_ptr());
             }
             for (actual, expected) in [
                 (string(record.body().unwrap()), ALLOCATION_BODY),
                 (string(attribute(record, "code.file.path")), ALLOCATION_FILE),
-                (
-                    string(attribute(record, "code.namespace")),
-                    ALLOCATION_NAMESPACE,
-                ),
+                (string(attribute(record, "code.namespace")), ALLOCATION_NAMESPACE),
             ] {
                 assert_eq!(actual, expected);
                 if !owned {
-                    assert_eq!(
-                        actual.as_ptr(),
-                        expected.as_ptr(),
-                        "static metadata was copied"
-                    );
+                    assert_eq!(actual.as_ptr(), expected.as_ptr(), "static metadata was copied");
                 }
             }
         }
@@ -431,18 +382,9 @@ mod tests {
         let off_exporter = InMemoryLogExporter::default();
         let sink = Sink::builder(SinkId::new("destination-filter-test"))
             .processors(vec![
-                Arc::new(allocation_test_processor(
-                    info_exporter.clone(),
-                    log::LevelFilter::Info,
-                )),
-                Arc::new(allocation_test_processor(
-                    error_exporter.clone(),
-                    log::LevelFilter::Error,
-                )),
-                Arc::new(allocation_test_processor(
-                    off_exporter.clone(),
-                    log::LevelFilter::Off,
-                )),
+                Arc::new(allocation_test_processor(info_exporter.clone(), log::LevelFilter::Info)),
+                Arc::new(allocation_test_processor(error_exporter.clone(), log::LevelFilter::Error)),
+                Arc::new(allocation_test_processor(off_exporter.clone(), log::LevelFilter::Off)),
             ])
             .clock(tick::SimpleClock::new_frozen())
             .build();
@@ -460,11 +402,7 @@ mod tests {
                 conversions: AtomicUsize::new(0),
             };
             emit_dyn_event(&sink, &event);
-            assert_eq!(
-                event.conversions.load(Ordering::Relaxed),
-                expected_conversions,
-                "{severity:?}"
-            );
+            assert_eq!(event.conversions.load(Ordering::Relaxed), expected_conversions, "{severity:?}");
         }
 
         sink.flush().unwrap();
@@ -482,8 +420,7 @@ mod tests {
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn log_processor_drop_preserves_retained_provider() {
         let provider = SdkLoggerProvider::builder().build();
-        let processor =
-            LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
+        let processor = LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
 
         drop(processor);
 
@@ -498,8 +435,7 @@ mod tests {
             .with_resource(Resource::builder_empty().build())
             .with_simple_exporter(exporter.clone())
             .build();
-        let processor =
-            LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
+        let processor = LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
 
         drop(processor);
 
@@ -514,10 +450,7 @@ mod tests {
             let logs = exporter.get_emitted_logs().unwrap();
             assert_eq!(logs.len(), 1);
             assert_eq!(logs[0].record.event_name(), Some("sampling.external"));
-            assert_eq!(
-                logs[0].record.body(),
-                Some(&AnyValue::String("after processor drop".into()))
-            );
+            assert_eq!(logs[0].record.body(), Some(&AnyValue::String("after processor drop".into())));
         }
         assert!(!exporter.is_shutdown_called());
 
@@ -537,8 +470,7 @@ mod tests {
         let provider = SdkLoggerProvider::builder()
             .with_batch_exporter(InMemoryLogExporter::default())
             .build();
-        let processor =
-            LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
+        let processor = LogEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
         assert!(format!("{processor:?}").contains("LogEventProcessor"));
 
         // Stopping the worker makes subsequent flushes fail without a custom exporter.
@@ -575,19 +507,13 @@ mod tests {
             fn register(
                 self,
                 builder: opentelemetry_sdk::logs::LoggerProviderBuilder,
-            ) -> observed_destination_core::DestinationResult<
-                opentelemetry_sdk::logs::LoggerProviderBuilder,
-            > {
+            ) -> observed_destination_core::DestinationResult<opentelemetry_sdk::logs::LoggerProviderBuilder> {
                 Ok(builder.with_log_processor(self))
             }
         }
 
         impl opentelemetry_sdk::logs::LogProcessor for Probe {
-            fn emit(
-                &self,
-                _data: &mut opentelemetry_sdk::logs::SdkLogRecord,
-                _instrumentation: &opentelemetry::InstrumentationScope,
-            ) {
+            fn emit(&self, _data: &mut opentelemetry_sdk::logs::SdkLogRecord, _instrumentation: &opentelemetry::InstrumentationScope) {
                 *self.invoked.lock() = true;
             }
 
@@ -595,12 +521,7 @@ mod tests {
                 Ok(())
             }
 
-            fn event_enabled(
-                &self,
-                level: opentelemetry::logs::Severity,
-                _target: &str,
-                _name: Option<&str>,
-            ) -> bool {
+            fn event_enabled(&self, level: opentelemetry::logs::Severity, _target: &str, _name: Option<&str>) -> bool {
                 level.ge(&self.min_severity)
             }
         }

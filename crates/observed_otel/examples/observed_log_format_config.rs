@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Example demonstrating `LogFormatConfig` options for controlling log output format.
 //!
@@ -6,19 +7,18 @@
 //!
 //! Run with:
 //! ```sh
-//! cargo run -p observed_otel --example log_format_config
+//! cargo run -p observed_otel --example observed_log_format_config
 //! ```
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use log::LevelFilter;
-use microsoft_enterprise_data_taxonomy::MicrosoftEnterpriseDataTaxonomy;
 use observed::{emit, event};
 use observed_destination_core::LogFormatConfig;
 use observed_destination_stdout::stdout_logs;
 use observed_otel::RedactionPolicy;
+use observed_testing::MicrosoftEnterpriseDataTaxonomy;
 
-const PUBLIC: MicrosoftEnterpriseDataTaxonomy =
-    MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData;
+const PUBLIC: MicrosoftEnterpriseDataTaxonomy = MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData;
 
 #[event("http.request.completed")]
 #[info("Request to {path} completed in {duration_ms}ms")]
@@ -41,26 +41,15 @@ struct CacheEviction {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let redaction = RedactionPolicy::new().class(
-        MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-    );
+    let redaction = RedactionPolicy::new().class(PUBLIC, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
     // Two stdout destinations with different format configs so you can compare.
     let sink = observed_otel::builder()
         .redaction(redaction.clone())
         // Full format: library info, event name, raw message template + attributes
-        .log(
-            stdout_logs()
-                .level(LevelFilter::Trace)
-                .format_config(LogFormatConfig::default()),
-        )
+        .log(stdout_logs().level(LevelFilter::Trace).format_config(LogFormatConfig::default()))
         // Minimal format: just timestamp, severity, and message with placeholders expanded
-        .log(
-            stdout_logs()
-                .level(LevelFilter::Trace)
-                .format_config(LogFormatConfig::minimal()),
-        )
+        .log(stdout_logs().level(LevelFilter::Trace).format_config(LogFormatConfig::minimal()))
         .build()?;
 
     println!("─── Default format vs. Minimal format ───\n");
@@ -88,16 +77,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let custom = observed_otel::builder()
         .redaction(redaction)
-        .log(
-            stdout_logs()
-                .level(LevelFilter::Trace)
-                .format_config(LogFormatConfig {
-                    include_target: false,
-                    include_library: false,
-                    include_event_name: true,
-                    format_body: true,
-                }),
-        )
+        .log(stdout_logs().level(LevelFilter::Trace).format_config(LogFormatConfig {
+            include_target: false,
+            include_library: false,
+            include_event_name: true,
+            format_body: true,
+        }))
         .build()?;
 
     emit!(

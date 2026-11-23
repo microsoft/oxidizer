@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Extension traits that attach per-destination overlays.
 //!
@@ -58,8 +59,8 @@ pub trait LogDestinationExt: observed_destination_core::IntoLogDestination + Siz
     /// ```
     /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     /// use observed_destination_stdout::stdout_logs;
+    /// use observed_otel::sampling::{LogSampler, LogSamplingContext, SamplingBatch};
     /// use observed_otel::{LogDestinationExt, builder};
-    /// use observed_otel::sampling::{LogSamplingContext, LogSampler, SamplingBatch};
     ///
     /// struct PassThrough;
     ///

@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Tests how sinks sample, deliver, and flush log records.
 
 #![allow(
     clippy::unwrap_used,
     reason = "Non-production code uses unwrap to fail immediately when a test or demonstration cannot proceed"
 )]
 
-use performables::arc::Arc;
-use performables::sync::channel as mpsc;
-use performables::sync::mutex::Mutex;
 use std::time::{Duration, SystemTime};
 use std::{fmt, mem, thread};
 
@@ -28,10 +28,10 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogProcessor, LoggerProviderBuilder, SdkLogRecord};
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
-use opentelemetry_sdk::metrics::data::{
-    AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
-};
-use performables::arc::Arc as PerformablesArc;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
+use performables::arc::{Arc, Arc as PerformablesArc};
+use performables::sync::channel as mpsc;
+use performables::sync::mutex::Mutex;
 use tick::SimpleClock;
 
 #[event("sampling.message")]
@@ -112,12 +112,7 @@ impl EventProcessor for SuppressedProcessor {
     fn process(&self, event: &EventView<'_>) {
         let suppressed = *self.suppressed.lock();
         let context = Context::current();
-        let _guard = if suppressed {
-            context.with_telemetry_suppressed()
-        } else {
-            context
-        }
-        .attach();
+        let _guard = if suppressed { context.with_telemetry_suppressed() } else { context }.attach();
         self.processor.process(event);
         assert_eq!(Context::is_current_telemetry_suppressed(), suppressed);
     }
@@ -151,11 +146,7 @@ struct LogProbe {
 
 impl LogProbe {
     fn attribute_values(&self, key: &str) -> Vec<Option<AnyValue>> {
-        self.observations
-            .lock()
-            .iter()
-            .map(|log| attribute(&log.record, key))
-            .collect()
+        self.observations.lock().iter().map(|log| attribute(&log.record, key)).collect()
     }
 
     fn lifecycle_calls(&self) -> Vec<LifecycleCall> {
@@ -249,17 +240,10 @@ fn attribute(record: &SdkLogRecord, key: &str) -> Option<AnyValue> {
 }
 
 fn assert_captured_context(observation: &Observation, request: &str, span_context: &SpanContext) {
-    assert_eq!(
-        observation.context.get::<RequestMarker>().unwrap().0,
-        request
-    );
+    assert_eq!(observation.context.get::<RequestMarker>().unwrap().0, request);
     assert_eq!(observation.context.span().span_context(), span_context);
     assert_eq!(
-        observation
-            .context
-            .baggage()
-            .get("request")
-            .map(ToString::to_string),
+        observation.context.baggage().get("request").map(ToString::to_string),
         Some(String::from(request))
     );
     assert!(!observation.context.is_telemetry_suppressed());
@@ -312,46 +296,25 @@ fn continued_log_preserves_otel_context() {
 
     let observations = probe.observations.lock();
     assert_eq!(observations.len(), 1);
-    assert_eq!(
-        observations[0].record.event_name(),
-        Some("sampling.message")
-    );
-    assert_eq!(
-        attribute(&observations[0].record, "value"),
-        Some(AnyValue::Int(42))
-    );
+    assert_eq!(observations[0].record.event_name(), Some("sampling.message"));
+    assert_eq!(attribute(&observations[0].record, "value"), Some(AnyValue::Int(42)));
     assert_captured_context(&observations[0], "original", &span_context);
-    assert_eq!(
-        Context::current().get::<RequestMarker>().unwrap().0,
-        "original"
-    );
+    assert_eq!(Context::current().get::<RequestMarker>().unwrap().0, "original");
 }
 
 #[test]
 #[cfg_attr(miri, ignore = "destination record completion reads the system clock")]
 fn unsampled_destination_preserves_ambient_context() {
     let probe = LogProbe::default();
-    let sink = builder()
-        .log(probe.clone())
-        .clock(SimpleClock::new_frozen())
-        .build()
-        .unwrap();
-    let _guard = Context::new()
-        .with_value(RequestMarker("original"))
-        .attach();
+    let sink = builder().log(probe.clone()).clock(SimpleClock::new_frozen()).build().unwrap();
+    let _guard = Context::new().with_value(RequestMarker("original")).attach();
 
     emit!(sink, Message { value: 42 });
 
     let observations = probe.observations.lock();
     assert_eq!(observations.len(), 1);
-    assert_eq!(
-        observations[0].context.get::<RequestMarker>().unwrap().0,
-        "original"
-    );
-    assert_eq!(
-        attribute(&observations[0].record, "value"),
-        Some(AnyValue::Int(42))
-    );
+    assert_eq!(observations[0].context.get::<RequestMarker>().unwrap().0, "original");
+    assert_eq!(attribute(&observations[0].record, "value"), Some(AnyValue::Int(42)));
 }
 
 struct Discard;
@@ -383,10 +346,7 @@ fn empty_log_batch_discards_one_destination() {
     assert!(sampled.observations.lock().is_empty());
     let observations = unsampled.observations.lock();
     assert_eq!(observations.len(), 1);
-    assert_eq!(
-        observations[0].record.event_name(),
-        Some("sampling.message")
-    );
+    assert_eq!(observations[0].record.event_name(), Some("sampling.message"));
 }
 
 #[test]
@@ -397,14 +357,10 @@ fn log_sampler_receives_complete_record_before_processors() {
     let captured = Arc::clone(&sampled);
     let event_time = SystemTime::UNIX_EPOCH + Duration::from_secs(42);
     let sink = builder()
-        .log(
-            probe
-                .clone()
-                .with_sampler(SampleFn(move |log: LogSamplingContext| {
-                    captured.lock().push(log.record().clone());
-                    SamplingBatch::one(log)
-                })),
-        )
+        .log(probe.clone().with_sampler(SampleFn(move |log: LogSamplingContext| {
+            captured.lock().push(log.record().clone());
+            SamplingBatch::one(log)
+        })))
         .clock(SimpleClock::new_frozen_at(event_time))
         .build()
         .unwrap();
@@ -461,9 +417,7 @@ fn saved_log_preserves_context_across_suppression_changes() {
         .build()
         .unwrap();
     {
-        let _guard = Context::new()
-            .with_value(RequestMarker("original"))
-            .attach();
+        let _guard = Context::new().with_value(RequestMarker("original")).attach();
         emit!(sink, Message { value: 1 });
     }
 
@@ -479,15 +433,9 @@ fn saved_log_preserves_context_across_suppression_changes() {
             assert_eq!(context.get::<RequestMarker>().unwrap().0, "original");
             assert!(!context.is_telemetry_suppressed());
         }
-        assert_eq!(
-            Context::current().get::<RequestMarker>().unwrap().0,
-            "release"
-        );
+        assert_eq!(Context::current().get::<RequestMarker>().unwrap().0, "release");
         emit!(sink, Message { value: 2 });
-        assert_eq!(
-            Context::current().get::<RequestMarker>().unwrap().0,
-            "release"
-        );
+        assert_eq!(Context::current().get::<RequestMarker>().unwrap().0, "release");
     }
 
     {
@@ -495,10 +443,7 @@ fn saved_log_preserves_context_across_suppression_changes() {
         assert_eq!(observations.len(), 1);
         expected.set_observed_timestamp(observations[0].record.observed_timestamp().unwrap());
         assert_eq!(observations[0].record, expected);
-        assert_eq!(
-            observations[0].context.get::<RequestMarker>().unwrap().0,
-            "original"
-        );
+        assert_eq!(observations[0].context.get::<RequestMarker>().unwrap().0, "original");
     }
 
     *suppressed.lock() = false;
@@ -506,10 +451,7 @@ fn saved_log_preserves_context_across_suppression_changes() {
 
     let observations = probe.observations.lock();
     assert_eq!(observations.len(), 1);
-    assert_eq!(
-        attribute(&observations[0].record, "value"),
-        Some(AnyValue::Int(1))
-    );
+    assert_eq!(attribute(&observations[0].record, "value"), Some(AnyValue::Int(1)));
 }
 
 #[test]
@@ -540,10 +482,7 @@ fn many_log_batch_preserves_contexts_across_threads() {
                 .spawn(|| {
                     let _guard = Context::new().with_value(RequestMarker(request)).attach();
                     emit!(sink, Message { value });
-                    assert_eq!(
-                        Context::current().get::<RequestMarker>().unwrap().0,
-                        request
-                    );
+                    assert_eq!(Context::current().get::<RequestMarker>().unwrap().0, request);
                 })
                 .join()
                 .unwrap();
@@ -553,19 +492,9 @@ fn many_log_batch_preserves_contexts_across_threads() {
     for probe in [sampled, unsampled] {
         let observations = probe.observations.lock();
         assert_eq!(observations.len(), 3);
-        for (observation, (value, request)) in
-            observations
-                .iter()
-                .zip([(10, "first"), (20, "second"), (30, "third")])
-        {
-            assert_eq!(
-                attribute(&observation.record, "value"),
-                Some(AnyValue::Int(value))
-            );
-            assert_eq!(
-                observation.context.get::<RequestMarker>().unwrap().0,
-                request
-            );
+        for (observation, (value, request)) in observations.iter().zip([(10, "first"), (20, "second"), (30, "third")]) {
+            assert_eq!(attribute(&observation.record, "value"), Some(AnyValue::Int(value)));
+            assert_eq!(observation.context.get::<RequestMarker>().unwrap().0, request);
         }
     }
 }
@@ -595,21 +524,14 @@ fn destination_sampler_replacement_reaches_both_builders() {
                 .clock(SimpleClock::new_frozen())
                 .build()
         } else {
-            builder()
-                .log(destination)
-                .clock(SimpleClock::new_frozen())
-                .build()
-                .unwrap()
+            builder().log(destination).clock(SimpleClock::new_frozen()).build().unwrap()
         };
 
         emit!(sink, Message { value: 42 });
 
         let observations = probe.observations.lock();
         assert_eq!(observations.len(), 1);
-        assert_eq!(
-            attribute(&observations[0].record, "value"),
-            Some(AnyValue::Int(42))
-        );
+        assert_eq!(attribute(&observations[0].record, "value"), Some(AnyValue::Int(42)));
     }
 }
 
@@ -620,19 +542,10 @@ fn log_sampler_receives_complete_redacted_record() {
         let pending = Mutex::<_>::new(None);
         SampleFn(move |log: LogSamplingContext| {
             for key in ["secret", "enrichment"] {
-                assert_eq!(
-                    attribute(log.record(), key),
-                    Some(AnyValue::String(expected.into()))
-                );
+                assert_eq!(attribute(log.record(), key), Some(AnyValue::String(expected.into())));
             }
-            assert_eq!(
-                attribute(log.record(), "code.file.path"),
-                Some(AnyValue::String(file!().into()))
-            );
-            pending
-                .lock()
-                .replace(log)
-                .map_or_else(SamplingBatch::empty, SamplingBatch::one)
+            assert_eq!(attribute(log.record(), "code.file.path"), Some(AnyValue::String(file!().into())));
+            pending.lock().replace(log).map_or_else(SamplingBatch::empty, SamplingBatch::one)
         })
     };
     let baseline = LogProbe::default();
@@ -679,10 +592,7 @@ fn log_sampler_receives_complete_redacted_record() {
         let observations = probe.observations.lock();
         assert_eq!(observations.len(), 1);
         for key in ["secret", "enrichment"] {
-            assert_eq!(
-                attribute(&observations[0].record, key),
-                Some(AnyValue::String(expected.into()))
-            );
+            assert_eq!(attribute(&observations[0].record, key), Some(AnyValue::String(expected.into())));
         }
     }
 }
@@ -690,10 +600,7 @@ fn log_sampler_receives_complete_redacted_record() {
 // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
 // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri"
-)]
+#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn sink_drop_discards_saved_records_before_provider_shutdown() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -715,23 +622,16 @@ fn sink_drop_discards_saved_records_before_provider_shutdown() {
 // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
 // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri"
-)]
+#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn saved_record_does_not_keep_provider_alive() {
     let saved = Arc::new(Mutex::<_>::new(None));
     let sampler_saved = Arc::clone(&saved);
     let probe = LogProbe::default();
     let sink = builder()
-        .log(
-            probe
-                .clone()
-                .with_sampler(SampleFn(move |log: LogSamplingContext| {
-                    *sampler_saved.lock() = Some(log);
-                    SamplingBatch::empty()
-                })),
-        )
+        .log(probe.clone().with_sampler(SampleFn(move |log: LogSamplingContext| {
+            *sampler_saved.lock() = Some(log);
+            SamplingBatch::empty()
+        })))
         .clock(SimpleClock::new_frozen())
         .build()
         .unwrap();
@@ -742,17 +642,11 @@ fn saved_record_does_not_keep_provider_alive() {
     assert_eq!(probe.lifecycle_calls(), [LifecycleCall::ProviderShutdown]);
     let log_record = saved.lock().take().unwrap();
     assert_eq!(log_record.record().event_name(), Some("sampling.message"));
-    assert_eq!(
-        attribute(log_record.record(), "value"),
-        Some(AnyValue::Int(42))
-    );
+    assert_eq!(attribute(log_record.record(), "value"), Some(AnyValue::Int(42)));
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "destination completion reads the clock and metric export uses SDK threads"
-)]
+#[cfg_attr(miri, ignore = "destination completion reads the clock and metric export uses SDK threads")]
 fn late_log_sampling_does_not_change_metric_delivery() {
     let logs = LogProbe::default();
     let metrics = InMemoryMetricExporter::default();
@@ -797,14 +691,8 @@ fn processor_mutation_reaches_later_processor() {
 
     let observations = probe.observations.lock();
     assert_eq!(observations.len(), 1);
-    assert_eq!(
-        observations[0].record.body(),
-        Some(&AnyValue::String("processed".into()))
-    );
-    assert_eq!(
-        attribute(&observations[0].record, "value"),
-        Some(AnyValue::Int(42))
-    );
+    assert_eq!(observations[0].record.body(), Some(&AnyValue::String("processed".into())));
+    assert_eq!(attribute(&observations[0].record, "value"), Some(AnyValue::Int(42)));
 }
 
 #[test]
@@ -838,10 +726,7 @@ fn flush_sends_saved_records_in_order() {
     let observations = probe.observations.lock();
     assert_eq!(observations.len(), 2);
     for (observation, (value, request)) in observations.iter().zip([(1, "first"), (2, "second")]) {
-        assert_eq!(
-            attribute(&observation.record, "value"),
-            Some(AnyValue::Int(value))
-        );
+        assert_eq!(attribute(&observation.record, "value"), Some(AnyValue::Int(value)));
         assert_eq!(observation.record.event_name(), Some("sampling.message"));
         assert_captured_context(observation, request, &span_context);
     }
@@ -864,10 +749,7 @@ fn flush_with_suppressed_telemetry_sends_saved_records() {
             .with_telemetry_suppressed()
             .attach();
         sink.flush().unwrap();
-        assert_eq!(
-            Context::current().get::<RequestMarker>().unwrap().0,
-            "flush"
-        );
+        assert_eq!(Context::current().get::<RequestMarker>().unwrap().0, "flush");
         assert!(Context::is_current_telemetry_suppressed());
     }
 
@@ -877,10 +759,7 @@ fn flush_with_suppressed_telemetry_sends_saved_records() {
 // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
 // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri"
-)]
+#[cfg_attr(miri, ignore = "OpenTelemetry resource detection uses current_exe, unsupported by isolated Miri")]
 fn flush_with_no_saved_records_flushes_provider() {
     let probe = LogProbe::default();
     let sink = builder()
@@ -891,10 +770,7 @@ fn flush_with_no_saved_records_flushes_provider() {
 
     sink.flush().unwrap();
 
-    assert_eq!(
-        probe.lifecycle_calls(),
-        [LifecycleCall::SamplerFlush, LifecycleCall::ProviderFlush]
-    );
+    assert_eq!(probe.lifecycle_calls(), [LifecycleCall::SamplerFlush, LifecycleCall::ProviderFlush]);
 }
 
 #[test]
@@ -915,11 +791,7 @@ fn flush_sends_saved_records_before_returning_provider_error() {
 
     assert_eq!(
         probe.lifecycle_calls(),
-        [
-            LifecycleCall::SamplerFlush,
-            LifecycleCall::Emit,
-            LifecycleCall::ProviderFlush,
-        ]
+        [LifecycleCall::SamplerFlush, LifecycleCall::Emit, LifecycleCall::ProviderFlush,]
     );
 }
 
@@ -965,17 +837,12 @@ fn sample_runs_while_sampler_flush_runs() {
 
     thread::scope(|scope| {
         let flush = scope.spawn(|| sink.flush());
-        paused_receiver
-            .recv_timeout(Duration::from_secs(10))
-            .unwrap();
+        paused_receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         emit!(sink, Message { value: 2 });
         resume_sender.send(()).unwrap();
         flush.join().unwrap().unwrap();
     });
     sink.flush().unwrap();
 
-    assert_eq!(
-        probe.attribute_values("value"),
-        [Some(AnyValue::Int(1)), Some(AnyValue::Int(2))]
-    );
+    assert_eq!(probe.attribute_values("value"), [Some(AnyValue::Int(1)), Some(AnyValue::Int(2))]);
 }

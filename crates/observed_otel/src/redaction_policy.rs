@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Fragment-retaining redaction recipe with overlay-merge support.
 //!
@@ -11,10 +12,10 @@
 //! [`LogDestinationExt`](crate::LogDestinationExt::extend_redaction)) and produces
 //! one engine per destination. Overlay entries win on `DataClass` conflict.
 
-use performables::arc::Arc;
 use std::collections::HashMap;
 
 use data_privacy::{DataClass, IntoDataClass, RedactionEngine, Redactor};
+use performables::arc::Arc;
 
 /// A reusable recipe for building a [`RedactionEngine`].
 ///
@@ -39,11 +40,9 @@ use data_privacy::{DataClass, IntoDataClass, RedactionEngine, Redactor};
 /// const PUBLIC: DataClass = DataClass::new("test", "public");
 /// const DEBUG: DataClass = DataClass::new("test", "debug");
 ///
-/// let baseline = RedactionPolicy::new()
-///     .class(PUBLIC, SimpleRedactor::new());
+/// let baseline = RedactionPolicy::new().class(PUBLIC, SimpleRedactor::new());
 ///
-/// let debug_overlay = RedactionPolicy::new()
-///     .class(DEBUG, SimpleRedactor::new());
+/// let debug_overlay = RedactionPolicy::new().class(DEBUG, SimpleRedactor::new());
 /// // pass `baseline` to the sink builder, `debug_overlay` to the destination
 /// ```
 #[derive(Clone, Default)]
@@ -66,11 +65,7 @@ impl RedactionPolicy {
     /// another (or vice versa), entries added on the overlay win on
     /// `DataClass` conflict.
     #[must_use]
-    pub fn class(
-        mut self,
-        data_class: impl IntoDataClass,
-        redactor: impl Redactor + Send + Sync + 'static,
-    ) -> Self {
+    pub fn class(mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) -> Self {
         self.classes.insert(
             data_class.into_data_class(),
             Arc::new(redactor).coerce::<dyn Redactor + Send + Sync>(|arc| arc),
@@ -105,12 +100,7 @@ impl Redactor for ArcRedactor {
         self.0.redacts(data_class)
     }
 
-    fn redact(
-        &self,
-        data_class: &DataClass,
-        value: &str,
-        output: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result {
+    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn std::fmt::Write) -> std::fmt::Result {
         self.0.redact(data_class, value, output)
     }
 }
@@ -118,18 +108,10 @@ impl Redactor for ArcRedactor {
 /// Builds a fresh [`RedactionEngine`] from a baseline policy plus an optional
 /// overlay. Entries are deduplicated by `DataClass` here (overlay entries win
 /// on conflict) before being registered with the upstream builder.
-pub(crate) fn engine_from_layers(
-    baseline: &RedactionPolicy,
-    overlay: Option<&RedactionPolicy>,
-) -> RedactionEngine {
+pub(crate) fn engine_from_layers(baseline: &RedactionPolicy, overlay: Option<&RedactionPolicy>) -> RedactionEngine {
     let mut merged = baseline.classes.clone();
     if let Some(overlay) = overlay {
-        merged.extend(
-            overlay
-                .classes
-                .iter()
-                .map(|(dc, redactor)| (dc.clone(), Arc::clone(redactor))),
-        );
+        merged.extend(overlay.classes.iter().map(|(dc, redactor)| (dc.clone(), Arc::clone(redactor))));
     }
     let mut builder = RedactionEngine::builder();
     for (dc, redactor) in merged {
@@ -140,8 +122,9 @@ pub(crate) fn engine_from_layers(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+
+    use super::*;
 
     const DC_A: DataClass = DataClass::new("test", "a");
     const DC_B: DataClass = DataClass::new("test", "b");
@@ -162,10 +145,7 @@ mod tests {
 
     #[test]
     fn debug_reports_configured_class_count() {
-        let policy = RedactionPolicy::new().class(
-            DC_A,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        );
+        let policy = RedactionPolicy::new().class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
         assert!(format!("{policy:?}").contains("classes: 1"));
     }
@@ -173,10 +153,7 @@ mod tests {
     #[test]
     fn class_entry_applies_to_matching_class() {
         let engine = RedactionPolicy::new()
-            .class(
-                DC_A,
-                SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-            )
+            .class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
             .build();
 
         assert!(!engine.redacts(&DC_A));
@@ -195,12 +172,8 @@ mod tests {
 
     #[test]
     fn overlay_entry_wins_on_conflict() {
-        let baseline = RedactionPolicy::new()
-            .class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
-        let overlay = RedactionPolicy::new().class(
-            DC_A,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        );
+        let baseline = RedactionPolicy::new().class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
+        let overlay = RedactionPolicy::new().class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
         let merged = engine_from_layers(&baseline, Some(&overlay));
         assert_eq!(redact(&merged, &DC_A, "secret"), "secret");
@@ -208,12 +181,8 @@ mod tests {
 
     #[test]
     fn overlay_entry_for_unrelated_class_does_not_disturb_baseline() {
-        let baseline = RedactionPolicy::new().class(
-            DC_A,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        );
-        let overlay = RedactionPolicy::new()
-            .class(DC_B, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
+        let baseline = RedactionPolicy::new().class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
+        let overlay = RedactionPolicy::new().class(DC_B, SimpleRedactor::with_mode(SimpleRedactorMode::Erase));
 
         let merged = engine_from_layers(&baseline, Some(&overlay));
         // Baseline still applies to DC_A.
@@ -228,20 +197,14 @@ mod tests {
         // call for DC_A overrides the first.
         let policy = RedactionPolicy::new()
             .class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Erase))
-            .class(
-                DC_A,
-                SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-            );
+            .class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
         let engine = policy.build();
         assert_eq!(redact(&engine, &DC_A, "secret"), "secret");
     }
 
     #[test]
     fn no_overlay_yields_baseline_only() {
-        let baseline = RedactionPolicy::new().class(
-            DC_A,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        );
+        let baseline = RedactionPolicy::new().class(DC_A, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
         let engine = engine_from_layers(&baseline, None);
         assert_eq!(redact(&engine, &DC_A, "secret"), "secret");
     }

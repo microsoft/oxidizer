@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use smallvec::{IntoIter, SmallVec};
 
@@ -31,9 +32,7 @@ impl<T> SamplingBatch<T> {
     #[must_use]
     pub fn many(items: impl IntoIterator<Item = T>) -> Self {
         let items: SmallVec<[T; 1]> = items.into_iter().collect();
-        Self {
-            items: items.into_iter(),
-        }
+        Self { items: items.into_iter() }
     }
 }
 

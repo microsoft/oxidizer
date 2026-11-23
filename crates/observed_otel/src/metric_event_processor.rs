@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::ops::ControlFlow;
 
@@ -66,8 +67,7 @@ impl Drop for MetricEventProcessor {
 
 impl std::fmt::Debug for MetricEventProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MetricEventProcessor")
-            .finish_non_exhaustive()
+        f.debug_struct("MetricEventProcessor").finish_non_exhaustive()
     }
 }
 
@@ -129,9 +129,7 @@ impl EventProcessor for MetricEventProcessor {
     }
 
     fn flush(&self) -> Result<(), FlushError> {
-        self.provider
-            .force_flush()
-            .map_err(|e| FlushError::new("otel-metrics", e))
+        self.provider.force_flush().map_err(|e| FlushError::new("otel-metrics", e))
     }
 }
 
@@ -146,16 +144,12 @@ mod tests {
     use data_privacy::{DataClass, RedactionEngine, Sensitive};
     use observed::enrichment::EnrichFnExt;
     use observed::interop::{DynEvent, emit_dyn_event};
-    use observed::metadata::{
-        EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricFieldEntry,
-    };
+    use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, MetricDescription, MetricFieldEntry};
     use observed::processing::{EventProcessor, EventView, FieldVisitorFn};
     use observed::{Enrichment, Event, SinkId, Value, emit, event};
     use observed_destination_memory::memory_metrics;
     use opentelemetry::KeyValue;
-    use opentelemetry_sdk::metrics::data::{
-        AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
-    };
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
     use crate::MetricEventProcessor;
@@ -170,11 +164,8 @@ mod tests {
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn metric_processor_ignores_events_without_metrics() {
         let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter.clone())
-            .build();
-        let processor =
-            MetricEventProcessor::new(provider, RedactionEngine::builder().build(), None);
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+        let processor = MetricEventProcessor::new(provider, RedactionEngine::builder().build(), None);
 
         // Bypass Sink's interest check to reach the processor's no-metrics return.
         processor.process(&EventView::new_synthetic(
@@ -205,8 +196,7 @@ mod tests {
         let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(InMemoryMetricExporter::default())
             .build();
-        let processor =
-            MetricEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
+        let processor = MetricEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
 
         drop(processor);
 
@@ -225,8 +215,7 @@ mod tests {
         let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(InMemoryMetricExporter::default())
             .build();
-        let processor =
-            MetricEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
+        let processor = MetricEventProcessor::new(provider.clone(), RedactionEngine::builder().build(), None);
         assert!(format!("{processor:?}").contains("MetricEventProcessor"));
 
         // A shut-down provider rejects flushes without a custom exporter.
@@ -276,12 +265,7 @@ mod tests {
                     None,
                     Some(MetricFieldEntry::instrument(
                         "classified_duration_ms",
-                        MetricDescription::new(
-                            "test.dynamic.classified",
-                            InstrumentKind::Histogram,
-                            "",
-                            "ms",
-                        ),
+                        MetricDescription::new("test.dynamic.classified", InstrumentKind::Histogram, "", "ms"),
                     )),
                 );
                 visitor(&classified, &|redactor| {
@@ -293,12 +277,7 @@ mod tests {
                     None,
                     Some(MetricFieldEntry::instrument(
                         "control_duration_ms",
-                        MetricDescription::new(
-                            "test.dynamic.control",
-                            InstrumentKind::Histogram,
-                            "",
-                            "ms",
-                        ),
+                        MetricDescription::new("test.dynamic.control", InstrumentKind::Histogram, "", "ms"),
                     )),
                 );
                 visitor(&control, &|_| Value::from(self.control_duration_ms))
@@ -314,9 +293,7 @@ mod tests {
         // Classified values become text even when redaction passes their contents through.
         for mode in [SimpleRedactorMode::Erase, SimpleRedactorMode::Passthrough] {
             let exporter = InMemoryMetricExporter::default();
-            let provider = SdkMeterProvider::builder()
-                .with_periodic_exporter(exporter.clone())
-                .build();
+            let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
             let redaction_engine = RedactionEngine::builder()
                 .add_class_redactor(TEST_DC, SimpleRedactor::with_mode(mode))
                 .build();
@@ -394,9 +371,7 @@ mod tests {
         trace_id: i64,
     }
 
-    fn emit_test_request(
-        exporter: &InMemoryMetricExporter,
-    ) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
+    fn emit_test_request(exporter: &InMemoryMetricExporter) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
         let sink = crate::builder()
             .metric(memory_metrics(exporter.clone()))
             .clock(tick::SimpleClock::new_frozen())
@@ -416,9 +391,7 @@ mod tests {
         exporter.get_finished_metrics().expect("should get metrics")
     }
 
-    fn emit_test_request_count(
-        exporter: &InMemoryMetricExporter,
-    ) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
+    fn emit_test_request_count(exporter: &InMemoryMetricExporter) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
         let sink = crate::builder()
             .metric(memory_metrics(exporter.clone()))
             .clock(tick::SimpleClock::new_frozen())
@@ -431,9 +404,7 @@ mod tests {
         exporter.get_finished_metrics().expect("should get metrics")
     }
 
-    fn emit_test_multi_metric(
-        exporter: &InMemoryMetricExporter,
-    ) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
+    fn emit_test_multi_metric(exporter: &InMemoryMetricExporter) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
         let sink = crate::builder()
             .metric(memory_metrics(exporter.clone()))
             .clock(tick::SimpleClock::new_frozen())
@@ -453,9 +424,7 @@ mod tests {
         exporter.get_finished_metrics().expect("should get metrics")
     }
 
-    fn emit_test_request_with_enrichment(
-        exporter: &InMemoryMetricExporter,
-    ) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
+    fn emit_test_request_with_enrichment(exporter: &InMemoryMetricExporter) -> Vec<opentelemetry_sdk::metrics::data::ResourceMetrics> {
         let sink = crate::builder()
             .metric(memory_metrics(exporter.clone()))
             .clock(tick::SimpleClock::new_frozen())
@@ -494,10 +463,7 @@ mod tests {
     fn metric_event_is_recorded_via_meter() {
         let metrics = emit_test_request(&InMemoryMetricExporter::default());
 
-        assert!(
-            !metrics.is_empty(),
-            "expected at least one ResourceMetrics batch, got none"
-        );
+        assert!(!metrics.is_empty(), "expected at least one ResourceMetrics batch, got none");
 
         let metric = metrics
             .iter()
@@ -536,10 +502,7 @@ mod tests {
     fn event_level_metric_without_field_is_recorded_via_meter() {
         let metrics = emit_test_request_count(&InMemoryMetricExporter::default());
 
-        assert!(
-            !metrics.is_empty(),
-            "expected at least one ResourceMetrics batch, got none"
-        );
+        assert!(!metrics.is_empty(), "expected at least one ResourceMetrics batch, got none");
 
         let metric = metrics
             .iter()
@@ -561,11 +524,7 @@ mod tests {
             data_point.value()
         );
 
-        assert!(
-            data_point
-                .attributes()
-                .any(|a| a == &KeyValue::new("status", 200i64))
-        );
+        assert!(data_point.attributes().any(|a| a == &KeyValue::new("status", 200i64)));
     }
 
     #[test]
@@ -585,17 +544,10 @@ mod tests {
             .find(|m| m.name() == "test.multi_metric.duration")
             .expect("expected duration metric");
 
-        let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data()
-        else {
-            panic!(
-                "expected histogram metric, got: {:?}",
-                duration_metric.data()
-            );
+        let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() else {
+            panic!("expected histogram metric, got: {:?}", duration_metric.data());
         };
-        let data_point = histogram
-            .data_points()
-            .next()
-            .expect("expected one histogram data point");
+        let data_point = histogram.data_points().next().expect("expected one histogram data point");
         let attrs: Vec<_> = data_point.attributes().cloned().collect();
 
         assert!((data_point.sum() - 42.5).abs() < 1e-9);
@@ -609,15 +561,9 @@ mod tests {
             .expect("expected queue depth metric");
 
         let AggregatedMetrics::F64(MetricData::Gauge(gauge)) = queue_depth_metric.data() else {
-            panic!(
-                "expected gauge metric, got: {:?}",
-                queue_depth_metric.data()
-            );
+            panic!("expected gauge metric, got: {:?}", queue_depth_metric.data());
         };
-        let data_point = gauge
-            .data_points()
-            .next()
-            .expect("expected one gauge data point");
+        let data_point = gauge.data_points().next().expect("expected one gauge data point");
         let attrs: Vec<_> = data_point.attributes().cloned().collect();
 
         assert!((data_point.value() - 7.0).abs() < 1e-9);
@@ -644,10 +590,7 @@ mod tests {
         let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() else {
             panic!("expected f64 histogram metric, got: {:?}", metric.data());
         };
-        let data_point = histogram
-            .data_points()
-            .next()
-            .expect("expected one histogram data point");
+        let data_point = histogram.data_points().next().expect("expected one histogram data point");
         let attrs: Vec<_> = data_point.attributes().cloned().collect();
         // Event field dimension still present.
         assert!(attrs.contains(&KeyValue::new("status", 200i64)));
@@ -687,18 +630,13 @@ mod tests {
 
         sink.flush().expect("flush should succeed");
 
-        let metrics = exporter_clone
-            .get_finished_metrics()
-            .expect("should get metrics");
+        let metrics = exporter_clone.get_finished_metrics().expect("should get metrics");
 
         let has_disabled_metric = metrics
             .iter()
             .flat_map(ResourceMetrics::scope_metrics)
             .flat_map(ScopeMetrics::metrics)
             .any(|m| m.name() == "test.disabled_metric");
-        assert!(
-            !has_disabled_metric,
-            "disabled event should not produce metrics"
-        );
+        assert!(!has_disabled_metric, "disabled event should not produce metrics");
     }
 }

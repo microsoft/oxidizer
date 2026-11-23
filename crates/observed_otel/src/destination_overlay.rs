@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! The overlay-carrying wrapper produced by the destination extension traits.
 //!

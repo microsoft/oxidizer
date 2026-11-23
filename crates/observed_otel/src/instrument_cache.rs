@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Thread-local metric instrument cache used by [`MetricEventProcessor`](crate::MetricEventProcessor).
 //!
@@ -74,8 +75,7 @@ impl InstrumentId {
 
     /// Builds an `InstrumentId` from a `MetricDescription`, normalizing the
     /// name.
-    /// `number` is hardcoded to `"f64"` because [`Instrument`] only
-    /// builds f64 instruments.
+    /// `number` is always `"f64"` because [`Instrument`] only builds `f64` instruments.
     fn from_metric(metric: &MetricDescription) -> Self {
         let kind = match metric.kind() {
             InstrumentKind::Histogram => OtelInstrumentKind::Histogram,
@@ -117,12 +117,7 @@ impl InstrumentCache {
 
     /// Resolves the instrument for the given metric description (creating and
     /// caching it on first use per thread), then records the data point.
-    pub(crate) fn record(
-        &self,
-        metric: &MetricDescription,
-        value: f64,
-        attributes: &[opentelemetry::KeyValue],
-    ) {
+    pub(crate) fn record(&self, metric: &MetricDescription, value: f64, attributes: &[opentelemetry::KeyValue]) {
         let cell = self.cache.get_or(|| RefCell::new(FxHashMap::default()));
         let mut cache = cell.borrow_mut();
 
@@ -182,9 +177,7 @@ mod tests {
 
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::noop::NoopMeterProvider;
-    use opentelemetry_sdk::metrics::data::{
-        AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics,
-    };
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
     use super::*;
@@ -201,9 +194,7 @@ mod tests {
 
     fn record_samples(description: &MetricDescription, values: &[f64]) -> Vec<ResourceMetrics> {
         let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter.clone())
-            .build();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
         let cache = InstrumentCache::new(provider.meter("cache"));
 
         for &value in values {
@@ -252,12 +243,7 @@ mod tests {
     // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn histogram_records_all_samples() {
-        let description = MetricDescription::new(
-            "test.request.size",
-            InstrumentKind::Histogram,
-            "Request payload size",
-            "By",
-        );
+        let description = MetricDescription::new("test.request.size", InstrumentKind::Histogram, "Request payload size", "By");
 
         let batches = record_samples(&description, &[3.0, 7.0]);
 
@@ -336,10 +322,7 @@ mod tests {
     // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn up_down_counter_accumulates_increments_and_decrements() {
         // Both signs must accumulate on the same instrument rather than replace its value.
-        let batches = record_samples(
-            &md("test.active_requests", InstrumentKind::UpDownCounter),
-            &[3.0, -1.0],
-        );
+        let batches = record_samples(&md("test.active_requests", InstrumentKind::UpDownCounter), &[3.0, -1.0]);
 
         let metric = batches
             .iter()
@@ -380,28 +363,16 @@ mod tests {
     #[test]
     fn description_and_unit_are_part_of_the_key() {
         let base = MetricDescription::new("foo.bar", InstrumentKind::Histogram, "", "");
-        let with_desc =
-            MetricDescription::new("foo.bar", InstrumentKind::Histogram, "Some metric", "");
+        let with_desc = MetricDescription::new("foo.bar", InstrumentKind::Histogram, "Some metric", "");
         let with_unit = MetricDescription::new("foo.bar", InstrumentKind::Histogram, "", "ms");
 
-        assert_ne!(
-            InstrumentId::from_metric(&base),
-            InstrumentId::from_metric(&with_desc)
-        );
-        assert_ne!(
-            InstrumentId::from_metric(&base),
-            InstrumentId::from_metric(&with_unit)
-        );
+        assert_ne!(InstrumentId::from_metric(&base), InstrumentId::from_metric(&with_desc));
+        assert_ne!(InstrumentId::from_metric(&base), InstrumentId::from_metric(&with_unit));
     }
 
     #[test]
     fn description_and_unit_are_propagated_to_id() {
-        let id = InstrumentId::from_metric(&MetricDescription::new(
-            "foo.bar",
-            InstrumentKind::Histogram,
-            "Some metric",
-            "ms",
-        ));
+        let id = InstrumentId::from_metric(&MetricDescription::new("foo.bar", InstrumentKind::Histogram, "Some metric", "ms"));
         assert_eq!(id.description, "Some metric");
         assert_eq!(id.unit, "ms");
     }

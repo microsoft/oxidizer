@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Destination-aware builder for an [`observed::Sink`].
 //!
@@ -11,18 +12,14 @@
 //! [`Sink::builder`]. Each per-destination processor owns its `OTel` provider
 //! and flushes it on demand. See each processor's documentation for shutdown.
 
-use performables::arc::Arc;
-
 use observed::processing::EventProcessor;
 use observed::{EventSampler, Sink, SinkId};
 use observed_destination_core::DestinationResult;
 use opentelemetry_sdk::Resource;
+use performables::arc::Arc;
 use tick::SimpleClock;
 
-use crate::{
-    ErasedLogDestination, ErasedMetricDestination, ProcessorBuilder, RedactionPolicy,
-    processor_builder,
-};
+use crate::{ErasedLogDestination, ErasedMetricDestination, ProcessorBuilder, RedactionPolicy, processor_builder};
 
 /// Creates a destination-aware [`Builder`] for an [`observed::Sink`].
 pub fn builder() -> Builder {
@@ -104,10 +101,7 @@ impl Builder {
 
     /// Adds multiple raw processors (forwards to
     /// [`ProcessorBuilder::processors`](ProcessorBuilder::processors)).
-    pub fn processors(
-        mut self,
-        processors: impl IntoIterator<Item = impl Into<Arc<dyn EventProcessor>>>,
-    ) -> Self {
+    pub fn processors(mut self, processors: impl IntoIterator<Item = impl Into<Arc<dyn EventProcessor>>>) -> Self {
         self.pipeline = self.pipeline.processors(processors);
         self
     }
@@ -166,8 +160,9 @@ impl Builder {
     /// [`event_sampler`](Self::event_sampler) to the [`Sink::builder`] when
     /// requested.
     ///
-    /// Returns a [`DestinationResult`] because destination setup (e.g.
-    /// opening a file, connecting an ETW provider) can fail.
+    /// # Errors
+    ///
+    /// Returns the destination's error if a log or metric destination fails to register.
     ///
     /// # Panics
     ///
@@ -180,11 +175,7 @@ impl Builder {
             clock,
             event_sampler,
         } = self;
-        let processors = pipeline
-            .build()?
-            .into_iter()
-            .map(Arc::into_std_arc)
-            .collect();
+        let processors = pipeline.build()?.into_iter().map(Arc::into_std_arc).collect();
         let id = id.unwrap_or_else(|| SinkId::new("empty.service.name"));
         let clock = clock.unwrap_or_else(SimpleClock::new_system);
         let mut builder = Sink::builder(id).processors(processors).clock(clock);
@@ -252,11 +243,7 @@ mod tests {
 
     #[test]
     fn processor_limit_accepts_64_and_rejects_65() {
-        let with_processors = |count| {
-            (0..count).fold(crate::builder(), |builder, _| {
-                builder.processor(NoopProcessor)
-            })
-        };
+        let with_processors = |count| (0..count).fold(crate::builder(), |builder, _| builder.processor(NoopProcessor));
 
         with_processors(64).build().unwrap();
         assert!(

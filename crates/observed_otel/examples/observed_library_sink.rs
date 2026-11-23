@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Library-style destination sink with isolated enrichment.
 //!
@@ -18,14 +19,13 @@
 use data_privacy::classified;
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use log::LevelFilter;
-use microsoft_enterprise_data_taxonomy::MicrosoftEnterpriseDataTaxonomy;
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, SinkId, emit, event};
 use observed_destination_stdout::stdout_logs;
 use observed_otel::RedactionPolicy;
+use observed_testing::MicrosoftEnterpriseDataTaxonomy;
 
-const PUBLIC: MicrosoftEnterpriseDataTaxonomy =
-    MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData;
+const PUBLIC: MicrosoftEnterpriseDataTaxonomy = MicrosoftEnterpriseDataTaxonomy::PublicNonPersonalData;
 
 static APP: SinkId = SinkId::new("app");
 static LIB: SinkId = SinkId::new("lib");
@@ -68,10 +68,7 @@ struct LibCtx {
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Passthrough redaction for the PUBLIC class so attribute values render
     // verbatim instead of being erased by the default fallback.
-    let redaction = RedactionPolicy::new().class(
-        PUBLIC,
-        SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-    );
+    let redaction = RedactionPolicy::new().class(PUBLIC, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
 
     // App sink — receives global enrichments (no isolation).
     let app = observed_otel::builder()
@@ -99,12 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     (|| {
         emit!(both, RequestServed { route: "/healthz" });
     })
-    .enrich(
-        &both,
-        TenantCtx {
-            tenant: Tenant("contoso"),
-        },
-    )();
+    .enrich(&both, TenantCtx { tenant: Tenant("contoso") })();
 
     println!();
     println!("--- Targeted enrichment for LIB: only lib sees `lib.version` ---");
