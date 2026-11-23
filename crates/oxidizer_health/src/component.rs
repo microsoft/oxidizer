@@ -4,7 +4,7 @@
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
@@ -164,6 +164,7 @@ pub(crate) struct ComponentShared {
 struct ComponentActor {
     updates: Receiver<Arc<Slot>>,
     signals: HashMap<u64, Arc<Signal>>,
+    dirty: bool,
 }
 
 impl ComponentShared {
@@ -178,12 +179,14 @@ impl ComponentShared {
                 component: Weak::clone(component),
                 updates,
                 worker,
+                blockers: AtomicUsize::new(0),
                 scheduled: AtomicBool::new(false),
                 removed: AtomicBool::new(false),
             }),
             actor: Mutex::new(ComponentActor {
                 updates: receiver,
                 signals: HashMap::new(),
+                dirty: false,
             }),
             snapshot: ArcSwap::from_pointee(Snapshot::default()),
             changes,
@@ -202,9 +205,8 @@ impl ComponentShared {
         // Release: a publisher can schedule another pass while this one is running.
         self.dispatch.scheduled.store(false, Ordering::Release);
         let mut actor = self.actor.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut changed = false;
         let mut processed = 0;
-        let ComponentActor { updates, signals } = &mut *actor;
+        let ComponentActor { updates, signals, dirty } = &mut *actor;
         for slot in updates.try_iter().take(MAX_BATCH) {
             processed += 1;
             // AcqRel: clearing the flag before reading the slot makes a concurrent publisher
@@ -212,23 +214,29 @@ impl ComponentShared {
             // this swap so the reads below observe them.
             slot.queued.swap(false, Ordering::AcqRel);
             if slot.removed.load(Ordering::Acquire) {
-                changed |= signals.remove(&slot.id).is_some();
+                *dirty |= signals.remove(&slot.id).is_some();
             } else if let Some(signal) = slot.pending.swap(None) {
                 signals.insert(slot.id, signal);
-                changed = true;
+                *dirty = true;
             }
         }
 
         if processed == MAX_BATCH {
             self.dispatch.schedule();
         }
-        if !changed {
+        if !*dirty {
             return;
         }
 
-        let snapshot = Snapshot::collect(actor.signals.values());
-        drop(actor);
+        let snapshot = Snapshot::collect(signals.values());
         let state = snapshot.state();
+        // A recovery can coalesce into a slot ahead of another publisher's failure. Keep the
+        // last whole report and retry on the next turn, even if it only removes an unseen slot.
+        if state == Health::Healthy && self.dispatch.blockers.load(Ordering::Relaxed) != 0 {
+            return;
+        }
+        *dirty = false;
+        drop(actor);
         self.snapshot.store(Arc::new(snapshot));
         aggregate.set(self.id, state);
         self.changes.send_replace(());
@@ -240,6 +248,9 @@ struct ComponentDispatch {
     component: Weak<ComponentShared>,
     updates: Sender<Arc<Slot>>,
     worker: Sender<Work>,
+    // Number of live non-healthy publishers, used only to veto a ready snapshot. Relaxed is
+    // enough: each transition updates the count before the existing synchronized slot handoff.
+    blockers: AtomicUsize,
     scheduled: AtomicBool,
     removed: AtomicBool,
 }
@@ -357,6 +368,13 @@ impl Publisher {
             return;
         }
         if self.dispatch.is_registered() {
+            if self.signal.state() != signal.state() {
+                if signal.state() == Health::Healthy {
+                    self.dispatch.blockers.fetch_sub(1, Ordering::Relaxed);
+                } else if self.signal.state() == Health::Healthy {
+                    self.dispatch.blockers.fetch_add(1, Ordering::Relaxed);
+                }
+            }
             self.slot.pending.store(Some(Arc::new(signal.clone())));
             self.dispatch.enqueue(&self.slot);
         }
@@ -391,6 +409,9 @@ impl Drop for Publisher {
         if !self.dispatch.is_registered() {
             return;
         }
+        if self.signal.state() != Health::Healthy {
+            self.dispatch.blockers.fetch_sub(1, Ordering::Relaxed);
+        }
         // Release: the worker that observes removal must not apply an older pending signal.
         self.slot.removed.store(true, Ordering::Release);
         self.dispatch.enqueue(&self.slot);
@@ -402,6 +423,39 @@ mod tests {
     use futures::FutureExt;
 
     use super::*;
+
+    #[test]
+    fn overlapping_failures_do_not_publish_a_ready_snapshot_between_turns() {
+        let (work, pending) = mpsc::channel();
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let mut aggregate = ProcessAggregate::new(Weak::new());
+        let mut advance = || {
+            let Work::Component(component) = pending.try_recv().unwrap() else {
+                panic!("expected component work");
+            };
+            component.upgrade().unwrap().process(&mut aggregate);
+        };
+
+        let mut first = Publisher::register(&clients);
+        first.publish(Health::Unhealthy, [("attempt", 1)]);
+        advance();
+        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Unhealthy), 1);
+
+        first.publish(Health::Unhealthy, [("attempt", 2)]);
+        let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients)).collect();
+        let mut second = Publisher::register(&clients);
+        second.publish(Health::Unhealthy, [("attempt", 1)]);
+        first.publish(Health::Healthy, [("attempt", 3)]);
+        advance();
+        assert_eq!(clients.report(Filter::ALL).state(), Health::Unhealthy);
+
+        // Removing the second publisher before its first snapshot is otherwise a no-op.
+        drop(second);
+        advance();
+        let recovered = clients.report(Filter::ALL);
+        assert_eq!(recovered.state(), Health::Healthy);
+        assert_eq!(recovered.signal_count(Health::Healthy), MAX_BATCH);
+    }
 
     #[test]
     fn queued_bursts_coalesce_and_resume_without_another_publish() {
