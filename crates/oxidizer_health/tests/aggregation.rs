@@ -169,12 +169,35 @@ fn publishing_does_not_wait_for_a_notification_consumer() {
 }
 
 #[test]
-fn last_component_handle_unregisters_during_an_in_flight_publish() {
+fn registering_a_component_does_not_wait_for_a_monitor() {
     let aggregator = Aggregator::new();
-    let component = aggregator.component("database");
     let mut monitor = aggregator.monitor();
+    let (entered, waiting) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let waker = Waker::from(Arc::new(BlockingWake {
+        entered,
+        release: Mutex::new(resume),
+    }));
+    let mut changed = pin!(monitor.changed());
+    assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+
+    let (registered, result) = mpsc::channel();
+    thread::scope(|scope| {
+        scope.spawn(|| registered.send(aggregator.component("database")).unwrap());
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+        let component = result.recv_timeout(Duration::from_secs(5));
+        release.send(()).unwrap();
+        assert!(component.is_ok(), "registration must not wait for the monitor's waker");
+    });
+}
+
+#[test]
+fn last_component_handle_unregisters_during_an_in_flight_publish() {
+    let mut aggregator = Aggregator::new();
+    let mut component = aggregator.component("database");
     let mut publisher = component.publisher();
-    block_on(monitor.changed());
+    block_on(component.changed());
+    let mut monitor = aggregator.monitor();
     assert_eq!(monitor.state(), Health::Healthy);
 
     let (entered_tx, entered_rx) = mpsc::channel();
@@ -190,11 +213,15 @@ fn last_component_handle_unregisters_during_an_in_flight_publish() {
     let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
     drop(component);
     let remaining = block_on(aggregator.reports(Filter::ALL)).len();
+    let replacement = aggregator.component("database");
+    let _replacement_publisher = replacement.publisher();
     let _ = release_tx.send(());
     worker.join().unwrap();
 
     assert!(notified, "the aggregate change must notify its consumer");
     assert_eq!(remaining, 0);
+    wait_for_aggregator(&mut aggregator, Health::Healthy);
+    assert_eq!(block_on(aggregator.reports(Filter::ALL)).len(), 1);
 }
 
 #[test]
@@ -439,7 +466,7 @@ fn reports_select_signals_by_filter() {
 }
 
 #[test]
-fn a_burst_of_publishers_converges_after_a_blocked_consumer_resumes() {
+fn a_burst_of_publishers_yields_to_another_component_and_converges() {
     let aggregator = Aggregator::new();
     let mut blocker = aggregator.component("observer");
     let mut trigger = blocker.publisher();
@@ -457,7 +484,21 @@ fn a_burst_of_publishers_converges_after_a_blocked_consumer_resumes() {
 
     let component = aggregator.component("clients");
     let publishers: Vec<_> = (0..512).map(|_| component.publisher()).collect();
+    let mut probe = aggregator.component("probe");
+    let (probe_entered, probe_waiting) = mpsc::channel();
+    let (probe_release, probe_resume) = mpsc::channel();
+    let probe_waker = Waker::from(Arc::new(BlockingWake {
+        entered: probe_entered,
+        release: Mutex::new(probe_resume),
+    }));
+    let _probe_publisher = probe.publisher();
+    let mut probe_changed = pin!(probe.changed());
+    assert!(probe_changed.as_mut().poll(&mut Context::from_waker(&probe_waker)).is_pending());
     release.send(()).unwrap();
+    probe_waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+    let count_at_probe = block_on(component.report(Filter::HEALTHY)).signal_count(Health::Healthy);
+    probe_release.send(()).unwrap();
+    assert!(count_at_probe < publishers.len(), "a burst must yield to other pending components");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let count = block_on(component.report(Filter::HEALTHY)).signal_count(Health::Healthy);

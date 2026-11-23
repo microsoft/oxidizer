@@ -4,16 +4,14 @@
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use performables::sync::channel::{WatchReceiver, WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::component::{ComponentOwner, ComponentShared};
-use crate::drain::Drain;
-use crate::worker::Worker;
+use crate::worker::{Work, Worker};
 use crate::{Component, Filter, Health, Reports};
 
 /// The process-level health root.
@@ -100,7 +98,7 @@ impl Aggregator {
         wait(&self.changes).await;
     }
 
-    /// Returns the current aggregate process state.
+    /// Returns the latest process state. It can briefly lag component registration, removal, or publication.
     #[must_use]
     pub fn state(&self) -> Health {
         self.shared.state()
@@ -184,7 +182,7 @@ impl Monitor {
         wait(&self.changes).await;
     }
 
-    /// Returns the current aggregate process state.
+    /// Returns the latest process state, with the same update timing as [`Aggregator::state`].
     #[must_use]
     pub fn state(&self) -> Health {
         self.shared.state()
@@ -235,71 +233,15 @@ pub(crate) async fn wait(changes: &WatchReceiver<()>) {
         .expect("the notification sender lives as long as the handle");
 }
 
-/// Component state shared with the process health root.
-pub(crate) struct ComponentCell {
-    id: u64,
-    health: AtomicU8,
-    queued: AtomicBool,
-    removed: AtomicBool,
-}
-
-impl ComponentCell {
-    fn new(id: u64) -> Self {
-        Self {
-            id,
-            health: AtomicU8::new(health_bits(Health::Unhealthy)),
-            queued: AtomicBool::new(false),
-            removed: AtomicBool::new(false),
-        }
-    }
-
-    pub(crate) const fn id(&self) -> u64 {
-        self.id
-    }
-
-    pub(crate) fn state(&self) -> Health {
-        // Acquire: pairs with the Release store so readers see the snapshot stored before it.
-        Health::from_index(self.health.load(Ordering::Acquire))
-    }
-
-    pub(crate) fn set_state(&self, state: Health) {
-        // Release: see `state`.
-        self.health.store(health_bits(state), Ordering::Release);
-    }
-
-    pub(crate) fn mark_removed(&self) {
-        // Release: the aggregator drainer that observes this flag ignores later stale updates.
-        self.removed.store(true, Ordering::Release);
-    }
-
-    pub(crate) fn is_registered(&self) -> bool {
-        // Acquire: pairs with `mark_removed`.
-        !self.removed.load(Ordering::Acquire)
-    }
-}
-
 #[expect(clippy::cast_possible_truncation, reason = "health indices are below Health::COUNT")]
 const fn health_bits(state: Health) -> u8 {
     state.index() as u8
 }
 
-enum Update {
-    Changed(Arc<ComponentCell>),
-    Removed(u64),
-}
-
-/// Owner of the process aggregation state.
-///
-/// Components enqueue their state changes; the single active [`Drain`] applies them to the
-/// actor state. Each component cell is queued at most once while pending, so the queue never
-/// holds more entries than twice the number of components.
 pub(crate) struct AggregatorShared {
     next_component: AtomicU64,
     registry: Mutex<HashMap<Arc<str>, RegistryEntry>>,
     worker: Arc<Worker>,
-    updates: Sender<Update>,
-    drain: Drain,
-    actor: Mutex<AggregatorActor>,
     health: AtomicU8,
     changes: WatchSender<()>,
 }
@@ -309,24 +251,21 @@ struct RegistryEntry {
     shared: Weak<ComponentShared>,
 }
 
-struct AggregatorActor {
-    updates: Receiver<Update>,
+/// Owned only by the worker. A component ID is never reused, even if its name is registered again.
+pub(crate) struct ProcessAggregate {
+    root: Weak<AggregatorShared>,
     components: HashMap<u64, Health>,
     counts: [usize; Health::COUNT],
 }
 
 impl AggregatorShared {
     fn new() -> Arc<Self> {
-        let (updates, receiver) = mpsc::channel();
         let (changes, _) = watch(());
-        Arc::new(Self {
+        Arc::new_cyclic(|root| Self {
             next_component: AtomicU64::new(0),
             registry: Mutex::new(HashMap::new()),
-            worker: Worker::new(),
-            updates,
-            drain: Drain::default(),
-            actor: Mutex::new(AggregatorActor {
-                updates: receiver,
+            worker: Worker::new(ProcessAggregate {
+                root: Weak::clone(root),
                 components: HashMap::new(),
                 counts: [0; Health::COUNT],
             }),
@@ -337,14 +276,14 @@ impl AggregatorShared {
 
     fn state(&self) -> Health {
         if self.worker.is_running() {
-            // Acquire: pairs with the Release store in `process`.
+            // Acquire: observe the snapshot published by the worker.
             Health::from_index(self.health.load(Ordering::Acquire))
         } else {
             Health::Unhealthy
         }
     }
 
-    fn component(self: &Arc<Self>, name: &str) -> Component {
+    fn component(&self, name: &str) -> Component {
         let mut registry = self.registry.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(shared) = registry.get(name).and_then(|entry| entry.owner.upgrade()) {
             return Component::new(shared);
@@ -353,9 +292,8 @@ impl AggregatorShared {
         registry.retain(|_, component| component.owner.strong_count() > 0);
         // Relaxed: the identifier only needs to be unique.
         let id = self.next_component.fetch_add(1, Ordering::Relaxed);
-        let cell = Arc::new(ComponentCell::new(id));
         let name: Arc<str> = Arc::from(name);
-        let shared = ComponentShared::new(Arc::clone(&name), Arc::clone(&cell), Arc::downgrade(self), &self.worker);
+        let shared = ComponentShared::new(Arc::clone(&name), id, &self.worker);
         let owner = ComponentOwner::new(Arc::clone(&shared), Arc::clone(&self.worker));
         registry.insert(
             name,
@@ -364,9 +302,8 @@ impl AggregatorShared {
                 shared: Arc::downgrade(&shared),
             },
         );
-        drop(registry);
-
-        self.component_changed(&cell);
+        // Queue registration before another caller can obtain this component and publish to it.
+        self.worker.send(Work::Register(id));
         Component::new(owner)
     }
 
@@ -386,64 +323,31 @@ impl AggregatorShared {
                 .collect(),
         )
     }
-
-    pub(crate) fn component_changed(&self, cell: &Arc<ComponentCell>) {
-        // AcqRel: Release publishes the cell state to the drainer that clears the flag; Acquire
-        // orders this check after that drainer's clear.
-        if !cell.queued.swap(true, Ordering::AcqRel) {
-            self.send(Update::Changed(Arc::clone(cell)));
-        }
-        self.drain.run(|| self.process());
-    }
-
-    pub(crate) fn component_removed(&self, id: u64) {
-        self.send(Update::Removed(id));
-        self.drain.run(|| self.process());
-    }
-
-    fn send(&self, update: Update) {
-        self.updates.send(update).expect("the update receiver is owned by the aggregator");
-    }
-
-    fn process(&self) {
-        let mut actor = self.actor.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut changed = false;
-        while let Ok(update) = actor.updates.try_recv() {
-            changed = true;
-            match update {
-                Update::Changed(cell) => {
-                    // AcqRel: clearing before reading makes a concurrent component either observe
-                    // the cleared flag and enqueue again, or store its state before this swap.
-                    cell.queued.swap(false, Ordering::AcqRel);
-                    // Acquire: pairs with `mark_removed`.
-                    if !cell.removed.load(Ordering::Acquire) {
-                        actor.set(cell.id, cell.state());
-                    }
-                }
-                Update::Removed(id) => actor.remove(id),
-            }
-        }
-
-        if changed {
-            // Release: pairs with the Acquire load in `state`.
-            self.health.store(health_bits(Health::worst(&actor.counts)), Ordering::Release);
-            drop(actor);
-            self.changes.send_replace(());
-        }
-    }
 }
 
-impl AggregatorActor {
-    fn set(&mut self, id: u64, state: Health) {
+impl ProcessAggregate {
+    pub(crate) fn set(&mut self, id: u64, state: Health) {
         if let Some(previous) = self.components.insert(id, state) {
             self.counts[previous.index()] -= 1;
         }
         self.counts[state.index()] += 1;
+        self.notify();
     }
 
-    fn remove(&mut self, id: u64) {
-        if let Some(previous) = self.components.remove(&id) {
-            self.counts[previous.index()] -= 1;
+    pub(crate) fn remove(&mut self, id: u64) {
+        let previous = self
+            .components
+            .remove(&id)
+            .expect("registration precedes the last handle's removal");
+        self.counts[previous.index()] -= 1;
+        self.notify();
+    }
+
+    fn notify(&self) {
+        if let Some(root) = self.root.upgrade() {
+            // Release: publish the new aggregate before waking readers.
+            root.health.store(health_bits(Health::worst(&self.counts)), Ordering::Release);
+            root.changes.send_replace(());
         }
     }
 }

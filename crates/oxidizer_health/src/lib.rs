@@ -120,7 +120,6 @@
 mod aggregator;
 mod attribute;
 mod component;
-mod drain;
 mod health;
 #[cfg(any(test, feature = "http", feature = "request-handler"))]
 pub mod http;

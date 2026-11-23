@@ -12,7 +12,7 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use performables::sync::channel::{WatchReceiver, WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
-use crate::aggregator::{AggregatorShared, ComponentCell, wait};
+use crate::aggregator::{ProcessAggregate, wait};
 use crate::report::Snapshot;
 use crate::worker::{Work, Worker};
 use crate::{Attribute, AttributeString, AttributeValue, Filter, Health, Report, Signal};
@@ -87,7 +87,7 @@ impl Component {
     #[must_use]
     pub fn state(&self) -> Health {
         if self.owner.worker.is_running() {
-            self.owner.shared.cell.state()
+            self.owner.shared.snapshot.load().state()
         } else {
             Health::Unhealthy
         }
@@ -140,10 +140,9 @@ impl ComponentOwner {
 
 impl Drop for ComponentOwner {
     fn drop(&mut self) {
-        self.shared.cell.mark_removed();
-        if let Some(aggregator) = self.shared.aggregator.upgrade() {
-            aggregator.component_removed(self.shared.cell.id());
-        }
+        // Release: reports and in-flight work must see removal without waiting for the worker.
+        self.shared.removed.store(true, Ordering::Release);
+        self.worker.send(Work::Remove(self.shared.id));
     }
 }
 
@@ -154,8 +153,8 @@ impl Drop for ComponentOwner {
 /// publishes snapshots.
 pub(crate) struct ComponentShared {
     name: Arc<str>,
-    cell: Arc<ComponentCell>,
-    aggregator: Weak<AggregatorShared>,
+    id: u64,
+    removed: AtomicBool,
     next_publisher: AtomicU64,
     dispatch: Arc<ComponentDispatch>,
     actor: Mutex<ComponentActor>,
@@ -169,14 +168,14 @@ struct ComponentActor {
 }
 
 impl ComponentShared {
-    pub(crate) fn new(name: Arc<str>, cell: Arc<ComponentCell>, aggregator: Weak<AggregatorShared>, worker: &Worker) -> Arc<Self> {
+    pub(crate) fn new(name: Arc<str>, id: u64, worker: &Worker) -> Arc<Self> {
         let (updates, receiver) = mpsc::channel();
         let (changes, _) = watch(());
         let sender = worker.sender();
         Arc::new_cyclic(|component| Self {
             name,
-            cell,
-            aggregator,
+            id,
+            removed: AtomicBool::new(false),
             next_publisher: AtomicU64::new(0),
             dispatch: Arc::new(ComponentDispatch {
                 component: Weak::clone(component),
@@ -198,16 +197,13 @@ impl ComponentShared {
     }
 
     pub(crate) fn is_registered(&self) -> bool {
-        self.cell.is_registered()
+        // Acquire: pairs with the last owner's Release store.
+        !self.removed.load(Ordering::Acquire)
     }
 
-    pub(crate) fn process(&self) {
+    pub(crate) fn process(&self, aggregate: &mut ProcessAggregate) {
         // Release: a publisher can schedule another pass while this one is running.
         self.dispatch.scheduled.store(false, Ordering::Release);
-        if !self.is_registered() {
-            return;
-        }
-
         let mut actor = self.actor.lock().unwrap_or_else(PoisonError::into_inner);
         let mut changed = false;
         let mut processed = 0;
@@ -239,10 +235,7 @@ impl ComponentShared {
         drop(actor);
         let state = snapshot.state();
         self.snapshot.store(Arc::new(snapshot));
-        self.cell.set_state(state);
-        if let Some(aggregator) = self.aggregator.upgrade() {
-            aggregator.component_changed(&self.cell);
-        }
+        aggregate.set(self.id, state);
         self.changes.send_replace(());
     }
 }
@@ -396,7 +389,7 @@ impl Debug for Publisher {
 
 impl Drop for Publisher {
     fn drop(&mut self) {
-        // Release: the drainer that observes this flag must not apply an older pending signal.
+        // Release: the worker that observes removal must not apply an older pending signal.
         self.slot.removed.store(true, Ordering::Release);
         self.dispatch.enqueue(&self.slot);
     }

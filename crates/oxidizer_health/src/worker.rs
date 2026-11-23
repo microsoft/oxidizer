@@ -7,9 +7,13 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
 
+use crate::Health;
+use crate::aggregator::ProcessAggregate;
 use crate::component::ComponentShared;
 
 pub(crate) enum Work {
+    Register(u64),
+    Remove(u64),
     Component(Weak<ComponentShared>),
     Stop,
 }
@@ -22,13 +26,13 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new(aggregate: ProcessAggregate) -> Arc<Self> {
         let (sender, receiver) = mpsc::channel();
         let running = Arc::new(AtomicBool::new(true));
         let worker_running = Arc::clone(&running);
         let spawned = thread::Builder::new()
             .name(String::from("oxidizer-health"))
-            .spawn(move || run(&receiver, worker_running));
+            .spawn(move || run(&receiver, worker_running, aggregate));
         Arc::new(Self::from_spawn(sender, running, spawned))
     }
 
@@ -47,6 +51,11 @@ impl Worker {
 
     pub(crate) fn sender(&self) -> Sender<Work> {
         self.sender.clone()
+    }
+
+    pub(crate) fn send(&self, work: Work) {
+        // A disconnected receiver means the worker has stopped; readiness already fails closed.
+        let _ = self.sender.send(work);
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -73,11 +82,18 @@ impl Drop for Worker {
     }
 }
 
-fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>) {
+fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>, mut aggregate: ProcessAggregate) {
     let _running = Running(running);
-    while let Ok(Work::Component(component)) = receiver.recv() {
-        if let Some(component) = component.upgrade() {
-            component.process();
+    while let Ok(work) = receiver.recv() {
+        match work {
+            Work::Register(id) => aggregate.set(id, Health::Unhealthy),
+            Work::Remove(id) => aggregate.remove(id),
+            Work::Component(component) => {
+                if let Some(component) = component.upgrade().filter(|c| c.is_registered()) {
+                    component.process(&mut aggregate);
+                }
+            }
+            Work::Stop => break,
         }
     }
 }
