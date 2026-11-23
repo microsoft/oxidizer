@@ -23,7 +23,7 @@ impl Workers {
     ///
     /// The count is always at least one.
     #[must_use]
-    #[expect(clippy::len_without_is_empty, reason = "runtime worker lists are non-empty by construction")]
+    #[expect(clippy::len_without_is_empty, reason = "avoid adding new public API")]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
