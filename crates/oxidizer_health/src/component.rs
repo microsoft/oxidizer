@@ -141,7 +141,7 @@ impl ComponentOwner {
 impl Drop for ComponentOwner {
     fn drop(&mut self) {
         // Release: reports and in-flight work must see removal without waiting for the worker.
-        self.shared.removed.store(true, Ordering::Release);
+        self.shared.dispatch.removed.store(true, Ordering::Release);
         self.worker.send(Work::Remove(self.shared.id));
     }
 }
@@ -154,7 +154,6 @@ impl Drop for ComponentOwner {
 pub(crate) struct ComponentShared {
     name: Arc<str>,
     id: u64,
-    removed: AtomicBool,
     next_publisher: AtomicU64,
     dispatch: Arc<ComponentDispatch>,
     actor: Mutex<ComponentActor>,
@@ -175,13 +174,13 @@ impl ComponentShared {
         Arc::new_cyclic(|component| Self {
             name,
             id,
-            removed: AtomicBool::new(false),
             next_publisher: AtomicU64::new(0),
             dispatch: Arc::new(ComponentDispatch {
                 component: Weak::clone(component),
                 updates,
                 worker: sender,
                 scheduled: AtomicBool::new(false),
+                removed: AtomicBool::new(false),
             }),
             actor: Mutex::new(ComponentActor {
                 updates: receiver,
@@ -197,8 +196,7 @@ impl ComponentShared {
     }
 
     pub(crate) fn is_registered(&self) -> bool {
-        // Acquire: pairs with the last owner's Release store.
-        !self.removed.load(Ordering::Acquire)
+        self.dispatch.is_registered()
     }
 
     pub(crate) fn process(&self, aggregate: &mut ProcessAggregate) {
@@ -246,9 +244,15 @@ struct ComponentDispatch {
     updates: Sender<Arc<Slot>>,
     worker: Sender<Work>,
     scheduled: AtomicBool,
+    removed: AtomicBool,
 }
 
 impl ComponentDispatch {
+    fn is_registered(&self) -> bool {
+        // Acquire: after the last owner is gone, a publisher must not change even an in-flight batch.
+        !self.removed.load(Ordering::Acquire)
+    }
+
     fn enqueue(&self, slot: &Arc<Slot>) {
         // AcqRel: Release publishes the slot contents to the worker that clears this flag;
         // Acquire observes the worker's previous clear.
@@ -355,8 +359,10 @@ impl Publisher {
         if signal == self.signal {
             return;
         }
-        self.slot.pending.store(Some(Arc::new(signal.clone())));
-        self.dispatch.enqueue(&self.slot);
+        if self.dispatch.is_registered() {
+            self.slot.pending.store(Some(Arc::new(signal.clone())));
+            self.dispatch.enqueue(&self.slot);
+        }
         self.signal = signal;
     }
 }
@@ -389,6 +395,9 @@ impl Debug for Publisher {
 
 impl Drop for Publisher {
     fn drop(&mut self) {
+        if !self.dispatch.is_registered() {
+            return;
+        }
         // Release: the worker that observes removal must not apply an older pending signal.
         self.slot.removed.store(true, Ordering::Release);
         self.dispatch.enqueue(&self.slot);

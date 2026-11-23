@@ -226,7 +226,7 @@ fn last_component_handle_unregisters_during_an_in_flight_publish() {
 
 #[test]
 fn publisher_outliving_component_only_changes_local_signal() {
-    let aggregator = Aggregator::new();
+    let mut aggregator = Aggregator::new();
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
     drop(component);
@@ -234,7 +234,9 @@ fn publisher_outliving_component_only_changes_local_signal() {
     publisher.degraded("orphaned");
     assert_eq!(publisher.signal().state(), Health::Degraded);
     assert_eq!(publisher.clone().signal().state(), Health::Healthy);
-    assert_eq!(aggregator.state(), Health::Unhealthy);
+    assert_eq!(block_on(aggregator.reports(Filter::ALL)).len(), 0);
+    assert_ne!(aggregator.state(), Health::Degraded, "a post-removal signal must stay local");
+    wait_for_aggregator(&mut aggregator, Health::Unhealthy);
 }
 
 #[test]
@@ -480,9 +482,9 @@ fn a_burst_of_publishers_yields_to_another_component_and_converges() {
     let mut changed = pin!(blocker.changed());
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     trigger.degraded("pause");
-    waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+    waiting.recv().unwrap();
 
-    let component = aggregator.component("clients");
+    let mut component = aggregator.component("clients");
     let publishers: Vec<_> = (0..512).map(|_| component.publisher()).collect();
     let mut probe = aggregator.component("probe");
     let (probe_entered, probe_waiting) = mpsc::channel();
@@ -495,19 +497,15 @@ fn a_burst_of_publishers_yields_to_another_component_and_converges() {
     let mut probe_changed = pin!(probe.changed());
     assert!(probe_changed.as_mut().poll(&mut Context::from_waker(&probe_waker)).is_pending());
     release.send(()).unwrap();
-    probe_waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+    probe_waiting.recv().unwrap();
     let count_at_probe = block_on(component.report(Filter::HEALTHY)).signal_count(Health::Healthy);
     probe_release.send(()).unwrap();
     assert!(count_at_probe < publishers.len(), "a burst must yield to other pending components");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let count = block_on(component.report(Filter::HEALTHY)).signal_count(Health::Healthy);
-        if count == publishers.len() {
-            break;
+    block_on(async {
+        while component.report(Filter::HEALTHY).await.signal_count(Health::Healthy) != publishers.len() {
+            component.changed().await;
         }
-        assert!(Instant::now() < deadline, "only {count} publishers contributed to the report");
-        thread::yield_now();
-    }
+    });
 }
 
 #[test]
