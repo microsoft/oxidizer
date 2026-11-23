@@ -256,8 +256,7 @@ The HTTP client uses [`templated_uri`][__link36] for URLs. [`Uri`][__link37] sup
 query parameters through templates.
 
 Templates follow [RFC 6570][__link38] level 3. [`Uri`][__link39] and
-string types also support URLs without typed templates. In that case, the full `PathAndQuery`
-string becomes the template.
+string types also support URLs without typed templates. Such a request has no URL template.
 
 [`handlers::Logging`][__link40] records the URL template as `url.path.template`.
 

@@ -189,7 +189,6 @@ mod tests {
         capture.assert_contains("http.response.status_code=200");
         capture.assert_contains("network.protocol.version=HTTP/1.1");
         capture.assert_contains("url.scheme=\"https\"");
-        capture.assert_contains("url.path.template=\"/path?query=value\"");
         // The default redaction engine redacts the path and query to an empty string.
         capture.assert_contains("url.path.redacted=\"\"");
     }

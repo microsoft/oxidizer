@@ -13,7 +13,7 @@ pub trait ExtensionsExt: sealed::Sealed {
     /// This method finds a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension
     /// 2. From a [`PathAndQuery`] label (if set via `#[templated(label = "...")]`)
-    /// 3. From a [`PathAndQuery`] template string
+    /// 3. From the template of a templated [`PathAndQuery`]
     ///
     /// Returns `None` if no template information is available.
     fn uri_template_label(&self) -> Option<UriTemplateLabel>;
@@ -24,7 +24,7 @@ impl ExtensionsExt for Extensions {
         if let Some(label) = self.get::<UriTemplateLabel>() {
             return Some(label.clone());
         }
-        if let Some(path) = self.get::<PathAndQuery>() {
+        if let Some(path) = self.get::<PathAndQuery>().filter(|path| path.is_templated()) {
             return Some(UriTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
         }
 
@@ -55,13 +55,31 @@ mod tests {
     }
 
     #[test]
-    fn returns_template_as_fallback_from_uri_path() {
+    fn returns_none_for_plain_path() {
         let mut extensions = Extensions::new();
         extensions.insert(PathAndQuery::from_static("/path"));
 
+        assert!(extensions.uri_template_label().is_none());
+    }
+
+    #[test]
+    fn returns_template_from_templated_path_without_label() {
+        use templated_uri::{EscapedString, templated};
+
+        #[templated(template = "/api/{user_id}/posts", unredacted)]
+        #[derive(Clone)]
+        struct UserPosts {
+            user_id: EscapedString,
+        }
+
+        let mut extensions = Extensions::new();
+        extensions.insert(PathAndQuery::from_template(UserPosts {
+            user_id: EscapedString::from_static("123"),
+        }));
+
         assert_eq!(
             extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
-            Some("/path")
+            Some("/api/{user_id}/posts")
         );
     }
 
