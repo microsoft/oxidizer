@@ -16,7 +16,7 @@ use arty::core::{Thread, ThreadAware};
 use arty::runtime::Runtime;
 use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::policy::WorkersPolicy;
-use observed::context::{Transfer, TransferScope};
+use observed::context::{Transfer, TransferGuard};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt, Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
@@ -28,7 +28,6 @@ use support::stop_bounded;
 assert_impl_all!(ObservedOptions: Clone, Send, Sync);
 assert_not_impl_any!(ObservedOptions: Copy);
 assert_not_impl_any!(observed::context::TransferGuard: Send, Sync);
-assert_not_impl_any!(TransferScope: Send, Sync);
 
 struct IgnoreEvents;
 
@@ -94,7 +93,8 @@ impl ThreadAware for RestorationProbeFactory {
 
 struct RestorationProbe {
     sink: Sink,
-    worker_context: TransferScope,
+    worker_context: Transfer,
+    guard: Option<TransferGuard>,
     observations: RestorationLog,
 }
 
@@ -102,7 +102,8 @@ impl RestorationProbe {
     fn new(factory: RestorationProbeFactory) -> Self {
         Self {
             sink: factory.sink,
-            worker_context: factory.worker_context.into_scope(),
+            worker_context: factory.worker_context,
+            guard: None,
             observations: factory.observations,
         }
     }
@@ -110,7 +111,11 @@ impl RestorationProbe {
 
 impl TaskObserver for RestorationProbe {
     fn poll_start(&mut self) {
-        self.worker_context.apply_current_thread();
+        if let Some(guard) = &mut self.guard {
+            guard.apply_current_thread();
+        } else {
+            self.guard = Some(self.worker_context.apply_current_thread());
+        }
     }
 
     fn poll_end(&mut self, outcome: Poll<()>) {
@@ -123,7 +128,9 @@ impl TaskObserver for RestorationProbe {
                 outcome,
                 keys: active_keys(&self.sink),
             });
-        self.worker_context.restore_current_thread();
+        if let Some(guard) = &mut self.guard {
+            guard.restore_current_thread();
+        }
     }
 }
 

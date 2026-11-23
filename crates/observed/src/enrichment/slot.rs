@@ -344,16 +344,6 @@ impl EnrichmentTransfer {
         state.restore(&self.slots);
     }
 
-    /// Restores captured heads with an owned guard that can outlive this transfer.
-    pub(crate) fn apply_owned(&self) -> Guard {
-        let mut slots = SmallVec::with_capacity(self.slots.len());
-        for (slot, head) in &self.slots {
-            let prev = slot.replace(head.clone());
-            slots.push((slot.clone(), prev));
-        }
-        Guard { slots }
-    }
-
     /// Pushes an additional enrichment node onto every captured chain.
     /// Broadcast within the transfer's known slots; transfers with no
     /// captured slots are left unchanged.
@@ -454,7 +444,7 @@ mod coverage_tests {
     }
 
     #[test]
-    fn gamma_round2_owned_transfer_restores_the_overwritten_chain_head() {
+    fn gamma_round2_transfer_restores_the_overwritten_chain_head() {
         let slot = Slot::new();
         let captured_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("captured", 1_i64)]));
         let captured = slot.current().unwrap();
@@ -463,7 +453,8 @@ mod coverage_tests {
         drop(captured_guard);
         let current_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("current", 2_i64)]));
         let current = slot.current().unwrap();
-        let applied = transfer.apply_owned();
+        let mut state = transfer.apply_state();
+        let applied = transfer.apply(&mut state);
         assert!(Arc::ptr_eq(&slot.current().unwrap(), &captured));
         drop(applied);
         assert!(Arc::ptr_eq(&slot.current().unwrap(), &current));

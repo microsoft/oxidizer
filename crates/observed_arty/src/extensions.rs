@@ -6,7 +6,7 @@ use std::task::Poll;
 use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
 use observed::Sink;
-use observed::context::{Transfer, TransferScope};
+use observed::context::{Transfer, TransferGuard};
 use thread_aware::ThreadAware;
 
 /// Configures Observed sink integration for an Arty runtime.
@@ -78,24 +78,29 @@ fn capture_enrichment(event: &mut TaskSpawn, options: &ObservedOptions) {
 }
 
 struct ObservedTask {
-    scope: TransferScope,
+    transfer: Transfer,
+    guard: Option<TransferGuard>,
 }
 
 impl ObservedTask {
     fn new(transfer: Transfer) -> Self {
-        Self {
-            scope: transfer.into_scope(),
-        }
+        Self { transfer, guard: None }
     }
 }
 
 impl TaskObserver for ObservedTask {
     fn poll_start(&mut self) {
-        self.scope.apply_current_thread();
+        if let Some(guard) = &mut self.guard {
+            guard.apply_current_thread();
+        } else {
+            self.guard = Some(self.transfer.apply_current_thread());
+        }
     }
 
     fn poll_end(&mut self, _outcome: Poll<()>) {
-        self.scope.restore_current_thread();
+        if let Some(guard) = &mut self.guard {
+            guard.restore_current_thread();
+        }
     }
 }
 

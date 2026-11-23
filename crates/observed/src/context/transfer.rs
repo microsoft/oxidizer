@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer, Guard};
+use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -108,18 +108,9 @@ impl Transfer {
     /// enrichment and strand the entries it applied on the origin thread.
     #[must_use = "the enrichment is removed as soon as the returned guard is dropped"]
     pub fn apply_current_thread(&self) -> TransferGuard {
-        TransferGuard::new(self.enrichment.apply_owned())
-    }
-
-    /// Creates reusable state for integrations that bracket repeated task polls.
-    ///
-    /// Create the scope on the thread that will use it. Call
-    /// [`TransferScope::apply_current_thread`] before each poll and
-    /// [`TransferScope::restore_current_thread`] after each poll. The scope
-    /// retains restoration storage, so transfers with many sink slots do not
-    /// allocate on every poll.
-    pub fn into_scope(self) -> TransferScope {
-        TransferScope::new(self)
+        let mut guard = TransferGuard::new(self.enrichment.clone());
+        guard.apply_current_thread();
+        guard
     }
 
     pub(crate) fn apply_state(&self) -> ApplyState {
@@ -131,76 +122,59 @@ impl Transfer {
     }
 }
 
-/// Reusable, thread-bound state that brackets repeated task polls.
+/// Applies captured enrichment and restores the prior enrichment on drop.
 ///
-/// The scope belongs to the thread that created it. It cannot move to another
-/// thread. Dropping an active scope restores the prior enrichment.
+/// The guard belongs to the thread that created it. It cannot move to another
+/// thread. Runtime integrations can restore and reapply it around repeated task
+/// polls without allocating new restoration storage.
 #[derive(Debug)]
-#[must_use]
-pub struct TransferScope {
-    transfer: Transfer,
+#[must_use = "the enrichment is removed as soon as the guard is dropped"]
+pub struct TransferGuard {
+    enrichment: EnrichmentTransfer,
     state: ApplyState,
     active: bool,
     _not_send: PhantomData<Rc<()>>,
 }
 
-impl TransferScope {
-    fn new(transfer: Transfer) -> Self {
-        let state = transfer.apply_state();
+impl TransferGuard {
+    fn new(enrichment: EnrichmentTransfer) -> Self {
+        let state = enrichment.apply_state();
         Self {
-            transfer,
+            enrichment,
             state,
             active: false,
             _not_send: PhantomData,
         }
     }
 
-    /// Applies the captured enrichment to the current thread.
+    /// Reapplies the captured enrichment to the current thread.
     ///
-    /// A repeated call while the scope is active does nothing.
+    /// A repeated call while the guard is active does nothing.
     pub fn apply_current_thread(&mut self) {
         if self.active {
             return;
         }
-        self.transfer.enrichment.apply_start(&mut self.state);
+        self.enrichment.apply_start(&mut self.state);
         self.active = true;
     }
 
     /// Restores the enrichment that was active before the last application.
     ///
-    /// A call while the scope is inactive does nothing.
+    /// A call while the guard is inactive does nothing. The guard keeps its
+    /// restoration storage so a later [`apply_current_thread`](Self::apply_current_thread)
+    /// call can reuse it.
     pub fn restore_current_thread(&mut self) {
         if !self.active {
             return;
         }
-        self.transfer.enrichment.apply_end(&mut self.state);
+        self.enrichment.apply_end(&mut self.state);
         self.active = false;
     }
 }
 
-impl Drop for TransferScope {
+impl Drop for TransferGuard {
     fn drop(&mut self) {
         self.restore_current_thread();
-    }
-}
-
-/// Restores the prior enrichment when it is dropped.
-///
-/// The guard belongs to the thread that created it. It cannot move to another
-/// thread. Runtime integrations can retain it while they run one task poll.
-#[derive(Debug)]
-#[must_use = "the enrichment is removed as soon as the guard is dropped"]
-pub struct TransferGuard {
-    _guard: Guard,
-    _not_send: PhantomData<Rc<()>>,
-}
-
-impl TransferGuard {
-    fn new(guard: Guard) -> Self {
-        Self {
-            _guard: guard,
-            _not_send: PhantomData,
-        }
     }
 }
 

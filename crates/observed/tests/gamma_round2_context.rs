@@ -144,28 +144,27 @@ fn gamma_round2_composite_transfer_restores_each_childs_independent_chain() {
 }
 
 #[test]
-fn gamma_round2_transfer_scope_repeats_safely_and_restores_on_drop() {
+fn gamma_round2_transfer_guard_repeats_safely_and_restores_on_drop() {
     let capture = Arc::new(Capture::default());
     let sink = sink(&capture);
     let transfer = (|| sink.transfer_context()).enrich(&sink, Layer("captured", 1))();
 
     (|| {
         assert_eq!(enrichment_keys(&sink), ["prior"]);
-        let mut scope = transfer.into_scope();
+        let mut guard = transfer.apply_current_thread();
 
-        scope.apply_current_thread();
         assert_eq!(enrichment_keys(&sink), ["captured"]);
-        scope.apply_current_thread();
+        guard.apply_current_thread();
         assert_eq!(enrichment_keys(&sink), ["captured"]);
 
-        scope.restore_current_thread();
+        guard.restore_current_thread();
         assert_eq!(enrichment_keys(&sink), ["prior"]);
-        scope.restore_current_thread();
+        guard.restore_current_thread();
         assert_eq!(enrichment_keys(&sink), ["prior"]);
 
-        scope.apply_current_thread();
+        guard.apply_current_thread();
         assert_eq!(enrichment_keys(&sink), ["captured"]);
-        drop(scope);
+        drop(guard);
         assert_eq!(enrichment_keys(&sink), ["prior"]);
     })
     .enrich(&sink, Layer("prior", 2))();

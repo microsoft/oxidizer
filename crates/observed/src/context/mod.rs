@@ -11,5 +11,5 @@
 mod transfer;
 mod transferred;
 
-pub use transfer::{Transfer, TransferGuard, TransferScope};
+pub use transfer::{Transfer, TransferGuard};
 pub use transferred::Transferred;
