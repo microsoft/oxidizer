@@ -16,6 +16,16 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health"
 
+[package.metadata.cargo_check_external_types]
+# Filter exposes bitflags iteration; health handles implement ThreadAware.
+allowed_external_types = [
+    "bitflags::iter::Iter",
+    "bitflags::iter::IterNames",
+    "bitflags::traits::Flags",
+    "bitflags::traits::PublicFlags",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
