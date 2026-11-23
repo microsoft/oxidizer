@@ -3,6 +3,7 @@
 
 //! Shared worker routing and shutdown state.
 
+use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
@@ -58,7 +59,7 @@ pub(crate) struct DispatcherCore {
     shutdown_signaled: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
-    workers: Workers,
+    workers: StdArc<[Thread]>,
 
     // Immutable, runtime-local lookup for placement and relocation; ordinary spawn uses a
     // cached index. IDs come only from registered workers, so a non-cryptographic hasher fits.
@@ -91,13 +92,11 @@ impl DispatcherCore {
             .enumerate()
             .map(|(index, endpoint)| (endpoint.thread.id(), WorkerIndex(index)))
             .collect();
-        let workers = Workers::new(
-            worker_endpoints
-                .iter()
-                .map(|endpoint| endpoint.thread.clone())
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        );
+        let workers = worker_endpoints
+            .iter()
+            .map(|endpoint| endpoint.thread.clone())
+            .collect::<Vec<_>>()
+            .into();
         assert_eq!(
             worker_indices.len(),
             worker_endpoints.len(),
@@ -232,8 +231,8 @@ impl DispatcherCore {
         self.worker_indices.get(&thread_id).copied()
     }
 
-    pub(crate) const fn workers(&self) -> &Workers {
-        &self.workers
+    pub(crate) fn workers(&self) -> Workers {
+        Workers::new(StdArc::clone(&self.workers))
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {

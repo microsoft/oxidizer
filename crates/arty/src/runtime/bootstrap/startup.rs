@@ -354,7 +354,6 @@ mod tests {
         let tasks: Vec<_> = cx
             .control()
             .workers()
-            .iter()
             .map(|worker| {
                 scheduler.spawn_at(
                     &worker,
@@ -405,7 +404,6 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .iter()
             .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
@@ -426,7 +424,6 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .iter()
             .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();

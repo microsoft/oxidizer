@@ -23,11 +23,17 @@ impl RuntimeControl {
         Self { dispatcher }
     }
 
-    /// Returns the details of this runtime's workers.
+    /// Returns an owned iterator over a snapshot of this runtime's worker identities.
     ///
-    /// The runtime owns these details. Use them with
-    /// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) to select a
-    /// specific worker.
+    /// Each call creates a fresh snapshot of the identities at that point.
+    /// Later runtime changes do not update it. The snapshot does not track
+    /// whether workers are still running or keep the runtime running.
+    ///
+    /// Use `control.workers().len()` to get the worker count at the time of the call.
+    /// A fresh snapshot contains at least one worker. Its
+    /// [`len`](ExactSizeIterator::len) decreases as you consume it.
+    /// Pass an item by reference to [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at)
+    /// to select a specific worker.
     ///
     /// # Examples
     ///
@@ -35,15 +41,16 @@ impl RuntimeControl {
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
+    /// let worker_count = cx.control().workers().len();
     /// let tasks: Vec<_> = cx
     ///     .control()
     ///     .workers()
-    ///     .iter()
     ///     .map(|worker| {
     ///         cx.scheduler()
     ///             .spawn_at(&worker, (), |()| async { std::thread::current().id() })
     ///     })
     ///     .collect();
+    /// assert_eq!(tasks.len(), worker_count);
     /// for task in tasks {
     ///     let _worker_id = task.await?;
     /// }
@@ -52,7 +59,7 @@ impl RuntimeControl {
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     #[must_use]
-    pub fn workers(&self) -> &Workers {
+    pub fn workers(&self) -> Workers {
         self.dispatcher.workers()
     }
 

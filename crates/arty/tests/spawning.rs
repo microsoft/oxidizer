@@ -394,11 +394,10 @@ impl ThreadAware for DestinationProbe {
 async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Context) {
     let expected_workers = 2;
     let home = cx.thread().id();
-    let destinations: Vec<_> = cx.control().workers().iter().map(|worker| worker.id()).collect();
+    let destinations: Vec<_> = cx.control().workers().map(|worker| worker.id()).collect();
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| {
             drop(cx.scheduler().spawn_anywhere((), |()| async {}));
             cx.scheduler().spawn_at(
@@ -451,7 +450,6 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
     control.shutdown();
     let tasks: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| scheduler.spawn_at::<(), _, ()>(&worker, (), |()| async { panic!("rejected factories must not run") }))
         .collect();
     assert!(!tasks.is_empty());
@@ -488,7 +486,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .unwrap();
     let destination = other
         .scheduler()
-        .block_on(async |cx| cx.control().workers().iter().next().unwrap())
+        .block_on(async |cx| cx.control().workers().next().unwrap())
         .unwrap();
     let relocations = Arc::new(AtomicUsize::new(0));
     let invocations = Arc::new(AtomicUsize::new(0));

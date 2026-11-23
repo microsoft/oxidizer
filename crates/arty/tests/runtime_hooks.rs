@@ -482,7 +482,7 @@ fn spawn_hook_covers_runtime_local_relocating_and_specific_worker_submissions() 
         .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
         .unwrap();
     let baseline = calls.load(Ordering::SeqCst);
-    let destination = control.workers().iter().next().unwrap();
+    let destination = control.workers().next().unwrap();
 
     scheduler.spawn(async |_| {}).join().unwrap();
     scheduler.spawn_anywhere((), |()| async {}).join().unwrap();
@@ -518,9 +518,8 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
     let (scheduler, destination, target) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers = cx.control().workers();
-            let destination = workers.iter().find(|worker| worker.id() != cx.thread().id()).unwrap();
-            let target = workers.iter().find(|worker| worker.id() == cx.thread().id()).unwrap();
+            let destination = cx.control().workers().find(|worker| worker.id() != cx.thread().id()).unwrap();
+            let target = cx.control().workers().find(|worker| worker.id() == cx.thread().id()).unwrap();
             (cx.scheduler().clone(), destination, target)
         })
         .unwrap();
@@ -576,12 +575,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
     let (scheduler, source, destination) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let destination = cx
-                .control()
-                .workers()
-                .iter()
-                .find(|worker| worker.id() != cx.thread().id())
-                .unwrap();
+            let destination = cx.control().workers().find(|worker| worker.id() != cx.thread().id()).unwrap();
             (cx.scheduler().clone(), cx.thread().clone(), destination)
         })
         .unwrap();
@@ -709,7 +703,7 @@ fn detached_scheduler_relocates_and_starts_observer_before_factory() {
         .scheduler()
         .block_on(async |cx| {
             let source = cx.thread().id();
-            let destination = cx.control().workers().iter().find(|worker| worker.id() != source).unwrap();
+            let destination = cx.control().workers().find(|worker| worker.id() != source).unwrap();
             cx.control().on(HookFn::<TaskSpawn, _>::new(
                 NeutralSpawnProbe {
                     factory_created: Arc::clone(&factory_created),
@@ -799,7 +793,6 @@ fn control_registration_precedes_later_task_submissions() {
 
     let tasks: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| scheduler.spawn_at(&worker, (), |()| async {}))
         .collect();
     for task in tasks {
@@ -1248,7 +1241,7 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
     let (workers, source, scheduler) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers: Vec<_> = cx.control().workers().iter().collect();
+            let workers: Vec<_> = cx.control().workers().collect();
             let source = cx.thread().id();
             cx.control().on(HookFn::<TaskPanic, _>::new(
                 RemotePanicProbe {

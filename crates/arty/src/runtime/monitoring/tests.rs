@@ -836,7 +836,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
     let parent = runtime
         .scheduler()
         .spawn_anywhere(Unaware(started), |cx, Unaware(started)| async move {
-            let destination = cx.control().workers().iter().find(|worker| worker != cx.thread()).unwrap();
+            let destination = cx.control().workers().find(|worker| worker != cx.thread()).unwrap();
             let at = cx.scheduler().spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
                 PendingBody::<64>::new(started)
             });

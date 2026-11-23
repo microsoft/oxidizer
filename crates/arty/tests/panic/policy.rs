@@ -283,7 +283,7 @@ fn ignore_policy_keeps_running_after_each_governed_panic_boundary() {
 #[test]
 fn ignore_policy_remains_operational_across_workers_and_cloned_schedulers() {
     let runtime = runtime_builder(2, PanicResponse::Ignore).build().unwrap();
-    let destination = support::runtime_control(&runtime).workers().iter().nth(1).unwrap();
+    let destination = support::runtime_control(&runtime).workers().nth(1).unwrap();
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
@@ -316,7 +316,6 @@ fn concurrent_panics_start_one_coordinated_shutdown() {
     let barrier = Arc::new(Barrier::new(3));
     let tasks: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| {
             let barrier = Arc::clone(&barrier);
             scheduler.spawn_at(&worker, Unaware(barrier), concurrent_panic)
@@ -386,7 +385,6 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
     let (started_tx, started_rx) = mpsc::channel();
     let pending: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| {
             scheduler.spawn_at(&worker, Unaware(started_tx.clone()), |Unaware(started)| async move {
                 started.send(()).unwrap();
@@ -398,7 +396,7 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
         started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
     }
 
-    drop(scheduler.spawn_at(&control.workers().iter().next().unwrap(), Unaware(()), relocated_panic));
+    drop(scheduler.spawn_at(&control.workers().next().unwrap(), Unaware(()), relocated_panic));
 
     let cancellations: Vec<_> = pending.into_iter().map(|task| task.join().unwrap_err()).collect();
     let stop = runtime.stop().unwrap_err();
@@ -434,7 +432,6 @@ fn detached_blocking_panic_keeps_runtime_running() {
     let (started_tx, started_rx) = mpsc::channel();
     let pending: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| {
             let (release, released) = events_once::Event::<()>::boxed();
             let task = scheduler.spawn_at(

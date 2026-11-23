@@ -30,7 +30,7 @@ assert_impl_all!(ShutdownCause: Send, Sync, Clone, Debug, Eq);
 assert_not_impl_any!(ShutdownCause: Copy);
 assert_impl_all!(RuntimeControl: Send, Sync, Clone, Debug);
 assert_not_impl_any!(RuntimeControl: ThreadAware, From<&'static Context>, From<&'static Runtime>);
-assert_impl_all!(Workers: Send, Sync, Debug);
+assert_impl_all!(Workers: Send, Sync, Debug, Iterator, ExactSizeIterator, UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(Workers: Clone);
 assert_not_impl_any!(&'static Workers: IntoIterator);
 assert_impl_all!(RuntimeScheduler: Send, Sync, Debug);
@@ -65,11 +65,7 @@ const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&Context) -> &RuntimeControl = Context::control;
 const _: fn(&RuntimeControl) = RuntimeControl::shutdown;
-const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
-const _: fn(&Workers) -> usize = Workers::len;
-const _: fn(&Workers) = |workers| {
-    fn assert_unwind_safe(_: impl UnwindSafe + RefUnwindSafe) {}
-    assert_unwind_safe(workers.iter());
-};
+const _: fn(&RuntimeControl) -> Workers = RuntimeControl::workers;
+const _: fn(&Workers) -> usize = <Workers as ExactSizeIterator>::len;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

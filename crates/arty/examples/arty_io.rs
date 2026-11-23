@@ -50,7 +50,6 @@ async fn main(cx: Context) -> Result<(), JoinError> {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| {
             cx.scheduler().spawn_at(&worker, cx.clone(), |worker| async move {
                 let _ = worker.io().context::<ExampleContext>(&());

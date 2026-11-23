@@ -1,39 +1,50 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::ops::Range;
+use std::sync::Arc;
+
 use thread_aware::Thread;
 
-/// A list of a runtime's workers and their details.
+/// An owned iterator over a snapshot of a runtime's worker identities.
 ///
-/// Obtain this list from
+/// Obtain a fresh snapshot from
 /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
-/// The runtime owns the list. Each item identifies one worker. Pass a reference to an item
-/// directly to [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
+/// The snapshot records the worker identities at the time of that call.
+/// Later runtime changes do not update it. It does not track whether workers
+/// are still running.
+///
+/// Each item is an owned [`Thread`] value. Pass a reference to it to
+/// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
+/// Neither the snapshot nor its items keep the runtime running or own
+/// operating-system resources.
+///
+/// [`len`](ExactSizeIterator::len) returns the number of remaining items.
+/// Before iteration starts, it returns the total worker count in the snapshot.
+/// Each yielded item reduces that count by one.
 #[derive(Debug)]
 pub struct Workers {
-    inner: Box<[Thread]>,
+    inner: Arc<[Thread]>,
+    remaining: Range<usize>,
 }
 
 impl Workers {
-    pub(crate) fn new(inner: Box<[Thread]>) -> Self {
-        Self { inner }
-    }
-
-    /// Returns the number of workers in this runtime.
-    ///
-    /// The count is always at least one.
-    #[must_use]
-    #[expect(clippy::len_without_is_empty, reason = "avoid adding new public API")]
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Returns an iterator over owned [`Thread`] values that identify this runtime's workers.
-    ///
-    /// You can retain these values after the borrow of this list ends.
-    /// Iteration does not remove workers. These values do not own operating-system
-    /// resources or keep the runtime running.
-    pub fn iter(&self) -> impl Iterator<Item = Thread> {
-        self.inner.iter().cloned()
+    pub(crate) fn new(inner: Arc<[Thread]>) -> Self {
+        let remaining = 0..inner.len();
+        Self { inner, remaining }
     }
 }
+
+impl Iterator for Workers {
+    type Item = Thread;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.remaining.next().map(|index| self.inner[index].clone())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.remaining.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Workers {}

@@ -45,7 +45,6 @@ async fn worker_runtime_ids(cx: &Context) -> Vec<String> {
     let tasks = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| {
             cx.scheduler()
                 .spawn_at(&worker, (), |()| async { Handle::current().id().to_string() })
@@ -70,7 +69,7 @@ fn builder_supports_tokio_on_every_worker() {
     let observations = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers = cx.control().workers().iter().collect::<Vec<_>>();
+            let workers = cx.control().workers().collect::<Vec<_>>();
             let tasks = workers
                 .iter()
                 .map(|worker| {

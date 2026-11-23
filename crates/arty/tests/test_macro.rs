@@ -98,7 +98,6 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 1);
@@ -117,7 +116,6 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 3);
@@ -131,7 +129,6 @@ async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .iter()
         .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 1);
@@ -165,7 +162,6 @@ mod controlled_time {
         let tasks: Vec<_> = cx
             .control()
             .workers()
-            .iter()
             .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
             .collect();
         assert_eq!(tasks.len(), 1);

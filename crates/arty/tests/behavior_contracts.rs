@@ -42,7 +42,6 @@ fn count_workers(runtime: &Runtime) -> usize {
         .unwrap();
     let tasks: Vec<_> = control
         .workers()
-        .iter()
         .map(|worker| scheduler.spawn_at(&worker, (), |()| async { thread::current().id() }))
         .collect();
     let count = tasks.len();
@@ -331,7 +330,6 @@ fn context_publishes_scheduler_and_clock_on_every_worker() {
     let tasks: Vec<_> = context
         .control()
         .workers()
-        .iter()
         .map(|worker| {
             context.scheduler().spawn_at(&worker, context.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();

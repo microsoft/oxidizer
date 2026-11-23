@@ -249,7 +249,6 @@ impl Scheduler {
     /// let destination = cx
     ///     .control()
     ///     .workers()
-    ///     .iter()
     ///     .next()
     ///     .ok_or_else(|| std::io::Error::other("runtime has no workers"))?;
     /// let task = cx
@@ -276,7 +275,6 @@ impl Scheduler {
     ///     let destination = runtime.scheduler().block_on(async |cx| {
     ///         cx.control()
     ///             .workers()
-    ///             .iter()
     ///             .next()
     ///             .ok_or_else(|| std::io::Error::other("runtime has no workers"))
     ///     })??;
