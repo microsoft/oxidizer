@@ -67,5 +67,9 @@ const _: fn(&Context) -> &RuntimeControl = Context::control;
 const _: fn(&RuntimeControl) = RuntimeControl::shutdown;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
 const _: fn(&Workers) -> usize = Workers::len;
+const _: fn(&Workers) = |workers| {
+    fn assert_unwind_safe(_: impl UnwindSafe + RefUnwindSafe) {}
+    assert_unwind_safe(workers.iter());
+};
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

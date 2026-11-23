@@ -20,16 +20,19 @@ impl Workers {
     }
 
     /// Returns the number of workers in this runtime.
+    ///
+    /// The count is always at least one.
     #[must_use]
     #[expect(clippy::len_without_is_empty, reason = "runtime worker lists are non-empty by construction")]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
-    /// Returns an iterator over owned worker thread handles.
+    /// Returns an iterator over owned [`Thread`] values that identify this runtime's workers.
     ///
-    /// Each item is a clone of a handle in the list. Iteration does not remove
-    /// workers or transfer ownership of the runtime's threads.
+    /// You can retain these values after the borrow of this list ends.
+    /// Iteration does not remove workers. These values do not own operating-system
+    /// resources or keep the runtime running.
     pub fn iter(&self) -> impl Iterator<Item = Thread> {
         self.inner.iter().cloned()
     }

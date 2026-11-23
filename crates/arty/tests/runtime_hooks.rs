@@ -793,7 +793,7 @@ fn control_registration_precedes_later_task_submissions() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers().iter() {
+    for _ in 0..control.workers().len() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
@@ -1351,7 +1351,7 @@ fn control_worker_spawn_runs_once_on_every_worker() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers().iter() {
+    for _ in 0..control.workers().len() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 

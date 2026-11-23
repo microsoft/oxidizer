@@ -36,7 +36,7 @@ fn wait_for_worker_initialization(cx: &Context) {
         .on(HookFn::<WorkerSpawn, _>::new(InitSignal(initialized), |_event, signal| {
             signal.0.send(()).unwrap();
         }));
-    for _ in cx.control().workers().iter() {
+    for _ in 0..cx.control().workers().len() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 }

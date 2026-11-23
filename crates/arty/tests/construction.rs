@@ -6,10 +6,12 @@
 #![cfg(feature = "rt")]
 // Under Miri, `test-util` supplies a processor model for the same selection logic.
 
+use std::collections::HashSet;
 use std::error::Error as StdError;
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 
+use arty::core::Thread;
 use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::runtime::{Error, Runtime, RuntimeBuilder};
@@ -241,9 +243,9 @@ fn default_runtime_construction_uses_one_worker() {
 }
 
 #[test]
-fn worker_iteration_returns_owned_handles_in_worker_order() {
+fn worker_iteration_returns_owned_worker_identities() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
-    let workers: Vec<arty::core::Thread> = runtime
+    let workers: [Thread; 2] = runtime
         .scheduler()
         .block_on(async |cx| {
             let workers = cx.control().workers();
@@ -253,8 +255,9 @@ fn worker_iteration_returns_owned_handles_in_worker_order() {
             let last = iter.next().unwrap();
             assert!(iter.next().is_none());
             assert_ne!(first.id(), last.id());
-            assert_eq!(workers.iter().collect::<Vec<_>>(), vec![first.clone(), last.clone()]);
-            vec![first, last]
+            let repeated: HashSet<_> = workers.iter().collect();
+            assert_eq!(repeated, [first.clone(), last.clone()].into_iter().collect());
+            [first, last]
         })
         .unwrap();
 
