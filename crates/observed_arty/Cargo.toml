@@ -21,6 +21,7 @@ allowed_external_types = [
     "arty::runtime::builder::RuntimeBuilder",
     "arty::runtime::control::RuntimeControl",
     "observed::sink::core::Sink",
+    "thread_aware_core::thread_aware::ThreadAware",
 ]
 
 [package.metadata.docs.rs]
