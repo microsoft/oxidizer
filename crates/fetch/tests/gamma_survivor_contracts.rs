@@ -5,11 +5,12 @@
 
 #![cfg(feature = "test-util")]
 
-use fetch::fake::FakeHandler;
+use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::handlers::Buffering;
 use fetch::{HttpBodyBuilder, HttpClient, HttpError, HttpResponseBuilder};
 use futures::executor::block_on;
 use layered::{Layer as _, Service as _};
+use observed::Sink;
 use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
 use tick::Clock;
 
@@ -35,7 +36,7 @@ fn gamma_survivor_buffering_preserves_stream_error() {
 
 #[test]
 fn gamma_survivor_relative_request_fails_before_fake_transport() {
-    let client = HttpClient::builder_fake(http::StatusCode::OK, &Clock::new_frozen()).build();
+    let client = HttpClient::builder_fake(http::StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop())).build();
     let request = http::Request::get("/relative").body(HttpBodyBuilder::new_fake().empty()).unwrap();
     block_on(client.execute(request)).unwrap_err();
 }
@@ -47,7 +48,7 @@ fn gamma_survivor_request_metric_description_and_unit_are_exact() {
 
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
-    let client = HttpClient::builder_fake(http::StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(http::StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .name("gamma-client")
         .meter_provider(provider.clone())
         .build();
@@ -87,7 +88,7 @@ fn gamma_survivor_total_metric_description_and_unit_are_exact() {
 
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
-    let client = HttpClient::builder_fake(http::StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(http::StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .meter_provider(provider.clone())
         .standard_pipeline(|pipeline, _| pipeline)
         .build();
@@ -195,6 +196,7 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
         memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
+        sink: Sink::noop(),
         extras: (),
     };
     let builder = create_builder(
@@ -241,7 +243,7 @@ fn gamma_survivor_standard_pipeline_retains_zero_hedge_configuration() {
         HttpResponseBuilder::new_fake().status(status).build()
     });
     let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
-    let client = HttpClient::builder_fake(handler, fetch::fake::FakeDeps { clock })
+    let client = HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 .total_timeout(|layer| layer.timeout(Duration::MAX))

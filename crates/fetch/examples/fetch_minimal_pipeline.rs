@@ -6,6 +6,7 @@
 //! The minimal pipeline contains no middleware.
 
 use fetch::HttpClient;
+use observed::Sink;
 
 #[path = "util/utils.rs"]
 mod utils;
@@ -15,7 +16,8 @@ async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
     // This client uses no middleware.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(Sink::noop()))
         .minimal_pipeline()
         .build();
 

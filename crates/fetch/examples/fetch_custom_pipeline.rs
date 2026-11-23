@@ -13,11 +13,13 @@ use fetch::fake::FakeDeps;
 use fetch::resilience::timeout::HttpTimeoutLayerExt;
 use http::StatusCode;
 use layered::Stack;
+use observed::Sink;
 use seatbelt::timeout::Timeout;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
         // Add a timeout layer around the dispatch handler.
         //
         // The fake dispatch handler returns 200 OK.

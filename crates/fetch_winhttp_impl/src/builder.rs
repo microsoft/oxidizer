@@ -158,6 +158,7 @@ fn into_custom_deps(deps: WinHttpDeps) -> CustomDeps<WinHttpDeps> {
     CustomDeps {
         clock: deps.clock.clone(),
         memory: deps.memory.clone(),
+        sink: deps.sink.clone(),
         extras: deps,
     }
 }
@@ -176,7 +177,7 @@ mod tests {
     use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
     use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
-    use observed::Sink;
+    use observed::{Sink, SinkId};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use thread_aware::{Relocator, ThreadAware, unaware};
     use tick::{Clock, ClockControl};
@@ -216,6 +217,13 @@ mod tests {
 
         let _body_pool_buffer = custom_deps.memory.reserve(1);
         let _transport_pool_buffer = custom_deps.extras.memory().reserve(1);
+    }
+
+    #[test]
+    fn into_custom_deps_forwards_sink() {
+        let deps = WinHttpDeps::builder(clock(), OpaqueMemory::new(GlobalPool::new()), Sink::builder("winhttp_test").build()).build();
+
+        assert_eq!(into_custom_deps(deps).sink.id(), SinkId::new("winhttp_test"));
     }
 
     /// Observes provider forwarding and cloning without calling the Windows API.

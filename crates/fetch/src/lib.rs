@@ -82,11 +82,13 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
 //! use fetch::{HttpClient, HttpError};
+//! use observed::Sink;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
 //!     // Create a client with the bundled Tokio transport.
-//!     let client: HttpClient = HttpClient::new_tokio();
+//!     // An application passes its own sink. `Sink::noop()` drops every event.
+//!     let client: HttpClient = HttpClient::new_tokio(Sink::noop());
 //!
 //!     // Return an error for a `4xx` or `5xx` status, then read the body as text.
 //!     let body: String = client.get("https://example.com").fetch_text_body().await?;
@@ -540,12 +542,17 @@
 //! # use fetch::{HttpClient, HttpResponseBuilder};
 //! # use fetch::fake::FakeHandler;
 //! # use http::StatusCode;
+//! # use observed::Sink;
 //!
+//! // An application passes its own sink. `Sink::noop()` drops every event.
 //! // Always return a 200 response.
-//! let client = HttpClient::new_fake(StatusCode::OK);
+//! let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
 //!
 //! // Return a sequence of responses without bodies.
-//! let client = HttpClient::new_fake(vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR]);
+//! let client = HttpClient::new_fake(
+//!     vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR],
+//!     Sink::noop(),
+//! );
 //!
 //! // Create a fake response.
 //! let response = HttpResponseBuilder::new_fake()
@@ -555,7 +562,7 @@
 //!     .expect("always succeeds");
 //!
 //! // Always return the same response.
-//! let client = HttpClient::new_fake(response);
+//! let client = HttpClient::new_fake(response, Sink::noop());
 //!
 //! // Use a synchronous or asynchronous custom handler.
 //! let fake_handler = FakeHandler::from_fn(|req| {
@@ -568,7 +575,7 @@
 //! });
 //!
 //! // Create a client that uses the custom handler.
-//! let client = HttpClient::new_fake(fake_handler);
+//! let client = HttpClient::new_fake(fake_handler, Sink::noop());
 //! # }
 //! ```
 //!
@@ -620,10 +627,12 @@
 //!
 //! ```rust,no_run
 //! # use fetch::{HttpClient, Uri};
+//! # use observed::Sink;
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create one client and reuse it.
-//! let client = HttpClient::new_tokio();
+//! // An application passes its own sink. `Sink::noop()` drops every event.
+//! let client = HttpClient::new_tokio(Sink::noop());
 //!
 //! // Parse repeated URIs once.
 //! let users_uri: Uri = "https://api.example.com/users".parse()?;
@@ -684,10 +693,12 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
 //! use fetch::HttpClient;
+//! use observed::Sink;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = HttpClient::new_tokio();
+//!     // An application passes its own sink. `Sink::noop()` drops every event.
+//!     let client = HttpClient::new_tokio(Sink::noop());
 //!
 //!     // Send an HTTPS request.
 //!     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -726,7 +737,8 @@
 //! # use fetch::fake::FakeDeps;
 //! # use fetch::options::DecompressionFormat;
 //! # use http::StatusCode;
-//! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+//! # use observed::Sink;
+//! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
 //! let client = builder.decompression(&[DecompressionFormat::Gzip]).build();
 //! # }
 //! ```

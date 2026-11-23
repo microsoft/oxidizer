@@ -20,6 +20,7 @@ use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, StatusCode};
 use http_compression::OriginalBody;
 use http_extensions::HttpBodyOptions;
+use observed::Sink;
 use ohno::Labeled as _;
 
 testing_aids::init_tracing!();
@@ -103,7 +104,7 @@ fn build_with_body_options(
         response.bytes(body.clone()).build()
     });
 
-    (configure(HttpClient::builder_fake(handler, FakeDeps::default())), seen)
+    (configure(HttpClient::builder_fake(handler, FakeDeps::new(Sink::noop()))), seen)
 }
 
 /// A client that decompresses every compression format available in this build.

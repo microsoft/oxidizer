@@ -11,6 +11,7 @@ use fetch::options::{DecompressionFormat, DecompressionOptions};
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::HeaderValue;
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+use observed::Sink;
 
 fn main() -> Result<(), ohno::AppError> {
     futures::executor::block_on(async {
@@ -29,7 +30,8 @@ fn main() -> Result<(), ohno::AppError> {
                 .bytes(compressed.clone())
                 .build()
         });
-        let client = HttpClient::builder_fake(handler, FakeDeps::default())
+        // An application passes its own sink. `Sink::noop()` drops every event.
+        let client = HttpClient::builder_fake(handler, FakeDeps::new(Sink::noop()))
             .decompression(DecompressionOptions::with_formats(&[DecompressionFormat::Gzip]))
             .build();
 

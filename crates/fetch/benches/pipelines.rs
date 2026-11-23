@@ -11,12 +11,14 @@ use alloc_tracker::{Allocator, Session};
 use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use fetch::HttpClient;
+use fetch::fake::FakeDeps;
 use fetch::handlers::{Logging, Metrics};
 use fetch::resilience::retry::HttpRetryLayerExt;
 use fetch::resilience::timeout::HttpTimeoutLayerExt;
 use futures::executor::block_on;
 use http::StatusCode;
 use layered::Stack;
+use observed::Sink;
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
 use tick::Clock;
@@ -34,7 +36,7 @@ fn entry(c: &mut Criterion) {
     let session = Session::new();
     let mut group = c.benchmark_group("http_client_pipelines");
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen()).build();
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop())).build();
     let standard_allocs = session.operation("standard_pipeline");
     group.bench_function("standard_pipeline", |b| {
         b.iter_custom(|iters| {
@@ -43,7 +45,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .minimal_pipeline()
         .build();
     let minimal_allocs = session.operation("minimal_pipeline");
@@ -54,7 +56,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .custom_pipeline(|dispatch, _context| dispatch)
         .build();
     let custom_minimal_allocs = session.operation("custom_minimal_pipeline");
@@ -65,7 +67,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .custom_pipeline(|dispatch, context| {
             let stack = (
                 Timeout::layer("total_timeout", context.resilience_context())

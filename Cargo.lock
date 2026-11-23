@@ -1803,6 +1803,7 @@ dependencies = [
  "observed",
  "observed_destination_core",
  "observed_destination_stdout",
+ "observed_testing",
  "ohno 0.5.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
@@ -1844,6 +1845,7 @@ dependencies = [
  "futures",
  "http",
  "layered",
+ "observed",
  "tick",
  "tokio",
 ]

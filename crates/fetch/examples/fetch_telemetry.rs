@@ -16,6 +16,7 @@ use fetch::HttpClient;
 use fetch::fake::FakeDeps;
 use fetch::telemetry::TelemetryAttributes;
 use http::StatusCode;
+use observed::Sink;
 use observed_destination_core::MeterProviderBuilderExt;
 use observed_destination_stdout::stdout_metrics;
 use opentelemetry::KeyValue;
@@ -47,7 +48,8 @@ async fn main() -> Result<(), ohno::AppError> {
 
     // Use the custom meter provider instead of the global provider.
     // The fake handler returns responses without network I/O.
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
         .meter_provider(meter_provider)
         .build();
 

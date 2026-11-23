@@ -21,6 +21,7 @@ use azure_storage_blob::{BlobServiceClient, BlobServiceClientOptions};
 use fetch::HttpClient as FetchClient;
 use fetch_azure::HttpClient;
 use futures::TryStreamExt as _;
+use observed::Sink;
 use tick::Clock;
 
 #[tokio::main]
@@ -38,7 +39,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DeveloperToolsCredential::new(Some(DeveloperToolsCredentialOptions { executor: Some(executor) }))?;
 
     // Use a tokio `fetch` client for Azure SDK HTTP requests.
-    let transport = Transport::new(HttpClient::from(FetchClient::new_tokio()).into());
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let transport = Transport::new(HttpClient::from(FetchClient::new_tokio(Sink::noop())).into());
     let options = BlobServiceClientOptions {
         client_options: ClientOptions {
             transport: Some(transport),

@@ -4,6 +4,7 @@
 use data_privacy::RedactionEngine;
 use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
+use observed::Sink;
 use opentelemetry::metrics::Meter;
 use tick::Clock;
 
@@ -22,6 +23,7 @@ pub struct PipelineContext {
     resilience_context: HttpResilienceContext,
     redaction_engine: RedactionEngine,
     clock: Clock,
+    sink: Sink,
     body_builder: HttpBodyBuilder,
     router: Router,
 }
@@ -33,6 +35,7 @@ impl PipelineContext {
         redaction_engine: RedactionEngine,
         body_builder: HttpBodyBuilder,
         clock: Clock,
+        sink: Sink,
         router: Router,
     ) -> Self {
         Self {
@@ -41,6 +44,7 @@ impl PipelineContext {
             meter: meter.clone(),
             body_builder,
             clock,
+            sink,
             router,
         }
     }
@@ -49,6 +53,12 @@ impl PipelineContext {
     #[must_use]
     pub fn clock(&self) -> &Clock {
         &self.clock
+    }
+
+    /// Returns the `observed` sink that the deps of the client supplied.
+    #[must_use]
+    pub const fn sink(&self) -> &Sink {
+        &self.sink
     }
 
     /// Returns the telemetry meter.
@@ -80,36 +90,36 @@ impl PipelineContext {
     pub const fn router(&self) -> &Router {
         &self.router
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        use opentelemetry::metrics::MeterProvider as _;
+
+        let clock = Clock::new_frozen();
+        Self::new(
+            HttpResilienceContext::new(&clock),
+            &opentelemetry_sdk::metrics::SdkMeterProvider::default().meter("test"),
+            RedactionEngine::default(),
+            HttpBodyBuilder::new_fake(),
+            clock,
+            Sink::noop(),
+            Router::default(),
+        )
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http_extensions::HttpBodyOptions;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     use super::*;
-
-    fn test_context(body_builder: HttpBodyBuilder) -> PipelineContext {
-        let clock = Clock::new_frozen();
-        let meter = SdkMeterProvider::default().meter("test");
-
-        PipelineContext::new(
-            HttpResilienceContext::new(&clock),
-            &meter,
-            RedactionEngine::default(),
-            body_builder,
-            clock,
-            Router::default(),
-        )
-    }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn body_builder_returns_the_configured_builder() {
-        let body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
-        let context = test_context(body_builder);
+        let mut context = PipelineContext::for_test();
+        context.body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
 
         // Return the builder supplied at construction, including its buffer limit.
         assert!(format!("{:?}", context.body_builder()).contains("4321"));
@@ -118,10 +128,11 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn accessors_return_constructed_dependencies() {
-        let context = test_context(HttpBodyBuilder::new_fake());
+        let context = PipelineContext::for_test();
 
         // Exercise every accessor. Each one must return without a panic.
         let _ = context.clock();
+        let _ = context.sink();
         let _ = context.meter();
         let _ = context.resilience_context();
         let _ = context.redaction_engine();

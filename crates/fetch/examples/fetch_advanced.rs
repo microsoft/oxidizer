@@ -15,6 +15,7 @@ use fetch::HttpClient;
 use fetch::options::{ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options};
 use fetch::tls::TlsOptions;
 use http::Version;
+use observed::Sink;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::crypto::CryptoProvider;
 use tracing::info;
@@ -39,7 +40,8 @@ async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
     // Create a client with custom transport and resilience options.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(Sink::noop()))
         // Use a custom rustls certificate verifier.
         .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
         // Keep active and idle connections alive with periodic probes.

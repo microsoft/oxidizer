@@ -13,9 +13,11 @@ use bytesbuf::BytesView;
 use bytesbuf::mem::{HasMemory, Memory};
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criterion_main};
+use fetch::fake::FakeDeps;
 use fetch::{HttpBodyBuilder, HttpClient};
 use futures::executor::block_on;
 use http::StatusCode;
+use observed::Sink;
 use tick::Clock;
 
 #[global_allocator]
@@ -25,7 +27,9 @@ static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 fn memory(c: &mut Criterion) {
     let session = Session::new();
     let clock = Clock::new_frozen();
-    let client = HttpClient::builder_fake(StatusCode::OK, &clock).minimal_pipeline().build();
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&clock, Sink::noop()))
+        .minimal_pipeline()
+        .build();
     let retained = client.memory();
     let builder = HttpBodyBuilder::new_fake();
     let mut group = c.benchmark_group("fetch_memory/steady_state");

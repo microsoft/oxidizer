@@ -155,34 +155,16 @@ impl PipelineBuilder {
 mod tests {
     use std::time::Duration;
 
-    use data_privacy::RedactionEngine;
     use http::StatusCode;
     use http_extensions::HttpBodyBuilder;
-    use http_extensions::routing::Router;
-    use opentelemetry::metrics::{Meter, MeterProvider};
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use tick::Clock;
 
     use super::*;
-    use crate::resilience::HttpResilienceContext;
-
-    fn test_context() -> PipelineContext {
-        let clock = Clock::new_frozen();
-        PipelineContext::new(
-            HttpResilienceContext::new(&clock),
-            &test_meter(),
-            RedactionEngine::default(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        )
-    }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_minimal_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::Minimal.build(dispatch, test_context());
+        let pipeline = PipelineBuilder::Minimal.build(dispatch, PipelineContext::for_test());
 
         assert!(matches!(pipeline, Pipeline::Minimal(_)));
         assert!(!pipeline.is_standard());
@@ -191,7 +173,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn service_trait_forwards_to_pipeline_execution() {
-        let pipeline = PipelineBuilder::Minimal.build(Dispatch::new_fake(StatusCode::OK), test_context());
+        let pipeline = PipelineBuilder::Minimal.build(Dispatch::new_fake(StatusCode::OK), PipelineContext::for_test());
         let request = http::Request::get("https://example.com")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
@@ -206,7 +188,7 @@ mod tests {
     #[should_panic(expected = "expected custom pipeline, found minimal pipeline")]
     fn dbg_string_for_minimal_pipeline_panics() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::Minimal.build(dispatch, test_context());
+        let pipeline = PipelineBuilder::Minimal.build(dispatch, PipelineContext::for_test());
 
         // The debug accessor is valid only for custom pipelines. A minimal pipeline must panic.
         let _ = pipeline.debug_string();
@@ -217,7 +199,7 @@ mod tests {
     fn build_custom_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
         let factory = CustomPipeline::new(|dispatch, _| dispatch);
-        let pipeline = PipelineBuilder::Custom(factory).build(dispatch, test_context());
+        let pipeline = PipelineBuilder::Custom(factory).build(dispatch, PipelineContext::for_test());
 
         assert!(!pipeline.is_standard());
     }
@@ -226,7 +208,7 @@ mod tests {
     #[test]
     fn build_standard_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::StandardPipeline(ConfigureStandardPipeline::default()).build(dispatch, test_context());
+        let pipeline = PipelineBuilder::StandardPipeline(ConfigureStandardPipeline::default()).build(dispatch, PipelineContext::for_test());
 
         let _dbg = pipeline.debug_string();
     }
@@ -235,7 +217,7 @@ mod tests {
     #[test]
     fn pipeline_builder_default_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
-        let pipeline = PipelineBuilder::default().build(dispatch, test_context());
+        let pipeline = PipelineBuilder::default().build(dispatch, PipelineContext::for_test());
 
         assert!(pipeline.is_standard());
     }
@@ -246,7 +228,7 @@ mod tests {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
         let pipeline = PipelineBuilder::Minimal
             .configure_standard(|p, _context| p.retry(|retry| retry.max_retry_attempts(10)))
-            .build(dispatch, test_context());
+            .build(dispatch, PipelineContext::for_test());
 
         assert!(format!("{pipeline:?}").contains("max_attempts: 11"));
     }
@@ -258,14 +240,10 @@ mod tests {
         let pipeline = PipelineBuilder::Minimal
             .configure_standard(|p, _context| p.retry(|retry| retry.max_retry_attempts(10)))
             .configure_standard(|p, _context| p.attempt_timeout(|timeout| timeout.timeout(Duration::from_secs(123))))
-            .build(dispatch, test_context());
+            .build(dispatch, PipelineContext::for_test());
 
         let debug = format!("{pipeline:?}");
         assert!(debug.contains("max_attempts: 11"));
         assert!(debug.contains("timeout: 123s"));
-    }
-
-    fn test_meter() -> Meter {
-        SdkMeterProvider::default().meter("test")
     }
 }

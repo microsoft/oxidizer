@@ -31,6 +31,7 @@ allowed_external_types = [
     "templated_uri::*",
     "layered::intercept::InterceptLayer",
     "layered::service::Service",
+    "observed::sink::core::Sink",
     "opentelemetry::common::KeyValue",
     "opentelemetry::metrics::meter::Meter",
     "opentelemetry::metrics::meter::MeterProvider",
@@ -121,6 +122,7 @@ layered = { workspace = true, features = [
 
 # TLS related crates
 native-tls = { workspace = true, features = ["alpn"], optional = true }
+observed = { workspace = true }
 ohno.workspace = true
 opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
@@ -171,9 +173,9 @@ http_telemetry = { path = "../http_telemetry" }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
-observed = { path = "../observed" }
 observed_destination_core = { workspace = true }
 observed_destination_stdout = { workspace = true }
+observed_testing = { path = "../observed_testing" }
 ohno = { workspace = true, features = ["test-util", "app-err"] }
 opentelemetry_sdk = { workspace = true, features = [
     "metrics",
@@ -332,6 +334,10 @@ required-features = ["test-util"]
 [[test]]
 name = "decompression"
 required-features = ["test-util", "compression-all"]
+
+[[test]]
+name = "sink"
+required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -352,6 +352,7 @@ pub(super) enum HttpClientPipeline {
 mod tests {
     use http::{Request, StatusCode, Uri};
     use http_extensions::FakeHandler;
+    use observed::Sink;
     use ohno::ErrorExt;
     use seatbelt::{Recovery, RecoveryKind};
     use static_assertions::assert_impl_all;
@@ -367,7 +368,9 @@ mod tests {
             assert!(request.extensions().get::<Router>().is_none());
             HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
         });
-        let client = HttpClient::builder_fake(handler, FakeDeps::default()).minimal_pipeline().build();
+        let client = HttpClient::builder_fake(handler, FakeDeps::new(Sink::noop()))
+            .minimal_pipeline()
+            .build();
         let response = futures::executor::block_on(client.get("https://example.test/").fetch()).unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -381,7 +384,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn assert_fetch_future_not_large() {
-        let client = HttpClient::new_fake(StatusCode::OK);
+        let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
 
         let future = client.get("http://example.com").fetch();
         let size = size_of_val(&future);
@@ -395,7 +398,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn http_not_allowed_ensure_rejected() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).build();
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).build();
 
         let err = client.get("http://example.com").fetch_text().await.unwrap_err();
 
@@ -444,7 +447,7 @@ mod tests {
             assert_eq!(request.uri().to_string(), "https://example.com/path");
             HttpResponseBuilder::new_fake().status(StatusCode::IM_A_TEAPOT).build()
         });
-        let client = HttpClient::new_fake(fake);
+        let client = HttpClient::new_fake(fake, Sink::noop());
 
         let response = client.request("DELETE", "https://example.com/path").fetch().await.unwrap();
 
@@ -456,7 +459,7 @@ mod tests {
     async fn fetch_fails_when_router_uri_resolution_conflicts() {
         use http_extensions::routing::BaseUriConflict;
 
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .router(Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail))
             .build();
 
@@ -470,7 +473,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_request_handler_implementation() {
-        let client = HttpClient::new_fake(StatusCode::ACCEPTED);
+        let client = HttpClient::new_fake(StatusCode::ACCEPTED, Sink::noop());
 
         // Create a request.
         let request = Request::builder()
@@ -487,7 +490,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_minimal_pipeline() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .minimal_pipeline()
             .build();
 
@@ -499,7 +502,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn test_has_memory() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .minimal_pipeline()
             .build();
 
@@ -511,7 +514,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn test_memory() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .minimal_pipeline()
             .build();
 
@@ -522,7 +525,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_custom_pipeline() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .custom_pipeline(|_root, _ctx| FakeHandler::from(StatusCode::IM_A_TEAPOT))
             .build();
 
@@ -534,7 +537,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_invalid_uri_handling() {
-        let client = HttpClient::new_fake(StatusCode::OK);
+        let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
 
         let error = client.get("not a valid uri").fetch().await.unwrap_err();
 
@@ -550,11 +553,14 @@ mod tests {
         let uri = Uri::from_static("https://example.com/test");
         let uri_cloned = uri.clone();
 
-        let client = HttpClient::new_fake(FakeHandler::from_fn(move |request| {
-            assert_eq!(request.method(), method);
-            assert_eq!(request.uri().path(), "/test");
-            HttpResponseBuilder::new_fake().build()
-        }));
+        let client = HttpClient::new_fake(
+            FakeHandler::from_fn(move |request| {
+                assert_eq!(request.method(), method);
+                assert_eq!(request.uri().path(), "/test");
+                HttpResponseBuilder::new_fake().build()
+            }),
+            Sink::noop(),
+        );
 
         callback(&client, uri_cloned).fetch().await.unwrap();
     }
@@ -566,7 +572,7 @@ mod tests {
         use crate::options::{ConnectionPoolOptions, PoolSelection};
         use crate::pipeline::Pipeline;
 
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .minimal_pipeline()
             .connection_pool_options(
                 ConnectionPoolOptions::default().multiple_pools(3, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)),
@@ -593,7 +599,7 @@ mod tests {
 
         let mut pools = ConnectionPoolOptions::default();
         pools.multiple_pools = Some((1, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)));
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .minimal_pipeline()
             .connection_pool_options(pools)
             .build();

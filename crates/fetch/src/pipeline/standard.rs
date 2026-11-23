@@ -304,36 +304,12 @@ impl Debug for ConfigureStandardPipeline {
 mod tests {
     use std::time::Duration;
 
-    use data_privacy::RedactionEngine;
-    use http_extensions::HttpBodyBuilder;
-    use http_extensions::routing::Router;
-    use opentelemetry::metrics::{Meter, MeterProvider};
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use tick::Clock;
-
     use super::*;
-    use crate::resilience::HttpResilienceContext;
-
-    fn test_meter() -> Meter {
-        SdkMeterProvider::default().meter("test")
-    }
-
-    fn test_context() -> PipelineContext {
-        let clock = Clock::new_frozen();
-        PipelineContext::new(
-            HttpResilienceContext::new(&clock),
-            &test_meter(),
-            RedactionEngine::default(),
-            HttpBodyBuilder::new_fake(),
-            clock,
-            Router::default(),
-        )
-    }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_new_with_clock_creates_pipeline() {
-        let pipeline = StandardRequestPipeline::new(&test_context());
+        let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
 
         assert!(format!("{:?}", pipeline.total_timeout).contains("timeout: Some(30s)"));
         assert!(format!("{:?}", pipeline.total_timeout).contains("standard.total_timeout"));
@@ -353,7 +329,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_debug_implementation() {
-        let pipeline = StandardRequestPipeline::new(&test_context());
+        let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
 
         let debug_str = format!("{pipeline:?}");
         assert!(debug_str.contains("StandardRequestPipeline"));
@@ -376,8 +352,8 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_multiple_pipelines_are_independent() {
-        let pipeline1 = StandardRequestPipeline::new(&test_context());
-        let pipeline2 = StandardRequestPipeline::new(&test_context());
+        let pipeline1 = StandardRequestPipeline::new(&PipelineContext::for_test());
+        let pipeline2 = StandardRequestPipeline::new(&PipelineContext::for_test());
 
         // Format two separately created pipelines.
         let debug1 = format!("{pipeline1:?}");
@@ -391,7 +367,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_default_recovery_mode_is_retry() {
-        let pipeline = StandardRequestPipeline::new(&test_context());
+        let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
 
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Retry);
     }
@@ -399,7 +375,7 @@ mod tests {
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_recovery_mode_can_be_set_to_hedging() {
-        let pipeline = StandardRequestPipeline::new(&test_context()).recovery_mode(RecoveryMode::Hedging);
+        let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test()).recovery_mode(RecoveryMode::Hedging);
 
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Hedging);
     }
@@ -416,7 +392,7 @@ mod tests {
         let metrics_flag = Arc::clone(&invocations);
         let total_metrics_flag = Arc::clone(&invocations);
 
-        let context = test_context();
+        let context = PipelineContext::for_test();
         let _pipeline = StandardRequestPipeline::new(&context)
             .attempt_intercept(move |intercept| {
                 intercept_flag.fetch_add(1, Ordering::Relaxed);

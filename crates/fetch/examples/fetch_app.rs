@@ -9,6 +9,7 @@ use std::sync::Arc;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;
+use observed::Sink;
 use observed_destination_core::MeterProviderBuilderExt;
 use observed_destination_stdout::stdout_metrics;
 use ohno::ErrorExt;
@@ -21,6 +22,7 @@ use tick::Clock;
 struct App {
     clock: Clock,
     memory: OpaqueMemory,
+    sink: Sink,
     client: HttpClient,
 }
 
@@ -44,6 +46,8 @@ async fn main() -> Result<(), ohno::AppError> {
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
         .memory(|_| OpaqueMemory::new(GlobalPool::new()))
+        // An application passes its own sink. `Sink::noop()` drops every event.
+        .sink(|_| Sink::noop())
         .client({
             let meter_provider = meter_provider.clone();
             move |x| {

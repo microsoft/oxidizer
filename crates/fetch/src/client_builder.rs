@@ -131,7 +131,8 @@ impl HttpClientBuilder {
     /// # use fetch::HttpClient;
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
-    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+    /// # use observed::Sink;
+    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     /// let options = HttpBodyOptions::default()
     ///     .buffer_limit(4 * 1024 * 1024)
     ///     .timeout(Duration::from_secs(30));
@@ -184,7 +185,8 @@ impl HttpClientBuilder {
     /// # use fetch::options::{DecompressionFormat, DecompressionOptions};
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
-    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+    /// # use observed::Sink;
+    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     /// let client = builder
     ///     .decompression(
     ///         DecompressionOptions::with_formats(&[DecompressionFormat::Gzip])
@@ -357,9 +359,11 @@ impl HttpClientBuilder {
     /// # use fetch::HttpClient;
     /// # use fetch::HttpResponseBuilder;
     /// # use fetch::fake::FakeDeps;
+    /// # use observed::Sink;
     /// # use templated_uri::BaseUri;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::default())
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
+    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::new(Sink::noop()))
     ///     .base_uri(BaseUri::from_static("https://example.com"))
     ///     .build();
     ///
@@ -393,8 +397,10 @@ impl HttpClientBuilder {
     /// # use fetch::fake::FakeHandler;
     /// # use fetch::fake::FakeDeps;
     /// # use http_extensions::routing::Router;
+    /// # use observed::Sink;
     /// # use templated_uri::BaseUri;
-    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::default())
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
+    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::new(Sink::noop()))
     ///     .router(Router::fallback(
     ///         BaseUri::from_static("https://primary.example.com/"),
     ///         BaseUri::from_static("https://secondary.example.com/"),
@@ -508,6 +514,7 @@ impl Aware {
             self.options.redaction_engine,
             body_builder,
             self.transport.clock().clone(),
+            self.transport.sink().clone(),
             self.options.router,
         );
 
@@ -520,6 +527,7 @@ impl Aware {
 mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
+    use observed::Sink;
     use opentelemetry::metrics::NoopMeterProvider;
 
     use crate::fake::FakeDeps;
@@ -528,7 +536,7 @@ mod tests {
 
     #[test]
     fn gamma_round2_name_and_meter_are_forwarded_to_resilience_context() {
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("gamma_round2_pipeline");
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).name("gamma_round2_pipeline");
         let before = format!("{:?}", builder.resilience_context);
         assert!(before.contains("name: \"gamma_round2_pipeline\""), "{before}");
         assert!(before.contains("meter: None"), "{before}");
@@ -542,7 +550,7 @@ mod tests {
 
     #[test]
     fn standard_pipeline_customization_applied() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(5)))
             .build();
 
@@ -556,7 +564,7 @@ mod tests {
 
         use crate::options::ConnectionKeepAlive;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_keep_alive(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_keep_alive(
             ConnectionKeepAlive::active_connections(Duration::from_secs(15), Duration::from_secs(5)),
         );
 
@@ -573,7 +581,7 @@ mod tests {
         use crate::tls::TlsOptions;
 
         // The fake transport ignores TLS. Storing custom options must not affect requests.
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .tls_options(TlsOptions::default())
             .build();
 
@@ -591,7 +599,7 @@ mod tests {
             .add_class_redactor(Uri::DATA_CLASS, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
             .build();
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).redaction_engine(&engine);
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).redaction_engine(&engine);
 
         // A passthrough redactor leaves the path unchanged.
         let redacted = PathAndQuery::from_static("/path").to_redacted_string(&builder.options.redaction_engine);
@@ -600,7 +608,7 @@ mod tests {
 
     #[test]
     fn standard_pipeline_after_minimal_creates_new_pipeline() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(3)))
             .minimal_pipeline()
             .standard_pipeline(|pipeline, _context| pipeline)
@@ -614,7 +622,7 @@ mod tests {
     fn response_body_options() {
         let custom = HttpBodyOptions::default().buffer_limit(1234);
 
-        let mut builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+        let mut builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
         assert_eq!(builder.options.response_body_options, HttpBodyOptions::default());
 
         builder = builder.response_body_options(custom);
@@ -628,14 +636,14 @@ mod tests {
 
     #[test]
     fn test_http2_options_configuration() {
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_max_send_streams(100).adaptive_window(true));
         assert_eq!(builder.options.transport.http_2.initial_max_send_streams, Some(100));
 
         assert!(builder.options.transport.http_2.adaptive_window);
         assert_eq!(builder.options.transport.http_2.initial_stream_window_size, None);
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_stream_window_size(1024 * 1024));
         assert_eq!(builder.options.transport.http_2.initial_stream_window_size, Some(1_048_576));
     }
@@ -644,7 +652,7 @@ mod tests {
     fn test_connection_pool_options_configuration() {
         use std::time::Duration;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_pool_options(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_pool_options(
             ConnectionPoolOptions::default()
                 .max_connections(50)
                 .connection_idle_timeout(Duration::from_mins(5)),
@@ -663,7 +671,7 @@ mod tests {
     fn test_http2_and_connection_pool_options_chaining() {
         use std::time::Duration;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_max_send_streams(200))
             .connection_pool_options(
                 ConnectionPoolOptions::default()
@@ -687,13 +695,13 @@ mod tests {
     #[test]
     fn defaults_ok() {
         // Create a builder with default settings.
-        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     }
 
     #[test]
     fn name_ok() {
         // Set the client name.
-        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("custom_client");
+        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).name("custom_client");
     }
 
     #[test]
@@ -701,7 +709,7 @@ mod tests {
         use std::time::Duration;
 
         // Create a configured builder.
-        let builder_1 = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder_1 = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .name("base_client")
             .connect_timeout(Duration::from_secs(10))
             .response_body_options(HttpBodyOptions::default().buffer_limit(1000));
@@ -757,7 +765,7 @@ mod tests {
     fn multiple_pools_sets_options() {
         use crate::options::{ConnectionPoolOptions, PoolSelection};
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_pool_options(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_pool_options(
             ConnectionPoolOptions::default().multiple_pools(5, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)),
         );
 
@@ -773,7 +781,7 @@ mod tests {
     fn meter_provider_updates_all_fields() {
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
         assert!(!builder.metering.has_custom_provider());
 
         let builder = builder.meter_provider(provider);

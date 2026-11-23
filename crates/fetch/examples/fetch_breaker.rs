@@ -15,6 +15,7 @@ use std::time::Duration;
 use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::StatusCode;
+use observed::Sink;
 use ohno::ErrorExt;
 
 const FAILING_HOST: &str = "https://failing.example.com";
@@ -33,7 +34,8 @@ async fn main() -> Result<(), ohno::AppError> {
         HttpResponseBuilder::new_fake().status(status).build()
     });
 
-    let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(fake_handler, FakeDeps::new(Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 // Disable retries to observe the breaker directly.

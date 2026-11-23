@@ -24,6 +24,7 @@ use argh::FromArgs;
 use fetch::HttpClient;
 use fetch::tls::{ClientIdentity, TlsOptions};
 use fetch::tokio::TokioDeps;
+use observed::Sink;
 use serde_json::Value;
 use tracing::info;
 
@@ -76,7 +77,8 @@ async fn main() -> Result<(), ohno::AppError> {
     info!("Loaded the client identity");
 
     // Build a native TLS client with the client identity.
-    let client = HttpClient::builder_tokio(TokioDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_tokio(TokioDeps::new(Sink::noop()))
         .tls_options(TlsOptions::builder().client_identity(identity).build())
         .build();
 

@@ -5,9 +5,10 @@
 
 use std::borrow::Cow;
 
-use fetch::fake::FakeDeps;
 use fetch::{BaseUri, HttpClient};
+use observed::Sink;
 use templated_uri::{EscapedString, templated};
+use tick::ClockControl;
 
 use crate::crates_io_mock::crates_io_fake_handler;
 
@@ -24,10 +25,11 @@ struct CrateUrl {
 async fn main() -> Result<(), ohno::AppError> {
     let crate_name = EscapedString::from_static("serde");
 
-    let client =
-        HttpClient::new_fake(crates_io_fake_handler(crate_name.to_string())).with_base_uri(BaseUri::from_static("https://crates.io/"));
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::new_fake(crates_io_fake_handler(crate_name.to_string()), Sink::noop())
+        .with_base_uri(BaseUri::from_static("https://crates.io/"));
 
-    let watch = FakeDeps::default().clock.stopwatch();
+    let watch = ClockControl::new().to_clock().stopwatch();
 
     let mut response = client
         .get(CrateUrl {

@@ -12,6 +12,7 @@ use fetch::{HttpClient, HttpResponseBuilder};
 use http::{Method, StatusCode};
 use http_extensions::HttpError;
 use layered::Stack;
+use observed::Sink;
 use ohno::ErrorExt;
 use seatbelt::Recovery;
 use seatbelt::retry::Attempt;
@@ -66,7 +67,7 @@ async fn retry_defaults_restore_requests() {
         HttpError::unavailable(format!("unavailable-{index}")).with_request(req)
     });
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    let client = HttpClient::builder_fake(handler, FakeDeps { clock })
+    let client = HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpRetry::layer("dummy", context.resilience_context())
                 .http_configure_defaults()
@@ -102,7 +103,7 @@ async fn retry_defaults_non_cloneable_body() {
 
 fn create_retry_client(status: StatusCode) -> HttpClient {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(status, FakeDeps { clock })
+    HttpClient::builder_fake(status, FakeDeps::with_clock(&clock, Sink::noop()))
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpRetry::layer("dummy", context.resilience_context())
                 .http_configure_defaults()
@@ -167,7 +168,7 @@ async fn breaker_rejected_request_error_attaches_request() {
 fn create_breaker_client(status: StatusCode) -> HttpClient {
     let handler = FakeHandler::from(HttpResponseBuilder::new_fake().status(status).build().unwrap());
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpBreaker::layer("test", context.resilience_context())
                 .http_configure_defaults()

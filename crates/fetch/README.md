@@ -81,11 +81,13 @@ The bundled transport runs on Tokio. Use a custom transport for another runtime.
 
 ```rust
 use fetch::{HttpClient, HttpError};
+use observed::Sink;
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
     // Create a client with the bundled Tokio transport.
-    let client: HttpClient = HttpClient::new_tokio();
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client: HttpClient = HttpClient::new_tokio(Sink::noop());
 
     // Return an error for a `4xx` or `5xx` status, then read the body as text.
     let body: String = client.get("https://example.com").fetch_text_body().await?;
@@ -466,11 +468,15 @@ A fake client can:
 
 ```rust
 
+// An application passes its own sink. `Sink::noop()` drops every event.
 // Always return a 200 response.
-let client = HttpClient::new_fake(StatusCode::OK);
+let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
 
 // Return a sequence of responses without bodies.
-let client = HttpClient::new_fake(vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR]);
+let client = HttpClient::new_fake(
+    vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR],
+    Sink::noop(),
+);
 
 // Create a fake response.
 let response = HttpResponseBuilder::new_fake()
@@ -480,7 +486,7 @@ let response = HttpResponseBuilder::new_fake()
     .expect("always succeeds");
 
 // Always return the same response.
-let client = HttpClient::new_fake(response);
+let client = HttpClient::new_fake(response, Sink::noop());
 
 // Use a synchronous or asynchronous custom handler.
 let fake_handler = FakeHandler::from_fn(|req| {
@@ -493,7 +499,7 @@ let fake_handler = FakeHandler::from_fn(|req| {
 });
 
 // Create a client that uses the custom handler.
-let client = HttpClient::new_fake(fake_handler);
+let client = HttpClient::new_fake(fake_handler, Sink::noop());
 ```
 
 ## Memory management with `BytesView`
@@ -531,7 +537,8 @@ Reuse clients, parse repeated URIs once, and keep binary data in [`BytesView`][_
 
 ```rust
 // Create one client and reuse it.
-let client = HttpClient::new_tokio();
+// An application passes its own sink. `Sink::noop()` drops every event.
+let client = HttpClient::new_tokio(Sink::noop());
 
 // Parse repeated URIs once.
 let users_uri: Uri = "https://api.example.com/users".parse()?;
@@ -587,10 +594,12 @@ The default client applies the selected TLS backend:
 
 ```rust
 use fetch::HttpClient;
+use observed::Sink;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = HttpClient::new_tokio();
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::new_tokio(Sink::noop());
 
     // Send an HTTPS request.
     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -712,7 +721,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbPh5YwcrhD5IbA8hdFeOUGgUbMczx3qultnEb6lovnWmarSRhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbiue-enSYUmsb_cTOMn9sVwMbiL-Df_f5JMAbVyz5lXt8OVBhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient::post

@@ -14,6 +14,7 @@ use std::fmt::Debug;
 
 use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
+use observed::Sink;
 use opentelemetry::metrics::Meter;
 use performables::arc::{Arc, PerThread};
 use thread_aware::{ThreadAware, unaware};
@@ -54,6 +55,8 @@ where
     pub clock: Clock,
     /// Memory provider for HTTP body allocations.
     pub memory: OpaqueMemory,
+    /// Sink for `observed` telemetry.
+    pub sink: Sink,
     /// Extra dependencies copied to [`CustomContext::extras`].
     pub extras: Extras,
 }
@@ -206,6 +209,7 @@ impl HttpClient {
             name: transport.into(),
             clock: deps.clock.clone(),
             memory: deps.memory.clone(),
+            sink: deps.sink.clone(),
             isolation,
             inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
                 let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
@@ -240,6 +244,7 @@ pub(crate) struct Transport {
     inner: Arc<TransportFn, PerThread>,
     clock: Clock,
     memory: OpaqueMemory,
+    sink: Sink,
     isolation: Isolation,
 }
 
@@ -258,6 +263,10 @@ impl Transport {
 
     pub(crate) fn clock(&self) -> &Clock {
         &self.clock
+    }
+
+    pub(crate) fn sink(&self) -> &Sink {
+        &self.sink
     }
 
     pub(crate) fn isolation(&self) -> Isolation {
@@ -288,17 +297,19 @@ mod tests {
     use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
+    use observed::Sink;
     use thread_aware::unaware;
+    use tick::ClockControl;
 
     use super::{CustomContext, CustomDeps, Isolation, create_builder};
     use crate::HttpResponseBuilder;
-    use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
 
     fn custom_deps() -> CustomDeps {
         CustomDeps {
-            clock: FakeDeps::default().clock,
+            clock: ClockControl::new().to_clock(),
             memory: OpaqueMemory::new(GlobalPool::new()),
+            sink: Sink::noop(),
             extras: (),
         }
     }
@@ -340,8 +351,9 @@ mod tests {
         // Wrap Arc<AtomicUsize> in unaware because derive cannot implement ThreadAware for it.
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
-            clock: FakeDeps::default().clock,
+            clock: ClockControl::new().to_clock(),
             memory: OpaqueMemory::new(GlobalPool::new()),
+            sink: Sink::noop(),
             extras: unaware(Arc::clone(&counter)),
         };
 

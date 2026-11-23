@@ -7,10 +7,12 @@
 use bytes::Bytes;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
+use fetch::fake::FakeDeps;
 use fetch::tokio::TokioDeps;
 use fetch::{HttpClient, HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::StatusCode;
 use layered::Service;
+use observed::Sink;
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use tick::Clock;
 use wiremock::matchers::{method, path};
@@ -70,7 +72,7 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
 async fn fake_transport_scope_attribute() {
     let (exporter, provider) = exporter_and_provider();
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .insecure_allow_http()
         .meter_provider(provider.clone())
         .build();
@@ -93,6 +95,7 @@ async fn custom_transport_scope_attribute() {
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
         memory: OpaqueMemory::new(GlobalPool::new()),
+        sink: Sink::noop(),
         extras: (),
     };
 
@@ -127,6 +130,7 @@ async fn custom_transport_instrument_inherits_scope() {
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
         memory: OpaqueMemory::new(GlobalPool::new()),
+        sink: Sink::noop(),
         extras: (),
     };
 
@@ -163,7 +167,7 @@ async fn custom_transport_instrument_inherits_scope() {
 async fn tokio_transport_connection_metric_scope_attribute() {
     let (exporter, provider) = exporter_and_provider();
 
-    let client = HttpClient::builder_tokio(TokioDeps::default())
+    let client = HttpClient::builder_tokio(TokioDeps::new(Sink::noop()))
         .insecure_allow_http()
         .meter_provider(provider.clone())
         .build();
@@ -189,7 +193,7 @@ async fn tokio_transport_connection_metric_scope_attribute() {
 async fn client_name_set_before_meter_provider_is_reported() {
     let (exporter, provider) = exporter_and_provider();
 
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .insecure_allow_http()
         .name("named_before_provider")
         .meter_provider(provider.clone())
@@ -212,7 +216,7 @@ async fn client_name_set_after_meter_provider_is_reported() {
 
     // Set the provider before the name. The client creates the scope at build time, so the later
     // name still applies.
-    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
         .insecure_allow_http()
         .meter_provider(provider.clone())
         .name("named_after_provider")

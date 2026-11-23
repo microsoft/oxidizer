@@ -23,6 +23,7 @@ use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
 use fetch_azure::HttpClient;
 use futures::io::AsyncRead;
+use observed::Sink;
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -42,7 +43,7 @@ async fn execute_request_maps_status_headers_and_body() {
             .text("world")
             .build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 
@@ -64,7 +65,7 @@ async fn execute_request_forwards_method_and_bytes_body() {
         let body = request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).bytes(body).build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let mut request = request(Method::Post);
     request.set_body(Bytes::from_static(b"payload"));
@@ -82,7 +83,7 @@ async fn execute_request_forwards_seekable_stream_body() {
         let body = request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).bytes(body).build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let mut request = request(Method::Put);
     request.set_body(BytesStream::new(Bytes::from_static(b"streamed")));
@@ -101,7 +102,7 @@ async fn execute_request_forwards_request_headers() {
         let status = if forwarded { 200u16 } else { 400u16 };
         HttpResponseBuilder::new_fake().status(status).build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let mut request = request(Method::Get);
     request.insert_header("x-correlation", "abc123");
@@ -119,7 +120,7 @@ async fn execute_request_maps_all_methods() {
             let status = if request.method().as_str() == expected { 200u16 } else { 400u16 };
             HttpResponseBuilder::new_fake().status(status).build()
         });
-        let client = HttpClient::new(FetchClient::new_fake(handler));
+        let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
         let response = client.execute_request(&request(method)).await.unwrap();
 
@@ -130,7 +131,7 @@ async fn execute_request_maps_all_methods() {
 #[tokio::test]
 async fn execute_request_maps_transport_error() {
     let handler = FakeHandler::from_error_fn(|_request| fetch::HttpError::unavailable("simulated transport failure"));
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let error = client.execute_request(&request(Method::Get)).await.unwrap_err();
 
@@ -142,7 +143,7 @@ async fn execute_request_maps_transport_error() {
 
 #[tokio::test]
 async fn azure_http_client_converts_into_dyn_client() {
-    let client: Arc<dyn HttpClientTrait> = HttpClient::from(FetchClient::new_fake(status_handler(202))).into();
+    let client: Arc<dyn HttpClientTrait> = HttpClient::from(FetchClient::new_fake(status_handler(202), Sink::noop())).into();
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 
@@ -151,7 +152,7 @@ async fn azure_http_client_converts_into_dyn_client() {
 
 #[tokio::test]
 async fn execute_request_maps_request_build_failure() {
-    let client = HttpClient::new(FetchClient::new_fake(status_handler(200)));
+    let client = HttpClient::new(FetchClient::new_fake(status_handler(200), Sink::noop()));
 
     // The `http` crate rejects this control character when `fetch` builds the
     // request. This exercises the DataConversion path.
@@ -178,7 +179,7 @@ async fn execute_request_skips_non_utf8_response_headers() {
             .header("x-binary", binary)
             .build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 
@@ -193,7 +194,7 @@ async fn execute_request_maps_seekable_stream_read_error() {
         request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let mut request = request(Method::Post);
     request.set_body(Body::SeekableStream(Box::new(ErroringStream)));
@@ -212,7 +213,7 @@ async fn execute_request_maps_response_body_read_error() {
         let body = fetch::HttpBodyBuilder::new_fake().stream(futures::stream::iter([Err(fetch::HttpError::unavailable("boom"))]));
         HttpResponseBuilder::new_fake().status(200u16).body(body).build()
     });
-    let client = HttpClient::new(FetchClient::new_fake(handler));
+    let client = HttpClient::new(FetchClient::new_fake(handler, Sink::noop()));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
     let error = response.into_body().collect().await.unwrap_err();

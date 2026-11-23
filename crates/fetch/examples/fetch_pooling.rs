@@ -10,13 +10,15 @@ use fetch::HttpClient;
 use fetch::fake::FakeDeps;
 use fetch::options::{ConnectionPoolOptions, PoolSelection};
 use http::StatusCode;
+use observed::Sink;
 
 #[path = "util/utils.rs"]
 mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
         .minimal_pipeline()
         .connection_pool_options(ConnectionPoolOptions::default().multiple_pools(10, PoolSelection::round_robin()))
         .build();
