@@ -78,29 +78,25 @@ fn capture_enrichment(event: &mut TaskSpawn, options: &ObservedOptions) {
 }
 
 struct ObservedTask {
-    transfer: Transfer,
-    guard: Option<TransferGuard>,
+    guard: TransferGuard,
 }
 
 impl ObservedTask {
     fn new(transfer: Transfer) -> Self {
-        Self { transfer, guard: None }
+        let mut guard = transfer.apply_current_thread();
+        drop(transfer);
+        guard.restore_current_thread();
+        Self { guard }
     }
 }
 
 impl TaskObserver for ObservedTask {
     fn poll_start(&mut self) {
-        if let Some(guard) = &mut self.guard {
-            guard.apply_current_thread();
-        } else {
-            self.guard = Some(self.transfer.apply_current_thread());
-        }
+        self.guard.apply_current_thread();
     }
 
     fn poll_end(&mut self, _outcome: Poll<()>) {
-        if let Some(guard) = &mut self.guard {
-            guard.restore_current_thread();
-        }
+        self.guard.restore_current_thread();
     }
 }
 
