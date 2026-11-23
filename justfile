@@ -22,7 +22,7 @@ test-feature-regressions package: anvil-tool-rustc-validate-prereqs
     $testArgs = @('--locked', '--package', '{{ package }}', '--no-default-features')
     switch ('{{ package }}') {
         'compressors' {
-            $testArgs += @('--features', 'deflate', '--test', 'public_api')
+            $testArgs += @('--features', 'deflate', '--test', 'round_trip')
             $requiredTests = @(
                 'afternoon_raw_deflate_pool_restores_raw_headers_without_the_zlib_feature: test'
             )
