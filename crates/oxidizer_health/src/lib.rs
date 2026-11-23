@@ -65,7 +65,7 @@
 //! `Unhealthy` immediately afterward does not prevent a probe from seeing that initial `Healthy`.
 //!
 //! If required dependencies must block readiness at startup, register their components on a new
-//! aggregator before creating any publishers or serving probes. Keep each component alive and
+//! [`Aggregator`] before creating any publishers or serving probes. Keep each component alive and
 //! empty until its first successful check. An empty component is `Unhealthy`. After success,
 //! create its publisher and reuse it for later failures and recoveries. Dropping the publisher
 //! removes its contribution. Dropping the last [`Component`] handle unregisters the component.

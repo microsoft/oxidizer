@@ -72,14 +72,14 @@ These thresholds are the client’s policy. A new publisher starts `Healthy`. Pu
 `Unhealthy` immediately afterward does not prevent a probe from seeing that initial `Healthy`.
 
 If required dependencies must block readiness at startup, register their components on a new
-aggregator before creating any publishers or serving probes. Keep each component alive and
+[`Aggregator`][__link3] before creating any publishers or serving probes. Keep each component alive and
 empty until its first successful check. An empty component is `Unhealthy`. After success,
 create its publisher and reuse it for later failures and recoveries. Dropping the publisher
-removes its contribution. Dropping the last [`Component`][__link3] handle unregisters the component.
+removes its contribution. Dropping the last [`Component`][__link4] handle unregisters the component.
 
 ## Diagnose a change
 
-When readiness is false, a read-only [`Monitor`][__link4] can identify the component and show what its
+When readiness is false, a read-only [`Monitor`][__link5] can identify the component and show what its
 publishers reported. This observer prints the component summary followed by each distinct problem:
 
 ```rust
@@ -103,7 +103,7 @@ async fn show_problems(monitor: &Monitor) {
 For the quick start, the report names `database` and the signal reads `Degraded (reason=slow queries)`.
 The filter selects signals, not components. A component without publishers has an `Unhealthy`
 summary but no signal to print. For continuous monitoring, read the reports, await
-[`Monitor::changed`][__link5], then read again. Multiple updates can produce one notification.
+[`Monitor::changed`][__link6], then read again. Multiple updates can produce one notification.
 
 ## HTTP readiness
 
@@ -113,10 +113,10 @@ Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `fals
 
 ## Additional documentation
 
-* Register a [`Component`][__link6] with [`Aggregator::component`][__link7] and report changes with [`Publisher::publish`][__link8].
-* Get a read-only [`Monitor`][__link9] with [`Aggregator::monitor`][__link10] to observe changes independently of publishers.
-* Select diagnostic signals with [`Filter`][__link11] and inspect their attributes and publisher counts with [`Report::signals`][__link12].
-* Serve readiness with one of the [HTTP adapters][__link13].
+* Register a [`Component`][__link7] with [`Aggregator::component`][__link8] and report changes with [`Publisher::publish`][__link9].
+* Get a read-only [`Monitor`][__link10] with [`Aggregator::monitor`][__link11] to observe changes independently of publishers.
+* Select diagnostic signals with [`Filter`][__link12] and inspect their attributes and publisher counts with [`Report::signals`][__link13].
+* Serve readiness with one of the [HTTP adapters][__link14].
 
 
 <hr/>
@@ -124,18 +124,19 @@ Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `fals
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbU1Xj5yIVBzEbZmEP0kFoTb8bUWpWPMwvTkUbgut1FcPiZglhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQAaznBUfBvQbcDNw_m5OW1Yb2LWTSpdyZSgb5wJ43Y7YvK1hZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
  [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
  [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
- [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
- [__link11]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
- [__link12]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
- [__link13]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
+ [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
+ [__link11]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
+ [__link12]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
+ [__link13]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
+ [__link14]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
  [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::state
- [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
- [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
- [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link7]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
- [__link8]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher::publish
- [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
+ [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
+ [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
+ [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
+ [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
+ [__link7]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
+ [__link8]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
+ [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher::publish
