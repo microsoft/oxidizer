@@ -12,7 +12,7 @@
 )]
 
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Write};
 use std::path::Path;
 
 #[cfg(feature = "rolling_file")]
@@ -34,12 +34,12 @@ impl FileWriterOpener {
         reason = "Instance methods allow fakeable to substitute writer creation in tests"
     )]
     pub(crate) fn open_file(&self, path: &Path, overwrite: bool) -> io::Result<Box<dyn Write + Send>> {
-        let mut file = File::options().create(true).write(true).truncate(overwrite).open(path)?;
-        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "Truncation leaves a regular file empty, so seeking to its end keeps the write position at zero.")]
-        if !overwrite {
-            // #[gamma::skip(try.propagate_to_unwrap, reason = "Seeking a regular file that is open for writing does not fail; only nonseekable special files, which tests cannot portably create, return this error.")]
-            file.seek(SeekFrom::End(0))?;
-        }
+        let file = File::options()
+            .create(true)
+            .write(true)
+            .append(!overwrite)
+            .truncate(overwrite)
+            .open(path)?;
         Ok(Box::new(file))
     }
 

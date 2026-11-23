@@ -15,7 +15,11 @@ use performables::arc::Arc;
 
 use crate::file_writer::FileWriterOpener;
 use crate::worker::{WriterOpener, background_processor};
-use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_FLUSH_ACK_TIMEOUT, DEFAULT_FLUSH_INTERVAL, DEFAULT_QUEUE_CAPACITY};
+use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_FLUSH_ACK_TIMEOUT, DEFAULT_FLUSH_INTERVAL, DEFAULT_QUEUE_CAPACITY, FileLogInitError};
+
+/// The rotation size limit must be nonzero.
+#[ohno::error]
+pub(crate) struct InvalidMaxFileSize;
 
 /// Creates a rolling file log destination builder for the given path.
 ///
@@ -67,6 +71,8 @@ pub enum FileLimit {
     /// Delete the oldest files if the rotated file count exceeds this limit.
     MaxFiles(usize),
     /// Delete files whose timestamp suffix is older than this duration.
+    ///
+    /// Ages of 10,000 years or more keep all rotated files.
     Age(Duration),
 }
 
@@ -76,14 +82,21 @@ impl Default for FileLimit {
     }
 }
 
+/// Shortest age that keeps all rotated files.
+///
+/// No rotated file can be this old. `file-rotate` subtracts the age from the
+/// current time and panics when the result is outside the Chrono date range
+/// (about 262,000 years from year zero). Thus, longer ages use the `Unlimited` policy.
+const UNLIMITED_AGE: Duration = Duration::from_hours(24 * 365 * 10_000);
+
 impl From<FileLimit> for file_rotate::suffix::FileLimit {
     fn from(value: FileLimit) -> Self {
         match value {
             FileLimit::MaxFiles(files) => Self::MaxFiles(files),
+            FileLimit::Age(age) if age >= UNLIMITED_AGE => Self::Unlimited,
             // `file-rotate` expresses age retention with `chrono::Duration`. Convert here so the
-            // public API stays on `std::time::Duration`. Durations too large for `chrono` are
-            // clamped to its maximum rather than panicking.
-            FileLimit::Age(age) => Self::Age(chrono::Duration::from_std(age).unwrap_or(chrono::Duration::MAX)),
+            // public API stays on `std::time::Duration`.
+            FileLimit::Age(age) => Self::Age(chrono::Duration::from_std(age).expect("ages below UNLIMITED_AGE fit chrono::Duration")),
         }
     }
 }
@@ -102,6 +115,7 @@ pub struct RollingFileLogDestination {
     level: LevelFilter,
 
     /// Sets the maximum file size in bytes before rotation (default: 10 MB).
+    /// The size must be nonzero.
     #[builder(default = 10 * 1024 * 1024)]
     max_file_size: usize,
 
@@ -120,7 +134,7 @@ pub struct RollingFileLogDestination {
 
     /// Sets the maximum number of log records buffered in the channel before
     /// new records are dropped and periodically reported in the destination
-    /// output as a warning.
+    /// output as a warning. The capacity must be nonzero.
     #[builder(default = DEFAULT_QUEUE_CAPACITY)]
     queue_capacity: usize,
 
@@ -156,6 +170,10 @@ impl LogDestination for RollingFileLogDestination {
         fn rolling_opener(opener: FileWriterOpener, max_file_size: usize, file_limit: FileLimit, compression: bool) -> WriterOpener {
             Arc::new(move |path: &Path| opener.open_rolling(path, max_file_size, file_limit, compression))
                 .coerce::<dyn Fn(&Path) -> std::io::Result<Box<dyn Write + Send>> + Send + Sync>(|arc| arc)
+        }
+
+        if self.max_file_size == 0 {
+            return Err(FileLogInitError::caused_by(InvalidMaxFileSize::new()).into());
         }
 
         background_processor(
@@ -202,7 +220,6 @@ mod tests {
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::*;
-    use crate::FileLogInitError;
     use crate::file_writer::fakes::{FakeFileWriterOpener, OpenCall};
     use crate::worker::InvalidFlushInterval;
 
@@ -213,14 +230,21 @@ mod tests {
             RotationFileLimit::from(FileLimit::MaxFiles(3)),
             RotationFileLimit::MaxFiles(3)
         ));
+        let just_below_unlimited = UNLIMITED_AGE.checked_sub(Duration::from_secs(1)).unwrap();
         for (age, expected) in [
             (Duration::from_mins(1), ChronoDuration::minutes(1)),
-            (Duration::MAX, ChronoDuration::MAX),
+            (just_below_unlimited, ChronoDuration::from_std(just_below_unlimited).unwrap()),
         ] {
             let RotationFileLimit::Age(actual) = RotationFileLimit::from(FileLimit::Age(age)) else {
                 panic!("expected age-based retention");
             };
             assert_eq!(actual, expected);
+        }
+
+        // Ages that no rotated file can reach keep all files instead of an age the
+        // rotating writer cannot subtract from the current date.
+        for age in [UNLIMITED_AGE, Duration::MAX] {
+            assert!(matches!(RotationFileLimit::from(FileLimit::Age(age)), RotationFileLimit::Unlimited));
         }
     }
 
@@ -257,6 +281,25 @@ mod tests {
         let init_error = error.downcast_ref::<FileLogInitError>().unwrap();
         assert!(init_error.find_source::<InvalidFlushInterval>().is_some());
         assert!(init_error.find_source::<Error>().is_none());
+        assert!(factory.calls().is_empty());
+    }
+
+    #[test]
+    fn registration_rejects_zero_max_file_size_before_opening_file() {
+        let factory = FakeFileWriterOpener::new("");
+
+        let error = SdkLoggerProvider::builder()
+            .register(
+                rolling_file_logs("application.log")
+                    .max_file_size(0)
+                    .build()
+                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+            )
+            .unwrap_err();
+
+        // The rotating writer would panic on this limit, so registration reports it instead.
+        let init_error = error.downcast_ref::<FileLogInitError>().unwrap();
+        assert!(init_error.find_source::<InvalidMaxFileSize>().is_some());
         assert!(factory.calls().is_empty());
     }
 

@@ -60,15 +60,18 @@ not open the file or start the worker thread.
 
 For single-file output, [`FileWriterOpener::open_file`](../src/file_writer.rs)
 registration opens `path` for writing. It creates the file if it is missing.
-By default, it preserves existing contents and moves the write position to the
-end. With `FileLogDestinationBuilder::overwrite(true)`, it truncates the file to
-zero bytes.
+By default, it opens the file in append mode. Each write then goes to the
+current end of the file, also when other writers use the same file. With
+`FileLogDestinationBuilder::overwrite(true)`, it truncates the file to zero bytes.
 An error from this opener returns as `FileLogInitError` before the background
 writer thread starts.
 
 For rolling output, `FileWriterOpener::open_rolling` calls
 `file_rotate::FileRotate::new` with the path, size limit, retention limit, and
-compression choice. This opener always returns `Ok` if the constructor returns.
+compression choice. Registration first rejects a zero `max_file_size` with
+`FileLogInitError`, because `file-rotate` asserts a positive limit. Ages of
+10,000 years or more map to `file_rotate::suffix::FileLimit::Unlimited`, because
+`file-rotate` panics when it cannot subtract the age from the current date.
 In `file-rotate` 0.8.0, the constructor suppresses file-open errors and can panic
 if directory creation fails. Registration can thus succeed without a usable
 output file.
@@ -120,7 +123,8 @@ For each accepted record,
 and its `InstrumentationScope` into a `QueuedLog`. These copies let `Worker`
 use the data after the application log call returns.
 
-`queue_capacity` defaults to 4,096 records. This limits how many records wait for
+`queue_capacity` defaults to 4,096 records and must be nonzero. Registration
+rejects zero with `FileLogInitError` before it opens the writer. This limits how many records wait for
 `Worker`. Record sizes can differ, so this value alone cannot specify a memory
 limit in bytes. A larger queue can absorb a longer period of slow output, but
 also retains more data in memory.
@@ -200,8 +204,7 @@ thread. This common interface lets both destinations use the same
 `BackgroundLogProcessor` implementation, formatting, buffering, and error
 handling.
 
-For a single file, `FileWriterOpener` creates a `std::fs::File` and positions it
-at the end of existing contents. `FileLogDestinationBuilder::overwrite(true)`
+For a single file, `FileWriterOpener` creates a `std::fs::File` in append mode. `FileLogDestinationBuilder::overwrite(true)`
 truncates the file during registration. For rotating files, the opener creates a
 `file_rotate::FileRotate`. That writer uses archive names with timestamps,
 age or count retention, and optional gzip compression. Retention limits which
@@ -257,12 +260,12 @@ to prevent continuous retries.
 
 `BackgroundLogProcessor::force_flush` sends a `Flush` control message and waits
 for an acknowledgment from `Worker`. For this request, `Worker::flush_pending`
-drains records until `log_rx.try_recv` finds the queue empty. It uses
-`Worker::write_log_result` to format and write each record, as the bounded
-batches in the scheduling loop do.
+reads the queue length when it starts and writes at most that many records.
+It uses `Worker::drain_ready_logs`, as the bounded batches in the scheduling loop do.
 
-Records enqueued during the drain can join it and extend the caller's wait.
-Records enqueued after the drain ends remain queued for later processing.
+Records enqueued before the request are thus part of the drain. Records
+enqueued during the drain remain queued for later processing, so continuous
+logging cannot extend the caller's wait.
 After the drain, `Worker` flushes its byte buffer and sends the result.
 
 Incoming `SetResource`, `Flush`, and `Shutdown` messages remain queued while
@@ -326,9 +329,9 @@ closes the writer. The caller then joins the thread, which waits for the thread
 to finish. This shutdown succeeds only after `Worker` closes the file
 and the background writer thread exits.
 
-Calls already past the shutdown check can still add records. `Worker` includes
-those records if it receives them during the final drain. A record added after
-that drain ends can remain unwritten.
+Calls already past the shutdown check can still add records. The final drain
+writes the records that are queued when it starts. A record added after that
+can remain unwritten.
 
 If the acknowledgment wait expires, `BackgroundLogProcessor` returns `Timeout`
 without joining the worker thread. `Worker` can continue its pending

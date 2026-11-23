@@ -73,7 +73,7 @@ pub struct FileLogDestination {
 
     /// Sets the maximum number of log records buffered in the channel before
     /// new records are dropped and periodically reported in the destination
-    /// output as a warning.
+    /// output as a warning. The capacity must be nonzero.
     #[builder(default = DEFAULT_QUEUE_CAPACITY)]
     queue_capacity: usize,
 
@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use crate::FileLogInitError;
     use crate::file_writer::fakes::{FakeFileWriterOpener, OpenCall};
-    use crate::worker::InvalidFlushInterval;
+    use crate::worker::{InvalidFlushInterval, InvalidQueueCapacity};
 
     #[test]
     fn buffer_size_defaults_to_256_kib_and_is_configurable() {
@@ -182,6 +182,26 @@ mod tests {
         assert!(init_error.find_source::<InvalidFlushInterval>().is_some());
         assert!(init_error.find_source::<Error>().is_none());
         assert!(factory.calls().is_empty());
+    }
+
+    #[test]
+    fn registration_rejects_zero_queue_capacity_before_opening_file() {
+        let factory = FakeFileWriterOpener::new("existing contents\n");
+        let error = SdkLoggerProvider::builder()
+            .register(
+                file_logs("application.log")
+                    .overwrite(true)
+                    .queue_capacity(0)
+                    .build()
+                    .writer_opener(FileWriterOpener::fake(factory.clone())),
+            )
+            .unwrap_err();
+
+        let init_error = error.downcast_ref::<FileLogInitError>().unwrap();
+        assert!(init_error.find_source::<InvalidQueueCapacity>().is_some());
+        // The rejected configuration must not truncate the existing log.
+        assert!(factory.calls().is_empty());
+        assert_eq!(factory.output(), "existing contents\n");
     }
 
     #[test]

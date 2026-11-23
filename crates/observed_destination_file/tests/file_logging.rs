@@ -78,16 +78,17 @@ fn native_files_append_or_overwrite_and_flush_at_lifecycle_boundaries() {
     for overwrite in [false, true] {
         let directory = directory();
         let path = directory.path().join("application.log");
-        fs::write(&path, "existing contents\n").unwrap();
+        // An earlier destination lifetime produces the existing contents.
+        let earlier = provider_for(file_logs(&path).format_config(LogFormatConfig::minimal()));
+        emit(&earlier, "earlier record".into());
+        earlier.shutdown().unwrap();
+        let existing = fs::read_to_string(&path).unwrap();
+
         let provider = provider_for(file_logs(&path).overwrite(overwrite).format_config(LogFormatConfig::minimal()));
         emit(&provider, "explicit flush record".into());
         provider.force_flush().unwrap();
         // Appended output starts directly after the existing contents.
-        let mut expected = if overwrite {
-            String::new()
-        } else {
-            "existing contents\n".to_owned()
-        };
+        let mut expected = if overwrite { String::new() } else { existing };
         expected.push_str(HEADER);
         expected.push_str(&line("explicit flush record"));
         assert_eq!(fs::read_to_string(&path).unwrap(), expected);
@@ -97,6 +98,30 @@ fn native_files_append_or_overwrite_and_flush_at_lifecycle_boundaries() {
         assert_eq!(fs::read_to_string(&path).unwrap(), expected);
         directory.close().unwrap();
     }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "requires native filesystem access")]
+fn native_destinations_sharing_a_file_append_without_overwriting_each_other() {
+    let directory = directory();
+    let path = directory.path().join("application.log");
+    // Both destinations open the empty file before either one writes.
+    let first = provider_for(file_logs(&path).format_config(LogFormatConfig::minimal()));
+    let second = provider_for(file_logs(&path).format_config(LogFormatConfig::minimal()));
+
+    emit(&first, "first destination".into());
+    first.force_flush().unwrap();
+    // The second write must follow the first, not start at the offset from opening.
+    emit(&second, "second destination".into());
+    second.force_flush().unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!("{HEADER}{}{HEADER}{}", line("first destination"), line("second destination"))
+    );
+    first.shutdown().unwrap();
+    second.shutdown().unwrap();
+    directory.close().unwrap();
 }
 
 #[test]
@@ -199,6 +224,41 @@ fn native_rotation_starts_only_after_the_file_exceeds_its_size_limit() {
         }
         directory.close().unwrap();
     }
+}
+
+#[test]
+#[cfg(feature = "rolling_file")]
+#[cfg_attr(miri, ignore = "requires native filesystem access")]
+fn native_rotation_keeps_all_archives_when_the_maximum_retention_age_set() {
+    let directory = directory();
+    let path = directory.path().join("application.log");
+    let provider = provider_for(
+        rolling_file_logs(&path)
+            .max_file_size(16)
+            .file_limit(FileLimit::Age(Duration::MAX))
+            .format_config(LogFormatConfig::minimal()),
+    );
+
+    // Each record exceeds the size limit, so each later write rotates the file and
+    // evaluates retention for the archives that already exist.
+    for index in 0..3 {
+        emit(&provider, format!("record {index}"));
+        provider.force_flush().unwrap();
+    }
+    provider.shutdown().unwrap();
+
+    // Every rotated file is kept, so all records remain on disk.
+    let archives = archive_paths(&directory, &path);
+    assert!(archives.len() >= 2);
+    let output: String = archives
+        .iter()
+        .chain([&path])
+        .map(|file| fs::read_to_string(file).unwrap())
+        .collect();
+    for index in 0..3 {
+        assert!(output.contains(&format!("record {index}")));
+    }
+    directory.close().unwrap();
 }
 
 #[test]

@@ -45,7 +45,8 @@
 //! * The background worker writes records in bounded batches. After receiving a
 //!   record it drains a limited portion of already queued records before
 //!   returning to control messages, so `force_flush`, `shutdown`, and resource
-//!   updates stay responsive under sustained logging.
+//!   updates stay responsive under sustained logging. A `force_flush` writes only
+//!   the records queued when the worker starts it.
 //! * Both destinations buffer formatted bytes on the worker thread to coalesce
 //!   small writes. Use the `buffer_size` builder option to change it,
 //!   or zero to disable buffering. Pending

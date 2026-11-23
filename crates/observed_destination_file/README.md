@@ -50,7 +50,8 @@ reported in the destination output.
 * The background worker writes records in bounded batches. After receiving a
   record it drains a limited portion of already queued records before
   returning to control messages, so `force_flush`, `shutdown`, and resource
-  updates stay responsive under sustained logging.
+  updates stay responsive under sustained logging. A `force_flush` writes only
+  the records queued when the worker starts it.
 * Both destinations buffer formatted bytes on the worker thread to coalesce
   small writes. Use the `buffer_size` builder option to change it,
   or zero to disable buffering. Pending
@@ -95,7 +96,7 @@ for ownership, failure policy, and testing boundaries.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLd-vGAD7Bjsbp3UObcynKKUb958NGCe-9U8bLXdh6Q6MxRxhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTlblZRytQbMbGCASL_fQhRIbLhrHNy8pUEMbQuq_w9pi9GJhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
  [__link0]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
  [__link1]: https://docs.rs/performables/
  [__link2]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs

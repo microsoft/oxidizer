@@ -47,6 +47,10 @@ const MAX_LOG_DRAIN_PER_TICK: usize = 256;
 #[ohno::error]
 pub(crate) struct InvalidFlushInterval;
 
+/// The record queue capacity must be nonzero.
+#[ohno::error]
+pub(crate) struct InvalidQueueCapacity;
+
 /// Opens the writer eagerly and spawns the background worker thread.
 pub(crate) fn background_processor(
     format_config: LogFormatConfig,
@@ -57,8 +61,12 @@ pub(crate) fn background_processor(
     flush_interval: Duration,
     flush_ack_timeout: std::time::Duration,
 ) -> DestinationResult<BackgroundLogProcessor> {
+    // Validate before opening, because opening can truncate the file.
     if flush_interval.is_zero() {
         return Err(FileLogInitError::caused_by(InvalidFlushInterval::new()).into());
+    }
+    if queue_capacity == 0 {
+        return Err(FileLogInitError::caused_by(InvalidQueueCapacity::new()).into());
     }
     let writer = opener(path).map_err(FileLogInitError::caused_by)?;
     let writer = BufferedWriter::with_capacity(buffer_size, writer);
@@ -311,15 +319,12 @@ impl Worker {
         write_warning_line(&mut self.writer, now, message).map_err(|err| err.to_string())
     }
 
-    /// Drains any buffered records and flushes the underlying writer.
+    /// Writes the records queued when the request starts and flushes the writer.
     fn flush_pending(&mut self) -> Result<(), String> {
+        // Records queued later wait for the serve loop. Under sustained logging,
+        // the drain thus ends, and control messages and deadlines still run.
+        self.drain_ready_logs(self.log_rx.len());
         let mut first_error = self.first_write_error.take();
-        while let Ok(log) = self.log_rx.try_recv() {
-            match self.write_log_result(&log) {
-                Err(err) if first_error.is_none() => first_error = Some(err),
-                _ => {}
-            }
-        }
         match self.writer.flush().map_err(|err| err.to_string()) {
             Err(err) if first_error.is_none() => first_error = Some(err),
             _ => {}
@@ -1138,18 +1143,64 @@ mod tests {
 
     #[test]
     fn due_drop_warning_write_failure_is_reported_by_flush() {
-        let (_log_tx, log_rx) = unbounded();
-        let mut worker = worker_with_writer(Box::new(FailWriter), log_rx);
+        // A frozen clock keeps the next deadline fixed between the checks below.
+        let control = tick::ClockControl::new();
+        let clock = control.to_simple_clock();
+        let (mut worker, inputs) = worker_with_inputs(Box::new(FailWriter), 0, clock.clone());
+        let now = clock.instant();
         // This fixture has no concurrent producers.
-        worker.dropped_event_count.store(1, Ordering::Relaxed);
-        worker.next_dropped_event_check = Instant::now();
+        inputs.dropped_event_count.store(1, Ordering::Relaxed);
+        worker.next_dropped_event_check = now;
         worker.report_dropped_events_if_due();
 
         assert!(worker.flush_pending().unwrap_err().contains("write failed"));
-        assert!(worker.next_dropped_event_check > Instant::now());
-        worker.dropped_event_count.store(2, Ordering::Relaxed);
+        assert_eq!(worker.next_dropped_event_check, now + DROPPED_EVENT_WARN_INTERVAL);
+
+        // The failed report still schedules the next one; an early check keeps new losses counted.
+        inputs.dropped_event_count.store(2, Ordering::Relaxed);
         worker.report_dropped_events_if_due();
-        assert_eq!(worker.dropped_event_count.load(Ordering::Relaxed), 2);
+        assert_eq!(inputs.dropped_event_count.load(Ordering::Relaxed), 2);
+    }
+
+    /// Queues another record for each write, as producers do under sustained logging.
+    struct ReplenishingWriter {
+        output: Arc<Mutex<Vec<u8>>>,
+        log_tx: Sender<QueuedLog>,
+        // A finite supply makes a regression fail instead of hang.
+        remaining: usize,
+    }
+
+    impl Write for ReplenishingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.remaining > 0 {
+                self.remaining -= 1;
+                self.log_tx.send(queued_log("late record")).unwrap();
+            }
+            self.output.lock().write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn flush_writes_only_records_queued_before_it_started() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (log_tx, log_rx) = unbounded();
+        log_tx.send(queued_log("early record")).unwrap();
+        let writer = ReplenishingWriter {
+            output: Arc::clone(&output),
+            log_tx,
+            remaining: 100,
+        };
+        let mut worker = worker_with_writer(Box::new(writer), log_rx);
+        worker.resource_header.set_resource(&Resource::builder_empty().build());
+
+        worker.flush_pending().unwrap();
+
+        assert_eq!(output_text(&output), "<Resource: >\nearly record\n");
+        assert!(!worker.log_rx.is_empty());
     }
 
     #[test]
