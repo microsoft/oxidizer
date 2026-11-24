@@ -143,7 +143,7 @@ fn gamma_round2_composite_transfer_restores_each_childs_independent_chain() {
 }
 
 #[test]
-fn gamma_round2_transfer_guard_debug_does_not_disclose_context() {
+fn transfer_guard_debug_does_not_disclose_context() {
     let capture = Arc::new(Capture::default());
     let sink = sink(&capture);
     let transfer = (|| sink.transfer_context()).enrich(&sink, Layer("captured-secret", 1))();
