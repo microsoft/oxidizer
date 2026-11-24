@@ -276,7 +276,7 @@ impl AggregatorShared {
         registry.retain(|_, component| component.owner.strong_count() > 0);
         let id = next_id(&self.next_component);
         let name: Arc<str> = Arc::from(name);
-        let (shared, actor) = ComponentShared::new(Arc::clone(&name), id, self.worker.sender(), Arc::clone(&self.blockers));
+        let (shared, actor) = ComponentShared::new(Arc::clone(&name), id, self.worker.sender.clone(), Arc::clone(&self.blockers));
         let owner = ComponentOwner::new(Arc::clone(&shared), Arc::clone(&self.worker));
         registry.insert(
             name,
@@ -286,7 +286,8 @@ impl AggregatorShared {
             },
         );
         // Queue registration before another caller can obtain this component and publish to it.
-        self.worker.send(Work::Register(id, actor));
+        // A disconnected worker cannot accept registrations and already fails closed.
+        let _ = self.worker.sender.send(Work::Register(id, actor));
         Component::new(owner)
     }
 
@@ -374,7 +375,7 @@ mod tests {
             let mut idle = root.component("idle");
             let component = root.component("live");
             let _publisher = component.publisher();
-            root.shared.worker.sender().send(Work::Stop).unwrap();
+            root.shared.worker.sender.send(Work::Stop).unwrap();
             // No publisher changes the idle component. Its cursor witnesses the worker's exit.
             block_on(idle.changed());
             assert_eq!(block_on(component.report(Filter::ALL)).signal_count(Health::Healthy), 1);

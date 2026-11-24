@@ -28,7 +28,7 @@ pub(crate) enum Work {
 
 /// Both process and component handles keep this worker alive.
 pub(crate) struct Worker {
-    sender: Sender<Work>,
+    pub(crate) sender: Sender<Work>,
     thread: Option<JoinHandle<()>>,
     status: Arc<Status>,
 }
@@ -59,15 +59,6 @@ impl Worker {
             }
         };
         Self { sender, thread, status }
-    }
-
-    pub(crate) fn sender(&self) -> Sender<Work> {
-        self.sender.clone()
-    }
-
-    pub(crate) fn send(&self, work: Work) {
-        // A disconnected receiver has no worker left to handle this message.
-        let _ = self.sender.send(work);
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -224,13 +215,13 @@ mod tests {
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
         assert!(worker.is_running());
-        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
-        worker.send(Work::Register(1, actor));
+        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender.clone(), Arc::default());
+        worker.sender.send(Work::Register(1, actor)).unwrap();
         let component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
         let mut publisher = component.publisher();
         publisher.publish(Health::Healthy, [("revision", 1)]);
 
-        worker.sender().send(Work::Stop).unwrap();
+        worker.sender.send(Work::Stop).unwrap();
         thread.join().unwrap();
         let report = futures::executor::block_on(component.report(Filter::ALL));
         assert_eq!(report.signal_count(Health::Healthy), 1);
@@ -278,15 +269,16 @@ mod tests {
         let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
-        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
-        worker.send(Work::Register(1, actor));
+        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender.clone(), Arc::default());
+        worker.sender.send(Work::Register(1, actor)).unwrap();
         let mut component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
         let owner = component.clone();
         let waker = Waker::from(Arc::new(Fail(owner.clone())));
         let mut changed = pin!(component.changed());
         assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
         let _publisher = owner.publisher();
-        worker.send(Work::Stop);
+        // The expected callback panic may already have disconnected the worker.
+        let _ = worker.sender.send(Work::Stop);
         assert!(thread.join().unwrap_err().is::<Initial>());
     }
 
