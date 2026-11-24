@@ -100,15 +100,15 @@ impl JoinableThreadPool {
                 .spawn(move || {
                     // #[gamma::skip(call_result.default, reason = "attach_thread returns unit; default_after preserves its side effects and unit result.")]
                     attach_thread(identity);
-                    let mut diagnostics = BlockingWorkerMonitoring::default();
-                    while let Some(job) = receiver.pop(index, &mut diagnostics) {
+                    let mut monitoring = BlockingWorkerMonitoring::default();
+                    while let Some(job) = receiver.pop(index, &mut monitoring) {
                         active_count.fetch_add(1, Ordering::SeqCst);
                         queued_count.fetch_sub(1, Ordering::SeqCst);
                         let canceled = job
                             .shutdown
                             .as_ref()
                             .is_some_and(|shutdown| matches!(shutdown.state(), ShutdownState::Started));
-                        let outcome = diagnostics.run(job.body, canceled);
+                        let outcome = monitoring.run(job.body, canceled);
                         active_count.fetch_sub(1, Ordering::SeqCst);
                         if let Err(panic) = outcome {
                             // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
