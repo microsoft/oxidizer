@@ -10,6 +10,8 @@ use observed::processing::FieldVisitorFn;
 use observed::{Text, Value, VisitFields, event};
 use templated_uri::PathAndQuery;
 
+use crate::shared::DURATION_BOUNDARIES;
+
 /// Produces the event `http.client.request.complete` when the handler returned a response.
 #[event("http.client.request.complete")]
 #[debug("HTTP request attempt completed")]
@@ -17,7 +19,8 @@ use templated_uri::PathAndQuery;
     duration_secs,
     name = "http.client.request.duration",
     desc = "Duration of HTTP client requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestComplete<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -67,7 +70,8 @@ pub(crate) struct RequestComplete<'a> {
     duration_secs,
     name = "http.client.request.duration",
     desc = "Duration of HTTP client requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestError<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -116,7 +120,8 @@ pub(crate) struct RequestError<'a> {
     duration_secs,
     name = "http.client.request.duration",
     desc = "Duration of HTTP client requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestAbandoned<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -161,7 +166,8 @@ pub(crate) struct RequestAbandoned<'a> {
     duration_secs,
     name = "http.client.request.total_duration",
     desc = "Total duration of HTTP client requests, including all retries and hedged attempts.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestTotalComplete<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -212,7 +218,8 @@ pub(crate) struct RequestTotalComplete<'a> {
     duration_secs,
     name = "http.client.request.total_duration",
     desc = "Total duration of HTTP client requests, including all retries and hedged attempts.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestTotalError<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -261,7 +268,8 @@ pub(crate) struct RequestTotalError<'a> {
     duration_secs,
     name = "http.client.request.total_duration",
     desc = "Total duration of HTTP client requests, including all retries and hedged attempts.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestTotalAbandoned<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]

@@ -99,7 +99,7 @@ fn failing_stack(layer: &TelemetryLayer<Client>, handler: Failing, warm_up: Http
 }
 
 /// A client layer with the three fields that `fetch` adds to tell which client sent a request.
-fn identity_layer() -> TelemetryLayer<Client> {
+fn client_attributes_layer() -> TelemetryLayer<Client> {
     Telemetry::client(passthrough_sink())
         .dimension("http.client.name", "books")
         .dimension("fetch.runtime", "tokio")
@@ -178,7 +178,7 @@ fn total_complete<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpReque
     Box::new(responding_stack(&Telemetry::client(passthrough_sink()), custom_scheme())),
     custom_scheme()
 )]
-#[bench::identity_dimensions(Box::new(responding_stack(&identity_layer(), common::get_book())), common::get_book())]
+#[bench::client_attributes(Box::new(responding_stack(&client_attributes_layer(), common::get_book())), common::get_book())]
 fn fields_complete<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -257,7 +257,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     complete_case("plain_path", &Telemetry::client(passthrough_sink()), plain_path);
     complete_case("owned_label", &Telemetry::client(passthrough_sink()), owned_label);
     complete_case("custom_scheme", &Telemetry::client(passthrough_sink()), custom_scheme);
-    complete_case("identity_dimensions", &identity_layer(), common::get_book);
+    complete_case("client_attributes", &client_attributes_layer(), common::get_book);
     let stack = failing_stack(&Telemetry::client(passthrough_sink()), common::FAILING, common::get_book());
     group.bench_function(
         BenchmarkId::new(FIELDS_HANDLER_ERROR.benchmark_name(), "templated_path"),

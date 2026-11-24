@@ -57,9 +57,11 @@ impl<T> Telemetry<T> {
     }
 }
 
-impl<T> fmt::Debug for Telemetry<T> {
+impl<T: fmt::Debug> fmt::Debug for Telemetry<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>())
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
     }
 }
 

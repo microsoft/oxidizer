@@ -14,6 +14,7 @@ use routerama::RouteHit;
 
 use super::request::HeaderValues;
 use super::route_fields::RouteParameter;
+use crate::shared::DURATION_BOUNDARIES;
 
 /// Produces the event `http.server.request.complete` when the handler returned a response and its body
 /// ended.
@@ -23,7 +24,8 @@ use super::route_fields::RouteParameter;
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestComplete<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -86,7 +88,8 @@ pub(crate) struct RequestComplete<'a> {
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestError<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -149,7 +152,8 @@ pub(crate) struct RequestError<'a> {
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestAbandoned<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]

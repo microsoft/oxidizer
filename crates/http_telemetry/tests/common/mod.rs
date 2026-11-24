@@ -69,6 +69,10 @@ pub(crate) fn client(sink: Sink) -> TelemetryLayer<Client> {
     Telemetry::client(sink).clock(SimpleClock::new_frozen())
 }
 
+/// The bucket boundaries of each duration metric: the boundaries that the OpenTelemetry HTTP metrics
+/// conventions give for request durations, in seconds.
+pub(crate) const DURATION_BOUNDARIES: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0];
+
 /// The value that one field records in a metric, and the description of that metric.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Measurement {
@@ -76,6 +80,7 @@ pub(crate) struct Measurement {
     pub(crate) kind: InstrumentKind,
     pub(crate) description: &'static str,
     pub(crate) unit: &'static str,
+    pub(crate) boundaries: &'static [f64],
     pub(crate) value: Value,
 }
 
@@ -86,6 +91,7 @@ pub(crate) fn duration(value: f64) -> Measurement {
         kind: InstrumentKind::Histogram,
         description: "Duration of HTTP server requests.",
         unit: "s",
+        boundaries: DURATION_BOUNDARIES,
         value: Value::F64(value),
     }
 }
@@ -97,6 +103,7 @@ pub(crate) fn client_duration(value: f64) -> Measurement {
         kind: InstrumentKind::Histogram,
         description: "Duration of HTTP client requests.",
         unit: "s",
+        boundaries: DURATION_BOUNDARIES,
         value: Value::F64(value),
     }
 }
@@ -108,6 +115,7 @@ pub(crate) fn total_duration(value: f64) -> Measurement {
         kind: InstrumentKind::Histogram,
         description: "Total duration of HTTP client requests, including all retries and hedged attempts.",
         unit: "s",
+        boundaries: DURATION_BOUNDARIES,
         value: Value::F64(value),
     }
 }
@@ -241,6 +249,7 @@ impl EventProcessor for Capture {
                         kind: instrument.kind(),
                         description: instrument.description(),
                         unit: instrument.unit(),
+                        boundaries: instrument.boundaries(),
                         value,
                     }),
                     None => captured.dimensions.push((metric.key(), value)),
@@ -532,6 +541,7 @@ pub(crate) struct Tenant {
 }
 
 /// Responds to each request with its status and an empty body. It does not allocate.
+#[derive(Debug)]
 pub(crate) struct Responding {
     status: StatusCode,
     bodies: HttpBodyBuilder,

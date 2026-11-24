@@ -96,6 +96,9 @@ Each event has the [attributes](#metric-httpserverrequestduration) of the metric
 |----|---------------|-----------|-----------|
 |`http.server.request.duration`|Histogram|`s`|Duration of HTTP server requests.|
 
+Its bucket boundaries are 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5 and
+10 seconds, as the OpenTelemetry HTTP metrics conventions give.
+
 |Attribute|Type|Description|Examples|Presence|
 |---------|----|-----------|--------|--------|
 |`http.request.method`|string|HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`.|`GET`; `POST`; `_OTHER`|Always|
@@ -244,6 +247,8 @@ at Warn. A log processor can skip that event by its name.
 |----|---------------|-----------|-----------|
 |`http.client.request.duration`|Histogram|`s`|Duration of HTTP client requests.|
 
+Its bucket boundaries are those of `http.server.request.duration`.
+
 |Attribute|Type|Description|Examples|Presence|
 |---------|----|-----------|--------|--------|
 |`http.request.method`|string|HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`.|`GET`; `POST`; `_OTHER`|Always|
@@ -266,7 +271,7 @@ add a [`UriTemplateLabel`][__link27] to the extensions of the request.
 |----|---------------|-----------|-----------|
 |`http.client.request.total_duration`|Histogram|`s`|Total duration of HTTP client requests, including all retries and hedged attempts.|
 
-It has the attributes of `http.client.request.duration`.
+It has the attributes and the bucket boundaries of `http.client.request.duration`.
 
 ### When the client middleware emits no event
 
@@ -314,7 +319,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbbIshYuIPZVgb6p2NB-Q279sbZ_sXjSyxFJwb_9VU6p2dBhFhZIaDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4wgm10ZW1wbGF0ZWRfdXJpZTAuNy4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblu7M4slErGIbGpkhO2ejHAkb_a_vEaD9YE0bVXUWIp5dEiRhZIaDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4wgm10ZW1wbGF0ZWRfdXJpZTAuNy4y
  [__link0]: https://crates.io/crates/observed/0.31.0
  [__link1]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry
  [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit

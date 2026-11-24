@@ -93,6 +93,9 @@
 //! |---|---|---|---|
 //! | `http.server.request.duration` | Histogram | `s` | Duration of HTTP server requests. |
 //!
+//! Its bucket boundaries are 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5 and
+//! 10 seconds, as the OpenTelemetry HTTP metrics conventions give.
+//!
 //! | Attribute | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|
 //! | `http.request.method` | string | HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`. | `GET`; `POST`; `_OTHER` | Always |
@@ -241,6 +244,8 @@
 //! |---|---|---|---|
 //! | `http.client.request.duration` | Histogram | `s` | Duration of HTTP client requests. |
 //!
+//! Its bucket boundaries are those of `http.server.request.duration`.
+//!
 //! | Attribute | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|
 //! | `http.request.method` | string | HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`. | `GET`; `POST`; `_OTHER` | Always |
@@ -263,7 +268,7 @@
 //! |---|---|---|---|
 //! | `http.client.request.total_duration` | Histogram | `s` | Total duration of HTTP client requests, including all retries and hedged attempts. |
 //!
-//! It has the attributes of `http.client.request.duration`.
+//! It has the attributes and the bucket boundaries of `http.client.request.duration`.
 //!
 //! ## When the client middleware emits no event
 //!

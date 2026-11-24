@@ -92,6 +92,7 @@ fn active_requests_logs_and_meters_each_delta() {
             kind: InstrumentKind::UpDownCounter,
             description: "Number of active HTTP server requests.",
             unit: "{request}",
+            boundaries: &[],
             value: Value::I64(value),
         }],
         enrichments: vec![],

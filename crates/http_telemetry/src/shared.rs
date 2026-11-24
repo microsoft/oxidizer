@@ -16,6 +16,11 @@ use ohno::{ErrorLabel, Labeled};
 /// for each value.
 pub(crate) const OTHER: &str = "_OTHER";
 
+/// The bucket boundaries of the request durations, in seconds. The OpenTelemetry HTTP metrics
+/// conventions give these boundaries for `http.server.request.duration` and
+/// `http.client.request.duration`.
+pub(crate) const DURATION_BOUNDARIES: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0];
+
 /// The value of `http.request.method` for `method`.
 pub(crate) const fn http_method_name(method: &Method) -> &'static str {
     match *method {

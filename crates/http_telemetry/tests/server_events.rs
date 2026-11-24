@@ -559,4 +559,5 @@ fn layer_and_middleware_debug_output_names_their_types() {
 
     assert!(format!("{layer:?}").contains("TelemetryLayer"));
     assert!(format!("{service:?}").contains("Telemetry<"));
+    assert!(format!("{service:?}").contains("inner: Responding"));
 }
