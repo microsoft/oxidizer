@@ -4,7 +4,7 @@
 use std::any::type_name;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::iter::FusedIterator;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{slice, vec};
 
 use bitflags::bitflags;
@@ -52,28 +52,46 @@ impl Filter {
 /// Immutable aggregation result of one component, shared by its reports.
 #[derive(Debug, Default)]
 pub(crate) struct Snapshot {
-    pub(crate) counts: [usize; Health::COUNT],
-    pub(crate) signals: [Vec<(Arc<Signal>, usize)>; Health::COUNT],
+    signals: [SignalBucket; Health::COUNT],
+}
+
+#[derive(Debug, Default)]
+struct SignalBucket {
+    publishers: Vec<Arc<Signal>>,
+    groups: OnceLock<Vec<(Arc<Signal>, usize)>>,
+}
+
+impl SignalBucket {
+    fn groups(&self) -> &[(Arc<Signal>, usize)] {
+        self.groups.get_or_init(|| {
+            let mut groups: Vec<(Arc<Signal>, usize)> = Vec::new();
+            for signal in &self.publishers {
+                match groups.iter_mut().find(|(existing, _)| **existing == **signal) {
+                    Some((_, count)) => *count += 1,
+                    None => groups.push((Arc::clone(signal), 1)),
+                }
+            }
+            groups
+        })
+    }
 }
 
 impl Snapshot {
-    /// Groups publisher signals into distinct signals with publisher counts.
+    /// Capture the publishers without comparing diagnostics on the shared aggregation worker.
     pub(crate) fn collect<'a>(signals: impl IntoIterator<Item = &'a Arc<Signal>>) -> Self {
         let mut snapshot = Self::default();
         for signal in signals {
-            let index = signal.state().index();
-            snapshot.counts[index] += 1;
-            let distinct = &mut snapshot.signals[index];
-            match distinct.iter_mut().find(|(existing, _)| **existing == **signal) {
-                Some((_, count)) => *count += 1,
-                None => distinct.push((Arc::clone(signal), 1)),
-            }
+            snapshot.signals[signal.state().index()].publishers.push(Arc::clone(signal));
         }
         snapshot
     }
 
+    fn counts(&self) -> [usize; Health::COUNT] {
+        self.signals.each_ref().map(|bucket| bucket.publishers.len())
+    }
+
     pub(crate) fn state(&self) -> Health {
-        Health::worst(&self.counts)
+        Health::worst(&self.counts())
     }
 }
 
@@ -126,7 +144,7 @@ impl Report {
         Self {
             name,
             state: snapshot.state(),
-            counts: snapshot.counts,
+            counts: snapshot.counts(),
             snapshot,
             filter,
         }
@@ -156,7 +174,7 @@ impl Report {
     #[must_use]
     pub fn signals(&self, state: Health) -> Signals<'_> {
         let signals: &[_] = if self.filter.selects(state) {
-            &self.snapshot.signals[state.index()]
+            self.snapshot.signals[state.index()].groups()
         } else {
             &[]
         };
@@ -260,10 +278,9 @@ mod tests {
 
         let snapshot = Snapshot::collect(&signals);
 
-        assert_eq!(snapshot.counts, [0, 3, 0]);
-        assert_eq!(snapshot.signals[Health::Degraded.index()].len(), 2);
-        assert_eq!(snapshot.state(), Health::Degraded);
         let report = Report::new(Arc::from("clients"), Arc::new(snapshot), Filter::ALL);
+        assert_eq!(report.state(), Health::Degraded);
+        assert_eq!(report.signal_count(Health::Degraded), 3);
         let mut groups: Vec<_> = report
             .signals(Health::Degraded)
             .map(|(signal, n)| (signal.to_string(), n))

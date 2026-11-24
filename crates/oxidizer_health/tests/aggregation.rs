@@ -474,14 +474,18 @@ fn reports_select_signals_by_filter() {
         .collect();
     assert_eq!(names, HashSet::from(["database".to_owned(), "cache".to_owned()]));
 
-    assert_eq!(report.state(), Health::Degraded);
-    assert_eq!(report.signal_count(Health::Degraded), 2);
-    assert_eq!(report.signals(Health::Degraded).len(), 1);
-    assert_eq!(report.signals(Health::Healthy).len(), 0);
-
     let filtered = block_on(database.report(Filter::HEALTHY));
     assert_eq!(filtered.signal_count(Health::Degraded), 2);
     assert!(!format!("{filtered:?}").contains("slow"));
+
+    // First read the detailed signals after the component no longer has either publisher.
+    drop((primary, replica));
+    wait_for_component(&mut database, Health::Unhealthy);
+    assert_eq!(report.state(), Health::Degraded);
+    assert_eq!(report.signal_count(Health::Degraded), 2);
+    assert_eq!(report.signals(Health::Degraded).next().unwrap().1, 2);
+    assert_eq!(report.signals(Health::Degraded).len(), 1);
+    assert_eq!(report.signals(Health::Healthy).len(), 0);
 
     let report = block_on(cache.report(Filter::DEGRADED));
     assert_eq!(report.signal_count(Health::Healthy), 1);
