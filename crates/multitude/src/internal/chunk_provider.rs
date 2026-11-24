@@ -442,6 +442,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         {
             // Acquire load pairs with retire on another thread.
             let wasted = u64::from((*chunk.as_ptr()).wasted_at_retire());
+            // A zero refund would still write to a counter shared by all chunk releases.
             if wasted != 0 {
                 self.release_wasted_tail(wasted);
             }

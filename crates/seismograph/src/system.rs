@@ -258,6 +258,7 @@ mod tests {
         ALLOCATION_TRACE.with_borrow(|trace| {
             assert!(trace.requests.is_empty());
             assert!(trace.releases.is_empty());
+            assert!(trace.invalid_releases.is_empty());
         });
     }
 

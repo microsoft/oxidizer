@@ -160,7 +160,7 @@ impl ThreadEntry {
         let blocking_worker = blocking::Worker::new(blocking_pool, shutdown);
 
         {
-            // Drop this sender before waiting for the builder's activation.
+            // Close the channel before waiting for activation so the builder can detect a missing endpoint.
             let endpoint_tx = endpoint_sender;
             endpoint_tx
                 .send(Endpoint {
@@ -191,7 +191,7 @@ impl ThreadEntry {
         );
 
         {
-            // The startup channel must not stay open for the worker's lifetime.
+            // Close the channel before entering the run loop so activation can detect a missing readiness message.
             let ready_tx = ready_sender;
             _ = ready_tx.send(());
         }

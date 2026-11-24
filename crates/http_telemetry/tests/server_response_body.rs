@@ -93,30 +93,40 @@ fn end_of_stream_survives_wrapping() {
 
 #[test]
 fn pending_response_does_not_query_the_inner_end_of_stream() {
-    struct PendingBody(Arc<AtomicUsize>);
+    struct PendingBody {
+        inner: HttpBody,
+        queries: Arc<AtomicUsize>,
+    }
 
     impl Body for PendingBody {
         type Data = BytesView;
         type Error = HttpError;
 
-        fn poll_frame(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
-            Poll::Pending
+        fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
+            Pin::new(&mut self.inner).poll_frame(cx)
         }
 
         fn is_end_stream(&self) -> bool {
-            self.0.fetch_add(1, Ordering::Relaxed);
-            false
+            // The test polls inline; the counter does not publish any other state.
+            self.queries.fetch_add(1, Ordering::Relaxed);
+            self.inner.is_end_stream()
         }
     }
 
     let queries = Arc::new(AtomicUsize::new(0));
-    let source = HttpBodyBuilder::new_fake().body(PendingBody(Arc::clone(&queries)));
+    let source = HttpBodyBuilder::new_fake().body(PendingBody {
+        inner: scripted([Step::Pending, Step::End]),
+        queries: Arc::clone(&queries),
+    });
     let (mut body, capture) = respond(StatusCode::OK, get(source));
     let before_poll = queries.load(Ordering::Relaxed);
 
     assert!(poll_frame(&mut body).is_pending());
     assert_eq!(queries.load(Ordering::Relaxed), before_poll);
     assert!(capture.names().is_empty());
+
+    assert!(matches!(poll_frame(&mut body), Poll::Ready(None)));
+    assert_eq!(capture.names(), vec![COMPLETE]);
 }
 
 #[test]

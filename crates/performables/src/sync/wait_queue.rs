@@ -600,9 +600,13 @@ mod tests {
     #[test]
     fn an_expired_deadline_still_checks_readiness_without_restarting_the_budget() {
         let budget = Duration::from_millis(1);
-        let mut deadline = Timeout::new(budget);
-        deadline.started -= budget;
-        assert_eq!(deadline.remaining(), None);
+        let timeout = Timeout::new(budget);
+        let remaining_at_expiry = || timeout.remaining_after(budget);
+        assert_eq!(remaining_at_expiry(), None);
+        assert_eq!(block_on_until_with(std::future::ready(7), remaining_at_expiry), Some(7));
+        assert_eq!(block_on_until_with(std::future::pending::<usize>(), remaining_at_expiry), None);
+
+        let deadline = Timeout::new(Duration::ZERO);
         assert_eq!(block_on_until(std::future::ready(7), deadline), Some(7));
         assert_eq!(block_on_until(std::future::pending::<usize>(), deadline), None);
         assert_eq!(
