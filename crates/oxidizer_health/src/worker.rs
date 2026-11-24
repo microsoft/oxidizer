@@ -110,9 +110,30 @@ impl Drop for Running {
 
 #[cfg(test)]
 mod tests {
+    use testing_aids::is_mutation_testing;
     use testing_aids::tracing_logs::Capture;
 
     use super::*;
+    use crate::component::ComponentOwner;
+    use crate::{Component, Filter};
+
+    #[test]
+    fn shutdown_finishes_preceding_publications() {
+        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
+        let thread = worker.thread.take().unwrap();
+        let worker = Arc::new(worker);
+        let shared = ComponentShared::new(Arc::from("database"), 1, worker.sender());
+        let component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
+        let mut publisher = component.publisher();
+        publisher.publish(Health::Healthy, [("revision", 1)]);
+
+        worker.send(Work::Stop);
+        thread.join().unwrap();
+        let report = futures::executor::block_on(component.report(Filter::ALL));
+        assert_eq!(report.signal_count(Health::Healthy), 1);
+        assert_eq!(report.signals(Health::Healthy).next().unwrap().0, *publisher.signal());
+        assert!(!worker.is_running());
+    }
 
     #[test]
     fn spawn_failure_marks_worker_unavailable_until_shutdown() {
@@ -130,7 +151,12 @@ mod tests {
             let _guard = tracing::subscriber::set_default(capture.subscriber());
             let (sender, receiver) = mpsc::channel();
             let spawned = thread::spawn(move || {
-                assert!(matches!(receiver.recv_timeout(std::time::Duration::from_secs(2)), Ok(Work::Stop)));
+                let message = if is_mutation_testing() {
+                    receiver.recv().unwrap()
+                } else {
+                    receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap()
+                };
+                assert!(matches!(message, Work::Stop));
                 assert!(!fail, "worker failed");
             });
             drop(Worker::from_spawn(sender, Arc::default(), Ok(spawned)));

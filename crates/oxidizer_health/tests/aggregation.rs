@@ -8,10 +8,11 @@ use std::pin::pin;
 use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::executor::block_on;
 use oxidizer_health::{Aggregator, Attribute, AttributeValue, Component, Filter, Health};
+use testing_aids::is_mutation_testing;
 use thread_aware::{ThreadAware, ThreadBuilder};
 
 testing_aids::init_tracing!();
@@ -35,6 +36,14 @@ impl Wake for BlockingWake {
 fn is_ready(future: impl Future<Output = ()>) -> bool {
     let mut future = pin!(future);
     future.as_mut().poll(&mut Context::from_waker(Waker::noop())) == Poll::Ready(())
+}
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(Duration::from_secs(5))
+    }
 }
 
 fn wait_for_component(component: &mut Component, state: Health) {
@@ -130,8 +139,8 @@ fn dropping_a_publisher_does_not_wait_for_a_notification_consumer() {
         returned_tx.send(()).unwrap();
     });
 
-    let returned = returned_rx.recv_timeout(Duration::from_secs(5)).is_ok();
-    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let returned = receive(&returned_rx).is_ok();
+    let notified = receive(&entered_rx).is_ok();
     let _ = release_tx.send(());
     worker.join().unwrap();
     assert!(notified, "the component change must notify its consumer");
@@ -160,8 +169,8 @@ fn publishing_does_not_wait_for_a_notification_consumer() {
         returned_tx.send(()).unwrap();
     });
 
-    let returned = returned_rx.recv_timeout(Duration::from_secs(5)).is_ok();
-    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let returned = receive(&returned_rx).is_ok();
+    let notified = receive(&entered_rx).is_ok();
     let _ = release_tx.send(());
     worker.join().unwrap();
     assert!(notified, "the component change must notify its consumer");
@@ -184,8 +193,8 @@ fn registering_a_component_does_not_wait_for_a_monitor() {
     let (registered, result) = mpsc::channel();
     thread::scope(|scope| {
         scope.spawn(|| registered.send(aggregator.component("database")).unwrap());
-        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
-        let component = result.recv_timeout(Duration::from_secs(5));
+        receive(&waiting).unwrap();
+        let component = receive(&result);
         release.send(()).unwrap();
         assert!(component.is_ok(), "registration must not wait for the monitor's waker");
     });
@@ -210,7 +219,7 @@ fn last_component_handle_unregisters_during_an_in_flight_publish() {
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
     let worker = thread::spawn(move || publisher.degraded("slow"));
-    let notified = entered_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let notified = receive(&entered_rx).is_ok();
     drop(component);
     let remaining = block_on(aggregator.reports(Filter::ALL)).len();
     let replacement = aggregator.component("database");
@@ -404,9 +413,16 @@ fn monitor_keeps_reading_reports_after_the_aggregator_handle_drops() {
 #[test]
 #[cfg_attr(panic = "abort", ignore = "requires a worker panic to unwind without terminating the process")]
 fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
-    struct PanickingWake;
+    use std::cell::Cell;
+
+    struct PanickingWake(mpsc::Sender<mpsc::Receiver<()>>);
     impl Wake for PanickingWake {
         fn wake(self: Arc<Self>) {
+            // This sender disconnects only after the worker unwinds and its thread exits.
+            thread_local! { static ALIVE: Cell<Option<mpsc::Sender<()>>> = const { Cell::new(None) }; }
+            let (alive, exited) = mpsc::channel();
+            ALIVE.set(Some(alive));
+            self.0.send(exited).unwrap();
             panic!("simulated consumer failure");
         }
     }
@@ -420,15 +436,14 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
     assert_eq!(aggregator.state(), Health::Healthy);
     let mut monitor = aggregator.monitor();
     let mut changed = pin!(monitor.changed());
-    let waker = Waker::from(Arc::new(PanickingWake));
+    let (entered, panic_started) = mpsc::channel();
+    let waker = Waker::from(Arc::new(PanickingWake(entered)));
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
     // Both signals are healthy: the worker failure, not the published state, must close readiness.
     publisher.publish(Health::Healthy, [("revision", 2_i64)]);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while aggregator.state() == Health::Healthy && Instant::now() < deadline {
-        thread::yield_now();
-    }
+    let exited = receive(&panic_started).unwrap();
+    assert_eq!(receive(&exited), Err(mpsc::RecvTimeoutError::Disconnected));
     assert_eq!(aggregator.state(), Health::Unhealthy);
     assert_eq!(component.state(), Health::Unhealthy);
 }

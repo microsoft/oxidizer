@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use futures::executor::block_on;
 use oxidizer_health::{Aggregator, Component, Filter, Health};
+use testing_aids::is_mutation_testing;
 
 testing_aids::init_tracing!();
 
@@ -33,7 +34,11 @@ fn turn<T>(probe: &mut Component, publish: impl FnOnce() -> T) -> (T, Thread) {
     let mut changed = pin!(probe.changed());
     assert!(changed.as_mut().poll(&mut cx).is_pending());
     let result = publish();
-    let worker = ack.recv_timeout(Duration::from_secs(3)).expect("worker must acknowledge the probe");
+    let worker = if is_mutation_testing() {
+        ack.recv().expect("worker must acknowledge the probe")
+    } else {
+        ack.recv_timeout(Duration::from_secs(3)).expect("worker must acknowledge the probe")
+    };
     assert!(changed.as_mut().poll(&mut cx).is_ready());
     (result, worker)
 }
