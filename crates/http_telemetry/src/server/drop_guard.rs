@@ -302,6 +302,7 @@ const fn http_method_name(method: &Method) -> &'static str {
 impl Drop for TelemetryDropGuard {
     fn drop(&mut self) {
         // Emit nothing while the thread panics, because a panic in a processor now aborts the process.
+        // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "The first check in emit returns before any side effects when finished is true.")]
         if self.finished || std::thread::panicking() {
             return;
         }

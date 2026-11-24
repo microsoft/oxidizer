@@ -33,6 +33,8 @@ fn native_lock_wait(state: &AtomicLockWord, expected: LockWord) -> i32 {
 }
 
 pub(super) fn wake_lock(state: &AtomicLockWord) {
+    #[cfg(test)]
+    crate::sync::effects::record_wake_dispatch();
     // SAFETY: the byte remains alive for this wake operation.
     unsafe { WakeByAddressSingle(state.as_ptr().cast()) };
 }
@@ -160,6 +162,8 @@ pub(super) fn wake_condition_one(state: &AtomicU32) {
 }
 
 pub(super) fn wake_condition_all(state: &AtomicU32) {
+    #[cfg(test)]
+    crate::sync::effects::record_wake_dispatch();
     // SAFETY: the four-byte word remains alive for the call.
     unsafe { WakeByAddressAll(state.as_ptr().cast()) };
 }

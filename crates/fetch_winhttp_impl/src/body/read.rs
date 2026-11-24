@@ -356,6 +356,7 @@ impl Body for WinHttpResponseBody {
         matches!(self.state, BodyState::Done)
     }
 
+    // #[gamma::skip(fn_value.default, reason = "The return type infers the same SizeHint default")]
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }

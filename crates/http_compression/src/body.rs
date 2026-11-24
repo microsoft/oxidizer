@@ -162,6 +162,7 @@ impl<C: Compression> Body for CompressionBody<C> {
     }
 
     /// The transformed length is unknown until the complete body is read.
+    // #[gamma::skip(fn_value.default, reason = "The return type infers the same SizeHint default")]
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }

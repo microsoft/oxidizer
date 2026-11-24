@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor};
+use arty_executor::{CycleOutcome, Executor, PanicPolicy};
 
 use super::support::{TaskBuilderExt as _, TaskOutcome};
 
@@ -134,6 +134,40 @@ fn completed_task_discards_its_queued_remote_notification() {
     assert!(!executor.has_tasks());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert_eq!(polls.get(), 1);
+}
+
+#[test]
+fn a_panicked_tasks_retained_waker_does_not_notify_the_live_executor() {
+    let owner = Arc::new(CountingWake(AtomicUsize::new(0)));
+    let mut executor = Executor::builder()
+        .owner_waker(Waker::from(Arc::clone(&owner)))
+        .panic_policy(PanicPolicy::IGNORE)
+        .build();
+    let retained = Rc::new(RefCell::new(None));
+    let _task = executor
+        .tasks()
+        .task(poll_fn({
+            let retained = Rc::clone(&retained);
+            move |cx| -> Poll<()> {
+                *retained.borrow_mut() = Some(cx.waker().clone());
+                panic!("contained task panic");
+            }
+        }))
+        .register_test();
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+    assert!(!executor.has_tasks());
+    let notifications = owner.0.load(Ordering::Relaxed);
+
+    let waker = retained.take().unwrap();
+    std::thread::spawn(move || {
+        waker.wake_by_ref();
+        waker.wake();
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(owner.0.load(Ordering::Relaxed), notifications);
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
 }
 
 #[test]

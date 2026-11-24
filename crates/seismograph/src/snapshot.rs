@@ -419,7 +419,7 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
         let data_len = reader.u64()?;
-        // #[gamma::skip(expr.decrement, literal.int_decrement, literal.int_to_one, literal.int_to_zero, reason = "reducing the reserved name/header extent only weakens this admission check; the following checked reserved-field, name, and data reads reject the same truncated source with the same invalid-format error")]
+        // #[gamma::skip(expr.decrement, expr.increment, literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, reason = "Valid snapshots have at least four trailing bytes for the symbol count. Malformed extents still fail the checked source or symbol reads with the same error.")]
         let data_len = snapshot_usize(data_len, reader.remaining().len().saturating_sub(4 + name_len))?;
         if reader.u32()? != 0 {
             return Err(Error::invalid_format());

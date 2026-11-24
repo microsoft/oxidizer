@@ -121,6 +121,7 @@ impl ObservePoll for &dyn PollObserver {
 
 impl Executor {
     /// Starts building a new instance of [`Executor`].
+    // #[gamma::skip(fn_value.default, reason = "ExecutorBuilder::default calls ExecutorBuilder::new")]
     pub fn builder() -> ExecutorBuilder {
         ExecutorBuilder::new()
     }
@@ -426,12 +427,7 @@ impl Executor {
 
     #[must_use]
     fn evaluate_shutdown_completion(&self) -> bool {
-        if !self.shared.shutdown().is_triggered() {
-            return false;
-        }
-        debug_assert!(self.active.is_empty());
-        debug_assert!(self.pending.is_empty());
-
+        debug_assert!(!self.shared.shutdown().is_triggered() || (self.active.is_empty() && self.pending.is_empty()));
         self.shared.shutdown_complete()
     }
 
@@ -492,6 +488,19 @@ mod gamma_round2_tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
+
+    #[test]
+    fn shutdown_is_incomplete_until_waiting_tasks_are_cancelled() {
+        let mut executor = Executor::builder().build();
+        executor.tasks().task(std::future::pending::<()>()).register(Completion);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+
+        executor.shutdown().trigger(ShutdownCause::default());
+        assert!(!executor.shared.shutdown_complete());
+
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
+        assert!(executor.shared.shutdown_complete());
+    }
 
     #[test]
     fn nov4_finish_drop_cancels_only_during_unwinding_without_recording_drop_metrics() {

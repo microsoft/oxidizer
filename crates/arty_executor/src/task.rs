@@ -339,7 +339,10 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
     #[cfg(test)]
-    std::panic::resume_unwind(panic);
+    {
+        tests::UNHANDLED_TASK_PANICS.with(|count| count.set(count.get() + 1));
+        std::panic::resume_unwind(panic);
+    }
 
     #[cfg(not(test))]
     if let Some(s) = panic.downcast_ref::<&str>() {
@@ -457,6 +460,7 @@ impl<F> FutureStorage<F> {
 
     fn destroy_pinned(self: Pin<&mut Self>) -> Result<(), TaskPanicPayload> {
         let mut inner = self.project().inner;
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Setting an empty Option to None drops no future and returns the same success result.")]
         if inner.is_none() {
             return Ok(());
         }
@@ -498,7 +502,7 @@ impl<F: Future> FutureStorage<F> {
 
 #[pinned_drop]
 impl<F> PinnedDrop for FutureStorage<F> {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
+    #[cfg_attr(coverage_nightly, coverage(off))] // The production fallback terminates the process.
     fn drop(self: Pin<&mut Self>) {
         if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
@@ -560,6 +564,10 @@ mod tests {
     use std::task::{Context, Waker};
 
     use super::*;
+
+    std::thread_local! {
+        pub(super) static UNHANDLED_TASK_PANICS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
         let handle = TaskHandle::new(allocate_task(pool, future, (), TestCompletion));
@@ -677,6 +685,13 @@ mod tests {
 
             assert_eq!(drops.load(Ordering::Relaxed), 1);
         }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let before = UNHANDLED_TASK_PANICS.get();
+        let panic = std::panic::catch_unwind(|| drop(FutureStorage::new(PanickingDropFuture(Arc::clone(&drops))))).unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"future destructor panic"));
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(UNHANDLED_TASK_PANICS.get(), before + 1);
     }
 
     #[test]

@@ -231,13 +231,19 @@ impl<T> Sender<T> {
     /// Returns [`Error`] with `value` if all receivers are gone or the
     /// channel was closed.
     pub fn send(&self, value: T) -> Result<(), Error<T>> {
+        self.send_with(value, |value| {
+            block_on(self.send_with_recording_async(value, ContentionRecording::Recorded))
+        })
+    }
+
+    fn send_with(&self, value: T, wait: impl FnOnce(T) -> Result<(), Error<T>>) -> Result<(), Error<T>> {
         match self.shared.try_send(value) {
             Ok(()) => Ok(()),
             Err((ERROR_CLOSED, value)) => Err(Error::with_value(ERROR_CLOSED, value)),
             Err((code, value)) => {
                 debug_assert_eq!(code, ERROR_FULL, "queue send reports only full or closed");
                 self.shared.record(EventKind::ChannelSendContention);
-                block_on(self.send_with_recording_async(value, ContentionRecording::Recorded))
+                wait(value)
             }
         }
     }
@@ -1334,6 +1340,75 @@ mod tests {
         );
         assert_eq!(crate::sync::effects::take().locks, 0);
     }
+
+    #[test]
+    fn queue_waits_wake_when_capacity_or_a_value_becomes_available() {
+        let (sender, receiver) = bounded(1);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut reading = std::pin::pin!(QueueWait::receive(&sender.shared));
+        assert!(reading.as_mut().poll(&mut context).is_pending());
+        assert_eq!(counter.0.load(Ordering::Relaxed), 0);
+
+        sender.try_send(7).unwrap();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert!(reading.as_mut().poll(&mut context).is_ready());
+        let mut writing = std::pin::pin!(QueueWait::send(&sender.shared));
+        assert!(writing.as_mut().poll(&mut context).is_pending());
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+
+        assert_eq!(receiver.try_recv().unwrap(), 7);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 2);
+        assert!(writing.as_mut().poll(&mut context).is_ready());
+    }
+
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn blocking_send_records_contention_before_waiting() {
+        use seismograph::recorder::event::EventKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let (sender, receiver) = bounded(1);
+        sender.try_send(7).unwrap();
+        let before = crate::gamma_round2_telemetry::recorded_test_events(EventKind::ChannelSendContention);
+
+        sender
+            .send_with(11, |value| {
+                assert_eq!(
+                    crate::gamma_round2_telemetry::recorded_test_events(EventKind::ChannelSendContention),
+                    before + 1
+                );
+                assert_eq!(receiver.try_recv().unwrap(), 7);
+                sender.try_send(value)
+            })
+            .unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), 11);
+    }
+
+    #[test]
+    fn watch_wait_registers_until_update_and_reports_close_without_waiting() {
+        let (sender, receiver) = watch(7);
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let mut wait = std::pin::pin!(WatchChanged {
+            receiver: &receiver,
+            registration: None,
+        });
+        assert!(receiver.try_changed().is_none());
+        assert!(wait.as_mut().poll(&mut context).is_pending());
+
+        sender.send_replace(11);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert!(wait.as_mut().poll(&mut context).is_ready());
+        assert!(matches!(receiver.try_changed(), Some(Ok(()))));
+        assert_eq!(*receiver.borrow(), 11);
+
+        drop(sender);
+        assert!(matches!(receiver.try_changed(), Some(Err(error)) if error.is_closed()));
+    }
+
     #[cfg(feature = "seismograph")]
     struct DropHook(std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>);
 

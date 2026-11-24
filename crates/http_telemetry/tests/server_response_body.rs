@@ -10,9 +10,13 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::task::Poll;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use common::{
     ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server, sized_scripted,
@@ -21,7 +25,7 @@ use future_assert::FutureTestExt;
 use futures::stream;
 use http::header::{CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
 use http::{Method, StatusCode, Version};
-use http_body::Body;
+use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 use layered::{Layer, Service};
 use observed::{Severity, Value};
@@ -85,6 +89,34 @@ fn end_of_stream_survives_wrapping() {
         [ends(HttpBodyBuilder::new_fake().text("chunk")), ends(scripted([data("chunk")]))],
         [(false, true); 2]
     );
+}
+
+#[test]
+fn pending_response_does_not_query_the_inner_end_of_stream() {
+    struct PendingBody(Arc<AtomicUsize>);
+
+    impl Body for PendingBody {
+        type Data = BytesView;
+        type Error = HttpError;
+
+        fn poll_frame(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
+            Poll::Pending
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    }
+
+    let queries = Arc::new(AtomicUsize::new(0));
+    let source = HttpBodyBuilder::new_fake().body(PendingBody(Arc::clone(&queries)));
+    let (mut body, capture) = respond(StatusCode::OK, get(source));
+    let before_poll = queries.load(Ordering::Relaxed);
+
+    assert!(poll_frame(&mut body).is_pending());
+    assert_eq!(queries.load(Ordering::Relaxed), before_poll);
+    assert!(capture.names().is_empty());
 }
 
 #[test]

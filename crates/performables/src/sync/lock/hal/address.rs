@@ -226,6 +226,17 @@ mod tests {
     }
 
     #[test]
+    fn last_reader_wakes_waiters_after_clearing_registration() {
+        let lock = RwLock::new();
+        let mut reader = lock.try_read().unwrap();
+        lock.state.fetch_or(WAITERS, Ordering::Relaxed);
+        crate::sync::effects::take();
+        lock.read_unlock(&mut reader);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+        assert_eq!(crate::sync::effects::take().wake_dispatches, 1);
+    }
+
+    #[test]
     fn gamma_survivor_registered_reader_parks_before_retrying_writer_owned_state() {
         let lock = RwLock::new();
         lock.state.store(WRITER, Ordering::Relaxed);

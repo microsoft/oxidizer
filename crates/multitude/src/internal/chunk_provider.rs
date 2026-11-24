@@ -315,6 +315,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     #[cfg(feature = "stats")]
     fn release_wasted_tail(&self, n: u64) {
         self.wasted_tail_bytes.fetch_sub(n, Ordering::Relaxed);
+        #[cfg(test)]
+        tests::WASTED_TAIL_REFUNDS.with(|count| count.set(count.get() + 1));
     }
 
     /// Returns the provider's configuration.
@@ -721,11 +723,25 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "stats")]
+    thread_local! {
+        pub(super) static WASTED_TAIL_REFUNDS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[cfg(feature = "stats")]
     #[test]
     fn gamma_round2_provider_generation_starts_empty_and_refunds_a_single_wasted_byte() {
         let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
         assert_eq!(provider.normal_chunks_allocated_since_reset.load(Ordering::Relaxed), 0);
         assert_eq!(provider.wasted_tail_bytes(), 0);
+        let before = WASTED_TAIL_REFUNDS.get();
+        let chunk = provider.acquire(1, SizeClass::ZERO).unwrap();
+        // SAFETY: this test owns the only reference and returns the chunk once.
+        unsafe {
+            assert!(Chunk::dec_ref(chunk));
+            provider.release(chunk);
+        }
+        assert_eq!(WASTED_TAIL_REFUNDS.get(), before, "no waste to refund on an unretired chunk");
+
         let chunk = provider.acquire(1, SizeClass::ZERO).unwrap();
         // SAFETY: this test owns the acquired chunk's sole reference.
         unsafe { Chunk::record_retire(chunk, 1) };
@@ -735,6 +751,7 @@ mod tests {
         // SAFETY: the exclusively owned chunk now has zero references.
         unsafe { provider.release(chunk) };
         assert_eq!(provider.wasted_tail_bytes(), 0);
+        assert_eq!(WASTED_TAIL_REFUNDS.get(), before + 1);
         provider.drain_all();
         assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
     }

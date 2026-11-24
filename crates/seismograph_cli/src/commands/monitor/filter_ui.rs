@@ -451,6 +451,8 @@ mod tests {
         assert_eq!(popup.includes, "a ");
         assert!(!popup.show_unknown);
         popup.edit(KeyCode::Down);
+        popup.edit(KeyCode::Right);
+        assert_eq!(popup.runtime_stack, RuntimeStackMode::Event);
         popup.edit(KeyCode::Char('b'));
         popup.error = Some("bad rule".into());
         popup.edit(KeyCode::Backspace);
@@ -1062,7 +1064,24 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains("Include: crate:app|"));
+        assert!(rendered.contains("Stack filters - whole records"));
+        assert!(rendered.contains("Enter apply | Esc cancel"));
+        assert!(rendered.contains("Comma/space-separated: crate:name"));
+        assert!(rendered.contains("Edit text at end."));
+        assert!(rendered.contains("Exclude:"));
+        assert!(rendered.contains("Unknown stacks: hide"));
         assert!(rendered.contains("spawn provenance"));
+
+        app.filters.popup.as_mut().unwrap().show_unknown = true;
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("Unknown stacks: show"));
 
         let mut no_capture = offline();
         *offline_snapshot_mut(&mut no_capture) = None;

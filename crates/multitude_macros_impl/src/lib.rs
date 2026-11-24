@@ -1761,6 +1761,7 @@ mod tests {
 
         let multitude_generated = expand("struct S { #[multitude(deserialize_with = \"arena_value\")] value: u8 }");
         assert!(multitude_generated.contains("arena_value(self.arena, deserializer)"));
+        assert!(multitude_generated.contains("struct __MultitudeVisitorForSField0Seed<"));
         assert!(multitude_generated.contains("__MultitudeVisitorForSField0Seed {"));
 
         let variant = expand(

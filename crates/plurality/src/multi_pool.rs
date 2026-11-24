@@ -83,13 +83,21 @@ mod gamma_round2_tests {
             },
             || {
                 snapshots.set(snapshots.get() + 1);
-                (snapshots.get(), true, snapshots.get() == 2)
+                (snapshots.get(), true, snapshots.get() == 3)
             },
         );
-        assert_eq!(result, Ok((2, 2)));
-        assert_eq!(pool_calls.get(), 2);
-        assert_eq!(layout_calls.get(), 2);
-        assert_eq!(snapshots.get(), 2);
+        assert_eq!(result, Ok((3, 3)));
+        assert_eq!(pool_calls.get(), 3);
+        assert_eq!(layout_calls.get(), 3);
+        assert_eq!(snapshots.get(), 3);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "reservation retried without an intervening install")]
+    fn directory_reservation_rejects_repeated_retries_without_progress() {
+        let mut snapshots = [(1, true, false), (1, true, false), (2, true, true)].into_iter();
+        let _result = MultiPool::<Global>::try_reserve_one_with(|| Ok(()), || Ok(()), || snapshots.next().unwrap());
     }
 
     #[test]

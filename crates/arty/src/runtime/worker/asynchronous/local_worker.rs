@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn dispatcher_uses_worker_local_spawn_hooks_for_remote_submission() {
-        let (queued, sources, source_id, scheduler_cleared) = std::thread::spawn(|| {
+        let (queued, queued_from_retained_binding, sources, source_id, scheduler_cleared) = std::thread::spawn(|| {
             let builder = ThreadBuilder::default();
             let destination_builder = builder.clone();
             let source = builder.build(std::thread::current().id());
@@ -395,7 +395,7 @@ mod tests {
                 sources.0.lock().unwrap().push(event.origin().map(Thread::id));
             }));
             let shutdown = Shutdown::default();
-            let (source_commands, _source_rx) = crate::runtime::worker::asynchronous::command_channel();
+            let (source_commands, source_rx) = crate::runtime::worker::asynchronous::command_channel();
             let (destination_commands, destination_rx) = crate::runtime::worker::asynchronous::command_channel();
             let core = DispatcherCore::new(
                 NonEmpty::from_vec(vec![
@@ -417,6 +417,7 @@ mod tests {
                 vec![hook.clone()],
             );
             let _prime = core.spawn_relocating(&destination, |_| async {});
+            drop(source_rx.spawn_receiver().try_recv().unwrap());
             sources.lock().unwrap().clear();
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
@@ -432,6 +433,10 @@ mod tests {
 
             let _task = core.spawn_relocating(&source, |_| async {});
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
+            // Round robin now selects the executing worker, but the submitting
+            // scheduler is still bound to the other worker.
+            let _task = core.spawn_relocating(&destination, |_| async {});
+            let queued_from_retained_binding = source_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
             let (scheduler_cleared, retained_scheduler, retained_spawn_hooks, retained_panic_hooks) =
@@ -451,7 +456,13 @@ mod tests {
                 drop(retained_panic_hooks);
             }
             let observed_sources = sources.lock().unwrap().clone();
-            (queued, observed_sources, source.id(), scheduler_cleared)
+            (
+                queued,
+                queued_from_retained_binding,
+                observed_sources,
+                source.id(),
+                scheduler_cleared,
+            )
         })
         .join()
         .unwrap();
@@ -461,7 +472,8 @@ mod tests {
             "clear_scheduler must release all worker-local registrations before thread teardown"
         );
         assert!(queued);
-        assert_eq!(sources, [Some(source_id)]);
+        assert!(queued_from_retained_binding);
+        assert_eq!(sources, [Some(source_id), Some(source_id)]);
     }
 
     #[test]

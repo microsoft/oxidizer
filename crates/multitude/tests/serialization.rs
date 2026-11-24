@@ -482,6 +482,34 @@ fn deserialize_uses_variant_custom_deserializers() {
 }
 
 #[test]
+fn custom_field_deserializer_uses_its_own_map_binding() {
+    fn decode_hex<'de, D: Deserializer<'de>>(input: D) -> Result<u64, D::Error> {
+        let text = <&str>::deserialize(input)?;
+        u64::from_str_radix(text, 16).map_err(serde::de::Error::custom)
+    }
+
+    #[derive(Debug, DeserializeIn, PartialEq)]
+    struct Record {
+        before: u64,
+        #[serde(deserialize_with = "decode_hex")]
+        value: u64,
+        after: bool,
+    }
+
+    let arena = Arena::new();
+    let mut input = serde_json::Deserializer::from_str(r#"{"after":true,"value":"2a","before":7}"#);
+    let record: Record = arena.deserialize(&mut input).unwrap();
+    assert_eq!(
+        record,
+        Record {
+            before: 7,
+            value: 42,
+            after: true,
+        }
+    );
+}
+
+#[test]
 fn deserialize_reports_structural_errors() {
     let arena = Arena::new();
 

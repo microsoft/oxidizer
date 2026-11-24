@@ -15,6 +15,7 @@ pub use crate::runner::{EngineSet, run};
 pub use crate::vtune::begin as begin_vtune_measurement;
 
 #[must_use]
+// #[gamma::skip(fn_value.default, reason = "The return type infers the same Criterion default")]
 pub fn default_criterion() -> criterion::Criterion {
     criterion::Criterion::default()
 }

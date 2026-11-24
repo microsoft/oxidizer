@@ -307,9 +307,15 @@ impl<M: Mode> Notify<M> {
     // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cold]
     fn wait_contended(&self, deadline: Option<Timeout>) -> bool {
-        self.wait_contended_with(deadline, Timeout::elapsed, |remaining| match remaining {
-            Some(remaining) => park_timeout(remaining),
-            None => park(),
+        self.wait_contended_with(deadline, Timeout::elapsed, |remaining| {
+            #[cfg(test)]
+            if crate::sync::effects::injected_park() {
+                return;
+            }
+            match remaining {
+                Some(remaining) => park_timeout(remaining),
+                None => park(),
+            }
         })
     }
 
@@ -507,6 +513,32 @@ mod tests {
         ));
         assert!(!notify.try_wait());
         assert!(notify.state().queue.get().unwrap().lock().is_empty());
+    }
+
+    #[test]
+    fn blocking_wait_parks_only_when_no_notification_is_stored() {
+        let notify = Arc::new(Notify::<Sync>::new());
+        let parks = std::rc::Rc::new(Cell::new(0));
+        let observe = std::rc::Rc::clone(&parks);
+        let producer = Arc::clone(&notify);
+
+        crate::sync::effects::with_park(
+            move || {
+                observe.set(observe.get() + 1);
+                assert_eq!(observe.get(), 1);
+                producer.notify_one();
+            },
+            || {
+                notify.notify_one();
+                notify.wait();
+                assert_eq!(parks.get(), 0);
+                assert!(!notify.is_notified());
+
+                notify.wait();
+                assert_eq!(parks.get(), 1);
+                assert!(!notify.is_notified());
+            },
+        );
     }
 
     #[test]

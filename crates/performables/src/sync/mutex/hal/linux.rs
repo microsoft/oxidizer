@@ -16,6 +16,8 @@ pub(super) fn wait_lock(state: &AtomicLockWord, expected: LockWord) {
 }
 
 pub(super) fn wake_lock(state: &AtomicLockWord) {
+    #[cfg(test)]
+    crate::sync::effects::record_wake_dispatch();
     wake(state, 1);
 }
 
@@ -56,6 +58,8 @@ pub(super) fn wake_condition_one(state: &AtomicU32) {
 }
 
 pub(super) fn wake_condition_all(state: &AtomicU32) {
+    #[cfg(test)]
+    crate::sync::effects::record_wake_dispatch();
     wake(state, libc::c_int::MAX);
 }
 

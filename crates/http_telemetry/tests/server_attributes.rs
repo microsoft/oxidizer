@@ -100,13 +100,14 @@ fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
 
 #[test]
 fn excluded_paths_match_raw_path_and_subpaths_ignoring_ascii_case() {
-    let rows: [(&[&'static str], &'static str, bool); 9] = [
+    let rows: [(&[&'static str], &'static str, bool); 10] = [
         (&["/health/"], "/health", true),
         (&["/health/"], "/HEALTH/live", true),
         (&["/Health/"], "/health?probe=1", true),
         (&["/metrics/", "/health/"], "/health", true),
         (&["/"], "/books/1", true),
         (&["/health/"], "/healths", false),
+        (&["/health/"], "/status/live", false),
         (&["/health/"], "/api/health", false),
         (&["/health/"], "/%68ealth", false),
         (&["/health/"], "/hea", false),

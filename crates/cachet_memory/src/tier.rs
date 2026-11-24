@@ -143,6 +143,7 @@ where
     ///     .build();
     /// ```
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "InMemoryCacheBuilder::default calls InMemoryCacheBuilder::new")]
     pub fn builder() -> InMemoryCacheBuilder<K, V> {
         InMemoryCacheBuilder::new()
     }

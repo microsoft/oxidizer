@@ -1429,6 +1429,23 @@ mod tests {
     }
 
     #[cfg_attr(miri, ignore)]
+    fn assert_cache_recording_updated(stream: &mut Connection, policy: seismograph_protocol::message::RecordingPolicy) {
+        let previous = crate::recorder::Configuration {
+            cache: crate::recorder::Policy::default(),
+            ..crate::recorder::configuration()
+        };
+        crate::recorder::configure(previous);
+        seismograph_protocol::write_request(stream, 2, &Request::SetCacheRecording(policy)).unwrap();
+        assert_eq!(seismograph_protocol::read_response(stream).unwrap(), (2, Response::Acknowledged));
+        assert_eq!(
+            crate::recorder::configuration(),
+            crate::recorder::Configuration {
+                cache: recorder_policy(policy),
+                ..previous
+            }
+        );
+    }
+
     #[test]
     #[expect(
         clippy::useless_let_if_seq,
@@ -1458,11 +1475,7 @@ mod tests {
             sampling_one_in: 4,
             ..Default::default()
         };
-        seismograph_protocol::write_request(&mut stream, 2, &Request::SetCacheRecording(cache_policy)).unwrap();
-        assert_eq!(
-            seismograph_protocol::read_response(&mut stream).unwrap(),
-            (2, Response::Acknowledged)
-        );
+        assert_cache_recording_updated(&mut stream, cache_policy);
 
         seismograph_protocol::write_request(
             &mut stream,

@@ -1213,6 +1213,21 @@ mod tests {
     }
 
     #[test]
+    fn runtime_count_preflight_accepts_a_record_with_no_variable_data() {
+        let mut snapshot = fixture();
+        let runtime = &mut snapshot.runtimes[0];
+        runtime.name.clear();
+        runtime.workers.clear();
+        runtime.tasks.clear();
+        snapshot.addresses.clear();
+        let mut output = vec![0; encoded_len(&snapshot).unwrap()];
+
+        encode(&snapshot, &mut output).unwrap();
+
+        assert_eq!(decode(&output).unwrap(), snapshot);
+    }
+
+    #[test]
     fn november_nested_count_preflight_checks_workers_and_tasks_before_reading_them() {
         let mut runtime = fixture().runtimes.remove(0);
         runtime.workers.clear();

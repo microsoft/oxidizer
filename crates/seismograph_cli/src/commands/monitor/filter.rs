@@ -177,6 +177,7 @@ fn identifier(segment: &str) -> bool {
 /// Removes generic arguments, retaining the implementing owner of qualified impls.
 pub(super) fn symbol_path(symbol: &str) -> Option<String> {
     let symbol = symbol.trim();
+    // #[gamma::skip(cond.always_false, reason = "The identifier check also rejects the empty path")]
     if symbol.is_empty() {
         return None;
     }
@@ -224,7 +225,9 @@ fn angle_end(text: &str, start: usize) -> Option<usize> {
         let position = start + offset;
         match byte {
             b'<' => depth += 1,
+            // #[gamma::skip(logical.or_remove_left, literal.int_increment, reason = "Both callers start at an opening angle bracket, so a closing bracket cannot be at index zero or follow a hyphen at index one")]
             b'>' if position == 0 || text.as_bytes()[position - 1] != b'-' => {
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The opening bracket makes depth positive and the scan stops at the first return to zero")]
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
                     return Some(position);
@@ -273,6 +276,10 @@ mod tests {
         assert_eq!(
             symbol_path("app::run::h0123456789abcdeg"),
             Some("app::run::h0123456789abcdeg".into())
+        );
+        assert_eq!(
+            symbol_path("app::run::hg123456789abcdef"),
+            Some("app::run::hg123456789abcdef".into())
         );
         assert_eq!(symbol_path("app::Type<one::Arg>::run::<two::Arg>"), Some("app::Type::run".into()));
     }
@@ -389,18 +396,19 @@ mod tests {
 
     #[test]
     fn malformed_rules_have_actionable_errors() {
-        for text in [
-            "crate:",
-            "crate:foo::bar",
-            "module:foo",
-            "function:foo",
-            "crate:foo-bar",
-            "crate:foo:",
-            "foo",
-            "other:foo",
+        for (text, guidance) in [
+            ("crate:", "nonempty Rust identifiers"),
+            ("crate:foo::bar", "a single crate name"),
+            ("module:foo", "must include its crate"),
+            ("function:foo", "must include its crate"),
+            ("crate:foo-bar", "nonempty Rust identifiers"),
+            ("crate:foo:", "nonempty Rust identifiers"),
+            ("foo", "use crate:, module:, or function:"),
+            ("other:foo", "use crate:, module:, or function:"),
         ] {
             let error = FilterSpec::parse(text, "", false, RuntimeStackMode::Event).unwrap_err();
-            assert!(error.to_string().contains(text), "{error}");
+            let message = error.to_string();
+            assert!(message.contains(text) && message.contains(guidance), "{message}");
         }
     }
 

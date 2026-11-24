@@ -8,8 +8,10 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
@@ -19,7 +21,7 @@ use future_assert::{FutureTestExt, poll_once};
 use futures::{StreamExt, stream};
 use http::header::CONTENT_TYPE;
 use http::{HeaderValue, Method, StatusCode, Version};
-use http_body::Body;
+use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Layer, Service};
@@ -85,6 +87,36 @@ fn reading() -> impl RequestHandler {
         request.into_body().into_bytes().await?;
         Ok::<_, HttpError>(HttpResponse::new(HttpBodyBuilder::new_fake().empty()))
     })
+}
+
+#[test]
+fn uninterested_sink_does_not_inspect_the_request_body() {
+    struct Probe(Arc<AtomicUsize>);
+
+    impl Body for Probe {
+        type Data = BytesView;
+        type Error = HttpError;
+
+        fn poll_frame(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
+            Poll::Pending
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    }
+
+    let queries = Arc::new(AtomicUsize::new(0));
+    let input = HttpBodyBuilder::new_fake().body(Probe(Arc::clone(&queries)));
+    let capture = Capture::new(|_| false);
+    let service = logging(&["application/json"])(server(common::sink_with(&capture))).layer(common::responding(StatusCode::ACCEPTED));
+
+    let response = service.execute(request("application/json", input)).unwrap_ready().unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(queries.load(Ordering::Relaxed), 0);
+    assert!(capture.names().is_empty());
 }
 
 #[test]

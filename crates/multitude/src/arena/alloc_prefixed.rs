@@ -101,7 +101,9 @@ impl<A: Allocator + Clone> Arena<A> {
         // pointer is strictly inside the chunk (never one-past-end at
         // `chunk_base + CHUNK_ALIGN`), preserving the mask-based chunk
         // recovery invariant used by the smart pointers' `Drop`.
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The byte size of a valid input slice fits in isize, so this product cannot overflow usize.")]
         let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The payload is at most isize::MAX and the prefix is one machine word, so the sum fits in usize.")]
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         // A fresh chunk's payload is `value_align`-aligned and `elem_align` is
         // no larger, so `total` is the exact reservation with no front padding.

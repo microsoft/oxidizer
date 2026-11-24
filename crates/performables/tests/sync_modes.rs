@@ -395,6 +395,40 @@ fn synchronous_condition_notify_all_releases_every_waiter() {
 }
 
 #[test]
+fn synchronous_condition_notify_all_releases_timed_waiters() {
+    const WAITERS: usize = 3;
+    let mutex = Mutex::<bool>::new(false);
+    let condition = Condvar::<sync::Sync>::new();
+    let (started_tx, started_rx) = mpsc::channel();
+    std::thread::scope(|scope| {
+        let workers = (0..WAITERS)
+            .map(|_| {
+                let (mutex, condition, started_tx) = (&mutex, &condition, started_tx.clone());
+                scope.spawn(move || {
+                    let mut guard = mutex.lock();
+                    started_tx.send(()).unwrap();
+                    while !*guard {
+                        let (next, outcome) = condition.wait_timeout(guard, DEADLINE);
+                        assert!(!outcome.timed_out(), "notify_all must wake every timed waiter");
+                        guard = next;
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for _ in 0..WAITERS {
+            started_rx.recv().unwrap();
+        }
+        let mut guard = mutex.lock();
+        *guard = true;
+        condition.notify_all();
+        drop(guard);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+}
+
+#[test]
 fn synchronous_condition_timeout_returns_the_guard() {
     let mutex = Mutex::<u64>::new(3);
     let condition = Condvar::<sync::Sync>::new();

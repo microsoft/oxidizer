@@ -35,6 +35,15 @@ fn gamma_round2_closing_the_receiver_wakes_every_pending_sender() {
 }
 
 #[test]
+fn closed_queue_delivers_buffered_data_then_reports_closed() {
+    let (sender, receiver) = performables::sync::channel::bounded(1);
+    sender.try_send(7).unwrap();
+    assert!(sender.close());
+    assert_eq!(receiver.try_recv().unwrap(), 7);
+    assert!(matches!(receiver.try_recv(), Err(error) if error.is_closed()));
+}
+
+#[test]
 fn gamma_round2_wait_for_acknowledges_the_returned_version() {
     let (sender, receiver) = performables::sync::channel::watch(1);
     sender.send_replace(2);

@@ -252,6 +252,16 @@ mod tests {
     }
 
     #[test]
+    fn empty_zeroed_slice_never_calls_the_system_allocator() {
+        let _scope = AllocationScope::new(Layout::array::<u8>(0).unwrap(), false);
+        assert!(SystemSlice::try_zeroed(0).unwrap().is_empty());
+        ALLOCATION_TRACE.with_borrow(|trace| {
+            assert!(trace.requests.is_empty());
+            assert!(trace.releases.is_empty());
+        });
+    }
+
+    #[test]
     fn november_system_storage_forwards_exact_layout_and_zeroing_and_returns_none_on_allocation_failure() {
         for fail in [false, true] {
             for length in [1, 7] {

@@ -557,6 +557,47 @@ mod tests {
     }
 
     #[test]
+    fn panic_hook_is_queued_before_its_original_capture_can_stop_the_runtime() {
+        struct StopOnOriginalDrop(Option<Arc<DispatcherCore>>);
+
+        impl Clone for StopOnOriginalDrop {
+            fn clone(&self) -> Self {
+                Self(None)
+            }
+        }
+
+        impl Drop for StopOnOriginalDrop {
+            fn drop(&mut self) {
+                if let Some(dispatcher) = &self.0 {
+                    dispatcher.stop_inner(ShutdownCause::default());
+                }
+            }
+        }
+
+        impl ThreadAware for StopOnOriginalDrop {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+        }
+
+        let threads = test_threads(1);
+        let (worker, worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        let hook = HookFn::<TaskPanic, _>::new(StopOnOriginalDrop(Some(dispatcher.clone())), |_event, _data| {});
+
+        dispatcher.register_hook(registration(hook));
+
+        let receiver = worker_rx.system_receiver();
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            SystemCommand::RegisterHook {
+                hook: HookRegistration::TaskPanic(_),
+                ..
+            }
+        ));
+        assert!(matches!(receiver.try_recv().unwrap(), SystemCommand::Shutdown));
+        receiver.try_recv().unwrap_err();
+    }
+
+    #[test]
     #[should_panic(expected = "same runtime owner")]
     fn dispatcher_rejects_mixed_runtime_owners() {
         let first = test_threads(1).remove(0);
@@ -714,10 +755,22 @@ mod tests {
     }
 
     #[test]
-    fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
+    fn dispatcher_stop_sends_one_stop_command_and_wakes_each_worker_once() {
+        struct WakeWorker(std::sync::mpsc::Sender<()>);
+
+        impl std::task::Wake for WakeWorker {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.send(()).unwrap();
+            }
+        }
+
         let threads = test_threads(2);
-        let (worker1, worker1_rx) = endpoint(&threads[0]);
-        let (worker2, worker2_rx) = endpoint(&threads[1]);
+        let (mut worker1, worker1_rx) = endpoint(&threads[0]);
+        let (mut worker2, worker2_rx) = endpoint(&threads[1]);
+        let (wake1, woken1) = std::sync::mpsc::channel();
+        let (wake2, woken2) = std::sync::mpsc::channel();
+        worker1.waker = Waker::from(std::sync::Arc::new(WakeWorker(wake1)));
+        worker2.waker = Waker::from(std::sync::Arc::new(WakeWorker(wake2)));
 
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default(), Vec::new());
 
@@ -728,12 +781,16 @@ mod tests {
 
         assert_eq!(drain_system(&worker1_rx).len(), 1);
         assert_eq!(drain_system(&worker2_rx).len(), 1);
+        woken1.try_recv().unwrap();
+        woken2.try_recv().unwrap();
 
-        // A second stop call sends no more stop commands.
+        // A second stop call neither sends commands nor wakes workers.
         dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_system(&worker1_rx).len(), 0);
         assert_eq!(drain_system(&worker2_rx).len(), 0);
+        assert!(woken1.try_recv().is_err());
+        assert!(woken2.try_recv().is_err());
     }
 
     #[cfg(any(test, feature = "monitor"))]

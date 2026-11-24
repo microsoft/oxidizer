@@ -470,6 +470,28 @@ fn gamma_survivor_wildcard_rejection_does_not_match_unknown_or_empty_tokens() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "native tests cover gzip compression; zlib-rs teardown violates Stacked Borrows")]
+fn buffered_compression_sets_content_length_through_the_direct_limit() {
+    block_on(async {
+        for (size, buffered) in [(64 * 1024, true), (64 * 1024 + 1, false)] {
+            let payload = vec![b'x'; size];
+            let body = BytesView::from(payload.clone());
+            let handler = Compression::server()
+                .compress_responses(&[Format::Gzip])
+                .layer(FakeHandler::from_fn(move |_| {
+                    HttpResponseBuilder::new_fake().status(StatusCode::OK).bytes(body.clone()).build()
+                }));
+            let response = handler.execute(request(Method::GET, Some("gzip"))).await.unwrap();
+            let content_length = response.headers().get(CONTENT_LENGTH).cloned();
+            let compressed = response.into_body().into_bytes().await.unwrap();
+            assert_eq!(content_length, buffered.then(|| HeaderValue::from(compressed.len())));
+            let plain = compressors::format::decompress(Format::Gzip, compressed, Resources::global()).unwrap();
+            assert_eq!(plain.to_vec(), payload);
+        }
+    });
+}
+
+#[test]
 fn gamma_survivor_empty_and_raw_format_configuration_is_disabled() {
     block_on(async {
         for formats in [&[][..], &[Format::Deflate][..]] {

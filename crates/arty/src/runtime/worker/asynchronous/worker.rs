@@ -231,12 +231,12 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
-        let Some(system_batch_exhausted) = self.process_system_commands() else {
+        let ControlFlow::Continue(system_batch) = self.process_system_commands() else {
             return CycleAction::Shutdown;
         };
 
         let spawn_batch_exhausted = matches!(self.process_spawn_commands(), BatchProgress::LimitReached);
-        let batch_exhausted = system_batch_exhausted || spawn_batch_exhausted;
+        let batch_exhausted = matches!(system_batch, BatchProgress::LimitReached) || spawn_batch_exhausted;
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
@@ -304,15 +304,17 @@ impl Worker {
         ControlFlow::Break(())
     }
 
-    fn process_system_commands(&mut self) -> Option<bool> {
+    fn process_system_commands(&mut self) -> ControlFlow<(), BatchProgress> {
         let Some(state) = &mut self.state else {
-            return None;
+            return ControlFlow::Break(());
         };
 
-        let mut processed = 0_usize;
-        for command in std::iter::from_fn(|| state.commands.system_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
+        for _ in 0..COMMANDS_PER_CYCLE {
+            let Ok(command) = state.commands.system_receiver().try_recv() else {
+                return ControlFlow::Continue(BatchProgress::Drained);
+            };
             if matches!(self.shutdown.state(), ShutdownState::Started) {
-                return None;
+                return ControlFlow::Break(());
             }
             match command {
                 SystemCommand::AccessIo { access } => {
@@ -328,12 +330,11 @@ impl Worker {
                     LocalWorker::install_hook(hook, source.as_ref());
                 }
                 SystemCommand::Shutdown => {
-                    return None;
+                    return ControlFlow::Break(());
                 }
             }
-            processed = processed.saturating_add(1);
         }
-        Some(processed == COMMANDS_PER_CYCLE)
+        ControlFlow::Continue(BatchProgress::LimitReached)
     }
 
     fn process_spawn_commands(&self) -> BatchProgress {
@@ -390,10 +391,7 @@ impl Worker {
 impl Drop for Worker {
     // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "Windows CI mutant 75cbed290f57: removing worker shutdown exceeded the test timeout")]
     fn drop(&mut self) {
-        // #[gamma::skip(cond.always_true, reason = "begin_shutdown immediately returns when state is None.")]
-        if self.state.is_some() {
-            self.begin_shutdown();
-        }
+        self.begin_shutdown();
     }
 }
 
@@ -681,12 +679,12 @@ mod tests {
             ClockControl::new().into(),
             Arc::new(Signal::default()),
         );
-        assert_eq!(worker.process_system_commands(), Some(false));
+        assert_eq!(worker.process_system_commands(), ControlFlow::Continue(BatchProgress::Drained));
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
         assert!(matches!(worker.prepare_cycle(), CycleAction::Shutdown));
         assert!(worker.finish_shutdown().is_break());
         assert!(worker_is_shutdown(&worker));
-        assert_eq!(worker.process_system_commands(), None);
+        assert!(worker.process_system_commands().is_break());
     }
 
     #[test]
@@ -1246,6 +1244,34 @@ mod tests {
     }
 
     #[test]
+    fn a_full_system_batch_keeps_the_worker_polling_without_spawn_work() {
+        let (commands, command_rx) = command_channel();
+        let mut worker = test_worker(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let processed = Arc::new(AtomicUsize::new(0));
+        for _ in 0..=COMMANDS_PER_CYCLE {
+            let processed = Arc::clone(&processed);
+            commands
+                .system_sender()
+                .send(SystemCommand::AccessIo {
+                    access: QueuedIoAccess::new(Box::new(move |_| {
+                        processed.fetch_add(1, Ordering::Relaxed);
+                    })),
+                })
+                .unwrap();
+        }
+
+        assert!(matches!(worker.prepare_cycle(), CycleAction::Poll));
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE);
+        assert!(matches!(worker.prepare_cycle(), CycleAction::WaitForSignal(_)));
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
+    }
+
+    #[test]
     fn pending_system_command_interrupts_spawn_registration() {
         let (commands, command_rx) = command_channel();
         let worker = test_worker(
@@ -1309,7 +1335,7 @@ mod tests {
             });
             let request = receiver.recv_timeout(TEST_TIMEOUT).unwrap();
             commands.system_sender().send(SystemCommand::Inspect { request }).unwrap();
-            assert_eq!(worker.process_system_commands(), Some(false));
+            assert_eq!(worker.process_system_commands(), ControlFlow::Continue(BatchProgress::Drained));
             captured.join().unwrap()
         });
 
@@ -1766,7 +1792,7 @@ mod tests {
         assert!(signal.is_notified());
 
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
-        worker.run();
+        assert!(matches!(worker.prepare_cycle(), CycleAction::Shutdown));
     }
 
     #[test]
@@ -1781,9 +1807,16 @@ mod tests {
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _context = worker_context(&worker).io().context::<WaitRecordingContext>(&Arc::clone(&waits));
+        assert!(matches!(worker.prepare_cycle(), CycleAction::WaitForIo(None)));
         for _ in 0..COMMANDS_PER_CYCLE {
             commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
+        commands
+            .spawn_sender()
+            .send(enqueue(test_factory(|_, _| {
+                panic!("spawn work beyond the batch must wait for another cycle")
+            })))
+            .unwrap();
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
 
@@ -1792,7 +1825,7 @@ mod tests {
         assert!(signal.is_notified());
 
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
-        worker.run();
+        assert!(matches!(worker.prepare_cycle(), CycleAction::Shutdown));
     }
 
     #[cfg(not(miri))]
@@ -2185,9 +2218,20 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
+        let executor_shutdown = worker_executor(&worker).shutdown();
 
         drop(worker);
 
+        let scheduler_cleared = LocalWorker::with_scheduler(|scheduler| scheduler.is_none());
+        // Release test-thread state even if the teardown under test missed it.
+        if !scheduler_cleared {
+            LocalWorker::clear_scheduler();
+        }
+        if LocalWorker::try_with_driver_host(|_| ()).is_some() {
+            drop(RuntimeDriverHost::uninstall());
+        }
+        assert!(scheduler_cleared);
+        assert!(executor_shutdown.is_triggered());
         assert!(blocking_worker.0.is_shutting_down());
     }
 
@@ -2211,7 +2255,7 @@ mod tests {
         assert!(outcome.is_break());
         assert!(worker_is_shutdown(&worker));
         assert!(blocking_worker.0.is_shutting_down());
-        assert!(worker.process_system_commands().is_none());
+        assert!(worker.process_system_commands().is_break());
         assert_eq!(worker.process_spawn_commands(), BatchProgress::Drained);
         drop(commands);
     }

@@ -198,16 +198,15 @@ impl Runtime {
 
     // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "The November 4 afternoon campaign timed out when resetting current_worker made a worker try to join itself.")]
     fn stop_with(&mut self, current_worker: bool, wait: impl FnOnce(&mut Self) -> Result<(), Error>) -> Result<(), Error> {
+        let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         if
         // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         current_worker {
-            let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
             self.shutdown_on_drop = false;
             // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             panic_shutdown_from_worker("Runtime::stop");
         }
-        _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         self.shutdown_on_drop = false;
         wait(self)
     }
