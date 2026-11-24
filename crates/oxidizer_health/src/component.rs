@@ -67,8 +67,9 @@ impl Component {
 
     /// Creates an independently owned publisher in `Healthy` state with no attributes.
     #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "a live handle cannot have a retired registration")]
     pub fn publisher(&self) -> Publisher {
-        Publisher::register(&self.owner.shared)
+        Publisher::register(&self.owner.shared).expect("this handle keeps the component registered")
     }
 
     /// Waits until the component state or report data may have changed.
@@ -140,9 +141,15 @@ impl ComponentOwner {
 
 impl Drop for ComponentOwner {
     fn drop(&mut self) {
-        // Release: reports and in-flight work must see removal without waiting for the worker.
-        self.shared.dispatch.removed.store(true, Ordering::Release);
-        self.worker.send(Work::Remove(self.shared.id));
+        let registration = &self.shared.dispatch.registration;
+        // Keep a veto until the worker removes this exact registration. New publications have
+        // no access after retirement; already admitted ones finish against the old registration.
+        registration
+            .load()
+            .as_ref()
+            .expect("only the last owner retires its registration")
+            .block();
+        registration.store(None);
     }
 }
 
@@ -168,9 +175,11 @@ struct ComponentActor {
 }
 
 impl ComponentShared {
-    pub(crate) fn new(name: Arc<str>, id: u64, worker: Sender<Work>) -> Arc<Self> {
+    pub(crate) fn new(name: Arc<str>, id: u64, worker: Sender<Work>, process_blockers: Arc<AtomicUsize>) -> Arc<Self> {
         let (updates, receiver) = mpsc::channel();
         let (changes, _) = watch(());
+        // Register the empty-component veto before any publisher can obtain the component.
+        process_blockers.fetch_add(1, Ordering::SeqCst);
         Arc::new_cyclic(|component| Self {
             name,
             id,
@@ -178,10 +187,15 @@ impl ComponentShared {
             dispatch: Arc::new(ComponentDispatch {
                 component: Weak::clone(component),
                 updates,
+                registration: ArcSwapOption::from_pointee(Registration {
+                    id,
+                    worker: worker.clone(),
+                    process_blockers,
+                    live: AtomicUsize::new(0),
+                    blockers: AtomicUsize::new(1),
+                }),
                 worker,
-                blockers: AtomicUsize::new(0),
                 scheduled: AtomicBool::new(false),
-                removed: AtomicBool::new(false),
             }),
             actor: Mutex::new(ComponentActor {
                 updates: receiver,
@@ -198,7 +212,7 @@ impl ComponentShared {
     }
 
     pub(crate) fn is_registered(&self) -> bool {
-        self.dispatch.is_registered()
+        self.dispatch.registration.load().is_some()
     }
 
     pub(crate) fn process(&self, aggregate: &mut ProcessAggregate) {
@@ -225,6 +239,8 @@ impl ComponentShared {
             self.dispatch.schedule();
         }
         if !*dirty {
+            drop(actor);
+            aggregate.refresh(false);
             return;
         }
 
@@ -232,7 +248,14 @@ impl ComponentShared {
         let state = snapshot.state();
         // A recovery can coalesce into a slot ahead of another publisher's failure. Keep the
         // last whole report and retry on the next turn, even if it only removes an unseen slot.
-        if state == Health::Healthy && self.dispatch.blockers.load(Ordering::Relaxed) != 0 {
+        if state == Health::Healthy
+            && self
+                .dispatch
+                .registration
+                .load()
+                .as_ref()
+                .is_none_or(|r| r.blockers.load(Ordering::SeqCst) != 0)
+        {
             return;
         }
         *dirty = false;
@@ -248,19 +271,51 @@ struct ComponentDispatch {
     component: Weak<ComponentShared>,
     updates: Sender<Arc<Slot>>,
     worker: Sender<Work>,
-    // Number of live non-healthy publishers, used only to veto a ready snapshot. Relaxed is
-    // enough: each transition updates the count before the existing synchronized slot handoff.
-    blockers: AtomicUsize,
+    registration: ArcSwapOption<Registration>,
     scheduled: AtomicBool,
-    removed: AtomicBool,
+}
+
+/// Publishers borrow the registration only for an update, never across a notification.
+struct Registration {
+    id: u64,
+    worker: Sender<Work>,
+    process_blockers: Arc<AtomicUsize>,
+    live: AtomicUsize,
+    blockers: AtomicUsize,
+}
+
+impl Registration {
+    fn block(&self) {
+        // SeqCst orders overlapping failures and recoveries. Reserve at the root first
+        // so that it is never more optimistic than the individual registrations.
+        self.process_blockers.fetch_add(1, Ordering::SeqCst);
+        self.blockers.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn unblock(&self) {
+        self.blockers.fetch_sub(1, Ordering::SeqCst);
+        self.process_blockers.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn leave(&self, state: Health) {
+        // Transfer the leaving publisher's veto to the empty component if it was the last.
+        // A healthy publisher must reserve one before a concurrent registration can claim it.
+        if state == Health::Healthy {
+            self.block();
+        }
+        if self.live.fetch_sub(1, Ordering::SeqCst) != 1 {
+            self.unblock();
+        }
+    }
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        let _ = self.worker.send(Work::Remove(self.id, *self.blockers.get_mut()));
+    }
 }
 
 impl ComponentDispatch {
-    fn is_registered(&self) -> bool {
-        // Acquire: after the last owner is gone, a publisher must not change even an in-flight batch.
-        !self.removed.load(Ordering::Acquire)
-    }
-
     fn enqueue(&self, slot: &Arc<Slot>) {
         // AcqRel: Release publishes the slot contents to the worker that clears this flag;
         // Acquire observes the worker's previous clear.
@@ -324,7 +379,9 @@ pub struct Publisher {
 }
 
 impl Publisher {
-    fn register(component: &Arc<ComponentShared>) -> Self {
+    fn register(component: &Arc<ComponentShared>) -> Option<Self> {
+        let registration = component.dispatch.registration.load();
+        let registration = registration.as_ref()?;
         let id = next_id(&component.next_publisher);
         let signal = Signal::healthy();
         let slot = Arc::new(Slot {
@@ -333,12 +390,16 @@ impl Publisher {
             queued: AtomicBool::new(false),
             removed: AtomicBool::new(false),
         });
+        // The first live publisher replaces the empty-component veto.
+        if registration.live.fetch_add(1, Ordering::SeqCst) == 0 {
+            registration.unblock();
+        }
         component.dispatch.enqueue(&slot);
-        Self {
+        Some(Self {
             signal,
             slot,
             dispatch: Arc::clone(&component.dispatch),
-        }
+        })
     }
 
     /// Returns the current signal of this publisher.
@@ -367,12 +428,12 @@ impl Publisher {
         if signal == self.signal {
             return;
         }
-        if self.dispatch.is_registered() {
+        if let Some(registration) = self.dispatch.registration.load().as_ref() {
             if self.signal.state() != signal.state() {
                 if signal.state() == Health::Healthy {
-                    self.dispatch.blockers.fetch_sub(1, Ordering::Relaxed);
+                    registration.unblock();
                 } else if self.signal.state() == Health::Healthy {
-                    self.dispatch.blockers.fetch_add(1, Ordering::Relaxed);
+                    registration.block();
                 }
             }
             self.slot.pending.store(Some(Arc::new(signal.clone())));
@@ -384,15 +445,16 @@ impl Publisher {
 
 impl Clone for Publisher {
     fn clone(&self) -> Self {
-        match self.dispatch.component.upgrade() {
-            Some(component) if component.is_registered() => Self::register(&component),
-            _ => Self {
+        self.dispatch
+            .component
+            .upgrade()
+            .and_then(|component| Self::register(&component))
+            .unwrap_or_else(|| Self {
                 signal: Signal::healthy(),
                 // Removal is permanent. Neither clone forwards to the slot again.
                 slot: Arc::clone(&self.slot),
                 dispatch: Arc::clone(&self.dispatch),
-            },
-        }
+            })
     }
 }
 
@@ -406,15 +468,12 @@ impl Debug for Publisher {
 
 impl Drop for Publisher {
     fn drop(&mut self) {
-        if !self.dispatch.is_registered() {
-            return;
+        if let Some(registration) = self.dispatch.registration.load().as_ref() {
+            registration.leave(self.signal.state());
+            // Release: the worker that observes removal must not apply an older pending signal.
+            self.slot.removed.store(true, Ordering::Release);
+            self.dispatch.enqueue(&self.slot);
         }
-        if self.signal.state() != Health::Healthy {
-            self.dispatch.blockers.fetch_sub(1, Ordering::Relaxed);
-        }
-        // Release: the worker that observes removal must not apply an older pending signal.
-        self.slot.removed.store(true, Ordering::Release);
-        self.dispatch.enqueue(&self.slot);
     }
 }
 
@@ -425,9 +484,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overlapping_failures_do_not_publish_a_ready_snapshot_between_turns() {
+    fn empty_live_set_does_not_publish_a_ready_snapshot_between_turns() {
         let (work, pending) = mpsc::channel();
-        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let mut aggregate = ProcessAggregate::new(Weak::new());
         let mut advance = || {
             let Work::Component(component) = pending.try_recv().unwrap() else {
@@ -436,14 +495,51 @@ mod tests {
             component.upgrade().unwrap().process(&mut aggregate);
         };
 
-        let mut first = Publisher::register(&clients);
+        let mut first = Publisher::register(&clients).unwrap();
+        first.publish(Health::Unhealthy, [("attempt", 1)]);
+        let second = Publisher::register(&clients).unwrap();
+        advance();
+        let changes = clients.changes.subscribe();
+        first.publish(Health::Unhealthy, [("attempt", 2)]);
+        for _ in 1..MAX_BATCH {
+            drop(Publisher::register(&clients).unwrap());
+        }
+        drop(second);
+        drop(first);
+        advance();
+        let retained = clients.report(Filter::ALL);
+        assert_eq!(retained.state(), Health::Unhealthy);
+        assert_eq!(retained.signal_count(Health::Unhealthy), 1);
+        assert_eq!(retained.signal_count(Health::Healthy), 1);
+        assert!(changes.changed_async().now_or_never().is_none());
+        advance();
+        assert!(changes.changed_async().now_or_never().is_some());
+        let empty = clients.report(Filter::ALL);
+        assert_eq!(empty.state(), Health::Unhealthy);
+        assert_eq!(empty.signal_count(Health::Unhealthy), 0);
+        assert_eq!(empty.signal_count(Health::Healthy), 0);
+    }
+
+    #[test]
+    fn overlapping_failures_do_not_publish_a_ready_snapshot_between_turns() {
+        let (work, pending) = mpsc::channel();
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let mut aggregate = ProcessAggregate::new(Weak::new());
+        let mut advance = || {
+            let Work::Component(component) = pending.try_recv().unwrap() else {
+                panic!("expected component work");
+            };
+            component.upgrade().unwrap().process(&mut aggregate);
+        };
+
+        let mut first = Publisher::register(&clients).unwrap();
         first.publish(Health::Unhealthy, [("attempt", 1)]);
         advance();
         assert_eq!(clients.report(Filter::ALL).signal_count(Health::Unhealthy), 1);
 
         first.publish(Health::Unhealthy, [("attempt", 2)]);
-        let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients)).collect();
-        let mut second = Publisher::register(&clients);
+        let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients).unwrap()).collect();
+        let mut second = Publisher::register(&clients).unwrap();
         second.degraded("retrying");
         second.publish(Health::Unhealthy, [("attempt", 1)]);
         first.publish(Health::Healthy, [("attempt", 3)]);
@@ -461,10 +557,10 @@ mod tests {
     #[test]
     fn queued_bursts_coalesce_and_resume_without_another_publish() {
         let (work, pending) = mpsc::channel();
-        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let mut aggregate = ProcessAggregate::new(Weak::new());
         let changes = clients.changes.subscribe();
-        let mut publishers: Vec<_> = (0..=MAX_BATCH).map(|_| Publisher::register(&clients)).collect();
+        let mut publishers: Vec<_> = (0..=MAX_BATCH).map(|_| Publisher::register(&clients).unwrap()).collect();
         for publisher in &mut publishers {
             publisher.degraded("busy");
         }
@@ -492,7 +588,7 @@ mod tests {
     #[test]
     fn retired_publishers_operate_locally_even_while_a_pass_owns_the_component() {
         let (work, pending) = mpsc::channel();
-        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let worker = Worker::new(ProcessAggregate::new(Weak::new()));
         worker.send(Work::Register(1));
         let handle = Component::new(ComponentOwner::new(Arc::clone(&clients), worker));
@@ -500,6 +596,7 @@ mod tests {
         publisher.degraded("retiring");
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
         clients.process(&mut ProcessAggregate::new(Weak::new()));
+        let admitted = clients.dispatch.registration.load_full().unwrap();
         drop(handle);
         let mut orphan = publisher.clone();
         assert_eq!(orphan.signal().state(), Health::Healthy);
@@ -511,12 +608,17 @@ mod tests {
             pending.try_recv().is_err(),
             "orphaned registration, publication and cleanup must leave the worker idle"
         );
+        drop(admitted);
+        assert!(
+            matches!(pending.try_recv(), Ok(Work::Remove(1, 2))),
+            "retirement releases the old failure and removal veto together"
+        );
     }
 
     #[test]
     fn publisher_removed_before_first_snapshot_does_not_notify() {
         let (work, pending) = mpsc::channel();
-        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let mut aggregate = ProcessAggregate::new(Weak::new());
         let mut advance = || {
             assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
@@ -525,12 +627,12 @@ mod tests {
         let changes = clients.changes.subscribe();
         let mut retained = Vec::new();
         while retained.len() < 2 {
-            drop(Publisher::register(&clients));
+            drop(Publisher::register(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_none());
             assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
 
-            retained.push(Publisher::register(&clients));
+            retained.push(Publisher::register(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_some());
             assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
@@ -540,8 +642,8 @@ mod tests {
     #[test]
     fn enqueue_racing_receiver_teardown_does_not_wake_the_worker() {
         let (work, pending) = mpsc::channel();
-        let clients = ComponentShared::new(Arc::from("clients"), 1, work);
-        let publisher = Publisher::register(&clients);
+        let clients = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let publisher = Publisher::register(&clients).unwrap();
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
         clients.process(&mut ProcessAggregate::new(Weak::new()));
 

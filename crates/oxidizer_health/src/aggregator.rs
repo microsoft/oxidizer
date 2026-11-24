@@ -4,7 +4,7 @@
 use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use performables::sync::channel::{WatchReceiver, WatchSender, watch};
@@ -239,6 +239,7 @@ pub(crate) struct AggregatorShared {
     next_component: AtomicU64,
     registry: Mutex<HashMap<Arc<str>, RegistryEntry>>,
     worker: Arc<Worker>,
+    blockers: Arc<AtomicUsize>,
     health: AtomicU8,
     changes: WatchSender<()>,
 }
@@ -269,6 +270,7 @@ impl AggregatorShared {
             next_component: AtomicU64::default(),
             registry: Mutex::new(HashMap::new()),
             worker: Worker::new(ProcessAggregate::new(Weak::clone(root))),
+            blockers: Arc::default(),
             // #[gamma::skip(expr.increment, tag = "equivalent", reason = "Both 2 and 3 decode to Unhealthy; the raw byte is private and subsequent writes replace it.")]
             health: AtomicU8::new(health_bits(Health::Unhealthy)),
             changes,
@@ -293,7 +295,7 @@ impl AggregatorShared {
         registry.retain(|_, component| component.owner.strong_count() > 0);
         let id = next_id(&self.next_component);
         let name: Arc<str> = Arc::from(name);
-        let shared = ComponentShared::new(Arc::clone(&name), id, self.worker.sender());
+        let shared = ComponentShared::new(Arc::clone(&name), id, self.worker.sender(), Arc::clone(&self.blockers));
         let owner = ComponentOwner::new(Arc::clone(&shared), Arc::clone(&self.worker));
         registry.insert(
             name,
@@ -340,32 +342,96 @@ impl ProcessAggregate {
         }
 
         self.counts[state.index()] += 1;
-        self.notify();
+        self.refresh(true);
     }
 
-    pub(crate) fn remove(&mut self, id: u64) {
+    pub(crate) fn remove(&mut self, id: u64, blockers: usize) {
         let previous = self
             .components
             .remove(&id)
             .expect("registration precedes the last handle's removal");
         self.counts[previous.index()] -= 1;
-        self.notify();
+        if let Some(root) = self.root.upgrade() {
+            // The worker reevaluates readiness below, so releasing these vetoes needs no wake.
+            root.blockers.fetch_sub(blockers, Ordering::SeqCst);
+        }
+        self.refresh(true);
     }
 
-    fn notify(&self) {
+    /// Even a turn that only removes an unseen publisher can release a deferred recovery.
+    pub(crate) fn refresh(&self, report_changed: bool) {
         if let Some(root) = self.root.upgrade() {
-            // Release: publish the new aggregate before waking readers.
-            root.health.store(health_bits(Health::worst(&self.counts)), Ordering::Release);
-            root.changes.send_replace(());
+            let state = Health::worst(&self.counts);
+            let mut changed = report_changed;
+            // SeqCst orders the readiness check with failures and recoveries across components.
+            if state != Health::Healthy || root.blockers.load(Ordering::SeqCst) == 0 {
+                let bits = health_bits(state);
+                // Release: publish the state before waking readers.
+                changed |= root.health.swap(bits, Ordering::Release) != bits;
+            }
+            if changed {
+                root.changes.send_replace(());
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use futures::FutureExt;
+    use futures::executor::block_on;
+    use testing_aids::execute_or_terminate_process;
 
     use super::*;
+
+    #[test]
+    fn overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns() {
+        let root = Aggregator::new();
+        let (work, pending) = mpsc::channel();
+        let component = |id, name| {
+            let shared = ComponentShared::new(Arc::from(name), id, work.clone(), Arc::clone(&root.shared.blockers));
+            Component::new(ComponentOwner::new(shared, Arc::clone(&root.shared.worker)))
+        };
+        let mut aggregate = ProcessAggregate::new(Arc::downgrade(&root.shared));
+        let mut advance = || {
+            let Work::Component(next) = pending.try_recv().unwrap() else {
+                panic!("expected a component turn");
+            };
+            next.upgrade().unwrap().process(&mut aggregate);
+        };
+
+        let first = component(1, "first");
+        let mut first_writer = first.publisher();
+        first_writer.publish(Health::Unhealthy, [("revision", 1)]);
+        let second = component(2, "second");
+        let _second_healthy = second.publisher();
+        advance();
+        advance();
+        assert_eq!(root.state(), Health::Unhealthy);
+
+        first_writer.publish(Health::Unhealthy, [("revision", 3)]);
+        let mut second_writer = second.publisher();
+        second_writer.publish(Health::Unhealthy, [("revision", 4)]);
+        first_writer.publish(Health::Healthy, [("revision", 5)]);
+        advance();
+        assert_eq!(first.state(), Health::Healthy);
+        assert_eq!(root.state(), Health::Unhealthy);
+        let mut monitor = root.monitor();
+        // This writer was never in a snapshot. Its removal must release the root even
+        // though the second component has no report change to publish.
+        drop(second_writer);
+        advance();
+        assert_eq!(monitor.changed().now_or_never(), Some(()));
+        assert_eq!(root.state(), Health::Healthy);
+        drop(second.publisher());
+        advance();
+        assert!(
+            monitor.changed().now_or_never().is_none(),
+            "an unchanged report must not wake readers"
+        );
+    }
 
     #[test]
     fn process_transitions_publish_the_worst_remaining_state() {
@@ -373,6 +439,10 @@ mod tests {
         let mut model = ProcessAggregate::new(Arc::downgrade(&root.shared));
         for (id, state, expected) in [
             (1, Some(Health::Healthy), Health::Healthy),
+            // Registering and removing another healthy component changes the reports even
+            // though it leaves the published state unchanged.
+            (3, Some(Health::Healthy), Health::Healthy),
+            (3, None, Health::Healthy),
             (2, Some(Health::Degraded), Health::Degraded),
             (1, Some(Health::Unhealthy), Health::Unhealthy),
             (1, None, Health::Degraded),
@@ -382,11 +452,33 @@ mod tests {
             if let Some(state) = state {
                 model.set(id, state);
             } else {
-                model.remove(id);
+                model.remove(id, 0);
             }
             assert_eq!(root.changed().now_or_never(), Some(()));
             assert_eq!(root.state(), expected);
         }
+    }
+
+    #[test]
+    fn a_degraded_component_cannot_replace_another_components_empty_registration() {
+        execute_or_terminate_process(|| {
+            let root = Aggregator::new();
+            let empty = root.component("required");
+            let mut reporting = root.component("optional");
+            let mut publisher = reporting.publisher();
+            block_on(reporting.changed());
+
+            // The component notification acknowledges its own turn, independently of the root state.
+            publisher.degraded("retrying");
+            block_on(reporting.changed());
+            assert_eq!(reporting.state(), Health::Degraded);
+            assert_eq!(root.state(), Health::Unhealthy);
+
+            drop(empty);
+            publisher.degraded("retrying again");
+            block_on(reporting.changed());
+            assert_eq!(root.state(), Health::Degraded);
+        });
     }
 
     #[test]

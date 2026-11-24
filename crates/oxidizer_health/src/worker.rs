@@ -13,7 +13,7 @@ use crate::component::ComponentShared;
 
 pub(crate) enum Work {
     Register(u64),
-    Remove(u64),
+    Remove(u64, usize),
     Component(Weak<ComponentShared>),
     Stop,
 }
@@ -88,7 +88,7 @@ fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>, mut aggregate: Proce
     while let Ok(work) = receiver.recv() {
         match work {
             Work::Register(id) => aggregate.set(id, Health::Unhealthy),
-            Work::Remove(id) => aggregate.remove(id),
+            Work::Remove(id, blockers) => aggregate.remove(id, blockers),
             Work::Component(component) => {
                 if let Some(component) = component.upgrade().filter(|c| c.is_registered()) {
                     component.process(&mut aggregate);
@@ -122,7 +122,7 @@ mod tests {
         let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
-        let shared = ComponentShared::new(Arc::from("database"), 1, worker.sender());
+        let shared = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
         let component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
         let mut publisher = component.publisher();
         publisher.publish(Health::Healthy, [("revision", 1)]);
