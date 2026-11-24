@@ -49,6 +49,8 @@ pub struct MetricDescription {
     ///
     /// [UCUM]: https://ucum.org/ucum
     unit: &'static str,
+    /// Bucket boundaries of a histogram. Empty if unset.
+    boundaries: &'static [f64],
 }
 
 impl MetricDescription {
@@ -61,7 +63,18 @@ impl MetricDescription {
             kind,
             description,
             unit,
+            boundaries: &[],
         }
+    }
+
+    /// Sets the bucket boundaries of a histogram.
+    ///
+    /// An exporter that creates an OpenTelemetry histogram for the instrument passes the
+    /// boundaries to it. OpenTelemetry requires finite values in strictly increasing order.
+    #[must_use]
+    pub const fn with_boundaries(mut self, boundaries: &'static [f64]) -> Self {
+        self.boundaries = boundaries;
+        self
     }
 
     /// Returns the `OTel` instrument name.
@@ -86,6 +99,12 @@ impl MetricDescription {
     #[must_use]
     pub const fn unit(&self) -> &'static str {
         self.unit
+    }
+
+    /// Returns the bucket boundaries of a histogram, or an empty slice if unset.
+    #[must_use]
+    pub const fn boundaries(&self) -> &'static [f64] {
+        self.boundaries
     }
 }
 
@@ -120,5 +139,13 @@ mod tests {
 
         assert_eq!(desc.description(), "server duration");
         assert_eq!(desc.unit(), "ms");
+    }
+
+    #[test]
+    fn metric_description_keeps_the_boundaries_it_is_given() {
+        let plain = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "", "s");
+        let bucketed = plain.with_boundaries(&[0.5, 1.0]);
+
+        assert_eq!((plain.boundaries(), bucketed.boundaries()), (&[][..], &[0.5, 1.0][..]));
     }
 }

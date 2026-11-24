@@ -446,3 +446,22 @@ fn metric_processor_receives_measurement_of_flattened_value() {
     assert_eq!(event.field_metrics()[0].metric().instrument_name(), "test.timing.duration");
     assert_f64_eq(event.field_metrics()[0].value(), 0.5);
 }
+
+#[test]
+fn histogram_boundaries_reach_processor() {
+    const BOUNDARIES: &[f64] = &[0.1, 1.0, 10.0];
+
+    #[event("test.timed")]
+    #[info]
+    #[histogram(duration, name = "test.duration", unit = "s", boundaries = BOUNDARIES)]
+    struct Timed {
+        #[unredacted]
+        duration: f64,
+    }
+
+    let (sink, processor) = test_emitter(TEST_ID);
+
+    emit!(sink, Timed { duration: 0.5 });
+
+    assert_eq!(processor.single_event().field_metrics()[0].metric().boundaries(), BOUNDARIES);
+}

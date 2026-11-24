@@ -305,7 +305,7 @@ pub use observed_macros::Enrichment;
 /// ```text
 /// #[event("<event_name>" [, disabled])]                              // REQUIRED (`disabled` optional)
 /// #[<severity>[("<message>")] [, name = "..."]]                      // optional log signal
-/// #[<kind>([<field>] [, name = "..."] [, desc = "..."] [, unit = "..."])]  // optional; repeatable
+/// #[<kind>([<field>] [, name = "..."] [, desc = "..."] [, unit = "..."] [, boundaries = <expr>])]  // optional; repeatable
 /// // <severity> is one of: trace, debug, info, warning, error, fatal
 /// // <kind>     is one of: counter, updown_counter, gauge, histogram
 /// struct MyEvent {
@@ -383,6 +383,22 @@ pub use observed_macros::Enrichment;
 /// ```text
 /// #[event("http.request")]
 /// #[histogram(duration, name = "http.server.duration", unit = "ms")]
+/// struct HttpRequest {
+///     #[unredacted]
+///     duration: f64,
+/// }
+/// ```
+///
+/// A `histogram` also accepts `boundaries`, a `&'static [f64]` expression with
+/// the bucket boundaries of the histogram. An exporter that creates an
+/// OpenTelemetry histogram passes them to it. OpenTelemetry requires finite
+/// values in strictly increasing order:
+///
+/// ```text
+/// const BOUNDARIES: &[f64] = &[0.1, 0.5, 1.0];
+///
+/// #[event("http.request")]
+/// #[histogram(duration, name = "http.server.duration", unit = "s", boundaries = BOUNDARIES)]
 /// struct HttpRequest {
 ///     #[unredacted]
 ///     duration: f64,

@@ -134,6 +134,21 @@ fn dimension_routes_the_log_and_metric_signals_independently() {
 }
 
 #[test]
+fn a_histogram_carries_its_boundaries() {
+    insta::assert_snapshot!(expand_event(
+        r#""operation""#,
+        r#"
+        #[info]
+        #[histogram(duration_secs, unit = "s", boundaries = BOUNDARIES)]
+        struct Operation {
+            #[unredacted]
+            duration_secs: f64,
+        }
+        "#,
+    ));
+}
+
+#[test]
 fn every_instrument_kind_records_the_field_it_names() {
     insta::assert_snapshot!(expand_event(
         r#""operation""#,
@@ -604,6 +619,8 @@ fn the_instrument_attribute_is_validated() {
             r#"#[counter(v, name = "a", name = "b")]"#,
             r#"#[counter(v, desc = "a", desc = "b")]"#,
             r#"#[counter(v, unit = "a", unit = "b")]"#,
+            "#[counter(v, boundaries = &[1.0])]",
+            "#[histogram(v, boundaries = &[1.0], boundaries = &[2.0])]",
             "#[counter(v)] #[counter(v)]",
         ]
         .into_iter()
