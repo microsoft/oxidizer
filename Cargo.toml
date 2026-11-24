@@ -200,7 +200,7 @@ multitude_macros = { path = "crates/multitude_macros", default-features = false,
 multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "=0.14.0" }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
-nix = { version = "0.31.3", default-features = false }
+nix = { version = "0.32.0", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 nonempty = { version = "0.12.0", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
