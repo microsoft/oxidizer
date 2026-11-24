@@ -1,7 +1,8 @@
 # Changelog
 
-## [0.4.1] - 2026-11-24
+## [0.5.0] - 2026-11-24
 
+- Breaking: Require Seismograph 0.6 for the optional `seismograph` feature. Applications must configure the same recorder version as their instrumented dependencies.
 - Expand deterministic contention, wakeup, timeout, cancellation, and final-owner synchronization regression coverage.
 - Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
 - Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.

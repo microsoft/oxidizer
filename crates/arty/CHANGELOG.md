@@ -11,7 +11,7 @@
 - Update the local requirement for `arty_macros` from `=0.6.1` to `=0.7.0`.
 - Update the local requirement for `observed` from `^0.30.1` to `^0.31.0`.
 - Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
-- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
 - Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
 - Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
 - Update the local requirement for `seismograph_runtime` from `^0.5.0` to `^0.6.0`.

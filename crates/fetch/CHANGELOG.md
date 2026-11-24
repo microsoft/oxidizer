@@ -16,7 +16,7 @@
 - Update the local requirement for `http_extensions` from `^0.15.0` to `^0.16.0`.
 - Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
 - Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
-- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
 - Update the local requirement for `seatbelt` from `^0.12.1` to `^0.13.0`.
 - Update the local requirement for `seatbelt_http` from `^0.13.0` to `^0.14.0`.
 - Update the local requirement for `templated_uri` from `^0.7.1` to `^0.7.2`.

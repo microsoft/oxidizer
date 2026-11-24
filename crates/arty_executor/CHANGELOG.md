@@ -4,7 +4,7 @@
 
 - Update private task building, instrumentation, cancellation, and panic handoff for Arty runtime hooks.
 - Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
-- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
 - Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
 - Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
 - Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.

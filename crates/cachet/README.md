@@ -282,15 +282,15 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaWkqhnCoP40bX0_PVavH0WcbT5lvBYobChYb1adcKzrXPOxhZIiCaGJ5dGVzYnVmZjAuMTUuMIJmY2FjaGV0ZjAuMTkuMIJtY2FjaGV0X21lbW9yeWUwLjkuM4JuY2FjaGV0X3NlcnZpY2VlMC42LjKCa2NhY2hldF90aWVyZTAuNi4ygmR0aWNrZjAuMTAuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjkuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaWkqhnCoP40bX0_PVavH0WcbT5lvBYobChYb1adcKzrXPOxhZIiCaGJ5dGVzYnVmZjAuMTUuMIJmY2FjaGV0ZjAuMTkuMIJtY2FjaGV0X21lbW9yeWYwLjEwLjCCbmNhY2hldF9zZXJ2aWNlZTAuNi4ygmtjYWNoZXRfdGllcmUwLjYuMoJkdGlja2YwLjEwLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRmMC4xMC4w
  [__link0]: https://docs.rs/cachet/0.19.0/cachet/?search=TimeToRefresh
- [__link1]: https://crates.io/crates/uniflight/0.9.1
+ [__link1]: https://crates.io/crates/uniflight/0.10.0
  [__link10]: https://docs.rs/cachet_tier/0.6.2/cachet_tier/?search=CacheTier
  [__link11]: https://docs.rs/cachet/0.19.0/cachet/?search=InsertPolicy
  [__link12]: https://docs.rs/cachet/0.19.0/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.6.2/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.6.2
- [__link15]: https://crates.io/crates/cachet_memory/0.9.3
+ [__link15]: https://crates.io/crates/cachet_memory/0.10.0
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.6.2
  [__link18]: https://docs.rs/cachet/0.19.0/cachet/?search=telemetry::attributes

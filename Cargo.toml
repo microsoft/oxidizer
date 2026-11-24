@@ -101,7 +101,7 @@ bytes = { version = "1.11.1", default-features = false }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.15.0" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.15.0" }
 cachet = { path = "crates/cachet", default-features = false, version = "0.19.0" }
-cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.9.3" }
+cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.10.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.6.2" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.6.2" }
 cc = { version = "1.2", default-features = false }
@@ -225,7 +225,7 @@ paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }
 pbjson = { version = "0.9.0", default-features = false }
 pbjson-build = { version = "0.9.0", default-features = false }
-performables = { path = "crates/performables", default-features = false, version = "0.4.1" }
+performables = { path = "crates/performables", default-features = false, version = "0.5.0" }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 plurality = { path = "crates/plurality", default-features = false, version = "0.2.5" }
@@ -314,7 +314,7 @@ trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 unicode-ident = { version = "1.0.22", default-features = false }
 unicode-width = { version = "0.2.2", default-features = false }
-uniflight = { path = "crates/uniflight", default-features = false, version = "0.9.1" }
+uniflight = { path = "crates/uniflight", default-features = false, version = "0.10.0" }
 ustr = { version = "1.1.0", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
