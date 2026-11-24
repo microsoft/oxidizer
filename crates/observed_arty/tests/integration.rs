@@ -110,11 +110,7 @@ impl RestorationProbe {
 
 impl TaskObserver for RestorationProbe {
     fn poll_start(&mut self) {
-        if let Some(guard) = &mut self.guard {
-            guard.apply_current_thread();
-        } else {
-            self.guard = Some(self.worker_context.apply_current_thread());
-        }
+        self.guard = Some(self.worker_context.apply_current_thread());
     }
 
     fn poll_end(&mut self, outcome: Poll<()>) {
@@ -127,9 +123,7 @@ impl TaskObserver for RestorationProbe {
                 outcome,
                 keys: active_keys(&self.sink),
             });
-        if let Some(guard) = &mut self.guard {
-            guard.restore_current_thread();
-        }
+        self.guard = None;
     }
 }
 

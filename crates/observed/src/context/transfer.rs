@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer};
+use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer, Guard};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -108,19 +108,7 @@ impl Transfer {
     /// enrichment and strand the entries it applied on the origin thread.
     #[must_use = "the enrichment is removed as soon as the returned guard is dropped"]
     pub fn apply_current_thread(&self) -> TransferGuard {
-        let mut guard = self.clone().into_inactive_guard();
-        guard.apply_current_thread();
-        guard
-    }
-
-    /// Converts the captured enrichment into an inactive reusable guard.
-    ///
-    /// The guard retains restoration storage across repeated
-    /// [`apply_current_thread`](TransferGuard::apply_current_thread) and
-    /// [`restore_current_thread`](TransferGuard::restore_current_thread) calls.
-    /// It does not change the current thread until it is applied.
-    pub fn into_inactive_guard(self) -> TransferGuard {
-        TransferGuard::new(self.enrichment)
+        TransferGuard::new(self.enrichment.apply_owned())
     }
 
     pub(crate) fn apply_state(&self) -> ApplyState {
@@ -132,66 +120,28 @@ impl Transfer {
     }
 }
 
-/// Applies captured enrichment and restores the prior enrichment on drop.
+/// Restores the prior enrichment when it is dropped.
 ///
 /// The guard belongs to the thread that created it. It cannot move to another
-/// thread. Runtime integrations can restore and reapply it around repeated task
-/// polls without allocating new restoration storage.
+/// thread.
 #[must_use = "the enrichment is removed as soon as the guard is dropped"]
 pub struct TransferGuard {
-    enrichment: EnrichmentTransfer,
-    state: ApplyState,
-    active: bool,
+    _guard: Guard,
     _not_send: PhantomData<Rc<()>>,
 }
 
 impl std::fmt::Debug for TransferGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("active", &self.active)
-            .finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
 impl TransferGuard {
-    fn new(enrichment: EnrichmentTransfer) -> Self {
-        let state = enrichment.apply_state();
+    fn new(guard: Guard) -> Self {
         Self {
-            enrichment,
-            state,
-            active: false,
+            _guard: guard,
             _not_send: PhantomData,
         }
-    }
-
-    /// Reapplies the captured enrichment to the current thread.
-    ///
-    /// A repeated call while the guard is active does nothing.
-    pub fn apply_current_thread(&mut self) {
-        if self.active {
-            return;
-        }
-        self.enrichment.apply_start(&mut self.state);
-        self.active = true;
-    }
-
-    /// Restores the enrichment that was active before the last application.
-    ///
-    /// A call while the guard is inactive does nothing. The guard keeps its
-    /// restoration storage so a later [`apply_current_thread`](Self::apply_current_thread)
-    /// call can reuse it.
-    pub fn restore_current_thread(&mut self) {
-        if !self.active {
-            return;
-        }
-        self.enrichment.apply_end(&mut self.state);
-        self.active = false;
-    }
-}
-
-impl Drop for TransferGuard {
-    fn drop(&mut self) {
-        self.restore_current_thread();
     }
 }
 

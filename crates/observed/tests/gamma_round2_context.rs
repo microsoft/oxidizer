@@ -81,10 +81,6 @@ fn sink(capture: &Arc<Capture>) -> Sink {
         .build()
 }
 
-fn enrichment_keys(sink: &Sink) -> Vec<String> {
-    sink.current_enrichments().iter().map(|entry| entry.key().to_string()).collect()
-}
-
 #[test]
 fn gamma_round2_future_enrichment_keeps_values_order_and_restores_each_poll() {
     let capture = Arc::new(Capture::default());
@@ -147,35 +143,6 @@ fn gamma_round2_composite_transfer_restores_each_childs_independent_chain() {
 }
 
 #[test]
-fn gamma_round2_transfer_guard_repeats_safely_and_restores_on_drop() {
-    let capture = Arc::new(Capture::default());
-    let sink = sink(&capture);
-    let transfer = (|| sink.transfer_context()).enrich(&sink, Layer("captured", 1))();
-
-    (|| {
-        assert_eq!(enrichment_keys(&sink), ["prior"]);
-        let mut guard = transfer.apply_current_thread();
-
-        assert_eq!(enrichment_keys(&sink), ["captured"]);
-        guard.apply_current_thread();
-        assert_eq!(enrichment_keys(&sink), ["captured"]);
-
-        guard.restore_current_thread();
-        assert_eq!(enrichment_keys(&sink), ["prior"]);
-        guard.restore_current_thread();
-        assert_eq!(enrichment_keys(&sink), ["prior"]);
-
-        guard.apply_current_thread();
-        assert_eq!(enrichment_keys(&sink), ["captured"]);
-        drop(guard);
-        assert_eq!(enrichment_keys(&sink), ["prior"]);
-    })
-    .enrich(&sink, Layer("prior", 2))();
-
-    assert!(sink.current_enrichments().is_empty());
-}
-
-#[test]
 fn gamma_round2_transfer_guard_debug_does_not_disclose_context() {
     let capture = Arc::new(Capture::default());
     let sink = sink(&capture);
@@ -184,7 +151,7 @@ fn gamma_round2_transfer_guard_debug_does_not_disclose_context() {
     (|| {
         let guard = transfer.apply_current_thread();
         let debug = format!("{guard:?}");
-        assert_eq!(debug, "observed::context::transfer::TransferGuard { active: true, .. }");
+        assert_eq!(debug, "observed::context::transfer::TransferGuard { .. }");
         assert!(!debug.contains("prior-secret"));
         assert!(!debug.contains("captured-secret"));
     })

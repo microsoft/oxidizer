@@ -259,14 +259,6 @@ impl ApplyState {
             previous_heads: SmallVec::with_capacity(slot_count),
         }
     }
-
-    fn restore(&mut self, slots: &[(Slot, OptEnrichmentNode)]) {
-        debug_assert_eq!(slots.len(), self.previous_heads.len());
-        while let Some(previous) = self.previous_heads.pop() {
-            let slot = &slots[self.previous_heads.len()].0;
-            let _ = slot.replace(previous);
-        }
-    }
 }
 
 /// Restores slot heads installed by an [`EnrichmentTransfer`].
@@ -287,7 +279,11 @@ impl std::fmt::Debug for AppliedGuard<'_> {
 
 impl Drop for AppliedGuard<'_> {
     fn drop(&mut self) {
-        self.state.restore(self.slots);
+        debug_assert_eq!(self.slots.len(), self.state.previous_heads.len());
+        while let Some(previous) = self.state.previous_heads.pop() {
+            let slot = &self.slots[self.state.previous_heads.len()].0;
+            let _ = slot.replace(previous);
+        }
     }
 }
 
@@ -326,22 +322,22 @@ impl EnrichmentTransfer {
 
     /// Restores captured heads using scratch storage retained by the caller.
     pub(crate) fn apply<'a>(&'a self, state: &'a mut ApplyState) -> AppliedGuard<'a> {
-        self.apply_start(state);
-        AppliedGuard { slots: &self.slots, state }
-    }
-
-    /// Restores captured heads and records the previous heads in reusable storage.
-    pub(crate) fn apply_start(&self, state: &mut ApplyState) {
         debug_assert!(state.previous_heads.is_empty());
         for (slot, head) in &self.slots {
             let previous = slot.replace(head.clone());
             state.previous_heads.push(previous);
         }
+        AppliedGuard { slots: &self.slots, state }
     }
 
-    /// Restores the heads recorded by [`Self::apply_start`].
-    pub(crate) fn apply_end(&self, state: &mut ApplyState) {
-        state.restore(&self.slots);
+    /// Restores captured heads with an owned guard that can outlive this transfer.
+    pub(crate) fn apply_owned(&self) -> Guard {
+        let mut slots = SmallVec::with_capacity(self.slots.len());
+        for (slot, head) in &self.slots {
+            let prev = slot.replace(head.clone());
+            slots.push((slot.clone(), prev));
+        }
+        Guard { slots }
     }
 
     /// Pushes an additional enrichment node onto every captured chain.

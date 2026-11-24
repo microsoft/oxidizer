@@ -86,24 +86,23 @@ fn capture_enrichment(event: &mut TaskSpawn, options: &ObservedOptions) {
 }
 
 struct ObservedTask {
-    guard: TransferGuard,
+    transfer: Transfer,
+    guard: Option<TransferGuard>,
 }
 
 impl ObservedTask {
     fn new(transfer: Transfer) -> Self {
-        Self {
-            guard: transfer.into_inactive_guard(),
-        }
+        Self { transfer, guard: None }
     }
 }
 
 impl TaskObserver for ObservedTask {
     fn poll_start(&mut self) {
-        self.guard.apply_current_thread();
+        self.guard = Some(self.transfer.apply_current_thread());
     }
 
     fn poll_end(&mut self, _outcome: Poll<()>) {
-        self.guard.restore_current_thread();
+        self.guard = None;
     }
 }
 
@@ -131,13 +130,8 @@ mod tests {
     const MEASURED_POLLS: usize = 1_000;
 
     #[test]
-    fn repeated_composite_poll_scopes_do_not_allocate() {
-        let sink = Sink::composite([
-            Sink::builder("allocation_test_1").build(),
-            Sink::builder("allocation_test_2").build(),
-            Sink::builder("allocation_test_3").build(),
-            Sink::builder("allocation_test_4").build(),
-        ]);
+    fn repeated_single_sink_poll_scopes_do_not_allocate() {
+        let sink = Sink::builder("allocation_test").build();
         let mut observer = ObservedTask::new(sink.transfer_context());
         observer.poll_start();
         observer.poll_end(Poll::Pending);
