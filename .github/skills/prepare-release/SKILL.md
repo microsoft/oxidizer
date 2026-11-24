@@ -28,6 +28,20 @@ reviewable version PR only. It does not merge, tag, publish, configure publishin
 or authorize any of those actions. Existing Microsoft automation remains
 responsible for publication after an authorized merge.
 
+For each reviewed comparison exclusion, retain its exact package, baseline
+version, reason, and supporting evidence. Pass the same
+`--exclude-comparison PACKAGE@VERSION=REASON` argument to every compatibility
+stage, including preview and final verification. If baseline selection changes,
+reassess the exception before continuing. Record the excluded comparison in the
+decision ledger and final handoff. An exclusion does not establish compatibility
+or justify a patch release.
+
+Use a tool that reports the schemas required by `increment-versions`. If testing
+an unpublished fix, use a session-local executable and record its checksum,
+source commit, and source changes. Do not describe that executable as a published
+release or invent a hosted tool pin. Reproducible hosted use requires a matching
+published tool and skill.
+
 On Windows, use a very short, session-unique external evidence root such as
 `C:\rp\<session-id>` and new short child directories for every repeated stage.
 Never share an evidence directory between concurrent runs. Deep session artifact

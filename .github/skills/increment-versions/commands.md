@@ -41,7 +41,7 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 if ("{{MODE}}" -notin @("configured", "standalone")) { throw "Select an explicit planning mode." }
 $Identity = & "{{TOOL}}" version | ConvertFrom-Json
-$Expected = @{ plan = 8; report = 8; prepared = 8; decisions = 2; compatibility = 3 }
+$Expected = @{ plan = 8; report = 8; prepared = 8; decisions = 2; compatibility = 4 }
 if ("{{MODE}}" -eq "configured") { $Expected.release_context = 2 }
 foreach ($Name in $Expected.Keys) {
     if ($Identity.schemas.$Name -ne $Expected[$Name]) {
@@ -143,7 +143,12 @@ evidence in `WORK_DIR`. A consistent lockfile may be installed during preparatio
 the report describes that same source. Compatibility checks require completed
 evidence before semantic assessment.
 Completed evidence can contain explicit exclusions: `not_compared_reason` distinguishes
-`unsupported-proc-macro` from `no-baseline`. Neither implies compatibility. Keep these
+`unsupported-proc-macro`, `no-baseline` and `explicit-exclusion`. None implies compatibility.
+An explicit exception uses `--exclude-comparison PACKAGE@VERSION=REASON`, retains its selected
+baseline and reason, and requires source/artifact evidence plus a complete semantic decision.
+For a binary-only predecessor, assess the added library API and existing CLI, behavior and
+feature contracts without a patch default. Never exclude unexplained operational failures.
+Keep these
 packages in the dependency-first assessment; do not substitute the checker target list.
 
 ## Stage 3: Assess in dependency order

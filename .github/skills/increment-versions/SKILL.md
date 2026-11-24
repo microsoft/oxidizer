@@ -38,7 +38,7 @@ requires GitHub CLI authentication.
 
 Check the schema revisions reported by `cargo release-plan version` before
 modifying source. This skill consumes plan/report/prepared schema `8`,
-semantic-decision schema `2` and compatibility schema `3`. Configured mode also
+semantic-decision schema `2` and compatibility schema `4`. Configured mode also
 consumes release-context schema `2`. Matching package version numbers are not a prerequisite.
 
 If schemas differ, update the installed skill from the complete
@@ -179,6 +179,14 @@ means the checker cannot compare that Cargo target directly; `no-baseline` means
 a supported target lacks a comparison version. Neither removes a package from
 assessment or justifies a `patch` default.
 
+`explicit-exclusion` records a caller-reviewed exception, not a tool-verified target shape.
+Use `--exclude-comparison PACKAGE@VERSION=REASON` only with evidence supporting the
+exception for that exact selected baseline, such as a published predecessor with no library.
+Do not use it to bypass unexplained registry, network, build or checker failures.
+Retain the recorded `exclusion_reason`, and require an explicit semantic decision for the
+excluded package based on the complete new library API and existing CLI, behavior and feature
+contracts. No passing comparison or semantic floor is claimed; never default to patch.
+
 Follow the decision guide's [re-export assessment](determining-level.md#re-exported-apis)
 and [procedural-macro assessment](determining-level.md#procedural-macros).
 Private implementations and unchanged facades remain in scope. Record the affected
@@ -209,6 +217,16 @@ ungrouped package: anchor version, proposed version, semantic impact
 and substantive reason. Explain dependent/group movements and retained versions.
 Mark non-publishable packages **version alignment only, not published** without
 inventing a published predecessor. State explicitly when nothing is to release.
+
+When a rationale covers changes of different semantic levels, separate the changes
+that require the final level from the remaining changes. Label the first paragraph
+**Breaking:**, **Nonbreaking:** or **Patch:** to match the final level, and the
+second **Additional:**. Use `<br><br>` between paragraphs in a Markdown table cell.
+No split is needed when all changes have the same level. For example:
+
+> **Breaking:** Public defining package `tick` releases incompatible type identities exposed by
+> `observed`.<br><br>**Additional:** Private macro cleanup and sink optimizations preserve existing
+> contracts. Published workspace requirements must name the new `observed_macros_impl` version.
 
 ## First-publication handoff
 
