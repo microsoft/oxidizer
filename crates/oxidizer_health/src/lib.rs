@@ -11,7 +11,7 @@
 //! an overall service state: [`Healthy`](Health::Healthy), [`Degraded`](Health::Degraded), or
 //! [`Unhealthy`](Health::Unhealthy). At each level, the worst state wins.
 //! [Reports](Report) retain diagnostic attributes and publisher counts, while the optional
-//! [HTTP helpers](https://docs.rs/oxidizer_health/latest/oxidizer_health/http/) expose readiness
+//! [Kubernetes HTTP helpers](https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/) expose readiness
 //! through Tower or [`http_extensions`](https://docs.rs/http_extensions).
 //!
 //! # Quick start
@@ -82,8 +82,8 @@
 //!
 //! # Features
 //!
-//! - `http` enables the [Tower readiness service](https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.service.html).
-//! - `request-handler` enables the [`http_extensions` readiness handler](https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.request_handler.html).
+//! - `http` enables the [Tower readiness service](https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/fn.service.html).
+//! - `request-handler` enables the [`http_extensions` readiness handler](https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/fn.request_handler.html).
 //!
 //! No features are enabled by default. Collection, aggregation, change notifications, and reports
 //! are available in the default configuration.
@@ -93,14 +93,14 @@
 //! - Register a [`Component`] with [`Aggregator::component`] and report changes with [`Publisher::publish`].
 //! - Get a read-only [`Monitor`] with [`Aggregator::monitor`] to observe changes independently of publishers.
 //! - Select diagnostic signals with [`Filter`] and inspect their attributes and publisher counts with [`Report::signals`].
-//! - Serve readiness with one of the [HTTP adapters](https://docs.rs/oxidizer_health/latest/oxidizer_health/http/).
+//! - Serve readiness with one of the [Kubernetes HTTP adapters](https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/).
 
 mod aggregator;
 mod attribute;
 mod component;
 mod health;
 #[cfg(any(test, feature = "http", feature = "request-handler"))]
-pub mod http;
+pub mod kubernetes_http;
 mod report;
 mod signal;
 mod worker;

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! HTTP readiness adapters over an [`Aggregator`].
+//! Kubernetes HTTP readiness adapters over an [`Aggregator`].
 //!
 //! Each adapter reads [`Aggregator::state`] for every request. `Healthy` responds with status
 //! `200 OK` and the JSON body `true`; any other state responds with
@@ -69,7 +69,7 @@ mod tower_service {
 /// # #[cfg(feature = "http")] {
 /// # testing_aids::init_tracing!();
 /// use http::{Request, StatusCode};
-/// use oxidizer_health::http::service;
+/// use oxidizer_health::kubernetes_http::service;
 /// use oxidizer_health::{Aggregator, Health};
 /// use tower::ServiceExt;
 ///
@@ -114,7 +114,7 @@ pub fn service<B>(
 /// use http_extensions::HttpBodyBuilder;
 /// use layered::Service;
 /// use oxidizer_health::Aggregator;
-/// use oxidizer_health::http::request_handler;
+/// use oxidizer_health::kubernetes_http::request_handler;
 ///
 /// # futures::executor::block_on(async {
 /// let aggregator = Aggregator::new();

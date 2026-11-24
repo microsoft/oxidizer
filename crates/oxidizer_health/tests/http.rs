@@ -49,11 +49,12 @@ fn assert_headers(headers: &HeaderMap) {
 fn tower_service_reports_readiness() {
     use futures::executor::block_on;
     use http::Request;
+    use oxidizer_health::kubernetes_http::service;
     use tower::ServiceExt;
 
     for state in STATES {
         let (aggregator, _component, _publisher) = aggregator_in(state);
-        let response = block_on(oxidizer_health::http::service(aggregator).oneshot(Request::new("ignored"))).unwrap();
+        let response = block_on(service(aggregator).oneshot(Request::new("ignored"))).unwrap();
         let (status, body) = expected(state);
         assert_eq!(response.status(), status);
         assert_eq!(response.body(), body);
@@ -68,10 +69,11 @@ fn request_handler_reports_readiness() {
     use http::Request;
     use http_extensions::HttpBodyBuilder;
     use layered::Service;
+    use oxidizer_health::kubernetes_http::request_handler;
 
     for state in STATES {
         let (aggregator, _component, _publisher) = aggregator_in(state);
-        let handler = oxidizer_health::http::request_handler(aggregator);
+        let handler = request_handler(aggregator);
         let response = block_on(handler.execute(Request::new(HttpBodyBuilder::new_fake().text("ignored")))).unwrap();
         let (status, body) = expected(state);
         assert_eq!(response.status(), status);

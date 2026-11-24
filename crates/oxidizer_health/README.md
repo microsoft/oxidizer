@@ -20,7 +20,7 @@ Each component aggregates its publishers, and an [`Aggregator`][__link2] combine
 an overall service state: [`Healthy`][__link3], [`Degraded`][__link4], or
 [`Unhealthy`][__link5]. At each level, the worst state wins.
 [Reports][__link6] retain diagnostic attributes and publisher counts, while the optional
-[HTTP helpers][__link7] expose readiness
+[Kubernetes HTTP helpers][__link7] expose readiness
 through Tower or [`http_extensions`][__link8].
 
 ## Quick start
@@ -96,7 +96,7 @@ are available in the default configuration.
 * Register a [`Component`][__link20] with [`Aggregator::component`][__link21] and report changes with [`Publisher::publish`][__link22].
 * Get a read-only [`Monitor`][__link23] with [`Aggregator::monitor`][__link24] to observe changes independently of publishers.
 * Select diagnostic signals with [`Filter`][__link25] and inspect their attributes and publisher counts with [`Report::signals`][__link26].
-* Serve readiness with one of the [HTTP adapters][__link27].
+* Serve readiness with one of the [Kubernetes HTTP adapters][__link27].
 
 
 <hr/>
@@ -104,7 +104,7 @@ are available in the default configuration.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbNAapo5IuxXIbVKGk2lqf504bDsR8lgfooBYb0hxkCq5PSGVhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8jQ9lj2XPi8b7yhWCRw1-yobiz3jGP3aJcsb5-dYyF9Q4KZhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
  [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
  [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
  [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
@@ -115,8 +115,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link15]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
  [__link16]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
  [__link17]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
- [__link18]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.service.html
- [__link19]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.request_handler.html
+ [__link18]: https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/fn.service.html
+ [__link19]: https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/fn.request_handler.html
  [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
  [__link20]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
  [__link21]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
@@ -125,11 +125,11 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link24]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
  [__link25]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
  [__link26]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
- [__link27]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
+ [__link27]: https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/
  [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Healthy
  [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Degraded
  [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Unhealthy
  [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
- [__link7]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
+ [__link7]: https://docs.rs/oxidizer_health/latest/oxidizer_health/kubernetes_http/
  [__link8]: https://docs.rs/http_extensions
  [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
