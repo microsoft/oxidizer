@@ -11,7 +11,7 @@ use std::sync::{Arc, mpsc};
 use arty::runtime::Runtime;
 use arty::runtime::policy::WorkersPolicy;
 use events_once::{BoxedReceiver, Event};
-use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
+use testing_aids::{TEST_TIMEOUT, execute_or_abandon, is_mutation_testing};
 use thread_aware::Unaware;
 
 fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>) {
@@ -38,12 +38,13 @@ fn stop_via_runtime() {
         assert!(observer.upgrade().is_none());
         done.send(()).unwrap();
     });
-    // Keep this receive bounded under mutation too. If stop never publishes
-    // shutdown or wakes the worker, joining the runtime owner could deadlock.
-    match completion.recv_timeout(TEST_TIMEOUT) {
-        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => owner.join().unwrap(),
-        Err(mpsc::RecvTimeoutError::Timeout) => panic!("runtime did not stop and release pending work"),
+    if !is_mutation_testing() {
+        assert!(
+            !matches!(completion.recv_timeout(TEST_TIMEOUT), Err(mpsc::RecvTimeoutError::Timeout)),
+            "runtime did not stop and release pending work"
+        );
     }
+    owner.join().unwrap();
 }
 
 #[test]

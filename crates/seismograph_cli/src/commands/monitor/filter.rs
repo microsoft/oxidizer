@@ -225,8 +225,7 @@ fn angle_end(text: &str, start: usize) -> Option<usize> {
         let position = start + offset;
         match byte {
             b'<' => depth += 1,
-            // #[gamma::skip(logical.or_remove_left, literal.int_increment, reason = "Both callers start at an opening angle bracket, so a closing bracket cannot be at index zero or follow a hyphen at index one")]
-            b'>' if position == 0 || text.as_bytes()[position - 1] != b'-' => {
+            b'>' if text.as_bytes()[position - 1] != b'-' => {
                 // #[gamma::skip(try.propagate_to_unwrap, reason = "The opening bracket makes depth positive and the scan stops at the first return to zero")]
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
@@ -404,19 +403,23 @@ mod tests {
 
     #[test]
     fn malformed_rules_have_actionable_errors() {
-        for (text, guidance) in [
-            ("crate:", "nonempty Rust identifiers"),
-            ("crate:foo::bar", "a single crate name"),
-            ("module:foo", "must include its crate"),
-            ("function:foo", "must include its crate"),
-            ("crate:foo-bar", "nonempty Rust identifiers"),
-            ("crate:foo:", "nonempty Rust identifiers"),
-            ("foo", "use crate:, module:, or function:"),
-            ("other:foo", "use crate:, module:, or function:"),
+        let invalid_identifier = "target must contain nonempty Rust identifiers separated by ::";
+        let missing_crate = "target must include its crate, for example my_crate::name";
+        let invalid_kind = "use crate:, module:, or function:";
+        for (text, reason) in [
+            ("crate:", invalid_identifier),
+            ("crate:foo::bar", "crate target must be a single crate name"),
+            ("module:foo", missing_crate),
+            ("function:foo", missing_crate),
+            ("crate:foo-bar", invalid_identifier),
+            ("crate:foo:", invalid_identifier),
+            ("foo", invalid_kind),
+            ("other:foo", invalid_kind),
         ] {
             let error = FilterSpec::parse(text, "", false, RuntimeStackMode::Event).unwrap_err();
-            let message = error.to_string();
-            assert!(message.contains(text) && message.contains(guidance), "{message}");
+            assert_eq!(error.rule, text);
+            assert_eq!(error.reason, reason);
+            assert_eq!(error.to_string(), format!("Invalid filter rule {text:?}: {reason}"));
         }
     }
 
