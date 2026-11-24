@@ -231,6 +231,8 @@ Each event has the [attributes](#metric-httpclientrequestduration) of its metric
 |`http.request.method_original`|string|The method of the request.|`PURGE`|If `http.request.method` is `_OTHER`.|
 |`url.path.redacted`|string|The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated][__link20] path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`][__link21].|`/books/1`|If the request URI has a path.|
 |`exception.message`|string|The message of the error that the handler returned.|`the review has no text`|If the handler returned an error.|
+|`http.request.header.<name>`|string|The value of a [configured request header][__link22], as on the server.|`0f3a9c`|If the request has the header when it reaches the layer.|
+|`http.response.header.<name>`|string|The value of a [configured response header][__link23], as on the server.|`120`|If the handler returned a response with the header.|
 
 The middleware does not redact `exception.message`, so the logs can contain personal data from
 the message of an error.
@@ -255,15 +257,15 @@ Its bucket boundaries are those of `http.server.request.duration`.
 |`url.scheme`|string|The scheme of the request URI. `_OTHER` if the URI has no scheme.|`http`; `https`; `ftp`; `_OTHER`|Always|
 |`server.address`|string|Host of the request URI. An IPv6 address keeps its brackets.|`example.com`; `[2001:db8::1]`|If the request URI has a host.|
 |`server.port`|int|Port of the request URI, else 80 for `http` and 443 for `https`.|`443`; `8080`|If the request URI has a host, and the port is known.|
-|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link22] of the request, else the label or the template of its [templated][__link23] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
+|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link24] of the request, else the label or the template of its [templated][__link25] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
 |`network.protocol.name`|string|The protocol of the response.|`http`|If the handler returned a response.|
 |`network.protocol.version`|string|Version of the HTTP protocol of the response. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|If the handler returned a response.|
 |`http.response.status_code`|int|HTTP response status code.|`200`; `503`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link24] and the kind of each I/O error, unless the layer has [its own function][__link25]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link26] and the kind of each I/O error, unless the layer has [its own function][__link27]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
 
 The `url.template` of a request whose URI is given as text is `unknown`, because its path has no
-template. To record a template, build the URI from a [templated][__link26] type, or
-add a [`UriTemplateLabel`][__link27] to the extensions of the request.
+template. To record a template, build the URI from a [templated][__link28] type, or
+add a [`UriTemplateLabel`][__link29] to the extensions of the request.
 
 #### Metric: `http.client.request.total_duration`
 
@@ -319,7 +321,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblu7M4slErGIbGpkhO2ejHAkb_a_vEaD9YE0bVXUWIp5dEiRhZIaDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4wgm10ZW1wbGF0ZWRfdXJpZTAuNy4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrvX77DzHOR8bhWBRmAdzDfEbga1mJWq470Ib723kZ-jbe4RhZIaDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4wgm10ZW1wbGF0ZWRfdXJpZTAuNy4y
  [__link0]: https://crates.io/crates/observed/0.31.0
  [__link1]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry
  [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit
@@ -335,16 +337,18 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link2]: https://docs.rs/layered/0.3.10/layered/?search=Layer
  [__link20]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
  [__link21]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=Uri::DATA_CLASS
- [__link22]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
- [__link23]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link24]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
- [__link25]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
- [__link26]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link27]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
+ [__link22]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link23]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link24]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
+ [__link25]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link26]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
+ [__link27]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
+ [__link28]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link29]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
  [__link3]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::server
  [__link4]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::client
  [__link5]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
  [__link6]: https://docs.rs/observed/0.31.0/observed/?search=Sink
  [__link7]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::route_parameter_data_classes
- [__link8]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::request_header_data_classes
- [__link9]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::response_header_data_classes
+ [__link8]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link9]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer

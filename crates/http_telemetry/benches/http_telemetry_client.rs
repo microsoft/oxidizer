@@ -13,9 +13,14 @@ mod common;
 use std::borrow::Borrow;
 use std::sync::Arc;
 
-use common::{Failing, NeverResponding, ReadAll, Responding, abandon, interested_sink, reading_sink, send};
+use common::{
+    Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, abandon, interested_sink, reading_sink, send,
+    with_headers,
+};
 use criterion::{BatchSize, BenchmarkId, Criterion};
-use http::StatusCode;
+use data_privacy::DataClass;
+use http::header::RETRY_AFTER;
+use http::{HeaderValue, StatusCode};
 use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, UriTemplateLabel};
 use http_telemetry::{Client, Telemetry, TelemetryLayer};
 use layered::Layer;
@@ -106,6 +111,18 @@ fn client_attributes_layer() -> TelemetryLayer<Client> {
         .dimension("fetch.transport", "hyper")
 }
 
+/// The client middleware with the request header `x-request-id` and the response header `retry-after`, both with
+/// `class`, over a sink with two processors that read every field, in front of [`Echoing`]. The stack already got
+/// `warm_up`, as for [`responding_stack`].
+fn header_stack(class: DataClass, warm_up: HttpRequest) -> Telemetry<Echoing> {
+    let stack = Telemetry::client(reading_sink(2))
+        .request_header_data_classes([(REQUEST_ID, class.clone())])
+        .response_header_data_classes([(RETRY_AFTER, class)])
+        .layer(Echoing(StatusCode::OK));
+    drop(send(&stack, warm_up));
+    stack
+}
+
 #[metabench::benchmark(INNER_ONLY, ATTEMPT, "inner_only")]
 #[bench::get(Box::new(common::responding(StatusCode::OK)), get())]
 fn inner_only<S: Borrow<Responding>>(handler: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
@@ -180,6 +197,23 @@ fn total_complete<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpReque
 )]
 #[bench::client_attributes(Box::new(responding_stack(&client_attributes_layer(), common::get_book())), common::get_book())]
 fn fields_complete<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
+#[metabench::benchmark(FIELDS_COMPLETE_WITH_HEADERS, FIELDS, "complete_with_headers")]
+#[bench::classified(
+    Box::new(header_stack(PUBLIC, with_headers(HeaderValue::from_static("120")))),
+    with_headers(HeaderValue::from_static("120"))
+)]
+#[bench::erased(
+    Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))),
+    with_headers(HeaderValue::from_static("120"))
+)]
+#[bench::owned_value(
+    Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))),
+    with_headers(HeaderValue::from_str("120").expect("120 is a valid header value"))
+)]
+fn fields_complete_with_headers<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
@@ -258,6 +292,22 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     complete_case("owned_label", &Telemetry::client(passthrough_sink()), owned_label);
     complete_case("custom_scheme", &Telemetry::client(passthrough_sink()), custom_scheme);
     complete_case("client_attributes", &client_attributes_layer(), common::get_book);
+    let static_value: fn() -> HttpRequest = || with_headers(HeaderValue::from_static("120"));
+    let owned_value: fn() -> HttpRequest = || with_headers(HeaderValue::from_str("120").expect("120 is a valid header value"));
+    for (case, class, request) in [
+        ("classified", PUBLIC, static_value),
+        ("erased", SECRET, static_value),
+        ("owned_value", SECRET, owned_value),
+    ] {
+        let stack = header_stack(class, static_value());
+        group.bench_function(BenchmarkId::new(FIELDS_COMPLETE_WITH_HEADERS.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(
+                request,
+                |request| fields_complete_with_headers(&stack, request).0,
+                BatchSize::SmallInput,
+            );
+        });
+    }
     let stack = failing_stack(&Telemetry::client(passthrough_sink()), common::FAILING, common::get_book());
     group.bench_function(
         BenchmarkId::new(FIELDS_HANDLER_ERROR.benchmark_name(), "templated_path"),
@@ -284,6 +334,7 @@ metabench::main!(
         ERROR,
         TOTAL_COMPLETE,
         FIELDS_COMPLETE,
+        FIELDS_COMPLETE_WITH_HEADERS,
         FIELDS_HANDLER_ERROR,
     ],
 );

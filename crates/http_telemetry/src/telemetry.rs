@@ -30,10 +30,6 @@ pub struct Telemetry<T> {
 
 /// The side of a [`Telemetry`] middleware, with its configuration.
 #[derive(Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the middleware is built once for each layer, and its requests borrow it, so they do not move it"
-)]
 pub(crate) enum Role {
     Client(Client),
     Server(Server),

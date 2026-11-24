@@ -10,6 +10,7 @@ use observed::processing::FieldVisitorFn;
 use observed::{Text, Value, VisitFields, event};
 use templated_uri::PathAndQuery;
 
+use crate::header_fields::Headers;
 use crate::shared::DURATION_BOUNDARIES;
 
 /// Produces the event `http.client.request.complete` when the handler returned a response.
@@ -61,6 +62,10 @@ pub(crate) struct RequestComplete<'a> {
     #[dimension(log = "http.client.request.duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
+    #[flatten]
+    pub(crate) response_headers: Headers<'a>,
 }
 
 /// Produces the event `http.client.request.error` when the handler returned an error or panicked.
@@ -110,6 +115,8 @@ pub(crate) struct RequestError<'a> {
     #[dimension(log = "http.client.request.duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
 }
 
 /// Produces the event `http.client.request.abandoned` when the caller dropped the request future before the handler
@@ -156,6 +163,8 @@ pub(crate) struct RequestAbandoned<'a> {
     #[dimension(log = "http.client.request.duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
 }
 
 /// Produces the event `http.client.request.total.complete` when the handler of a layer that reports the total
@@ -208,6 +217,10 @@ pub(crate) struct RequestTotalComplete<'a> {
     #[dimension(log = "http.client.request.total_duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
+    #[flatten]
+    pub(crate) response_headers: Headers<'a>,
 }
 
 /// Produces the event `http.client.request.total.error` when the handler of a layer that reports the total duration
@@ -258,6 +271,8 @@ pub(crate) struct RequestTotalError<'a> {
     #[dimension(log = "http.client.request.total_duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
 }
 
 /// Produces the event `http.client.request.total.abandoned` when the caller dropped the request future of a layer that
@@ -304,6 +319,8 @@ pub(crate) struct RequestTotalAbandoned<'a> {
     #[dimension(log = "http.client.request.total_duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[flatten]
+    pub(crate) request_headers: Headers<'a>,
 }
 
 /// The fields that the layer adds to each of its events, each one a log field and a metric dimension.

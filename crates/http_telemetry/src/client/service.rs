@@ -17,6 +17,7 @@ use super::layer::Client;
 use super::request::{ClientRequest, RequestEnd};
 use crate::Telemetry;
 use crate::drop_guard::TelemetryDropGuard;
+use crate::header_fields::RequestAndResponseHeaders;
 use crate::shared::{OTHER, known_scheme};
 
 impl<T: RequestHandler> Telemetry<T> {
@@ -66,6 +67,11 @@ impl<T: RequestHandler> Telemetry<T> {
                     .path_and_query()
                     .cloned()
                     .or_else(|| uri.path_and_query().cloned().map(PathAndQuery::from)),
+                headers: RequestAndResponseHeaders::new(
+                    client.request_header_fields.as_ref(),
+                    client.response_header_fields.as_ref(),
+                    input.headers(),
+                ),
             },
             &self.sink,
             &self.clock,
@@ -83,6 +89,9 @@ impl<T: RequestHandler> Telemetry<T> {
         Either::Right(async move {
             match AssertUnwindSafe(response).catch_unwind().await {
                 Ok(Ok(response)) => {
+                    if let Some(headers) = &mut guard.request.headers {
+                        headers.set_response(client.response_header_fields.as_ref(), response.headers());
+                    }
                     guard.emit(RequestEnd::Complete(response.status(), response.version()));
                     Ok(response)
                 }

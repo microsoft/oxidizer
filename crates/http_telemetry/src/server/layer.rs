@@ -16,9 +16,9 @@ use routerama::RouteTable;
 use templated_uri::BasePath;
 
 use super::excluded_paths::ExcludedPaths;
-use super::header_fields::{HeaderField, header_fields};
 use super::media_types::{MediaTypeError, MediaTypes};
 use super::route_fields::RouteFields;
+use crate::header_fields::{HeaderField, REQUEST_HEADER_PREFIX, RESPONSE_HEADER_PREFIX, header_fields};
 use crate::telemetry::Role;
 use crate::{Telemetry, TelemetryLayer};
 
@@ -131,7 +131,7 @@ impl TelemetryLayer<Server> {
         for (name, class) in data_classes {
             self.role.request_header_data_classes.insert(name, class.into_data_class());
         }
-        self.role.request_header_fields = header_fields(&self.role.request_header_data_classes, "http.request.header.");
+        self.role.request_header_fields = header_fields(&self.role.request_header_data_classes, REQUEST_HEADER_PREFIX);
         self
     }
 
@@ -143,7 +143,7 @@ impl TelemetryLayer<Server> {
         for (name, class) in data_classes {
             self.role.response_header_data_classes.insert(name, class.into_data_class());
         }
-        self.role.response_header_fields = header_fields(&self.role.response_header_data_classes, "http.response.header.");
+        self.role.response_header_fields = header_fields(&self.role.response_header_data_classes, RESPONSE_HEADER_PREFIX);
         self
     }
 

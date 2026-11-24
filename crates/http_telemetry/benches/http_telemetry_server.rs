@@ -16,13 +16,13 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use common::{
-    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, ReadAll, Responding, SECRET, Step, Tenant, abandon, interested_sink, reading_sink,
-    send,
+    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, Step, Tenant, abandon, interested_sink,
+    reading_sink, send, with_headers,
 };
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
 use http::header::{CONTENT_TYPE, RETRY_AFTER};
-use http::{HeaderName, HeaderValue, Request, StatusCode, Uri};
+use http::{HeaderValue, Request, StatusCode, Uri};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
@@ -131,8 +131,6 @@ enum Route<'p> {
     #[route(GET, "/books/{book}")]
     GetBook { book: &'p str },
 }
-
-const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 
 /// The server middleware with a resolver for [`Route`], over a sink with two processors that read
 /// every field, in front of [`Responding`]. If `class` is set, it is the data class of the route
@@ -255,15 +253,6 @@ fn stalled(sent: usize, declared: usize) -> HttpBody {
         Step::Pending,
         common::data(&"a".repeat(declared - sent)),
     ])
-}
-
-/// A request for `/books/1` with the header `x-request-id`, and with `retry_after` as the header
-/// `retry-after`. [`Echoing`] copies both headers to the response.
-fn with_headers(retry_after: HeaderValue) -> HttpRequest {
-    let mut request = common::get_to("http://example.com/books/1");
-    request.headers_mut().insert(REQUEST_ID, HeaderValue::from_static("7"));
-    request.headers_mut().insert(RETRY_AFTER, retry_after);
-    request
 }
 
 #[metabench::benchmark(INNER_ONLY, GROUP, "inner_only")]

@@ -5,12 +5,16 @@
 
 use std::borrow::Cow;
 use std::error::Error;
+use std::sync::Arc;
 
+use data_privacy::{DataClass, IntoDataClass};
+use http::{HeaderMap, HeaderName};
 use layered::Layer;
 use observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
 use observed::{Sink, Text};
 use ohno::ErrorLabel;
 
+use crate::header_fields::{HeaderField, REQUEST_HEADER_PREFIX, RESPONSE_HEADER_PREFIX, header_fields};
 use crate::shared::collect_error_labels;
 use crate::telemetry::Role;
 use crate::{Telemetry, TelemetryLayer};
@@ -24,6 +28,10 @@ pub struct Client {
     pub(crate) report_total_duration: bool,
     pub(crate) error_labels: fn(&(dyn Error + 'static)) -> ErrorLabel,
     pub(crate) dimensions: Vec<(FieldDescriptor, Text)>,
+    pub(crate) request_header_data_classes: HeaderMap<DataClass>,
+    pub(crate) request_header_fields: Option<Arc<[HeaderField]>>,
+    pub(crate) response_header_data_classes: HeaderMap<DataClass>,
+    pub(crate) response_header_fields: Option<Arc<[HeaderField]>>,
 }
 
 impl Telemetry<()> {
@@ -37,6 +45,10 @@ impl Telemetry<()> {
                 report_total_duration: false,
                 error_labels: collect_error_labels,
                 dimensions: Vec::new(),
+                request_header_data_classes: HeaderMap::default(),
+                request_header_fields: None,
+                response_header_data_classes: HeaderMap::default(),
+                response_header_fields: None,
             },
         )
     }
@@ -75,6 +87,30 @@ impl TelemetryLayer<Client> {
     #[must_use]
     pub fn error_labels_with(mut self, labels: fn(&(dyn Error + 'static)) -> ErrorLabel) -> Self {
         self.role.error_labels = labels;
+        self
+    }
+
+    /// Adds request headers to log and their data classes for redaction.
+    ///
+    /// By default, no request header is logged.
+    #[must_use]
+    pub fn request_header_data_classes(mut self, data_classes: impl IntoIterator<Item = (HeaderName, impl IntoDataClass)>) -> Self {
+        for (name, class) in data_classes {
+            self.role.request_header_data_classes.insert(name, class.into_data_class());
+        }
+        self.role.request_header_fields = header_fields(&self.role.request_header_data_classes, REQUEST_HEADER_PREFIX);
+        self
+    }
+
+    /// Adds response headers to log and their data classes for redaction.
+    ///
+    /// By default, no response header is logged.
+    #[must_use]
+    pub fn response_header_data_classes(mut self, data_classes: impl IntoIterator<Item = (HeaderName, impl IntoDataClass)>) -> Self {
+        for (name, class) in data_classes {
+            self.role.response_header_data_classes.insert(name, class.into_data_class());
+        }
+        self.role.response_header_fields = header_fields(&self.role.response_header_data_classes, RESPONSE_HEADER_PREFIX);
         self
     }
 

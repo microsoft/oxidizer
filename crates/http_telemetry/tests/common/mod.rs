@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use bytesbuf::BytesView;
 use data_privacy::{DataClass, RedactionEngine, Sensitive};
-use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
+use http::header::RETRY_AFTER;
+use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, RequestHandler};
 use http_telemetry::{Client, Server, Telemetry, TelemetryLayer};
@@ -530,6 +531,18 @@ pub(crate) fn get_book() -> HttpRequest {
             book: Sensitive::new(EscapedString::from_static("1"), SECRET),
         });
     HttpRequestBuilder::new_fake().get(uri).build().unwrap()
+}
+
+/// The header that the header tests and benchmarks log for each request.
+pub(crate) const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+
+/// A request for `http://example.com/books/1` with the header `x-request-id`, and with `retry_after` as the header
+/// `retry-after`. [`Echoing`] copies both headers to the response.
+pub(crate) fn with_headers(retry_after: HeaderValue) -> HttpRequest {
+    let mut request = get_to("http://example.com/books/1");
+    request.headers_mut().insert(REQUEST_ID, HeaderValue::from_static("7"));
+    request.headers_mut().insert(RETRY_AFTER, retry_after);
+    request
 }
 
 /// An enrichment with the metric dimension `tenant`.

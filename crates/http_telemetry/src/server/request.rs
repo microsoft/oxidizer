@@ -6,20 +6,19 @@
 use std::sync::Arc;
 
 use http::uri::{Authority, PathAndQuery};
-use http::{HeaderMap, HeaderValue, Method, StatusCode, Version};
+use http::{HeaderValue, Method, StatusCode, Version};
 use http_extensions::HttpError;
 use http_headers::SingleValueField;
 use http_headers::headers::{Host, HostView};
 use observed::{Sink, Text, emit};
 use parking_lot::Mutex;
 use routerama::RouteTemplate;
-use smallvec::SmallVec;
 
 use super::body_buffer::BodyBuffer;
-use super::events::{ActiveRequests, Headers, RequestAbandoned, RequestComplete, RequestError, RouteParameters};
-use super::header_fields::HeaderField;
+use super::events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError, RouteParameters};
 use super::route_fields::RouteFields;
 use crate::drop_guard::EmitEvents;
+use crate::header_fields::{Headers, RequestAndResponseHeaders};
 use crate::shared::{collect_error_labels, http_method_name, method_original, protocol_version};
 
 /// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
@@ -59,27 +58,6 @@ pub(crate) enum UriAuthority {
 pub(crate) struct RouteValues {
     pub(crate) route_fields: Arc<RouteFields>,
     pub(crate) path_and_query: PathAndQuery,
-}
-
-pub(crate) struct RequestAndResponseHeaders {
-    pub(crate) request: Option<HeaderValues>,
-    pub(crate) response: Option<HeaderValues>,
-}
-
-pub(crate) struct HeaderValues {
-    pub(crate) fields: Arc<[HeaderField]>,
-    pub(crate) values: SmallVec<[(usize, HeaderValue); 2]>,
-}
-
-impl HeaderValues {
-    pub(crate) fn new(fields: Arc<[HeaderField]>, headers: &HeaderMap) -> Self {
-        let values = fields
-            .iter()
-            .enumerate()
-            .flat_map(|(index, field)| headers.get_all(&field.header_name).iter().map(move |value| (index, value.clone())))
-            .collect();
-        Self { fields, values }
-    }
 }
 
 /// The values of one server request that its events record.

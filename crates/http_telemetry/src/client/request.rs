@@ -18,6 +18,7 @@ use super::events::{
 };
 use super::layer::Client;
 use crate::drop_guard::EmitEvents;
+use crate::header_fields::{Headers, RequestAndResponseHeaders};
 use crate::shared::{http_method_name, method_original, protocol_version};
 
 pub(crate) enum RequestEnd<'a> {
@@ -43,6 +44,7 @@ pub(crate) struct ClientRequest<'a> {
     pub(crate) server_port: Option<u16>,
     pub(crate) url_template: Option<Cow<'static, str>>,
     pub(crate) path: Option<PathAndQuery>,
+    pub(crate) headers: Option<Box<RequestAndResponseHeaders>>,
 }
 
 impl EmitEvents for ClientRequest<'_> {
@@ -68,6 +70,9 @@ impl EmitEvents for ClientRequest<'_> {
         };
         let path = self.path.as_ref();
         let dimensions = || Dimensions(&self.client.dimensions);
+        let headers = self.headers.as_deref();
+        let request_headers = || Headers(headers.and_then(|headers| headers.request.as_ref()));
+        let response_headers = || Headers(headers.and_then(|headers| headers.response.as_ref()));
         match end {
             RequestEnd::Complete(status_code, version) => {
                 if self.client.report_total_duration {
@@ -86,6 +91,8 @@ impl EmitEvents for ClientRequest<'_> {
                             status_code: status_code.as_u16(),
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
+                            response_headers: response_headers(),
                         }
                     );
                 } else {
@@ -104,6 +111,8 @@ impl EmitEvents for ClientRequest<'_> {
                             status_code: status_code.as_u16(),
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
+                            response_headers: response_headers(),
                         }
                     );
                 }
@@ -124,6 +133,7 @@ impl EmitEvents for ClientRequest<'_> {
                             exception_message: Some(Text::from(error.message())),
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 } else {
@@ -141,6 +151,7 @@ impl EmitEvents for ClientRequest<'_> {
                             exception_message: Some(Text::from(error.message())),
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 }
@@ -161,6 +172,7 @@ impl EmitEvents for ClientRequest<'_> {
                             exception_message: None,
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 } else {
@@ -178,6 +190,7 @@ impl EmitEvents for ClientRequest<'_> {
                             exception_message: None,
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 }
@@ -197,6 +210,7 @@ impl EmitEvents for ClientRequest<'_> {
                             error_type: "abandoned",
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 } else {
@@ -213,6 +227,7 @@ impl EmitEvents for ClientRequest<'_> {
                             error_type: "abandoned",
                             dimensions: dimensions(),
                             duration_secs,
+                            request_headers: request_headers(),
                         }
                     );
                 }

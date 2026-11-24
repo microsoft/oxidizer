@@ -80,8 +80,8 @@
 //! | `http.server.request.duration` | double | HTTP request duration in seconds. | `0.012` | Always |
 //! | `http.request.method_original` | string | The method as the client sent it. | `PURGE` | If `http.request.method` is `_OTHER`. |
 //! | `http.route.parameter.<name>` | string | The value of a [configured route parameter](TelemetryLayer::route_parameter_data_classes), percent-encoded as in the request, redacted according to its data class. | `1` | If the request matches a route that has the parameter. |
-//! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer::request_header_data_classes), redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`. | `0f3a9c` | If the request has the header. |
-//! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer::response_header_data_classes), as for a request header. | `120` | If the response has the header. |
+//! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer), redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`. | `0f3a9c` | If the request has the header. |
+//! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer), as for a request header. | `120` | If the response has the header. |
 //! | `http.request.body.content` | string | The start of the request body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer::request_body_media_types) cover the `Content-Type` of the request. |
 //! | `http.response.body.content` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer::response_body_media_types) cover the `Content-Type` of the response. |
 //!
@@ -228,6 +228,8 @@
 //! | `http.request.method_original` | string | The method of the request. | `PURGE` | If `http.request.method` is `_OTHER`. |
 //! | `url.path.redacted` | string | The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated](templated_uri::templated) path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`](templated_uri::Uri::DATA_CLASS). | `/books/1` | If the request URI has a path. |
 //! | `exception.message` | string | The message of the error that the handler returned. | `the review has no text` | If the handler returned an error. |
+//! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer), as on the server. | `0f3a9c` | If the request has the header when it reaches the layer. |
+//! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer), as on the server. | `120` | If the handler returned a response with the header. |
 //!
 //! The middleware does not redact `exception.message`, so the logs can contain personal data from
 //! the message of an error.
@@ -320,6 +322,8 @@
 
 mod client;
 mod drop_guard;
+mod header_fields;
+mod interner;
 mod server;
 mod shared;
 mod telemetry;

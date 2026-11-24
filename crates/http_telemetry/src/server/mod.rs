@@ -6,8 +6,6 @@
 mod body_buffer;
 mod events;
 mod excluded_paths;
-mod header_fields;
-mod interner;
 mod layer;
 mod media_types;
 mod request;

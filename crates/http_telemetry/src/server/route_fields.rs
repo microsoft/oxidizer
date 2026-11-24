@@ -9,8 +9,8 @@ use data_privacy::DataClass;
 use observed::metadata::FieldDescriptor;
 use routerama::RouteTable;
 
-use super::interner::intern;
 use super::layer::Server;
+use crate::interner::intern;
 
 pub(crate) struct RouteFields {
     pub(crate) route_resolver: Arc<dyn RouteTable + Send + Sync>,
