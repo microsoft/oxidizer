@@ -296,6 +296,26 @@ fn component_remains_live_after_aggregator_is_dropped() {
 }
 
 #[test]
+fn cancelling_a_pending_change_releases_its_last_waker() {
+    struct Task;
+    impl Wake for Task {
+        fn wake(self: Arc<Self>) {
+            panic!("an idle monitor should not wake the cancelled task");
+        }
+    }
+    let root = Aggregator::new();
+    let mut monitor = root.monitor();
+    let task = Arc::new(Task);
+    let weak = Arc::downgrade(&task);
+    {
+        let mut changed = pin!(monitor.changed());
+        let waker = Waker::from(task);
+        assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+    }
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
 fn equal_signal_does_not_notify() {
     let aggregator = Aggregator::new();
     let mut component = aggregator.component("database");
@@ -413,16 +433,27 @@ fn monitor_keeps_reading_reports_after_the_aggregator_handle_drops() {
 #[test]
 #[cfg_attr(panic = "abort", ignore = "requires a worker panic to unwind without terminating the process")]
 fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
-    use std::cell::Cell;
+    use std::cell::OnceCell;
+
+    struct Observe(Aggregator, mpsc::Sender<Health>);
+    impl Wake for Observe {
+        fn wake(self: Arc<Self>) {
+            self.1.send(self.0.component("database").state()).unwrap();
+        }
+    }
 
     struct PanickingWake(mpsc::Sender<mpsc::Receiver<()>>);
     impl Wake for PanickingWake {
         fn wake(self: Arc<Self>) {
             // This sender disconnects only after the worker unwinds and its thread exits.
-            thread_local! { static ALIVE: Cell<Option<mpsc::Sender<()>>> = const { Cell::new(None) }; }
-            let (alive, exited) = mpsc::channel();
-            ALIVE.set(Some(alive));
-            self.0.send(exited).unwrap();
+            thread_local! { static ALIVE: OnceCell<mpsc::Sender<()>> = const { OnceCell::new() }; }
+            ALIVE.with(|alive| {
+                alive.get_or_init(|| {
+                    let (sender, exited) = mpsc::channel();
+                    self.0.send(exited).unwrap();
+                    sender
+                });
+            });
             panic!("simulated consumer failure");
         }
     }
@@ -440,12 +471,23 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
     let waker = Waker::from(Arc::new(PanickingWake(entered)));
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
+    let (woke, states) = mpsc::channel();
+    let observer = Waker::from(Arc::new(Observe(aggregator.clone(), woke)));
+    let mut cursor = component.clone();
+    let mut pending = Box::pin(cursor.changed());
+    assert!(pending.as_mut().poll(&mut Context::from_waker(&observer)).is_pending());
+
     // Both signals are healthy: the worker failure, not the published state, must close readiness.
     publisher.publish(Health::Healthy, [("revision", 2_i64)]);
     let exited = receive(&panic_started).unwrap();
     assert_eq!(receive(&exited), Err(mpsc::RecvTimeoutError::Disconnected));
     assert_eq!(aggregator.state(), Health::Unhealthy);
     assert_eq!(component.state(), Health::Unhealthy);
+    assert_eq!(states.try_recv(), Ok(Health::Unhealthy));
+    assert!(pending.as_mut().poll(&mut Context::from_waker(&observer)).is_ready());
+    drop(pending);
+    assert!(!is_ready(cursor.changed()), "a stopped worker must not repeatedly signal change");
+    assert_eq!(block_on(component.report(Filter::ALL)).state(), Health::Healthy);
 }
 
 #[test]

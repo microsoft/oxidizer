@@ -7,11 +7,11 @@ use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use performables::sync::channel::{WatchReceiver, WatchSender, watch};
+use performables::sync::channel::{WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::component::{ComponentOwner, ComponentShared};
-use crate::worker::{Work, Worker};
+use crate::worker::{Changes, Work, Worker};
 use crate::{Component, Filter, Health, Reports};
 
 /// The process-level health root.
@@ -50,7 +50,7 @@ use crate::{Component, Filter, Health, Reports};
 /// ```
 pub struct Aggregator {
     shared: Arc<AggregatorShared>,
-    changes: WatchReceiver<()>,
+    changes: Changes,
 }
 
 impl Aggregator {
@@ -58,7 +58,7 @@ impl Aggregator {
     #[must_use]
     pub fn new() -> Self {
         let shared = AggregatorShared::new();
-        let changes = shared.changes.subscribe();
+        let changes = shared.worker.subscribe(&shared.changes);
         Self { shared, changes }
     }
 
@@ -79,7 +79,7 @@ impl Aggregator {
     pub fn monitor(&self) -> Monitor {
         Monitor {
             shared: Arc::clone(&self.shared),
-            changes: self.shared.changes.subscribe(),
+            changes: self.shared.worker.subscribe(&self.shared.changes),
         }
     }
 
@@ -87,12 +87,8 @@ impl Aggregator {
     ///
     /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
     /// [`reports`](Self::reports) afterwards to observe the current state.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "exclusive access keeps one waiter per notification cursor"
-    )]
     pub async fn changed(&mut self) {
-        wait(&self.changes).await;
+        self.changes.wait(&self.shared.worker).await;
     }
 
     /// Returns the latest process state. It can briefly lag component registration, removal, or publication.
@@ -163,7 +159,7 @@ impl ThreadAware for Aggregator {
 /// ```
 pub struct Monitor {
     shared: Arc<AggregatorShared>,
-    changes: WatchReceiver<()>,
+    changes: Changes,
 }
 
 impl Monitor {
@@ -171,12 +167,8 @@ impl Monitor {
     ///
     /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
     /// [`reports`](Self::reports) afterwards to observe the current state.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "exclusive access keeps one waiter per notification cursor"
-    )]
     pub async fn changed(&mut self) {
-        wait(&self.changes).await;
+        self.changes.wait(&self.shared.worker).await;
     }
 
     /// Returns the latest process state, with the same update timing as [`Aggregator::state`].
@@ -217,17 +209,6 @@ impl Debug for Monitor {
 // Relocation keeps the handle to the same process root; the shared owner is thread-safe.
 impl ThreadAware for Monitor {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
-}
-
-/// Waits for the next change notification on a handle's cursor.
-///
-/// Every public handle owns a receiver subscribed to its owner's sender, and the owner outlives
-/// the handle, so the channel cannot close while this is awaited.
-pub(crate) async fn wait(changes: &WatchReceiver<()>) {
-    changes
-        .changed_async()
-        .await
-        .expect("the notification sender lives as long as the handle");
 }
 
 #[expect(clippy::cast_possible_truncation, reason = "health indices are below Health::COUNT")]
@@ -295,7 +276,7 @@ impl AggregatorShared {
         registry.retain(|_, component| component.owner.strong_count() > 0);
         let id = next_id(&self.next_component);
         let name: Arc<str> = Arc::from(name);
-        let shared = ComponentShared::new(Arc::clone(&name), id, self.worker.sender(), Arc::clone(&self.blockers));
+        let (shared, actor) = ComponentShared::new(Arc::clone(&name), id, self.worker.sender(), Arc::clone(&self.blockers));
         let owner = ComponentOwner::new(Arc::clone(&shared), Arc::clone(&self.worker));
         registry.insert(
             name,
@@ -305,7 +286,7 @@ impl AggregatorShared {
             },
         );
         // Queue registration before another caller can obtain this component and publish to it.
-        self.worker.send(Work::Register(id));
+        self.worker.send(Work::Register(id, actor));
         Component::new(owner)
     }
 
@@ -387,46 +368,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn worker_shutdown_finishes_the_last_registered_components_report() {
+        execute_or_terminate_process(|| {
+            let root = Aggregator::new();
+            let mut idle = root.component("idle");
+            let component = root.component("live");
+            let _publisher = component.publisher();
+            root.shared.worker.sender().send(Work::Stop).unwrap();
+            // No publisher changes the idle component. Its cursor witnesses the worker's exit.
+            block_on(idle.changed());
+            assert_eq!(block_on(component.report(Filter::ALL)).signal_count(Health::Healthy), 1);
+        });
+    }
+
+    #[test]
     fn overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns() {
         let root = Aggregator::new();
         let (work, pending) = mpsc::channel();
         let component = |id, name| {
-            let shared = ComponentShared::new(Arc::from(name), id, work.clone(), Arc::clone(&root.shared.blockers));
-            Component::new(ComponentOwner::new(shared, Arc::clone(&root.shared.worker)))
+            let (shared, actor) = ComponentShared::new(Arc::from(name), id, work.clone(), Arc::clone(&root.shared.blockers));
+            (Component::new(ComponentOwner::new(shared, Arc::clone(&root.shared.worker))), actor)
         };
+        let (first, mut first_actor) = component(1, "first");
+        let (second, mut second_actor) = component(2, "second");
         let mut aggregate = ProcessAggregate::new(Arc::downgrade(&root.shared));
-        let mut advance = || {
+        let mut advance = |actor: &mut _| {
             let Work::Component(next) = pending.try_recv().unwrap() else {
                 panic!("expected a component turn");
             };
-            next.upgrade().unwrap().process(&mut aggregate);
+            next.upgrade().unwrap().process(actor, &mut aggregate);
         };
 
-        let first = component(1, "first");
         let mut first_writer = first.publisher();
         first_writer.publish(Health::Unhealthy, [("revision", 1)]);
-        let second = component(2, "second");
         let _second_healthy = second.publisher();
-        advance();
-        advance();
+        advance(&mut first_actor);
+        advance(&mut second_actor);
         assert_eq!(root.state(), Health::Unhealthy);
 
         first_writer.publish(Health::Unhealthy, [("revision", 3)]);
         let mut second_writer = second.publisher();
         second_writer.publish(Health::Unhealthy, [("revision", 4)]);
         first_writer.publish(Health::Healthy, [("revision", 5)]);
-        advance();
+        advance(&mut first_actor);
         assert_eq!(first.state(), Health::Healthy);
         assert_eq!(root.state(), Health::Unhealthy);
         let mut monitor = root.monitor();
         // This writer was never in a snapshot. Its removal must release the root even
         // though the second component has no report change to publish.
         drop(second_writer);
-        advance();
+        advance(&mut second_actor);
         assert_eq!(monitor.changed().now_or_never(), Some(()));
         assert_eq!(root.state(), Health::Healthy);
         drop(second.publisher());
-        advance();
+        advance(&mut second_actor);
         assert!(
             monitor.changed().now_or_never().is_none(),
             "an unchanged report must not wake readers"

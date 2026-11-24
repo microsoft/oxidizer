@@ -1,18 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::io;
+use std::any::Any;
+use std::collections::HashMap;
+use std::future::{pending, poll_fn};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::task::{Poll, Waker};
 use std::thread::{self, JoinHandle};
+use std::{io, mem, ptr};
+
+use performables::sync::channel::{WatchReceiver, WatchSender};
 
 use crate::Health;
 use crate::aggregator::ProcessAggregate;
-use crate::component::ComponentShared;
+use crate::component::{ComponentActor, ComponentShared};
 
 pub(crate) enum Work {
-    Register(u64),
+    Register(u64, ComponentActor),
     Remove(u64, usize),
     Component(Weak<ComponentShared>),
     Stop,
@@ -22,31 +30,35 @@ pub(crate) enum Work {
 pub(crate) struct Worker {
     sender: Sender<Work>,
     thread: Option<JoinHandle<()>>,
-    running: Arc<AtomicBool>,
+    status: Arc<Status>,
 }
 
 impl Worker {
     pub(crate) fn new(aggregate: ProcessAggregate) -> Arc<Self> {
         let (sender, receiver) = mpsc::channel();
-        let running = Arc::new(AtomicBool::new(true));
-        let worker_running = Arc::clone(&running);
-        let spawned = thread::Builder::new()
-            .name(String::from("oxidizer-health"))
-            .spawn(move || run(&receiver, worker_running, aggregate));
-        Arc::new(Self::from_spawn(sender, running, spawned))
+        let status = Arc::new(Status::new());
+        let worker_status = Arc::clone(&status);
+        let spawned = thread::Builder::new().name(String::from("oxidizer-health")).spawn(move || {
+            // Disconnect all work queues before invoking terminal wakers, outside any unwind.
+            let outcome = catch_unwind(AssertUnwindSafe(move || run(receiver, aggregate)));
+            worker_status.stop();
+            if let Err(cause) = outcome {
+                resume_unwind(cause);
+            }
+        });
+        Arc::new(Self::from_spawn(sender, status, spawned))
     }
 
-    fn from_spawn(sender: Sender<Work>, running: Arc<AtomicBool>, spawned: io::Result<JoinHandle<()>>) -> Self {
+    fn from_spawn(sender: Sender<Work>, status: Arc<Status>, spawned: io::Result<JoinHandle<()>>) -> Self {
         let thread = match spawned {
             Ok(thread) => Some(thread),
             Err(error) => {
-                // Release: state readers observe that no worker is available.
-                running.store(false, Ordering::Release);
+                status.stop();
                 tracing::error!(%error, "failed to start health aggregation worker");
                 None
             }
         };
-        Self { sender, thread, running }
+        Self { sender, thread, status }
     }
 
     pub(crate) fn sender(&self) -> Sender<Work> {
@@ -54,13 +66,17 @@ impl Worker {
     }
 
     pub(crate) fn send(&self, work: Work) {
-        // A disconnected receiver means the worker has stopped; readiness already fails closed.
+        // A disconnected receiver has no worker left to handle this message.
         let _ = self.sender.send(work);
     }
 
     pub(crate) fn is_running(&self) -> bool {
         // Acquire: pairs with the Release store when the worker fails or stops.
-        self.running.load(Ordering::Acquire)
+        self.status.running.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn subscribe(&self, updates: &WatchSender<()>) -> Changes {
+        Changes(self.is_running().then(|| updates.subscribe()))
     }
 
     /// Requests shutdown and returns the worker thread if the caller can join it.
@@ -76,22 +92,38 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         if let Some(thread) = self.request_stop()
-            && thread.join().is_err()
+            && thread.join().map_err(discard_panic).is_err()
         {
             tracing::error!("health aggregation worker terminated unexpectedly");
         }
     }
 }
 
-fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>, mut aggregate: ProcessAggregate) {
-    let _running = Running(running);
-    while let Ok(work) = receiver.recv() {
+/// Panic payloads are caller-owned values, even when recovered from a worker join during Drop.
+fn discard_panic(cause: Box<dyn Any + Send>) {
+    if let Err(nested) = catch_unwind(AssertUnwindSafe(|| drop(cause))) {
+        // Release the destructor's payload too. If it panics again, do not recurse.
+        mem::forget(catch_unwind(AssertUnwindSafe(|| drop(nested))));
+    }
+}
+
+fn run(receiver: Receiver<Work>, mut aggregate: ProcessAggregate) {
+    // Both pending registrations and registered actors belong to this thread, not to readers.
+    let mut actors = HashMap::new();
+    for work in receiver {
         match work {
-            Work::Register(id) => aggregate.set(id, Health::Unhealthy),
-            Work::Remove(id, blockers) => aggregate.remove(id, blockers),
+            Work::Register(id, actor) => {
+                actors.insert(id, actor);
+                aggregate.set(id, Health::Unhealthy);
+            }
+            Work::Remove(id, blockers) => {
+                actors.remove(&id);
+                aggregate.remove(id, blockers);
+            }
             Work::Component(component) => {
                 if let Some(component) = component.upgrade().filter(|c| c.is_registered()) {
-                    component.process(&mut aggregate);
+                    let actor = actors.get_mut(&component.id).expect("registration precedes component work");
+                    component.process(actor, &mut aggregate);
                 }
             }
             Work::Stop => return,
@@ -99,17 +131,86 @@ fn run(receiver: &Receiver<Work>, running: Arc<AtomicBool>, mut aggregate: Proce
     }
 }
 
-struct Running(Arc<AtomicBool>);
+struct Status {
+    running: AtomicBool,
+    waiters: Mutex<HashMap<usize, Waker>>,
+}
 
-impl Drop for Running {
+impl Status {
+    fn new() -> Self {
+        Self {
+            running: AtomicBool::new(true),
+            waiters: Mutex::default(),
+        }
+    }
+
+    fn stop(&self) {
+        // Release: every terminal observer must see fail-closed readiness before its wake.
+        self.running.store(false, Ordering::Release);
+        let waiters = mem::take(&mut *self.waiters.lock().unwrap_or_else(PoisonError::into_inner));
+        for waker in waiters.into_values() {
+            if let Err(cause) = catch_unwind(|| waker.wake()) {
+                discard_panic(cause);
+            }
+        }
+    }
+}
+
+/// Each handle can observe the worker's terminal transition once, independently of normal updates.
+#[derive(Clone)]
+pub(crate) struct Changes(Option<WatchReceiver<()>>);
+
+impl Changes {
+    pub(crate) async fn wait(&mut self, worker: &Worker) {
+        let Some(updates) = &self.0 else { return pending().await };
+        if Self::stopped_or_changed(updates, worker).await {
+            self.0 = None;
+        }
+    }
+
+    async fn stopped_or_changed(updates: &WatchReceiver<()>, worker: &Worker) -> bool {
+        let mut changed = pin!(updates.changed_async());
+        // A pending changed() holds its handle exclusively at a stable address until cancellation.
+        let exit = ExitWaiter {
+            status: &worker.status,
+            key: ptr::from_ref(updates).addr(),
+        };
+        poll_fn(|cx| {
+            // The regular sender lives as long as the handle; only a pending update needs a wake.
+            let waker = changed.as_mut().poll(cx).is_pending().then(|| cx.waker().clone());
+            // Only register while running. Clone and release caller wakers outside the lock.
+            let _previous = {
+                let mut waiters = exit.status.waiters.lock().unwrap_or_else(PoisonError::into_inner);
+                if !worker.is_running() {
+                    return Poll::Ready(true);
+                }
+                let Some(waker) = waker else { return Poll::Ready(false) };
+                waiters.insert(exit.key, waker)
+            };
+            Poll::Pending
+        })
+        .await
+    }
+}
+
+struct ExitWaiter<'a> {
+    status: &'a Status,
+    key: usize,
+}
+
+impl Drop for ExitWaiter<'_> {
     fn drop(&mut self) {
-        // Release: state readers fail closed if the worker has stopped.
-        self.0.store(false, Ordering::Release);
+        let _discarded = self.status.waiters.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.key);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::panic::panic_any;
+    use std::task::{Context, Wake};
+
+    use futures::FutureExt;
+    use performables::sync::channel::watch;
     use testing_aids::is_mutation_testing;
     use testing_aids::tracing_logs::Capture;
 
@@ -122,12 +223,14 @@ mod tests {
         let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
-        let shared = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
+        assert!(worker.is_running());
+        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
+        worker.send(Work::Register(1, actor));
         let component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
         let mut publisher = component.publisher();
         publisher.publish(Health::Healthy, [("revision", 1)]);
 
-        worker.send(Work::Stop);
+        worker.sender().send(Work::Stop).unwrap();
         thread.join().unwrap();
         let report = futures::executor::block_on(component.report(Filter::ALL));
         assert_eq!(report.signal_count(Health::Healthy), 1);
@@ -136,9 +239,61 @@ mod tests {
     }
 
     #[test]
+    fn change_cursor_delivers_separate_completed_turns() {
+        let worker = Worker::new(ProcessAggregate::new(Weak::new()));
+        let (updates, _) = watch(());
+        let mut changes = worker.subscribe(&updates);
+        for _ in 0..2 {
+            updates.send_replace(());
+            assert_eq!(changes.wait(&worker).now_or_never(), Some(()));
+            assert!(changes.wait(&worker).now_or_never().is_none());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(panic = "abort", ignore = "requires worker unwinding")]
+    fn worker_exit_preserves_the_original_panic_across_terminal_callbacks() {
+        struct Initial;
+        struct Final;
+        impl Drop for Final {
+            fn drop(&mut self) {
+                panic_any(());
+            }
+        }
+        struct Secondary;
+        impl Drop for Secondary {
+            fn drop(&mut self) {
+                panic_any(Final);
+            }
+        }
+        struct Fail(Component);
+        impl Wake for Fail {
+            fn wake(self: Arc<Self>) {
+                if self.0.state() == Health::Healthy {
+                    panic_any(Initial);
+                }
+                panic_any(Secondary);
+            }
+        }
+        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
+        let thread = worker.thread.take().unwrap();
+        let worker = Arc::new(worker);
+        let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender(), Arc::default());
+        worker.send(Work::Register(1, actor));
+        let mut component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
+        let owner = component.clone();
+        let waker = Waker::from(Arc::new(Fail(owner.clone())));
+        let mut changed = pin!(component.changed());
+        assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+        let _publisher = owner.publisher();
+        worker.send(Work::Stop);
+        assert!(thread.join().unwrap_err().is::<Initial>());
+    }
+
+    #[test]
     fn spawn_failure_marks_worker_unavailable_until_shutdown() {
         let (sender, receiver) = mpsc::channel();
-        let worker = Worker::from_spawn(sender, Arc::new(AtomicBool::new(true)), Err(io::ErrorKind::WouldBlock.into()));
+        let worker = Worker::from_spawn(sender, Arc::new(Status::new()), Err(io::ErrorKind::WouldBlock.into()));
         assert!(!worker.is_running());
         drop(worker);
         assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected)));
@@ -146,6 +301,12 @@ mod tests {
 
     #[test]
     fn shutdown_stops_and_joins_the_worker_and_reports_a_failed_join() {
+        struct FailedJoin;
+        impl Drop for FailedJoin {
+            fn drop(&mut self) {
+                panic!("failed worker payload panicked during cleanup");
+            }
+        }
         for &fail in if cfg!(panic = "unwind") { &[false, true][..] } else { &[false][..] } {
             let capture = Capture::new();
             let _guard = tracing::subscriber::set_default(capture.subscriber());
@@ -157,9 +318,11 @@ mod tests {
                     receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap()
                 };
                 assert!(matches!(message, Work::Stop));
-                assert!(!fail, "worker failed");
+                if fail {
+                    panic_any(FailedJoin);
+                }
             });
-            drop(Worker::from_spawn(sender, Arc::default(), Ok(spawned)));
+            drop(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned)));
             assert_eq!(capture.output().contains("terminated unexpectedly"), fail);
         }
     }
@@ -175,7 +338,9 @@ mod tests {
             assert!(matches!(receiver.try_recv(), Ok(Work::Stop)));
             done.send(()).unwrap();
         });
-        owner.send(Worker::from_spawn(sender, Arc::default(), Ok(spawned))).unwrap();
+        owner
+            .send(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned)))
+            .unwrap();
         finished.recv().unwrap();
     }
 }
