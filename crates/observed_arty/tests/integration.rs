@@ -161,7 +161,7 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
     let (scheduler, source, target) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let mut workers = cx.control().workers().into_iter().cloned();
+            let mut workers = cx.control().workers();
             (cx.scheduler().clone(), workers.next().unwrap(), workers.next().unwrap())
         })
         .unwrap();
