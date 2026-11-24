@@ -9,12 +9,12 @@ use layered::{Intercept, InterceptLayer};
 use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
-use crate::handlers::{Logging, LoggingLayer, Metrics, MetricsLayer};
 use crate::pipeline::PipelineContext;
 use crate::resilience::breaker::{HttpBreaker, HttpBreakerLayer, HttpBreakerLayerExt};
 use crate::resilience::hedging::{HttpHedging, HttpHedgingLayer, HttpHedgingLayerExt};
 use crate::resilience::retry::{HttpRetry, HttpRetryLayer, HttpRetryLayerExt};
 use crate::resilience::timeout::{HttpTimeout, HttpTimeoutLayer, HttpTimeoutLayerExt};
+use crate::telemetry::{Client, TelemetryLayer};
 
 const ATTEMPT_TIMEOUT_NAME: &str = "standard.attempt_timeout";
 /// Ten seconds allows network variance and leaves time for retries in the total request budget.
@@ -56,9 +56,10 @@ pub enum RecoveryMode {
 ///
 /// The handler order is outermost to innermost:
 ///
-/// 1. Total metrics ([`total_metrics`][Self::total_metrics]) records pipeline execution through an
-///    [`HttpResponse`] or terminal error, including retries and hedged attempts. It uses the
-///    `http.client.request.total_duration` instrument. Later body reads are not included.
+/// 1. Total telemetry ([`total_telemetry`][Self::total_telemetry]) reports pipeline execution
+///    through an [`HttpResponse`] or terminal error, including retries and hedged attempts. Its
+///    events record the `http.client.request.total_duration` instrument. Later body reads are not
+///    included.
 /// 2. Total timeout ([`total_timeout`][Self::total_timeout]) limits pipeline execution through an
 ///    [`HttpResponse`] or terminal error. It does not limit later body streaming, buffering, or
 ///    lazy decompression.
@@ -67,33 +68,30 @@ pub enum RecoveryMode {
 /// 4. Breaker ([`breaker`][Self::breaker]) rejects requests when the service is likely to fail.
 /// 5. Attempt timeout ([`attempt_timeout`][Self::attempt_timeout]) limits each attempt.
 /// 6. Attempt intercept ([`attempt_intercept`][Self::attempt_intercept]) runs for each attempt.
-/// 7. Logging ([`attempt_logs`][Self::attempt_logs]) records requests and responses.
-/// 8. Metrics ([`attempt_metrics`][Self::attempt_metrics]) records per-attempt HTTP metrics.
-/// 9. Dispatch ([`crate::handlers::Dispatch`]) sends the request to the transport.
+/// 7. Attempt telemetry ([`attempt_telemetry`][Self::attempt_telemetry]) reports each attempt. Its
+///    events record the `http.client.request.duration` instrument.
+/// 8. Dispatch ([`crate::handlers::Dispatch`]) sends the request to the transport.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct StandardRequestPipeline {
-    pub(crate) total_metrics: MetricsLayer,
+    pub(crate) total_telemetry: TelemetryLayer<Client>,
     pub(crate) total_timeout: HttpTimeoutLayer,
     pub(crate) retry: HttpRetryLayer,
     pub(crate) hedging: HttpHedgingLayer,
     pub(crate) breaker: HttpBreakerLayer,
     pub(crate) attempt_timeout: HttpTimeoutLayer,
     pub(crate) attempt_intercept: InterceptLayer<crate::HttpRequest, crate::Result<HttpResponse>>,
-    pub(crate) attempt_logs: LoggingLayer,
-    pub(crate) attempt_metrics: MetricsLayer,
+    pub(crate) attempt_telemetry: TelemetryLayer<Client>,
     pub(crate) recovery_mode: RecoveryMode,
 }
 
 impl StandardRequestPipeline {
     pub(crate) fn new(context: &PipelineContext) -> Self {
         let options = context.resilience_context();
-        let clock = context.clock();
-        let meter = context.meter();
         let router = context.router();
 
         Self {
-            total_metrics: Metrics::layer().clock(clock).meter(meter.clone()).report_total_duration(true),
+            total_telemetry: context.client_telemetry().report_total_duration(true),
             total_timeout: HttpTimeout::layer(TOTAL_TIMEOUT_NAME, options)
                 .http_timeout_error()
                 .timeout(TOTAL_TIMEOUT_DURATION),
@@ -108,8 +106,7 @@ impl StandardRequestPipeline {
                 .http_timeout_error()
                 .timeout(ATTEMPT_TIMEOUT_DURATION),
             attempt_intercept: Intercept::layer(),
-            attempt_logs: Logging::layer().redaction_engine(context.redaction_engine()).clock(clock),
-            attempt_metrics: Metrics::layer().clock(clock).meter(meter.clone()),
+            attempt_telemetry: context.client_telemetry(),
             recovery_mode: RecoveryMode::default(),
         }
     }
@@ -215,28 +212,32 @@ impl StandardRequestPipeline {
         self
     }
 
-    /// Changes the logging layer for each request attempt.
-    #[must_use]
-    pub fn attempt_logs(mut self, configure: impl FnOnce(LoggingLayer) -> LoggingLayer) -> Self {
-        self.attempt_logs = configure(self.attempt_logs);
-        self
-    }
-
-    /// Changes the layer that records per-attempt HTTP metrics.
-    #[must_use]
-    pub fn attempt_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
-        self.attempt_metrics = configure(self.attempt_metrics);
-        self
-    }
-
-    /// Changes the total metrics layer.
+    /// Changes the telemetry layer for each request attempt.
     ///
-    /// This outermost layer measures the logical request, including retries and hedged attempts.
-    /// It records `http.client.request.total_duration`. [`attempt_metrics`][Self::attempt_metrics]
-    /// records each attempt.
+    /// The layer emits one event for each attempt, which records `http.client.request.duration`.
+    ///
+    /// # Defaults
+    ///
+    /// The layer of [`PipelineContext::client_telemetry`].
     #[must_use]
-    pub fn total_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
-        self.total_metrics = configure(self.total_metrics);
+    pub fn attempt_telemetry(mut self, configure: impl FnOnce(TelemetryLayer<Client>) -> TelemetryLayer<Client>) -> Self {
+        self.attempt_telemetry = configure(self.attempt_telemetry);
+        self
+    }
+
+    /// Changes the total telemetry layer.
+    ///
+    /// This outermost layer reports the logical request, including retries and hedged attempts. It
+    /// emits one event for each request, which records `http.client.request.total_duration`.
+    /// [`attempt_telemetry`][Self::attempt_telemetry] reports each attempt.
+    ///
+    /// # Defaults
+    ///
+    /// The layer of [`PipelineContext::client_telemetry`] with
+    /// [`report_total_duration(true)`](TelemetryLayer::report_total_duration).
+    #[must_use]
+    pub fn total_telemetry(mut self, configure: impl FnOnce(TelemetryLayer<Client>) -> TelemetryLayer<Client>) -> Self {
+        self.total_telemetry = configure(self.total_telemetry);
         self
     }
 
@@ -333,20 +334,13 @@ mod tests {
 
         let debug_str = format!("{pipeline:?}");
         assert!(debug_str.contains("StandardRequestPipeline"));
-        assert!(debug_str.contains("total_metrics"));
+        assert!(debug_str.contains("total_telemetry"));
         assert!(debug_str.contains("total_timeout"));
         assert!(debug_str.contains("retry"));
         assert!(debug_str.contains("hedging"));
         assert!(debug_str.contains("breaker"));
         assert!(debug_str.contains("attempt_timeout"));
-
-        // The total_metrics layer must actually be configured to record the
-        // total-duration instrument, not merely be present.
-        let total_metrics_debug = format!("{:?}", pipeline.total_metrics);
-        assert!(
-            total_metrics_debug.contains("report_total_duration: true"),
-            "total_metrics must record the total-duration instrument, got: {total_metrics_debug}"
-        );
+        assert!(debug_str.contains("attempt_telemetry"));
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
@@ -388,9 +382,8 @@ mod tests {
         let invocations = Arc::new(AtomicUsize::new(0));
 
         let intercept_flag = Arc::clone(&invocations);
-        let logs_flag = Arc::clone(&invocations);
-        let metrics_flag = Arc::clone(&invocations);
-        let total_metrics_flag = Arc::clone(&invocations);
+        let attempt_telemetry_flag = Arc::clone(&invocations);
+        let total_telemetry_flag = Arc::clone(&invocations);
 
         let context = PipelineContext::for_test();
         let _pipeline = StandardRequestPipeline::new(&context)
@@ -398,20 +391,16 @@ mod tests {
                 intercept_flag.fetch_add(1, Ordering::Relaxed);
                 intercept
             })
-            .attempt_logs(move |logs| {
-                logs_flag.fetch_add(1, Ordering::Relaxed);
-                logs
+            .attempt_telemetry(move |telemetry| {
+                attempt_telemetry_flag.fetch_add(1, Ordering::Relaxed);
+                telemetry
             })
-            .attempt_metrics(move |metrics| {
-                metrics_flag.fetch_add(1, Ordering::Relaxed);
-                metrics
-            })
-            .total_metrics(move |metrics| {
-                total_metrics_flag.fetch_add(1, Ordering::Relaxed);
-                metrics
+            .total_telemetry(move |telemetry| {
+                total_telemetry_flag.fetch_add(1, Ordering::Relaxed);
+                telemetry
             });
 
-        assert_eq!(invocations.load(Ordering::Relaxed), 4);
+        assert_eq!(invocations.load(Ordering::Relaxed), 3);
     }
 
     #[cfg_attr(miri, ignore)] // insta snapshots are not supported under Miri.

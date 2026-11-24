@@ -22,24 +22,22 @@ allowed_external_types = [
     "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
-    "data_privacy::redaction_engine::RedactionEngine",
     "fetch_options::*",
     "fetch_tls::*",
     "http::*",
     "http_extensions::*",
+    "http_telemetry::*",
     "seatbelt_http::*",
     "templated_uri::*",
     "layered::intercept::InterceptLayer",
     "layered::service::Service",
     "observed::sink::core::Sink",
-    "opentelemetry::common::KeyValue",
     "opentelemetry::metrics::meter::Meter",
     "opentelemetry::metrics::meter::MeterProvider",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
     "thread_aware_core::thread_aware::ThreadAware",
     "tick::clock::Clock",
-    "tick::simple_clock::SimpleClock",
     "tower_layer::Layer",
 ]
 
@@ -104,7 +102,6 @@ http_compression = { workspace = true, optional = true }
 # external
 bytes = { workspace = true }
 bytesbuf = { workspace = true, features = ["std"] }
-data_privacy = { workspace = true }
 fetch_hyper = { workspace = true, optional = true }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
@@ -112,6 +109,7 @@ fundle = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http_extensions = { workspace = true }
+http_telemetry = { workspace = true }
 
 # tokio runtime transport
 hyper-util = { workspace = true, optional = true, features = ["client-legacy"] }
@@ -125,9 +123,6 @@ native-tls = { workspace = true, features = ["alpn"], optional = true }
 observed = { workspace = true }
 ohno.workspace = true
 opentelemetry = { workspace = true, features = ["futures", "metrics"] }
-opentelemetry-semantic-conventions = { workspace = true, features = [
-    "semconv_experimental",
-] }
 performables = { workspace = true }
 rustls = { workspace = true, features = [
     "tls12",
@@ -136,14 +131,12 @@ rustls = { workspace = true, features = [
 rustls-platform-verifier = { workspace = true, optional = true }
 seatbelt = { workspace = true, features = ["timeout", "retry", "breaker", "hedging", "logs", "metrics"] }
 seatbelt_http = { workspace = true, features = ["timeout", "retry", "breaker", "hedging"] }
-smallvec = { workspace = true }
 templated_uri = { workspace = true, features = ["uuid"] }
 thread_aware = { workspace = true, features = ["derive", "std"] }
 tick = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net"], optional = true }
 # `hyper-util`'s `HttpConnector` is a `tower` service, so driving it needs the trait.
 tower-service = { workspace = true, optional = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 
@@ -169,7 +162,6 @@ fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["executor", "std"] }
 http_compression = { path = "../http_compression", features = ["brotli", "deflate", "gzip", "zstd"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
-http_telemetry = { path = "../http_telemetry" }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
@@ -337,6 +329,10 @@ required-features = ["test-util", "compression-all"]
 
 [[test]]
 name = "sink"
+required-features = ["test-util"]
+
+[[test]]
+name = "request_telemetry"
 required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints

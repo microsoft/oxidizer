@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for the `fetch.runtime` and `fetch.transport` instrumentation-scope
-//! attributes on client metrics.
+//! Integration tests for the instrumentation-scope attributes of the `fetch` meter, which the
+//! connection metrics and the instruments of `CustomContext::meter` carry.
 
 use bytes::Bytes;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
-use fetch::fake::FakeDeps;
 use fetch::tokio::TokioDeps;
-use fetch::{HttpClient, HttpRequest, HttpResponse, HttpResponseBuilder};
+use fetch::{HttpClient, HttpClientBuilder, HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::StatusCode;
 use layered::Service;
 use observed::Sink;
@@ -65,61 +64,6 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
         .await;
 
     mock_server
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn fake_transport_scope_attribute() {
-    let (exporter, provider) = exporter_and_provider();
-
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
-        .insecure_allow_http()
-        .meter_provider(provider.clone())
-        .build();
-
-    client.get("http://example.com").fetch().await.unwrap();
-    provider.force_flush().unwrap();
-
-    assert_eq!(
-        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
-        (Some("fake".to_owned()), Some("fake".to_owned())),
-        "the fake client must report fetch.runtime=fake and fetch.transport=fake on its request metric"
-    );
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn custom_transport_scope_attribute() {
-    let (exporter, provider) = exporter_and_provider();
-
-    let deps = CustomDeps {
-        clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(GlobalPool::new()),
-        sink: Sink::noop(),
-        extras: (),
-    };
-
-    let client = create_builder(
-        "my-runtime",
-        "my-custom",
-        |cx: CustomContext| OkHandler {
-            body_builder: cx.body_builder,
-        },
-        Isolation::Shared,
-        deps,
-    )
-    .insecure_allow_http()
-    .meter_provider(provider.clone())
-    .build();
-
-    client.get("http://example.com").fetch().await.unwrap();
-    provider.force_flush().unwrap();
-
-    assert_eq!(
-        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
-        (Some("my-runtime".to_owned()), Some("my-custom".to_owned())),
-        "a custom transport must report the runtime and transport names passed to create_builder"
-    );
 }
 
 #[cfg_attr(miri, ignore)]
@@ -181,19 +125,14 @@ async fn tokio_transport_connection_metric_scope_attribute() {
         (Some("tokio".to_owned()), Some("hyper".to_owned())),
         "the hyper connection metric must carry the tokio runtime and hyper transport scope"
     );
-    assert_eq!(
-        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
-        (Some("tokio".to_owned()), Some("hyper".to_owned())),
-        "the request metric must carry the tokio runtime and hyper transport scope"
-    );
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn client_name_set_before_meter_provider_is_reported() {
+async fn client_name_set_before_meter_provider_reaches_meter_scope() {
     let (exporter, provider) = exporter_and_provider();
 
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
+    let client = counting_builder()
         .insecure_allow_http()
         .name("named_before_provider")
         .meter_provider(provider.clone())
@@ -203,7 +142,7 @@ async fn client_name_set_before_meter_provider_is_reported() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        scope_attribute_for_metric(&exporter, "http.client.request.duration", "http.client.name"),
+        scope_attribute_for_metric(&exporter, COUNTER, "http.client.name"),
         Some("named_before_provider".to_owned()),
         "a client name set before meter_provider must be reported as the http.client.name scope attribute"
     );
@@ -211,12 +150,12 @@ async fn client_name_set_before_meter_provider_is_reported() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn client_name_set_after_meter_provider_is_reported() {
+async fn client_name_set_after_meter_provider_reaches_meter_scope() {
     let (exporter, provider) = exporter_and_provider();
 
     // Set the provider before the name. The client creates the scope at build time, so the later
     // name still applies.
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), Sink::noop()))
+    let client = counting_builder()
         .insecure_allow_http()
         .meter_provider(provider.clone())
         .name("named_after_provider")
@@ -226,10 +165,35 @@ async fn client_name_set_after_meter_provider_is_reported() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        scope_attribute_for_metric(&exporter, "http.client.request.duration", "http.client.name"),
+        scope_attribute_for_metric(&exporter, COUNTER, "http.client.name"),
         Some("named_after_provider".to_owned()),
         "a client name set after meter_provider must be reported as the http.client.name scope attribute"
     );
+}
+
+/// The counter that the transport of [`counting_builder`] records on its meter.
+const COUNTER: &str = "custom.transport.requests";
+
+/// A builder whose transport records [`COUNTER`] on the `fetch` meter for each handler it creates.
+fn counting_builder() -> HttpClientBuilder {
+    let deps = CustomDeps {
+        clock: Clock::new_frozen(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
+        sink: Sink::noop(),
+        extras: (),
+    };
+    create_builder(
+        "counting-runtime",
+        "counting",
+        |cx: CustomContext| {
+            cx.meter.u64_counter(COUNTER).build().add(1, &[]);
+            OkHandler {
+                body_builder: cx.body_builder,
+            }
+        },
+        Isolation::Shared,
+        deps,
+    )
 }
 
 /// Returns a canned `200 OK`.

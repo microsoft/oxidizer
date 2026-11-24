@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use data_privacy::RedactionEngine;
 use http_extensions::routing::{BaseUriConflict, Router};
 use http_extensions::{HttpBodyOptions, HttpRequest, HttpResponse};
 use opentelemetry::metrics::{Meter, MeterProvider};
@@ -20,7 +19,7 @@ use crate::handlers::Dispatch;
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, DecompressionOptions, Http2Options, RequestFilter};
 use crate::pipeline::{CustomPipeline, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::Metering;
+use crate::telemetry::{ClientAttributes, Metering};
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -53,11 +52,11 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::new(
+            metering: Metering::new(ClientAttributes::new(
                 transport.runtime().clone(),
                 transport.name().clone(),
                 Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
-            ),
+            )),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -223,18 +222,16 @@ impl HttpClientBuilder {
     ///
     /// ```rust
     /// # use fetch::*;
-    /// # use fetch::handlers::*;
     /// # use fetch::resilience::retry::{HttpRetry, HttpRetryLayerExt};
     /// # use layered::Stack;
     /// fn configure_builder(mut builder: HttpClientBuilder) -> HttpClientBuilder {
     ///     builder.custom_pipeline(move |dispatch, ctx| {
     ///         let stack = (
-    ///             Logging::layer()
-    ///                 .redaction_engine(ctx.redaction_engine())
-    ///                 .clock(ctx.clock()),
     ///             HttpRetry::layer("my_retry", ctx.resilience_context())
     ///                 .http_configure_defaults()
     ///                 .max_retry_attempts(1),
+    ///             // Below the retry, the layer emits one event for each attempt.
+    ///             ctx.client_telemetry(),
     ///             dispatch,
     ///         );
     ///         stack.into_service()
@@ -287,7 +284,8 @@ impl HttpClientBuilder {
     /// Sets a custom OpenTelemetry meter provider for the client.
     ///
     /// The client uses the global meter provider by default. This method sets a provider for this
-    /// client.
+    /// client. The provider records the connection metrics and the resilience metrics. Request
+    /// telemetry goes to the sink of the deps of the client.
     ///
     /// The client creates the scoped meter when [`build`][Self::build] runs. A
     /// [`name`][Self::name] set before or after this call appears in the metrics.
@@ -299,7 +297,7 @@ impl HttpClientBuilder {
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
-        // Use the provider for both resilience and HTTP metrics.
+        // Use the provider for both resilience and connection metrics.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
         self.metering = self.metering.with_provider(meter_provider);
         self
@@ -459,15 +457,6 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the redaction engine for the client.
-    ///
-    /// Logging and telemetry use the [`RedactionEngine`] to remove sensitive request and response
-    /// data.
-    pub fn redaction_engine(mut self, redaction_engine: &RedactionEngine) -> Self {
-        self.options.redaction_engine = redaction_engine.clone();
-        self
-    }
-
     /// Builds the configured [`HttpClient`](crate::HttpClient).
     ///
     /// The returned client uses every setting on this builder.
@@ -505,13 +494,14 @@ struct Aware {
 
 impl Aware {
     fn into_pipeline(self) -> Pipeline {
+        let client_attributes = self.metering.client_attributes().clone();
         let meter: Meter = self.metering.into();
         let body_builder = self.transport.create_body_builder(&self.options);
         let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport, &body_builder);
         let context = PipelineContext::new(
             self.resilience_context,
             &meter,
-            self.options.redaction_engine,
+            client_attributes,
             body_builder,
             self.transport.clock().clone(),
             self.transport.sink().clone(),
@@ -587,23 +577,6 @@ mod tests {
 
         let response = client.get("https://example.com").fetch().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[test]
-    fn redaction_engine_sets_option() {
-        use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-        use data_privacy::{RedactedToString, RedactionEngine};
-        use templated_uri::{PathAndQuery, Uri};
-
-        let engine = RedactionEngine::builder()
-            .add_class_redactor(Uri::DATA_CLASS, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
-            .build();
-
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).redaction_engine(&engine);
-
-        // A passthrough redactor leaves the path unchanged.
-        let redacted = PathAndQuery::from_static("/path").to_redacted_string(&builder.options.redaction_engine);
-        assert_eq!(redacted, "/path");
     }
 
     #[test]

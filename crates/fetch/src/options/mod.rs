@@ -4,13 +4,10 @@
 //! HTTP client configuration.
 //!
 //! [`fetch_options`] defines the transport options and this module re-exports them. `ClientOptions`
-//! combines transport options with response-body, routing, redaction, TLS, and decompression
-//! configuration.
+//! combines transport options with response-body, routing, TLS, and decompression configuration.
 //!
 //! Transport-specific builders can use [`fetch_options::SocketOptions`]. It is separate from
 //! [`fetch_options::TransportOptions`] because only a transport that owns sockets can apply it.
-
-use data_privacy::RedactionEngine;
 
 mod decompression;
 
@@ -36,8 +33,6 @@ pub(crate) struct ClientOptions {
     pub response_body_options: HttpBodyOptions,
     /// Base-URI rewriting rules.
     pub router: Router,
-    /// Redaction engine used for logging and telemetry.
-    pub redaction_engine: RedactionEngine,
     /// TLS configuration used by the bundled transports.
     pub tls: TlsOptions,
     /// Formats and resource limits for automatic response decompression.

@@ -102,9 +102,10 @@ pub struct CustomContext<Extras = ()> {
 
 /// Creates a builder for an HTTP client backed by a custom transport handler.
 ///
-/// `runtime` and `transport` identify the client in telemetry. Every metric uses them as the
-/// `fetch.runtime` and `fetch.transport` instrumentation-scope attributes. Use short, stable
-/// identifiers, such as `runtime = "tokio"` and `transport = "http3_experimental"`.
+/// `runtime` and `transport` identify the client in telemetry. They are the `fetch.runtime` and
+/// `fetch.transport` instrumentation-scope attributes of the `fetch` meter, and fields of every
+/// request event. Use short, stable identifiers, such as `runtime = "tokio"` and
+/// `transport = "http3_experimental"`.
 ///
 /// The client calls `factory` when it needs a handler for a pool slot. The factory receives the
 /// slot [`CustomContext`] and returns the transport [`RequestHandler`]. The builder adds resilience,

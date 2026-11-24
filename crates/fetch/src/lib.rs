@@ -60,8 +60,8 @@
 //! | Resilience | Retries and circuit breaking are enabled by default; hedging is built in and optional | Built-in retries; circuit breaking and hedging require external middleware |
 //! | JSON support | Built in | Built in |
 //! | Testing tools | Built in | Requires custom or external tools |
-//! | OpenTelemetry metrics | Built in | Requires custom integration |
-//! | Structured request logging | Built-in tracing events | Requires custom middleware |
+//! | Request logs and metrics | Built-in `observed` events | Requires custom middleware |
+//! | OpenTelemetry connection metrics | Built in | Requires custom integration |
 //! | Advanced HTTP client features [^1] | Not supported yet [^2] | Available through optional features |
 //! | Request pipeline | Built in | Requires custom or external tools |
 //! | Zero-copy buffers | Built in | Partial support through `Bytes` |
@@ -305,7 +305,8 @@
 //! Templates follow [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) level 3. [`Uri`] and
 //! string types also support URLs without typed templates. Such a request has no URL template.
 //!
-//! [`handlers::Logging`] records the URL template as `url.path.template`.
+//! The request telemetry records the URL template as `url.template`. A request without a URL
+//! template records `unknown`.
 //!
 //! This example creates a [`Uri`] with a templated path:
 //!

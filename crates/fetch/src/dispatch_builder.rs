@@ -5,9 +5,9 @@
 //!
 //! [`Dispatch`] owns the transports and their wrappers. It wraps each transport once when it builds
 //! the dispatch pool. The wrapper runs inside retries, so it processes the response from every
-//! attempt. It also runs inside attempt logging and metrics. Those layers receive the response
-//! after its encoding metadata is updated. Their timing excludes decompression,
-//! which runs when the consumer reads the body.
+//! attempt. It also runs inside the attempt telemetry. That layer receives the response after its
+//! encoding metadata is updated. Its timing excludes decompression, which runs when the consumer
+//! reads the body.
 
 use http_extensions::HttpBodyBuilder;
 use opentelemetry::metrics::Meter;

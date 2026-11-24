@@ -1,14 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy::RedactionEngine;
 use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
 use observed::Sink;
 use opentelemetry::metrics::Meter;
 use tick::Clock;
 
+use crate::error_labels::collect_error_labels;
 use crate::resilience::HttpResilienceContext;
+use crate::telemetry::{Client, ClientAttributes, Telemetry, TelemetryLayer};
 
 /// Shared dependencies for a custom or standard request pipeline.
 ///
@@ -21,7 +22,7 @@ use crate::resilience::HttpResilienceContext;
 pub struct PipelineContext {
     meter: Meter,
     resilience_context: HttpResilienceContext,
-    redaction_engine: RedactionEngine,
+    client_attributes: ClientAttributes,
     clock: Clock,
     sink: Sink,
     body_builder: HttpBodyBuilder,
@@ -32,7 +33,7 @@ impl PipelineContext {
     pub(crate) fn new(
         resilience_context: HttpResilienceContext,
         meter: &Meter,
-        redaction_engine: RedactionEngine,
+        client_attributes: ClientAttributes,
         body_builder: HttpBodyBuilder,
         clock: Clock,
         sink: Sink,
@@ -40,7 +41,7 @@ impl PipelineContext {
     ) -> Self {
         Self {
             resilience_context,
-            redaction_engine,
+            client_attributes,
             meter: meter.clone(),
             body_builder,
             clock,
@@ -73,10 +74,26 @@ impl PipelineContext {
         &self.resilience_context
     }
 
-    /// Returns the redaction engine.
+    /// Returns a telemetry layer that emits the request events of this client.
+    ///
+    /// Each event has the fields `http.client.name`, `fetch.runtime` and `fetch.transport`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fetch::HttpClientBuilder;
+    /// # use layered::Stack;
+    /// # fn configure(builder: HttpClientBuilder) -> HttpClientBuilder {
+    /// builder.custom_pipeline(|dispatch, ctx| (ctx.client_telemetry(), dispatch).into_service())
+    /// # }
+    /// ```
     #[must_use]
-    pub const fn redaction_engine(&self) -> &RedactionEngine {
-        &self.redaction_engine
+    pub fn client_telemetry(&self) -> TelemetryLayer<Client> {
+        self.client_attributes.apply(
+            Telemetry::client(self.sink.clone())
+                .clock(&self.clock)
+                .error_labels_with(collect_error_labels),
+        )
     }
 
     /// Returns the HTTP body builder.
@@ -99,7 +116,11 @@ impl PipelineContext {
         Self::new(
             HttpResilienceContext::new(&clock),
             &opentelemetry_sdk::metrics::SdkMeterProvider::default().meter("test"),
-            RedactionEngine::default(),
+            ClientAttributes::new(
+                crate::constants::FAKE_RUNTIME_NAME.into(),
+                crate::constants::FAKE_TRANSPORT_NAME.into(),
+                crate::constants::DEFAULT_HTTP_CLIENT_NAME.into(),
+            ),
             HttpBodyBuilder::new_fake(),
             clock,
             Sink::noop(),
@@ -135,7 +156,7 @@ mod tests {
         let _ = context.sink();
         let _ = context.meter();
         let _ = context.resilience_context();
-        let _ = context.redaction_engine();
+        let _ = context.client_telemetry();
         let _ = context.router();
     }
 }
