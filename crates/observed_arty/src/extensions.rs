@@ -43,13 +43,21 @@ impl From<Sink> for ObservedOptions {
 ///
 /// The implementation for [`RuntimeBuilder`] registers the task-spawn hook
 /// before startup. The implementation for a [`RuntimeControl`] reference
-/// registers it on a live runtime. The current integration transfers sink
-/// enrichment into each task.
+/// registers it on a live runtime. Builder registration covers every task.
+/// Live registration runs immediately on the calling worker and is queued on
+/// other workers, so tasks submitted there before the queue is processed are
+/// not covered. Use builder registration when every task must be covered.
+///
+/// The current integration transfers sink enrichment into each covered task.
 pub trait ObservedExt: private::Sealed {
     /// The result of enabling Observed sink integration.
     type Output;
 
-    /// Enables the configured sink integration for each task submitted later.
+    /// Enables the configured sink integration.
+    ///
+    /// On [`RuntimeBuilder`], this covers every task. On live
+    /// [`RuntimeControl`], registration is queued on other workers and does not
+    /// cover tasks that they submit before processing that queue.
     fn enable_observed(self, options: impl Into<ObservedOptions>) -> Self::Output;
 }
 
@@ -83,10 +91,9 @@ struct ObservedTask {
 
 impl ObservedTask {
     fn new(transfer: Transfer) -> Self {
-        let mut guard = transfer.apply_current_thread();
-        drop(transfer);
-        guard.restore_current_thread();
-        Self { guard }
+        Self {
+            guard: transfer.into_inactive_guard(),
+        }
     }
 }
 

@@ -41,6 +41,11 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! Live registration runs immediately on the calling worker and is queued on
+//! other workers. A task submitted on another worker before it processes that
+//! queue is not covered. Configure the runtime builder when every task must
+//! receive the integration.
+//!
 //! Arty runs the task-spawn callback on the submitting worker when one exists.
 //! Submissions from outside the runtime use Arty's worker-neutral callback.
 //! Arty then moves the poll observer to the required target worker.

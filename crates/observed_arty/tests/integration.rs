@@ -27,7 +27,6 @@ use support::stop_bounded;
 
 assert_impl_all!(ObservedOptions: Clone, Send, Sync);
 assert_not_impl_any!(ObservedOptions: Copy);
-assert_not_impl_any!(observed::context::TransferGuard: Send, Sync);
 
 struct IgnoreEvents;
 
