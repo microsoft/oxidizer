@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use data_privacy::{DataClass, Redactor, taxonomy};
+use data_privacy::{DataClass, RedactedToString, Redactor, Sensitive, taxonomy};
 
 struct TestRedactor;
 
@@ -27,8 +27,8 @@ enum TestTaxonomy {
 #[test]
 fn test_exact_len_default_behavior() {
     let redactor = TestRedactor;
-    let mut output_buffer = String::new();
-    _ = redactor.redact(&TestTaxonomy::Sensitive.data_class(), "test_value", &mut output_buffer);
+    let sensitive = Sensitive::new("test_value", TestTaxonomy::Sensitive.data_class());
+    let output_buffer = sensitive.to_redacted_string(&redactor);
 
     assert_eq!(output_buffer, "test_valuetomato");
 }
