@@ -13,110 +13,151 @@
 
 </div>
 
-Component health reports and HTTP readiness checks for Rust services.
+Health signal collection, aggregation, and HTTP readiness helpers for Rust services.
 
-A service reports the worst state among its components: `Healthy`, `Degraded`, or `Unhealthy`.
-For example, if a database is degraded and a cache is healthy, the service is degraded.
-Use the overall state for readiness checks and [component reports][__link0] to find the reason.
+[`Publisher`][__link0]s collect application-defined health signals into named [`Component`][__link1]s.
+Each component aggregates its publishers, and an [`Aggregator`][__link2] combines the components into
+an overall service state: [`Healthy`][__link3], [`Degraded`][__link4], or
+[`Unhealthy`][__link5]. At each level, the worst state wins.
+[Reports][__link6] retain diagnostic attributes and publisher counts, while the optional
+[HTTP helpers][__link7] expose readiness
+through Tower or [`http_extensions`][__link8].
 
 ## Quick start
 
-Register a component for the database. Use its [`Publisher`][__link1] to report slow queries:
+Create an [`Aggregator`][__link9], register an application-defined component, and publish a health signal.
+[`Aggregator::component`][__link10] creates the named component on first use; subsequent calls with the
+same name return a handle to that component. The name identifies a subsystem, not a built-in check.
 
 ```rust
 use oxidizer_health::{Aggregator, Health};
 
 let aggregator = Aggregator::new();
-let database = aggregator.component("database");
-let mut publisher = database.publisher();
+let backend = aggregator.component("backend");
+let mut monitor = aggregator.monitor();
+let mut publisher = backend.publisher();
 
-publisher.degraded("slow queries");
-assert_eq!(publisher.signal().state(), Health::Degraded);
+publisher.degraded("connection pool exhausted");
+while monitor.state() != Health::Degraded {
+    monitor.changed().await;
+}
+assert_eq!(monitor.state(), Health::Degraded);
 ```
 
-Publishing updates the local signal immediately. [`Aggregator::state`][__link2] reads the latest
-aggregate, so it can briefly report the previous state. A component without publishers is
-`Unhealthy`, as is a service without components.
+Publishing updates the local [`Signal`][__link11] immediately; aggregation runs in the background.
+[`Monitor::changed`][__link12] notifies observers when state or report data may have changed.
+Re-read the current state after each notification, as updates can coalesce.
 
-## Write a custom health check
+Keep the component and its publishers alive while the subsystem participates in health reporting.
+Dropping a publisher removes its contribution; dropping the last [`Component`][__link13] handle unregisters
+the component. A component without publishers is `Unhealthy`, as is an [`Aggregator`][__link14] without components.
 
-Your application decides what to measure, when to measure it, and what counts as unhealthy.
-A check is ordinary Rust code that publishes its result.
-For example, a database client can count consecutive failures and reset the count after a
-successful request. After each request, it passes the current count to this function:
+## Custom health checks and HTTP readiness
+
+A custom check measures a dependency or application condition and publishes the result.
+The application invokes the check at startup, periodically, or after relevant operations.
+The HTTP helper reads the latest aggregate for each request.
+
+This complete example checks TCP connectivity to a backend and invokes the Tower readiness
+handler with a probe request. A local TCP listener supplies the backend so the example can run
+independently. It uses the `http` feature and Tower with the `util` feature for `oneshot`.
+Run the async code in an application executor.
 
 ```rust
-use oxidizer_health::{Aggregator, Health, Publisher};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::time::Duration;
 
-fn report_failures(publisher: &mut Publisher, failures: u32) {
-    let state = match failures {
-        0 => Health::Healthy,
-        1..=2 => Health::Degraded,
-        _ => Health::Unhealthy,
-    };
-    publisher.publish(state, [("consecutive_failures", i64::from(failures))]);
+use http::{Request, StatusCode};
+use oxidizer_health::http::service;
+use oxidizer_health::{Aggregator, Health, Publisher};
+use tower::ServiceExt;
+
+fn check_backend(address: SocketAddr, publisher: &mut Publisher) {
+    match TcpStream::connect_timeout(&address, Duration::from_millis(100)) {
+        Ok(_) => publisher.publish(Health::Healthy, [("endpoint", address.to_string())]),
+        Err(error) => publisher.publish(Health::Unhealthy, [("error", error.to_string())]),
+    }
 }
 
+let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+let address = listener.local_addr().unwrap();
 let aggregator = Aggregator::new();
-let database = aggregator.component("database");
-let mut publisher = database.publisher();
+let backend = aggregator.component("backend");
+let mut monitor = aggregator.monitor();
 
-report_failures(&mut publisher, 3);
-assert_eq!(publisher.signal().state(), Health::Unhealthy);
+let mut publisher = backend.publisher();
+check_backend(address, &mut publisher);
+while monitor.state() != publisher.signal().state() {
+    monitor.changed().await;
+}
 
-report_failures(&mut publisher, 0);
-assert_eq!(publisher.signal().state(), Health::Healthy);
+let handler = service(aggregator);
+let request = Request::builder().uri("/health/ready").body(()).unwrap();
+let response = handler.oneshot(request).await.unwrap();
+assert_eq!(response.status(), StatusCode::OK);
+assert_eq!(response.body(), "true");
 ```
 
-These thresholds are the client’s policy. A new publisher starts `Healthy`. Publishing
-`Unhealthy` immediately afterward does not prevent a probe from seeing that initial `Healthy`.
+The check measures TCP connectivity; an application-level check can instead perform a protocol
+exchange or inspect application state. Reuse the publisher for subsequent checks so failures and
+recoveries replace its previous signal.
 
-If required dependencies must block readiness at startup, register their components on a new
-[`Aggregator`][__link3] before creating any publishers or serving probes. Keep each component alive and
-empty until its first successful check. An empty component is `Unhealthy`. After success,
-create its publisher and reuse it for later failures and recoveries. Dropping the publisher
-removes its contribution. Dropping the last [`Component`][__link4] handle unregisters the component.
+Both HTTP helpers return HTTP 200 with JSON `true` for `Healthy`, and HTTP 503 with JSON `false`
+for `Degraded` or `Unhealthy`. Responses use `Content-Type: application/json` and
+`Cache-Control: no-store`. Register the handler on a readiness route in your HTTP server;
+the example invokes it directly without starting a server.
+
+A new publisher starts `Healthy`. For dependencies that must pass a check before admitting
+traffic, register their components on a new [`Aggregator`][__link15] before serving probes. Keep each component
+empty until its first successful check, then create and retain its publisher for later results.
+This keeps the component `Unhealthy` during startup.
 
 ## Diagnose a change
 
-When readiness is false, a read-only [`Monitor`][__link5] can identify the component and show what its
-publishers reported. This observer prints the component summary followed by each distinct problem:
+A read-only [`Monitor`][__link16] provides component reports independently of publishers.
+This example publishes a problem, waits for aggregation, and prints its diagnostic signal:
 
 ```rust
-use oxidizer_health::{Filter, Health, Monitor};
+use oxidizer_health::{Aggregator, Filter, Health};
 
-async fn show_problems(monitor: &Monitor) {
-    for report in monitor.reports(Filter::DEGRADED | Filter::UNHEALTHY).await {
-        if report.state() == Health::Healthy {
-            continue;
-        }
-        println!("{report}");
-        for state in [Health::Degraded, Health::Unhealthy] {
-            for (signal, _) in report.signals(state) {
-                println!("  {signal}");
-            }
+let aggregator = Aggregator::new();
+let backend = aggregator.component("backend");
+let mut monitor = aggregator.monitor();
+let mut publisher = backend.publisher();
+publisher.degraded("connection pool exhausted");
+while monitor.state() != Health::Degraded {
+    monitor.changed().await;
+}
+
+for report in monitor.reports(Filter::DEGRADED | Filter::UNHEALTHY).await {
+    println!("{report}");
+    for state in [Health::Degraded, Health::Unhealthy] {
+        for (signal, count) in report.signals(state) {
+            println!("  {signal} ({count} publishers)");
         }
     }
 }
 ```
 
-For the quick start, the report names `database` and the signal reads `Degraded (reason=slow queries)`.
-The filter selects signals, not components. A component without publishers has an `Unhealthy`
-summary but no signal to print. For continuous monitoring, read the reports, await
-[`Monitor::changed`][__link6], then read again. Multiple updates can produce one notification.
+Reports group identical signals and count their publishers. [`Filter`][__link17] selects diagnostic
+signals; all registered components and their aggregate states remain in the reports.
+An empty component has an `Unhealthy` summary with no signals. For continuous observation,
+read the reports, await [`Monitor::changed`][__link18], and repeat.
 
-## HTTP readiness
+## Features
 
-Health reporting works without HTTP. Enable `http` to use `http::service` with Tower,
-or `request-handler` to use `http::request_handler` with `http_extensions`.
-Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `false` otherwise.
+* `http` enables the [Tower readiness service][__link19].
+* `request-handler` enables the [`http_extensions` readiness handler][__link20].
+
+No features are enabled by default. Collection, aggregation, change notifications, and reports
+are available in the default configuration.
 
 ## Additional documentation
 
-* Register a [`Component`][__link7] with [`Aggregator::component`][__link8] and report changes with [`Publisher::publish`][__link9].
-* Get a read-only [`Monitor`][__link10] with [`Aggregator::monitor`][__link11] to observe changes independently of publishers.
-* Select diagnostic signals with [`Filter`][__link12] and inspect their attributes and publisher counts with [`Report::signals`][__link13].
-* Serve readiness with one of the [HTTP adapters][__link14].
+* Register a [`Component`][__link21] with [`Aggregator::component`][__link22] and report changes with [`Publisher::publish`][__link23].
+* Get a read-only [`Monitor`][__link24] with [`Aggregator::monitor`][__link25] to observe changes independently of publishers.
+* Select diagnostic signals with [`Filter`][__link26] and inspect their attributes and publisher counts with [`Report::signals`][__link27].
+* Serve readiness with one of the [HTTP adapters][__link28].
 
 
 <hr/>
@@ -124,19 +165,33 @@ Both return HTTP 200 with JSON `true` for `Healthy` and HTTP 503 with JSON `fals
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQAaznBUfBvQbcDNw_m5OW1Yb2LWTSpdyZSgb5wJ43Y7YvK1hZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
- [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
- [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
- [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
- [__link11]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
- [__link12]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
- [__link13]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
- [__link14]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
- [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::state
- [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
- [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
- [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
- [__link7]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link8]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
- [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher::publish
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbS6VIXSRo6gobgFQr_MUOVd0bbtCXAa3cRWsbExrSJXOEDyZhZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
+ [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
+ [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
+ [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
+ [__link11]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Signal
+ [__link12]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
+ [__link13]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
+ [__link14]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
+ [__link15]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
+ [__link16]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
+ [__link17]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
+ [__link18]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
+ [__link19]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.service.html
+ [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
+ [__link20]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/fn.request_handler.html
+ [__link21]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
+ [__link22]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
+ [__link23]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher::publish
+ [__link24]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
+ [__link25]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
+ [__link26]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Filter
+ [__link27]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
+ [__link28]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
+ [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Healthy
+ [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Degraded
+ [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Unhealthy
+ [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
+ [__link7]: https://docs.rs/oxidizer_health/latest/oxidizer_health/http/
+ [__link8]: https://docs.rs/http_extensions
+ [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
