@@ -257,7 +257,15 @@ fn strip_generics(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, symbol_path};
+    use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, angle_end, symbol_path};
+
+    #[test]
+    fn angle_scan_starts_at_the_requested_generic_list() {
+        let symbol = "app::First<T>::Second<Outer<U>>::run";
+        let start = symbol.find("<Outer").unwrap();
+        let end = angle_end(symbol, start).unwrap();
+        assert_eq!(&symbol[start..=end], "<Outer<U>>");
+    }
 
     #[test]
     fn gamma_survivor_symbol_owners_reject_partial_paths_and_keep_async_blocks() {

@@ -1428,7 +1428,6 @@ mod tests {
         assert_eq!((idle_is_closed, readable_is_closed), (false, false));
     }
 
-    #[cfg_attr(miri, ignore)]
     fn assert_cache_recording_updated(stream: &mut Connection, policy: seismograph_protocol::message::RecordingPolicy) {
         let previous = crate::recorder::Configuration {
             cache: crate::recorder::Policy::default(),
@@ -1447,6 +1446,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "uses native monitor IPC; recorder unit tests cover configuration under Miri")]
     #[expect(
         clippy::useless_let_if_seq,
         reason = "The end-to-end monitor scenario stays together; default initialization keeps impossible response-shape branches out of line coverage"

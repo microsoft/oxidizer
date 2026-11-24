@@ -2219,18 +2219,21 @@ mod tests {
             Arc::new(Signal::default()),
         );
         let executor_shutdown = worker_executor(&worker).shutdown();
+        assert!(LocalWorker::try_with_driver_host(|_| ()).is_some());
 
         drop(worker);
 
         let scheduler_cleared = LocalWorker::with_scheduler(|scheduler| scheduler.is_none());
+        let driver_host_cleared = LocalWorker::try_with_driver_host(|_| ()).is_none();
         // Release test-thread state even if the teardown under test missed it.
         if !scheduler_cleared {
             LocalWorker::clear_scheduler();
         }
-        if LocalWorker::try_with_driver_host(|_| ()).is_some() {
+        if !driver_host_cleared {
             drop(RuntimeDriverHost::uninstall());
         }
         assert!(scheduler_cleared);
+        assert!(driver_host_cleared);
         assert!(executor_shutdown.is_triggered());
         assert!(blocking_worker.0.is_shutting_down());
     }
