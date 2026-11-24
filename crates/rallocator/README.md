@@ -69,8 +69,8 @@ If you omit `default`, `dynamic` uses `system`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ6-wcnyIDM8b6SDn8WAIpfIbGfeY9xXcLV8btSsZXnhR-mFhZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ6-wcnyIDM8b6SDn8WAIpfIbGfeY9xXcLV8btSsZXnhR-mFhZIGCanJhbGxvY2F0b3JlMC41LjA
  [__link0]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
- [__link1]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html
+ [__link1]: https://docs.rs/rallocator/0.5.0/rallocator/macro.rallocator.html
  [__link2]: https://github.com/microsoft/snmalloc
  [__link3]: https://github.com/microsoft/mimalloc

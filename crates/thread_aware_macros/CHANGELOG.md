@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.3] - 2026-11-24
+
+- Update the private relocation derive shim and implementation requirement.
+- Update the local requirement for `thread_aware_macros_impl` from `=0.12.2` to `=0.12.3`.
+
 ## [0.12.2] - 2026-11-02
 
 - Use version 0.12.2 to match the Thread Aware packages. Derive macro behavior does not change.

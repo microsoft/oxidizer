@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0] - 2026-11-24
+
+- Breaking: Update task, serialized-buffer, telemetry, and timing integrations to the new workspace contracts.
+- Expand cache pipeline and expiry regression coverage.
+- Update the local requirement for `anyspawn` from `^0.11.0` to `^0.12.0`.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `cachet_memory` from `^0.9.2` to `^0.9.3`.
+- Update the local requirement for `cachet_service` from `^0.6.1` to `^0.6.2`.
+- Update the local requirement for `cachet_tier` from `^0.6.1` to `^0.6.2`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+- Update the local requirement for `uniflight` from `^0.9.0` to `^0.9.1`.
+
 ## [0.18.0] - 2026-11-06
 
 - Accept `impl Into<OpaqueMemory>` in serialization builders. Callers can pass `GlobalPool`

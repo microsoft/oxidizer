@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Generate new runtime policy and hook calls for Arty entry points.
+- Align the version with the `arty` package group at `0.7.0`.
+
 ## [0.6.1] - 2026-11-06
 
 - Simplify macro documentation and the package description. Accepted invocations and

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.0] - 2026-11-24
+
+- Breaking: Update buffer recording to the new Seismograph contracts.
+- Expand buffer boundaries, memory lifetime, vectored access, and synchronization regression coverage.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
+- Update the local requirement for `seismograph_io` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.14.0] - 2026-11-06
 
 - Add conversion from `GlobalPool` to `OpaqueMemory` for memory-provider builders.

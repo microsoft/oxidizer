@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.3] - 2026-11-24
+
+- Update the private privacy macro shim and compiler-error conversion.
+- Update the local requirement for `data_privacy_macros_impl` from `=0.13.2` to `=0.13.3`.
+
 ## [0.13.2] - 2026-11-02
 
 - Use version 0.13.2 to match the data_privacy packages. Macro behavior does not change.

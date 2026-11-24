@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.1] - 2026-11-24
+
+- Expand heap-identity, option-boundary, and scoped allocation-hint regression coverage.
+
 ## [0.2.0] - 2026-10-05
 
 - ✨ Features

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.2] - 2026-11-24
+
+- Expand bundle builder type-state and input-validation regression coverage.
+
 ## [0.4.1] - 2026-10-20
 
 - Refresh published implementation documentation and test-support dependency metadata.

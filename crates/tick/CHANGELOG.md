@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0] - 2026-11-24
+
+- Breaking: Remove legacy formatting wrappers, SystemTimeExt, and fast-instant configuration.
+- Add coarse stopwatch construction and running-state controls with start, stop, reset, and restart.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.9.1] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

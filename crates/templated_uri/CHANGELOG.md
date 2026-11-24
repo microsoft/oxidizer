@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2] - 2026-11-24
+
+- Update the URI macro parser dependency.
+- Expand URI parsing, escaping, optional parameters, and redaction regression coverage.
+- Update the local requirement for `data_privacy` from `^0.13.2` to `^0.13.3`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `templated_uri_macros` from `=0.7.1` to `=0.7.2`.
+
 ## [0.7.1] - 2026-11-02
 
 - Update privacy, error, and benchmark requirements. Use version 0.7.1 for all Templated URI

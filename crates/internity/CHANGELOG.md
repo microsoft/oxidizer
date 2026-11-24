@@ -4,6 +4,11 @@ All notable changes to this crate are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-24
+
+- Expand interning, capacity, stable hashing, and Serde regression coverage.
+- Update the local requirement for `internity_macros` from `=0.3.1` to `=0.3.2`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update synchronization and benchmark requirements. Use version 0.3.1 for all Internity packages.

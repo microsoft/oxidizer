@@ -177,11 +177,11 @@ atomics). The generated resolvers run on bare-metal targets; the
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHOi8QcR7GzUbWNQ2_S3ygncb4N9E3BpA5FAbBPdYPdGfr2NhZIGCaXJvdXRlcmFtYWUwLjMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHOi8QcR7GzUbWNQ2_S3ygncb4N9E3BpA5FAbBPdYPdGfr2NhZIGCaXJvdXRlcmFtYWUwLjMuMg
  [__link0]: macro@resolver
- [__link1]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver
- [__link2]: https://docs.rs/routerama/0.3.1/routerama/?search=RouteTable
- [__link3]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver::resolve
+ [__link1]: https://docs.rs/routerama/0.3.2/routerama/?search=Resolver
+ [__link2]: https://docs.rs/routerama/0.3.2/routerama/?search=RouteTable
+ [__link3]: https://docs.rs/routerama/0.3.2/routerama/?search=Resolver::resolve
  [__link4]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
  [__link5]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
  [__link6]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html

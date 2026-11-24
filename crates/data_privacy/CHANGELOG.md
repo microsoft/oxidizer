@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.3] - 2026-11-24
+
+- Expand redaction-engine and sensitive-value formatting regression coverage.
+- Update the local requirement for `data_privacy_core` from `^0.1.3` to `^0.1.4`.
+- Update the local requirement for `data_privacy_macros` from `=0.13.2` to `=0.13.3`.
+
 ## [0.13.2] - 2026-11-02
 
 - Clarify that xxH3 hashes let applications match related values but do not protect the original

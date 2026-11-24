@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1] - 2026-11-24
+
+- Make merger cancellation and follower regression tests deterministic.
+- Update shared synchronization requirements.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.4.1`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.9.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

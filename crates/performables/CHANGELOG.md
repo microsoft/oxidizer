@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] - 2026-11-24
+
+- Expand deterministic contention, wakeup, timeout, cancellation, and final-owner synchronization regression coverage.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+- Update the local development requirement for `metabench` from `^0.3.0` to `^0.3.1`.
+
 ## [0.4.0] - 2026-11-06
 
 - Breaking: Seal `MakeMutTarget`. Downstream crates can no longer implement this trait.

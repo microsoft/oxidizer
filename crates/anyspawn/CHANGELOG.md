@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0] - 2026-11-24
+
+- Breaking: Update runtime and event integration for the new Arty, Observed, and Tick contracts.
+- Update the local requirement for `arty` from `^0.6.1` to `^0.7.0`.
+- Update the local requirement for `observed` from `^0.30.1` to `^0.31.0`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.11.0] - 2026-11-06
 
 - Breaking: Support Arty and Tokio explicitly. Remove custom spawner and layering APIs,
