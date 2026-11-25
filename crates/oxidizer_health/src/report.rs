@@ -12,9 +12,10 @@ use bitflags::bitflags;
 use crate::{Health, Signal};
 
 bitflags! {
-    /// Selects which publisher signals a [`Report`] retains.
+    /// Selects which publisher signals [`Report::signals`] returns.
     ///
-    /// Publisher counts remain available for every state, even when its signals are filtered out.
+    /// Counts remain available for every state. Even with an empty filter, a report keeps
+    /// the complete shared snapshot alive, including attributes of signals the filter hides.
     ///
     /// # Examples
     ///
@@ -27,13 +28,13 @@ bitflags! {
     /// ```
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Filter: u8 {
-        /// Retains `Healthy` signals.
+        /// Includes `Healthy` signals in the iterator.
         const HEALTHY = 1;
-        /// Retains `Degraded` signals.
+        /// Includes `Degraded` signals in the iterator.
         const DEGRADED = 1 << 1;
-        /// Retains `Unhealthy` signals.
+        /// Includes `Unhealthy` signals in the iterator.
         const UNHEALTHY = 1 << 2;
-        /// Retains all signals.
+        /// Includes signals of every state in the iterators.
         const ALL = Self::HEALTHY.bits() | Self::DEGRADED.bits() | Self::UNHEALTHY.bits();
     }
 }
