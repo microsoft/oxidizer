@@ -84,13 +84,13 @@ fn captures_keep_one_running_row_when_a_task_also_appears_in_a_queue() {
         let other_task = allocate_task_id();
         let descriptor = allocate_type_descriptor_id();
         let (running, ready) = if running_first { (&first, &second) } else { (&second, &first) };
+        let running_worker = running.id();
         running
             .handle()
             .register_task_provider(move |request| {
-                request.respond(
-                    vec![Task::new(task, descriptor, TaskActivityState::Running)],
-                    TaskCollection::Complete,
-                );
+                let mut running = Task::new(task, descriptor, TaskActivityState::Running);
+                running.last_worker_id = Some(running_worker);
+                request.respond(vec![running], TaskCollection::Complete);
             })
             .unwrap();
         ready

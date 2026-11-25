@@ -161,6 +161,12 @@ impl RuntimeHandle {
         self.control.id
     }
 
+    /// Copies runtime task-event identities without worker attribution.
+    #[must_use]
+    pub fn task_events(&self) -> task::EventContext {
+        task::EventContext::new(self.id(), None, self.control.lifecycle_backtraces)
+    }
+
     /// Registers worker metadata without registering any tasks.
     ///
     /// # Panics

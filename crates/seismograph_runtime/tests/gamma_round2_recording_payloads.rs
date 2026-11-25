@@ -90,7 +90,7 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
                 type_descriptor: TypeDescriptorId::from_raw(descriptor).unwrap(),
                 future_size_bytes: Some(size),
                 spawned_at: None,
-                last_worker_id: None,
+                last_worker_id: Some(first_id),
                 metrics: TaskMetrics::default(),
                 metrics_scope: TaskMetricsScope::Uncollected,
                 activity: Some(TaskActivity {

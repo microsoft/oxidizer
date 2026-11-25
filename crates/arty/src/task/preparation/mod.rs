@@ -12,7 +12,7 @@ mod deferred_task;
 mod remote;
 mod spawn_options;
 
-pub(crate) use blocking::{BlockingTask, prepare_blocking};
+pub(crate) use blocking::{BlockingTask, BlockingTaskOutcome, prepare_blocking};
 pub(crate) use cleanup::discard_panicking_drop;
 pub(crate) use deferred_task::DeferredTaskFactory;
 pub(crate) use remote::{RemoteFutureFactory, prepare_remote};

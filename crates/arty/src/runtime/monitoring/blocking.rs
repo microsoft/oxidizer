@@ -3,7 +3,7 @@
 
 use super::TaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::task::preparation::BlockingTask;
+use crate::task::preparation::{BlockingTask, BlockingTaskOutcome};
 
 pub(crate) enum BlockingJob {
     Plain(Box<dyn FnOnce() + Send + 'static>),
@@ -11,10 +11,19 @@ pub(crate) enum BlockingJob {
 }
 
 impl BlockingJob {
-    pub(crate) fn run(self) {
+    #[cfg(test)]
+    pub(crate) fn run(self) -> Option<BlockingTaskOutcome> {
+        let mut outcome = None;
+        self.run_with(&mut |terminal| outcome = Some(terminal));
+        outcome
+    }
+
+    fn run_with(self, finish: &mut dyn FnMut(BlockingTaskOutcome)) {
         match self {
-            Self::Plain(body) => body(),
-            Self::Monitored(body) => body.run(),
+            Self::Plain(body) => {
+                body();
+            }
+            Self::Monitored(body) => body.run(finish),
         }
     }
 
@@ -28,7 +37,7 @@ impl BlockingJob {
 
 pub(crate) trait MonitoredBlockingJob: Send + Sync {
     fn info(&self) -> &TaskInfo;
-    fn run(&self);
+    fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome));
 }
 
 #[derive(Clone, Debug, Default)]
@@ -71,26 +80,9 @@ impl BlockingTaskMonitoring {
                 info,
             }));
         }
-        BlockingJob::Plain(Box::new(move || task.run(BlockingTaskEvents::default())))
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-pub(crate) struct BlockingTaskEvents<'a> {
-    info: Option<&'a TaskInfo>,
-}
-
-impl BlockingTaskEvents<'_> {
-    pub(crate) fn completed(self) {
-        if let Some(info) = self.info {
-            info.completed();
-        }
-    }
-
-    pub(crate) fn panicked(self) {
-        if let Some(info) = self.info {
-            info.panicked();
-        }
+        BlockingJob::Plain(Box::new(move || {
+            task.run(|_| {});
+        }))
     }
 }
 
@@ -110,12 +102,12 @@ where
         &self.info
     }
 
-    fn run(&self) {
+    fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome)) {
         let task = std::mem::replace(
             &mut *self.task.lock().expect("taking a blocking callback does not execute user code"),
             BlockingTask { pending: None },
         );
-        task.run(BlockingTaskEvents { info: Some(&self.info) });
+        task.run(finish);
     }
 }
 
@@ -152,30 +144,47 @@ impl BlockingWorkerMonitoring {
     }
 
     pub(crate) fn run(&self, body: BlockingJob, canceled: bool) -> std::thread::Result<()> {
-        let observation = self.handle.as_ref().filter(|_| !canceled).and_then(|worker| {
-            body.monitoring().map(|body| {
-                let info = body.info();
-                info.started_on(worker.task_events());
-                let poll = worker.is_observed().then(|| worker.task_poll_started(info.id()));
-                (worker, poll)
-            })
-        });
+        let monitored = body.monitoring().cloned();
+        let mut poll = None;
+        let mut current = None;
+        if let Some(worker) = self.handle.as_ref().filter(|_| !canceled)
+            && let Some(body) = &monitored
+        {
+            let info = body.info();
+            let events = worker.task_events();
+            let observed = worker.is_observed();
+            let token = observed.then(|| worker.task_poll_started(info.id()));
+            info.started_on(events, token.as_ref().and_then(seismograph_runtime::task::TaskPoll::started_at));
+            if let Some(token) = token {
+                current = Some(seismograph_runtime::task::enter_task(info.id(), events));
+                poll = Some((worker, token));
+            }
+        }
+        let mut finish = |terminal| {
+            drop(current.take());
+            if let Some((worker, poll)) = poll.take() {
+                worker.task_poll_finished(poll);
+            }
+            if let Some(body) = &monitored {
+                match terminal {
+                    BlockingTaskOutcome::Completed => body.info().completed(),
+                    BlockingTaskOutcome::Panicked => body.info().panicked(),
+                }
+            }
+        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _current = observation
-                .as_ref()
-                .and_then(|(_, poll)| poll.as_ref())
-                .and_then(|_| body.monitoring())
-                .map(|body| seismograph_runtime::task::enter_task(body.info().id()));
             if canceled {
                 drop(body);
             } else {
-                body.run();
+                body.run_with(&mut finish);
             }
         }));
-        if let Some((worker, Some(poll))) = observation {
+        drop(finish);
+        drop(current.take());
+        if let Some((worker, poll)) = poll.take() {
             worker.task_poll_finished(poll);
         }
-        outcome
+        outcome.map(|_| ())
     }
 }
 

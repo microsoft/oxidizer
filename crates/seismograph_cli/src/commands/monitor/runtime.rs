@@ -209,8 +209,9 @@ impl RuntimeMonitorSnapshot {
             let Some(runtime) = event.runtime() else { continue };
             let runtime_id = runtime.runtime_id.get();
             let worker_id = runtime.worker_id.map(seismograph::recorder::runtime::WorkerId::get);
-            // TaskReady is emitted on the notifier's OS thread, not an executor worker.
-            let executor_worker_id = worker_id.filter(|_| event.kind != EventKind::TaskReady);
+            // TaskReady names the notifier and TaskSpawned names the origin.
+            // Neither identifies the worker that executes the task.
+            let executor_worker_id = worker_id.filter(|_| !matches!(event.kind, EventKind::TaskReady | EventKind::TaskSpawned));
             if let Some(worker_id) = executor_worker_id {
                 workers
                     .entry((runtime_id, Some(worker_id)))
@@ -723,7 +724,7 @@ mod tests {
         );
         assert_eq!(
             result.workers.iter().map(|worker| worker.worker_id).collect::<Vec<_>>(),
-            [Some(7), Some(8)]
+            [None, Some(8)]
         );
         assert_eq!(
             result.workers[0]

@@ -5,7 +5,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::TaskCompletion;
 
-use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
+use crate::runtime::monitoring::{BlockingJob, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 
@@ -29,20 +29,26 @@ pub(crate) struct BlockingTask<F, R: Send + 'static> {
     pub(crate) pending: Option<(F, Sender<R>)>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BlockingTaskOutcome {
+    Completed,
+    Panicked,
+}
+
 impl<F, R> BlockingTask<F, R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn run(mut self, monitoring: BlockingTaskEvents<'_>) {
+    pub(crate) fn run(mut self, finish: impl FnOnce(BlockingTaskOutcome)) {
         let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => {
-                monitoring.completed();
+                finish(BlockingTaskOutcome::Completed);
                 result_tx.completed(result);
             }
             Err(panic) => {
-                monitoring.panicked();
+                finish(BlockingTaskOutcome::Panicked);
                 result_tx.panicked(panic, None);
             }
         }

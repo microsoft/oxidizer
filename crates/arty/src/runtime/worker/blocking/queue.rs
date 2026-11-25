@@ -153,14 +153,7 @@ impl Queue {
         for (index, slot) in state.workers.iter_mut().enumerate() {
             slot.registration = Some(self.register_worker(runtime, index));
         }
-        let events = state
-            .workers
-            .first()
-            .and_then(|slot| slot.registration.as_ref())
-            .expect("a blocking pool starts with at least one worker")
-            .handle()
-            .task_events();
-        self.monitoring.enable(events);
+        self.monitoring.enable(runtime.task_events());
         state.runtime = Some(runtime.clone());
         drop(state);
         self.ready.notify_all();
@@ -210,10 +203,22 @@ impl Queue {
             .take(if index == 0 { usize::MAX } else { 0 })
             .map(|job| (job.body.monitoring().map(|body| body.info()), TaskActivityState::Ready));
         let mut descriptions = current.chain(queued);
+        let worker_id = request.worker_id();
         let tasks = descriptions
             .by_ref()
             .take(request.limit())
-            .filter_map(|(info, activity)| info.map(|info| info.describe(activity)))
+            .filter_map(|(info, state)| {
+                info.map(|info| {
+                    let mut task = info.describe(state);
+                    if state == TaskActivityState::Running {
+                        task.last_worker_id = Some(worker_id);
+                        if let Some(activity) = &mut task.activity {
+                            activity.poll_worker_id = Some(worker_id);
+                        }
+                    }
+                    task
+                })
+            })
             .collect();
         let status = if descriptions.next().is_some() {
             TaskCollection::Truncated
@@ -238,6 +243,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::monitoring::TaskInfo;
+    use crate::task::preparation::BlockingTaskOutcome;
 
     #[derive(Default)]
     pub(super) struct ScriptedCondvar {
@@ -294,7 +300,9 @@ mod tests {
             &self.0
         }
 
-        fn run(&self) {}
+        fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome)) {
+            finish(BlockingTaskOutcome::Completed);
+        }
     }
 
     #[test]
@@ -685,7 +693,9 @@ mod tests {
                 &self.0
             }
 
-            fn run(&self) {}
+            fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome)) {
+                finish(BlockingTaskOutcome::Completed);
+            }
         }
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();

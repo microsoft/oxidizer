@@ -25,9 +25,7 @@ mod tests;
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(crate) use asynchronous::WorkerMonitoring;
-pub(crate) use blocking::{
-    BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob,
-};
+pub(crate) use blocking::{BlockingJob, BlockingPoolMonitoring, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob};
 pub(crate) use runtime::RuntimeMonitoring;
 pub(crate) use task::{TaskInfo, current_events, current_task};
 #[cfg(test)]

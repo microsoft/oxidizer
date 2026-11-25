@@ -141,6 +141,13 @@ impl WorkerHandle {
         self.runtime.control.requests.load(Ordering::Relaxed) != 0 || is_enabled(EventClass::RuntimeTask)
     }
 
+    /// Returns whether this worker has a dispatched task request to retire.
+    #[must_use]
+    #[inline]
+    pub fn has_pending_task_request(&self) -> bool {
+        self.worker.request_pending.load(Ordering::Acquire)
+    }
+
     /// Routes bounded task requests to this worker's native storage.
     ///
     /// The callback runs on the diagnostic caller and must return promptly.

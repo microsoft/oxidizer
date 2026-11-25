@@ -354,20 +354,25 @@ fn queued_and_running_blocking_tasks_come_from_native_pool_storage() {
         .tasks
         .iter()
         .map(|task| {
-            let worker = snapshot
-                .workers
-                .iter()
-                .find(|worker| Some(worker.id) == task.last_worker_id)
-                .unwrap();
-            (worker.role, task.activity.unwrap().state, task.metrics_scope)
+            let role = task
+                .last_worker_id
+                .and_then(|id| snapshot.workers.iter().find(|worker| worker.id == id))
+                .map(|worker| worker.role);
+            let activity = task.activity.unwrap();
+            (role, activity.state, activity.poll_worker_id, task.metrics_scope)
         })
         .collect::<Vec<_>>();
 
     assert_eq!(
         states,
         [
-            (WorkerRole::Blocking, TaskActivityState::Running, TaskMetricsScope::Uncollected),
-            (WorkerRole::Blocking, TaskActivityState::Ready, TaskMetricsScope::Uncollected),
+            (
+                Some(WorkerRole::Blocking),
+                TaskActivityState::Running,
+                snapshot.tasks[0].last_worker_id,
+                TaskMetricsScope::Uncollected,
+            ),
+            (None, TaskActivityState::Ready, None, TaskMetricsScope::Uncollected),
         ]
     );
 }
@@ -631,6 +636,24 @@ fn recording_reports_real_async_and_blocking_outcomes() {
     assert!(canceled.join().unwrap_err().is_shutdown());
     let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+    for (terminal_index, terminal) in snapshot.events.events.iter().enumerate() {
+        if !matches!(terminal.kind, EventKind::TaskCompleted | EventKind::TaskPanicked) {
+            continue;
+        }
+        let payload = terminal.runtime().unwrap();
+        if payload.runtime_id != id {
+            continue;
+        }
+        assert!(
+            snapshot.events.events[..terminal_index].iter().any(|event| {
+                event.kind == EventKind::TaskPollFinished
+                    && event
+                        .runtime()
+                        .is_some_and(|candidate| candidate.runtime_id == id && candidate.subject_id == payload.subject_id)
+            }),
+            "a terminal outcome must follow its final poll"
+        );
+    }
     let outcomes = snapshot
         .events
         .events
@@ -858,6 +881,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
     assert!(anywhere.join().unwrap_err().is_shutdown());
     assert_eq!(native.tasks.len(), 3);
     let root = native.tasks.iter().find(|task| task.parent.is_none()).unwrap();
+    let origin_worker = root.last_worker_id.unwrap();
     let children = native.tasks.iter().filter(|task| task.id != root.id).collect::<Vec<_>>();
     assert!(children.iter().all(|task| task.parent == Some(root.id)));
     let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
@@ -874,7 +898,11 @@ fn queued_remote_children_retain_their_recorded_parent() {
                         .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == child.id.get())
             })
             .unwrap();
-        assert_eq!(spawn.runtime().unwrap().related_id, root.id.get());
+        let payload = spawn.runtime().unwrap();
+        assert_eq!(
+            (payload.related_id, payload.worker_id, child.spawned_at),
+            (root.id.get(), Some(origin_worker), Some(spawn.timestamp))
+        );
     }
 }
 
