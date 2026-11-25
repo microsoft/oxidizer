@@ -15,8 +15,16 @@ use seismograph_runtime::snapshot::{
     Counters, CountersScope, RuntimeState, Task, TaskActivity, TaskActivityState, TaskCollection, TaskMetrics, TaskMetricsScope,
     WorkerState,
 };
+use seismograph_runtime::task::TaskProperties;
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, register_runtime};
+
+fn task_properties(descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> TaskProperties {
+    let mut spawn = TaskProperties::new(descriptor);
+    spawn.parent = parent;
+    spawn.body_size = body_size;
+    spawn
+}
 
 fn capture(disposition: EventBufferDisposition) -> DecodedSnapshot {
     let bytes = seismograph::snapshot(SnapshotOptions {
@@ -59,11 +67,6 @@ fn payload(
     reason = "One fixture owns the recording session and its ordered lifecycle assertions"
 )]
 fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exact() {
-    struct Parent;
-    struct Child;
-    struct Legacy;
-    struct Sized;
-
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         event_capacity_per_thread: EventBufferCapacity::new(1024),
@@ -76,55 +79,44 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
     let worker = first.handle();
     let first_id = first.id();
     let second_id = second.id();
-    let runtime_handle = runtime.handle();
-    let parent_task = runtime_handle
-        .spawned::<Parent>(|properties| properties.origin(runtime_id, first_id))
-        .unwrap();
-    let parent = parent_task.id();
-    let child_task = runtime_handle
-        .spawned::<Child>(|properties| properties.parent(Some(parent)).origin(runtime_id, first_id))
-        .unwrap();
-    let child = child_task.id();
-    let legacy_task = runtime_handle
-        .spawned::<Legacy>(|properties| properties.parent(Some(parent)).origin(runtime_id, first_id))
-        .unwrap();
-    let legacy = legacy_task.id();
-    let sized_task = runtime_handle
-        .spawned::<Sized>(|properties| properties.body_size(321).parent(Some(parent)).origin(runtime_id, first_id))
-        .unwrap();
-    let sized = sized_task.id();
-    let descriptors = [
-        parent_task.snapshot(TaskActivityState::Unknown).type_descriptor,
-        child_task.snapshot(TaskActivityState::Unknown).type_descriptor,
-        legacy_task.snapshot(TaskActivityState::Unknown).type_descriptor,
-        sized_task.snapshot(TaskActivityState::Unknown).type_descriptor,
-    ];
+    let task_events = worker.task_events();
+    let parent = task_events
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(11).unwrap(), None, 0))
+        .unwrap()
+        .id();
+    let child = task_events
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(13).unwrap(), Some(parent), 0))
+        .unwrap()
+        .id();
+    let legacy = task_events
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(17).unwrap(), Some(parent), 0))
+        .unwrap()
+        .id();
+    let sized = task_events
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(19).unwrap(), Some(parent), 321))
+        .unwrap()
+        .id();
     let tasks = Arc::new(Mutex::new(
-        [
-            (parent, descriptors[0], 0),
-            (child, descriptors[1], 0),
-            (legacy, descriptors[2], 0),
-            (sized, descriptors[3], 321),
-        ]
-        .map(|(id, descriptor, size)| Task {
-            id,
-            parent: (id != parent).then_some(parent),
-            type_descriptor: descriptor,
-            future_size_bytes: Some(size),
-            spawned_at: None,
-            last_worker_id: Some(first_id),
-            metrics: TaskMetrics::default(),
-            metrics_scope: TaskMetricsScope::Uncollected,
-            activity: Some(TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Waiting,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            }),
-        })
-        .to_vec(),
+        [(parent, 11, 0), (child, 13, 0), (legacy, 17, 0), (sized, 19, 321)]
+            .map(|(id, descriptor, size)| Task {
+                id,
+                parent: (id != parent).then_some(parent),
+                type_descriptor: TypeDescriptorId::from_raw(descriptor).unwrap(),
+                future_size_bytes: Some(size),
+                spawned_at: None,
+                last_worker_id: Some(first_id),
+                metrics: TaskMetrics::default(),
+                metrics_scope: TaskMetricsScope::Uncollected,
+                activity: Some(TaskActivity {
+                    observed_at: EventTimestamp::from_ticks(100),
+                    state: TaskActivityState::Waiting,
+                    ready_since: None,
+                    poll_started_at: None,
+                    poll_worker_id: None,
+                    queued_since: None,
+                }),
+            })
+            .to_vec(),
     ));
     worker
         .register_task_provider({
@@ -153,14 +145,14 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
             ))
         });
     }
-    let poll = child_task.poll_started(&worker);
+    let poll = worker.task_poll_started(child);
     let polling = runtime_source(&capture(EventBufferDisposition::Retain));
     let task = polling.runtimes[0].tasks.iter().find(|value| value.id == child).unwrap();
     assert_eq!(task.metrics, TaskMetrics::default());
     assert_eq!(task.metrics_scope, TaskMetricsScope::Uncollected);
     assert_eq!(task.last_worker_id, Some(first_id));
     assert_eq!(polling.runtimes[0].workers[0].current_task, Some(child));
-    child_task.poll_finished(&worker, poll);
+    worker.task_poll_finished(poll);
     {
         let mut tasks = tasks.lock().unwrap();
         let child = tasks.iter_mut().find(|task| task.id == child).unwrap();
@@ -176,8 +168,8 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
         .unwrap();
     assert_eq!(ready.state, TaskActivityState::Ready);
     assert_eq!((ready.ready_since, ready.queued_since), (None, None));
-    let poll = child_task.poll_started(&worker);
-    child_task.poll_finished(&worker, poll);
+    let poll = worker.task_poll_started(child);
+    worker.task_poll_finished(poll);
     let polled = runtime_source(&capture(EventBufferDisposition::Retain));
     let task = polled.runtimes[0].tasks.iter().find(|value| value.id == child).unwrap();
     assert_eq!(task.metrics, TaskMetrics::default());
@@ -196,10 +188,10 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
         .subject_id;
     worker.instance_relocated(&transfer);
     worker.transfer_finished(transfer);
-    child_task.completed(&worker);
-    parent_task.canceled();
-    sized_task.panicked(&worker);
-    legacy_task.completed(&worker);
+    task_events.completed(child);
+    second.handle().task_events().canceled(parent);
+    task_events.panicked(sized);
+    task_events.completed(legacy);
     tasks.lock().unwrap().clear();
     runtime.stopping();
     runtime.stopping();
@@ -227,13 +219,7 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
         .collect::<Vec<_>>();
     assert_eq!(
         actual,
-        expected_events(
-            runtime_id,
-            [first_id, second_id],
-            [parent, child, legacy, sized],
-            descriptors,
-            transfer_id,
-        )
+        expected_events(runtime_id, [first_id, second_id], [parent, child, legacy, sized], transfer_id)
     );
     assert_terminal_source(&snapshot);
 }
@@ -260,16 +246,9 @@ fn assert_initial_source(snapshot: &DecodedSnapshot, runtime_id: RuntimeId, work
     );
 }
 
-fn expected_events(
-    runtime_id: RuntimeId,
-    workers: [WorkerId; 2],
-    tasks: [TaskId; 4],
-    descriptors: [TypeDescriptorId; 4],
-    transfer_id: u64,
-) -> [(EventKind, RuntimeEvent); 26] {
+fn expected_events(runtime_id: RuntimeId, workers: [WorkerId; 2], tasks: [TaskId; 4], transfer_id: u64) -> [(EventKind, RuntimeEvent); 26] {
     let [first_id, second_id] = workers;
     let [parent, child, legacy, sized] = tasks;
-    let [parent_descriptor, child_descriptor, legacy_descriptor, sized_descriptor] = descriptors;
     let p = |worker, subject, related, first, second| payload(runtime_id, worker, subject, related, first, second);
     [
         (EventKind::RuntimeCreated, p(None, 0, 0, 4, 0)),
@@ -278,22 +257,10 @@ fn expected_events(
             EventKind::WorkerStarted,
             p(Some(second_id), second_id.get(), 0, 2, u64::from(u32::MAX)),
         ),
-        (
-            EventKind::TaskSpawned,
-            p(Some(first_id), parent.get(), 0, parent_descriptor.get(), 1),
-        ),
-        (
-            EventKind::TaskSpawned,
-            p(Some(first_id), child.get(), parent.get(), child_descriptor.get(), 1),
-        ),
-        (
-            EventKind::TaskSpawned,
-            p(Some(first_id), legacy.get(), parent.get(), legacy_descriptor.get(), 1),
-        ),
-        (
-            EventKind::TaskSpawned,
-            p(Some(first_id), sized.get(), parent.get(), sized_descriptor.get(), 322),
-        ),
+        (EventKind::TaskSpawned, p(Some(first_id), parent.get(), 0, 11, 1)),
+        (EventKind::TaskSpawned, p(Some(first_id), child.get(), parent.get(), 13, 1)),
+        (EventKind::TaskSpawned, p(Some(first_id), legacy.get(), parent.get(), 17, 1)),
+        (EventKind::TaskSpawned, p(Some(first_id), sized.get(), parent.get(), 19, 322)),
         (EventKind::WorkerParked, p(Some(first_id), first_id.get(), 0, 0, 0)),
         (EventKind::WorkerUnparked, p(Some(first_id), first_id.get(), 0, 0, 0)),
         (EventKind::TaskEnqueued, p(Some(first_id), child.get(), 0, 0, 0)),
@@ -315,7 +282,7 @@ fn expected_events(
             p(Some(first_id), transfer_id, child.get(), 0, second_id.get()),
         ),
         (EventKind::TaskCompleted, p(Some(first_id), child.get(), 0, 0, 0)),
-        (EventKind::TaskCanceled, p(None, parent.get(), 0, 0, 0)),
+        (EventKind::TaskCanceled, p(Some(second_id), parent.get(), 0, 0, 0)),
         (EventKind::TaskPanicked, p(Some(first_id), sized.get(), 0, 0, 0)),
         (EventKind::TaskCompleted, p(Some(first_id), legacy.get(), 0, 0, 0)),
         (EventKind::RuntimeStopping, p(None, 0, 0, 0, 0)),

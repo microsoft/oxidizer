@@ -21,29 +21,15 @@ fn unidentified_type_descriptor_is_reserved() {
     assert_ne!(allocate_type_descriptor_id().get(), 1);
 }
 
-fn task_description(
-    id: seismograph::recorder::runtime::TaskId,
+fn task_properties(
     descriptor: seismograph::recorder::runtime::TypeDescriptorId,
-    state: TaskActivityState,
-) -> Task {
-    Task {
-        id,
-        parent: None,
-        type_descriptor: descriptor,
-        future_size_bytes: None,
-        spawned_at: None,
-        last_worker_id: None,
-        metrics: seismograph_runtime::snapshot::TaskMetrics::default(),
-        metrics_scope: TaskMetricsScope::Uncollected,
-        activity: Some(seismograph_runtime::snapshot::TaskActivity {
-            observed_at: EventTimestamp::now(),
-            state,
-            ready_since: None,
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: None,
-        }),
-    }
+    parent: Option<seismograph::recorder::runtime::TaskId>,
+    body_size: usize,
+) -> TaskProperties {
+    let mut spawn = TaskProperties::new(descriptor);
+    spawn.parent = parent;
+    spawn.body_size = body_size;
+    spawn
 }
 
 #[expect(
@@ -78,7 +64,7 @@ fn all_native_constructor_states_survive_process_snapshot_encoding() {
         .handle()
         .register_task_provider(move |request| {
             request.respond(
-                states.map(|state| task_description(allocate_task_id(), descriptor, state)).to_vec(),
+                states.map(|state| Task::new(allocate_task_id(), descriptor, state)).to_vec(),
                 TaskCollection::Complete,
             );
         })
@@ -120,7 +106,7 @@ fn captures_keep_one_running_row_when_a_task_also_appears_in_a_queue() {
         running
             .handle()
             .register_task_provider(move |request| {
-                let mut running = task_description(task, descriptor, TaskActivityState::Running);
+                let mut running = Task::new(task, descriptor, TaskActivityState::Running);
                 running.last_worker_id = Some(running_worker);
                 request.respond(vec![running], TaskCollection::Complete);
             })
@@ -130,8 +116,8 @@ fn captures_keep_one_running_row_when_a_task_also_appears_in_a_queue() {
             .register_task_provider(move |request| {
                 request.respond(
                     vec![
-                        task_description(task, descriptor, TaskActivityState::Ready),
-                        task_description(other_task, descriptor, TaskActivityState::Ready),
+                        Task::new(task, descriptor, TaskActivityState::Ready),
+                        Task::new(other_task, descriptor, TaskActivityState::Ready),
                     ],
                     TaskCollection::Truncated,
                 );
@@ -213,9 +199,10 @@ fn metadata_backtrace_override_controls_lifecycle_and_spawn_events() {
     let runtime = register_runtime(RuntimeMetadata::new("no-lifecycle-stacks", 1).lifecycle_backtraces(BacktraceCapture::Never));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
 
-    runtime
+    worker
         .handle()
-        .spawned::<()>(|properties| properties.origin(runtime.id(), worker.id()))
+        .task_events()
+        .spawned(|| task_properties(allocate_type_descriptor_id(), None, 0))
         .unwrap();
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let captured = seismograph::snapshot::decode(captured.as_bytes()).unwrap();
@@ -250,10 +237,9 @@ fn finishing_an_observed_poll_records_the_pair_and_releases_the_worker_slot() {
     let handle = worker.handle();
     let task = allocate_task_id();
 
-    let task = handle.unrecorded(task);
-    let poll = task.poll_started(&handle);
+    let poll = handle.task_poll_started(task);
     let during = runtime.handle().capture(CaptureOptions::default()).unwrap();
-    task.poll_finished(&handle, poll);
+    handle.task_poll_finished(poll);
     let after = runtime.handle().capture(CaptureOptions::default()).unwrap();
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let captured = seismograph::snapshot::decode(captured.as_bytes()).unwrap();
@@ -494,9 +480,10 @@ fn simulated_timeout_preserves_the_request_limit_and_cancels_the_request() {
 fn event_and_capture_values_preserve_copy_and_unwind_contracts() {
     use std::panic::{RefUnwindSafe, UnwindSafe};
     fn value<T: Send + Sync + UnwindSafe + RefUnwindSafe>() {}
+    fn copied<T: Copy>() {}
+    value::<seismograph_runtime::task::EventContext>();
+    copied::<seismograph_runtime::task::EventContext>();
     value::<seismograph_runtime::task::TaskProperties>();
-    value::<seismograph_runtime::task::MonitoredTask<seismograph_runtime::task::Inactive>>();
-    value::<seismograph_runtime::task::MonitoredTask<seismograph_runtime::task::Active>>();
     static_assertions::assert_not_impl_any!(TaskProperties: Clone, Copy);
     value::<CaptureOptions>();
     value::<TaskCollection>();
@@ -517,7 +504,7 @@ fn current_native_state_is_available_without_event_recording() {
     handle
         .register_task_provider(move |request| {
             request.respond(
-                vec![task_description(task, descriptor, TaskActivityState::Ready)],
+                vec![Task::new(task, descriptor, TaskActivityState::Ready)],
                 TaskCollection::Complete,
             );
         })
@@ -567,7 +554,7 @@ fn stopping_events_does_not_freeze_native_task_state() {
             let state = Arc::clone(&state);
             move |request| {
                 let state = *state.lock().unwrap();
-                request.respond(vec![task_description(task, descriptor, state)], TaskCollection::Complete);
+                request.respond(vec![Task::new(task, descriptor, state)], TaskCollection::Complete);
             }
         })
         .unwrap();
@@ -622,7 +609,7 @@ fn collection_truncates_an_oversized_provider_response() {
         .register_task_provider(|request| {
             let descriptor = allocate_type_descriptor_id();
             request.respond(
-                vec![task_description(allocate_task_id(), descriptor, TaskActivityState::Waiting); 2],
+                vec![Task::new(allocate_task_id(), descriptor, TaskActivityState::Waiting); 2],
                 TaskCollection::Complete,
             );
         })
@@ -651,7 +638,7 @@ fn a_response_exactly_at_the_limit_remains_complete() {
         .handle()
         .register_task_provider(|request| {
             request.respond(
-                vec![task_description(
+                vec![Task::new(
                     allocate_task_id(),
                     allocate_type_descriptor_id(),
                     TaskActivityState::Waiting,
@@ -729,9 +716,7 @@ fn abandoning_an_observed_poll_clears_its_worker_slot() {
     let runtime = register_runtime(RuntimeMetadata::new("abandoned-poll", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let id = allocate_task_id();
-    let worker = worker.handle();
-    let task = worker.unrecorded(id);
-    let poll = task.poll_started(&worker);
+    let poll = worker.handle().task_poll_started(id);
     let during = runtime.handle().capture(CaptureOptions::default()).unwrap();
 
     drop(poll);
@@ -746,29 +731,19 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
     seismograph::recorder(Configuration::default());
     let runtime = register_runtime(RuntimeMetadata::new("recorded-task-lifecycle", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-    let handle = runtime.handle();
-    let worker = worker.handle();
+    let events = worker.handle().task_events();
+    let descriptor = allocate_type_descriptor_id();
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(true),
         ..Configuration::default()
     });
 
-    let completed_task = handle
-        .spawned::<()>(|properties| properties.origin(handle.id(), worker.id()))
-        .unwrap();
-    let completed = completed_task.id();
-    completed_task.completed(&worker);
-    let panicked_task = handle
-        .spawned::<()>(|properties| properties.body_size(64).parent(Some(completed)).origin(handle.id(), worker.id()))
-        .unwrap();
-    let panicked = panicked_task.id();
-    panicked_task.panicked(&worker);
-    let canceled_task = handle
-        .spawned::<()>(|properties| properties.body_size(4096).origin(handle.id(), worker.id()))
-        .unwrap();
-    let canceled = canceled_task.id();
-    let descriptor = canceled_task.snapshot(TaskActivityState::Unknown).type_descriptor;
-    canceled_task.canceled();
+    let completed = events.spawned(|| task_properties(descriptor, None, 0)).unwrap().id();
+    events.completed(completed);
+    let panicked = events.spawned(|| task_properties(descriptor, Some(completed), 64)).unwrap().id();
+    events.panicked(panicked);
+    let canceled = events.spawned(|| task_properties(descriptor, None, 4096)).unwrap().id();
+    events.canceled(canceled);
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
     seismograph::recorder(Configuration::default());
@@ -814,19 +789,24 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
     });
     let previous = register_runtime(RuntimeMetadata::new("previous-task-events", 1));
     let previous_worker = previous.register_worker(WorkerMetadata::new(WorkerRole::Core));
-    previous
+    previous_worker
         .handle()
-        .spawned::<()>(|properties| properties.origin(previous.id(), previous_worker.id()))
+        .task_events()
+        .spawned(|| task_properties(allocate_type_descriptor_id(), None, 0))
         .unwrap();
     seismograph::recorder(Configuration::default());
     seismograph::recorder::clear_buffers().unwrap();
     let (created, events) = std::thread::spawn(|| {
         let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core)).handle();
-        let runtime = runtime.handle();
-        let created = runtime
-            .spawned::<()>(|properties| properties.body_size(64).origin(runtime.id(), worker.id()))
-            .map(|spawn| spawn.id());
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let context = worker.handle().task_events();
+        let id = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
+
+        let created = context.spawned(|| task_properties(descriptor, None, 64)).map(|spawn| spawn.id());
+        context.completed(id);
+        context.panicked(id);
+        context.canceled(id);
         let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
         (created, snapshot.events)
@@ -842,8 +822,9 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
     let runtime = register_runtime(RuntimeMetadata::new("lazy-spawn-metadata", 1));
-    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core)).handle();
-    let runtime_handle = runtime.handle();
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = allocate_type_descriptor_id();
     let parent = allocate_task_id();
     let calls = std::cell::Cell::new(0);
     seismograph::recorder(Configuration {
@@ -851,16 +832,24 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
         ..Configuration::default()
     });
 
-    let spawned = runtime_handle
-        .spawned::<()>(|properties| {
-            calls.set(calls.get() + 1);
-            properties
-                .body_size(64)
-                .parent(Some(parent))
-                .origin(runtime_handle.id(), worker.id())
+    let spawned = context
+        .spawned(|| {
+            let mut spawn = task_properties(
+                {
+                    calls.set(calls.get() + 1);
+                    descriptor
+                },
+                Some(parent),
+                64,
+            );
+            spawn.spawned_at = Some(EventTimestamp::from_ticks(42));
+            spawn
         })
         .unwrap();
-    let task = spawned.snapshot(TaskActivityState::Ready);
+    let mut task = Task::new(spawned.id(), spawned.descriptor, TaskActivityState::Ready);
+    task.parent = spawned.parent;
+    task.spawned_at = spawned.spawned_at;
+    task.future_size_bytes = Some(u64::try_from(spawned.body_size).expect("a task body fits the platform address space"));
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
     seismograph::recorder(Configuration::default());
@@ -877,24 +866,17 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
         .unwrap();
     let payload = event.runtime().unwrap();
 
-    assert_eq!(task.spawned_at, Some(event.timestamp));
+    assert_eq!(task.spawned_at, Some(EventTimestamp::from_ticks(42)));
     assert_eq!(
         (
             calls.get(),
-            task.type_descriptor,
+            spawned.descriptor,
             task.spawned_at,
             payload.related_id,
             payload.value_0,
             payload.value_1
         ),
-        (
-            1,
-            task.type_descriptor,
-            Some(event.timestamp),
-            parent.get(),
-            task.type_descriptor.get(),
-            65,
-        )
+        (1, descriptor, Some(event.timestamp), parent.get(), descriptor.get(), 65)
     );
 }
 
@@ -903,17 +885,18 @@ fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
     let runtime = register_runtime(RuntimeMetadata::new("lazy-disabled-spawn", 1));
-    let context = runtime.handle();
-    let create = |_| panic!("disabled or suppressed recording must not enrich task metadata");
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
+    let create = || TaskProperties::new(descriptor());
 
-    let disabled = context.spawned::<()>(create);
+    let disabled = context.spawned(create);
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let suppressed = without_recording(|| context.spawned::<()>(create));
+    let suppressed = without_recording(|| context.spawned(create));
     seismograph::recorder(Configuration::default());
 
-    assert!(disabled.is_none());
-    assert!(suppressed.is_none());
+    assert_eq!((disabled, suppressed), (None, None));
 }

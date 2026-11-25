@@ -157,7 +157,7 @@ impl BlockingWorkerMonitoring {
             let observed = worker.is_observed();
             poll = info.started_on(worker, observed);
             if poll.is_some() {
-                current = Some(arty_executor::enter_task(info.id(), worker));
+                current = Some(arty_executor::enter_task(info.id()));
             }
         }
         let outcome = {

@@ -4,34 +4,9 @@
 //! Contracts at the boundary between native task providers and inspection.
 
 use seismograph::recorder::event::EventTimestamp;
-use seismograph_runtime::snapshot::{CaptureOptions, Task, TaskActivity, TaskActivityState, TaskCollection, TaskMetrics, TaskMetricsScope};
+use seismograph_runtime::snapshot::{CaptureOptions, Task, TaskActivityState, TaskCollection, TaskMetrics, TaskMetricsScope};
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
-
-fn task(
-    id: seismograph::recorder::runtime::TaskId,
-    descriptor: seismograph::recorder::runtime::TypeDescriptorId,
-    state: TaskActivityState,
-) -> Task {
-    Task {
-        id,
-        parent: None,
-        type_descriptor: descriptor,
-        future_size_bytes: None,
-        spawned_at: None,
-        last_worker_id: None,
-        metrics: TaskMetrics::default(),
-        metrics_scope: TaskMetricsScope::Uncollected,
-        activity: Some(TaskActivity {
-            observed_at: EventTimestamp::now(),
-            state,
-            ready_since: None,
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: None,
-        }),
-    }
-}
 
 #[test]
 fn providers_cannot_supply_poll_measurements_or_override_the_responding_worker() {
@@ -47,7 +22,7 @@ fn providers_cannot_supply_poll_measurements_or_override_the_responding_worker()
         .register_task_provider(move |request| {
             let tasks = [second, first]
                 .map(|id| {
-                    let mut task = task(id, descriptor, TaskActivityState::Ready);
+                    let mut task = Task::new(id, descriptor, TaskActivityState::Ready);
                     task.last_worker_id = Some(other_id);
                     task.metrics = TaskMetrics {
                         poll_count: 7,

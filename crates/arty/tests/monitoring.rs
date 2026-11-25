@@ -208,7 +208,6 @@ fn remote_spawn_uses_origin_metadata_and_destination_execution() {
     let root = native.tasks.iter().find(|task| task.parent.is_none()).unwrap();
     let children = native.tasks.iter().filter(|task| task.parent == Some(root.id)).collect::<Vec<_>>();
     assert_eq!(children.len(), 2);
-    let origin_worker = root.last_worker_id.unwrap();
     assert_eq!(
         children
             .iter()
@@ -239,7 +238,7 @@ fn remote_spawn_uses_origin_metadata_and_destination_execution() {
         let payload = spawn.runtime().unwrap();
         assert_eq!(
             (payload.worker_id, payload.related_id, child.spawned_at),
-            (Some(origin_worker), root.id.get(), Some(spawn.timestamp))
+            (None, root.id.get(), Some(spawn.timestamp))
         );
         assert!(snapshot.events.events.iter().any(|event| {
             event.kind == EventKind::TaskPollStarted
