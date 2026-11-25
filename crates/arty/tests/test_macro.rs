@@ -33,7 +33,7 @@ pub async fn main_with_panic_shutdown(cx: Context) -> Result<(), arty::task::Joi
 }
 
 /// This compile-pass fixture sets the ignore panic policy and other options.
-#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+#[arty::main(panic = ignore, workers = 1)]
 pub async fn main_with_panic_ignore(cx: Context) -> Result<(), arty::task::JoinError> {
     assert!(
         cx.scheduler()
@@ -98,18 +98,12 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .into_iter()
-        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 1);
     for task in tasks {
         assert_eq!(task.await.unwrap(), home);
     }
-}
-
-#[test(monitor = enabled)]
-async fn test_can_enable_monitoring(cx: Context) {
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[test(monitor = disabled, workers = 1)]
@@ -122,8 +116,7 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .into_iter()
-        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 3);
     let workers: std::collections::HashSet<_> = futures::future::join_all(tasks).await.into_iter().map(Result::unwrap).collect();
@@ -136,8 +129,7 @@ async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .into_iter()
-        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
         .collect();
     assert_eq!(tasks.len(), 1);
     for task in tasks {
@@ -170,8 +162,7 @@ mod controlled_time {
         let tasks: Vec<_> = cx
             .control()
             .workers()
-            .into_iter()
-            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+            .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async { std::thread::current().id() }))
             .collect();
         assert_eq!(tasks.len(), 1);
         for task in tasks {

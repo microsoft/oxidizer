@@ -554,7 +554,9 @@ fn allows_type(actual: &Mime) -> bool {
             return false;
         }
 
-        return ![
+        return !
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The exclusion array is used only by an any membership query with a pure case-insensitive comparison, so its order cannot change the result")]
+        [
             "application/gzip",
             "application/x-gzip",
             "application/zip",
@@ -623,6 +625,7 @@ fn weaken_etag(headers: &mut HeaderMap) {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn weak_etag_value(etag: &HeaderValue) -> HeaderValue {
+    // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, literal.int_to_zero, tag = "equivalent", reason = "This expression only reserves Vec capacity; extend_from_slice independently writes W/ and every original ETag byte")]
     let mut bytes = Vec::with_capacity(etag.as_bytes().len() + 2);
     bytes.extend_from_slice(b"W/");
     bytes.extend_from_slice(etag.as_bytes());
@@ -666,6 +669,7 @@ impl Client {
 
         // Descending quality values state the preference. Token order alone does
         // not assign different quality values.
+        // #[gamma::skip(arith.mul_to_add, arith.mul_to_div, tag = "equivalent", reason = "This expression is only the initial capacity estimate; every advertised coding and weight is appended independently")]
         let mut joined = String::with_capacity(self.decompress_responses.len() * ACCEPT_ENCODING_ENTRY_CAPACITY);
 
         for (index, format) in self.decompress_responses.iter().filter_map(|f| f.content_encoding()).enumerate() {
@@ -741,6 +745,7 @@ impl Server {
             accept_encoding.append(ACCEPT_ENCODING, value.clone());
         }
 
+        // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "With no enabled formats compress_response unconditionally returns the original response before reading selection, so computing an unused negotiation selection cannot affect the request or response")]
         if self.compress_responses.is_empty() || request.method() == Method::HEAD {
             return ResponseNegotiation {
                 selection: negotiate::Selection::Identity,
@@ -762,7 +767,13 @@ impl Server {
         head: bool,
         connect: bool,
     ) -> Result<HttpResponse> {
-        if self.compress_responses.is_empty() || head || (connect && response.status().is_success()) {
+        if self.compress_responses.is_empty()
+            || head
+            || (
+                // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "The next guard also returns the unchanged response for every non-success status")]
+                connect && response.status().is_success()
+            )
+        {
             return Ok(response);
         }
 
@@ -773,6 +784,7 @@ impl Server {
 
         // Every negotiated response depends on `Accept-Encoding`, including an
         // uncompressed response. A cache must keep these variants separate.
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after still executes the complete header update and replaces its unit result with the identical unit value")]
         mark_varies_on_accept_encoding(response.headers_mut());
 
         if !carries_a_body(&response) {
@@ -799,6 +811,7 @@ impl Server {
         };
 
         let (mut parts, body) = response.into_parts();
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "compress only propagates generic compressor construction, which has validated native settings and no failing constructor path for enabled formats")]
         let body = self.compress(config, &mut parts.headers, body, format)?;
 
         Ok(HttpResponse::from_parts(parts, body))
@@ -821,6 +834,7 @@ impl Server {
             return Ok(body);
         };
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Generic format construction supplies only a validated Level; all enabled format constructors succeed and zstd's init-stage compression-level setter only clamps a scalar")]
         let compressor = CompressorBuilder::new()
             .level(self.level)
             .build_format(format, &config.resources)
@@ -830,6 +844,7 @@ impl Server {
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_DIGEST_HEADER);
         headers.remove(REPR_DIGEST_HEADER);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves the ETag update and only replaces its unit return value with unit")]
         weaken_etag(headers);
 
         body.map(|content| {
@@ -934,6 +949,7 @@ impl Config {
 
         // These formats use validated default decoder options.
         // `formats` is in header order, so decompression walks it backwards.
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Every generic decompressor uses infallible default native settings; runtime output limits are checked while reading, not during construction, and no custom zstd window option is supplied")]
         let decompressors = formats
             .iter()
             .rev()
@@ -1018,7 +1034,45 @@ impl Config {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use http_extensions::HttpBodyBuilder;
+
     use super::*;
+
+    #[test]
+    fn gamma_round2_negotiation_skips_head_and_disabled_formats() {
+        for (formats, method) in [(&[Format::Gzip][..], Method::HEAD), (&[][..], Method::GET)] {
+            let layer = Compression::server().compress_responses(formats);
+            let request = http::Request::builder()
+                .method(method)
+                .header(ACCEPT_ENCODING, "gzip, identity;q=0")
+                .body(HttpBodyBuilder::new_fake().empty())
+                .unwrap();
+            let negotiation = layer.role.choose_response_format(&request);
+            assert_eq!(negotiation.selection, negotiate::Selection::Identity);
+            assert_eq!(negotiation.accept_encoding.get(ACCEPT_ENCODING).unwrap(), "gzip, identity;q=0");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_not_acceptable_removes_content_range() {
+        let response = http::Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_RANGE, "bytes 0-3/8")
+            .header(CONTENT_TYPE, "text/plain")
+            .body(HttpBodyBuilder::new_fake().text("body"))
+            .unwrap();
+        let response = not_acceptable(response).unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+        assert!(!response.headers().contains_key(CONTENT_RANGE));
+        assert!(!response.headers().contains_key(CONTENT_TYPE));
+        assert_eq!(futures::executor::block_on(response.into_body().into_text()).unwrap(), "");
+    }
+
+    #[test]
+    fn gamma_round2_decompression_requires_a_coding_header() {
+        let headers = HeaderMap::new();
+        assert!(!wants_decompression(&[Format::Gzip], &headers));
+    }
 
     #[test]
     fn raw_deflate_has_no_http_content_encoding() {

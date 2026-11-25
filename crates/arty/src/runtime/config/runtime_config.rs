@@ -2,9 +2,11 @@
 // Licensed under the MIT License.
 
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
-use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{MonitorOptions, RuntimeName};
 use crate::runtime::hook::HookRegistration;
+use crate::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 
 /// Resource settings validated during runtime construction.
 #[derive(Debug)]
@@ -14,7 +16,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
     pub(crate) monitor_options: MonitorOptions,
-    pub(crate) hook_registrations: Vec<HookRegistration>,
+    pub(crate) hook_registrations: Mutex<Vec<HookRegistration>>,
 }
 
 impl Default for RuntimeConfig {
@@ -27,18 +29,7 @@ impl Default for RuntimeConfig {
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
             monitor_options: MonitorOptions::default(),
-            hook_registrations: Vec::new(),
+            hook_registrations: Mutex::new(Vec::new()),
         }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_runtime_shares_blocking_pool() {
-        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
     }
 }

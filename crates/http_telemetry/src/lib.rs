@@ -44,13 +44,18 @@
 //! | `http.server.request.error` | Error | `HTTP server request failed` | The handler or the response body returned an error or panicked. |
 //! | `http.server.request.abandoned` | Warn | `HTTP server request abandoned` | The caller dropped the request future before the handler returned, or the server dropped the response body before its end. |
 //!
-//! Each event carries the [attributes](#metric-httpserverrequestduration) of the metric
+//! Each event has the [attributes](#metric-httpserverrequestduration) of the metric
 //! `http.server.request.duration`, and these fields:
 //!
 //! | Field | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|
 //! | `http.server.request.duration` | double | HTTP request duration in seconds. | `0.012` | Always |
 //! | `http.request.method_original` | string | The method as the client sent it. | `PURGE` | If `http.request.method` is `_OTHER`. |
+//! | `http.route.parameter.<name>` | string | The value of a [configured route parameter](TelemetryLayer::route_parameter_data_classes), percent-encoded as in the request, redacted according to its data class. | `1` | If the request matches a route that has the parameter. |
+//! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer::request_header_data_classes), redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`. | `0f3a9c` | If the request has the header. |
+//! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer::response_header_data_classes), as for a request header. | `120` | If the response has the header. |
+//! | `http.request.body.content` | string | The start of the request body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer::request_body_media_types) cover the `Content-Type` of the request. |
+//! | `http.response.body.content` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer::response_body_media_types) cover the `Content-Type` of the response. |
 //!
 //! # Metrics
 //!
@@ -67,11 +72,16 @@
 //! | `network.protocol.version` | string | Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3. | `1.1`; `2` | Always |
 //! | `server.address` | string | Host of the server, from the request URI, else from the `Host` header. An IPv6 address keeps its brackets. | `example.com`; `[2001:db8::1]` | If the request URI or the `Host` header names a host. |
 //! | `server.port` | int | Port of the server, from the request URI, else 80 for `http` and 443 for `https`. A request URI without a host takes the port from the `Host` header. | `443`; `8080` | If the port is known. |
+//! | `http.route` | string | The template of the route that the request matches. | `/books/{book}` | If the layer has a [resolver](TelemetryLayer::route_resolver) and the request matches one of its routes. |
 //! | `http.response.status_code` | int | HTTP response status code. | `200` | If the handler returned a response. |
 //! | `error.type` | string | Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`](http_extensions::HttpError) and the kind of each I/O error. A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code. | `validation`; `io.connection_refused`; `panic`; `503`; `abandoned` | If the request ended with an error, a panic or a drop, or with a status from 500 to 599. |
 //!
 //! `server.address` and `server.port` come from the request, so a client that sends new host names
 //! creates new metric series.
+//!
+//! The middleware matches each request to a route of its resolver, with the method and the path of
+//! the request. The query does not take part. Give the middleware a resolver with the same routes
+//! as the application, so that both match a request to the same route.
 //!
 //! ## Metric: `http.server.active_requests`
 //!
@@ -114,6 +124,38 @@
 //! - A response to `HEAD`.
 //! - A response to `CONNECT` with a status from 200 to 299.
 //! - A response with a status from 100 to 199, 204 or 304.
+//!
+//! # Bodies
+//!
+//! The middleware logs no body of a direction while the list of media types of that direction is
+//! empty, which is the default. If the list is not empty, the middleware always logs a body whose
+//! `Content-Type` is one of these types:
+//!
+//! - A `text` type, such as `text/plain` or `text/csv`.
+//! - An `application` type whose subtype ends with `+json` or `+xml`, such as
+//!   `application/problem+json`.
+//!
+//! The media types in the list add more types, such as `application/json`. The list cannot remove
+//! the types above. So with only `application/json` in the list, the middleware also logs
+//! `text/csv` and `application/soap+xml` bodies. ASCII case and the parameters of a `Content-Type`
+//! do not matter.
+//!
+//! The middleware does not redact the bodies that it logs, so the logs can contain personal data
+//! from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
+//! `identity`, because the text of compressed bytes cannot be read. To log the bodies that the
+//! server layer of `http_compression` compresses or decompresses, put this layer after that layer
+//! in the tuple.
+//!
+//! The middleware copies the bytes of a logged request body while the handler reads the body, so
+//! the events show the bytes that the handler read before the request ended. The middleware does
+//! not read a request body by itself, so it does not delay the handler. A request body whose bytes
+//! are already in memory is copied when the request arrives, also if the handler does not read it.
+//!
+//! The middleware copies the bytes of a logged response body while the server reads the body, so
+//! the error and abandoned events show the bytes that the server read before the request ended.
+//!
+//! The copy of a body grows only with the bytes that arrive, up to the size limit, so the length
+//! that a client declares does not decide how much memory the middleware uses.
 //!
 //! # When the middleware emits no event
 //!
@@ -168,4 +210,5 @@
 mod server;
 mod telemetry;
 
+pub use server::MediaTypeError;
 pub use telemetry::{Telemetry, TelemetryLayer};

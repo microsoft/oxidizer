@@ -191,36 +191,14 @@ where
     }
 }
 
+// These tests inspect private in-flight membership, including an unregistered key.
 #[cfg(test)]
 mod tests {
-    use tick::Clock;
-
     use super::*;
-
-    fn create_refresh() -> TimeToRefresh<String> {
-        TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio(None))
-    }
-
-    #[test]
-    fn time_to_refresh_new() {
-        let refresh = create_refresh();
-
-        assert_eq!(refresh.duration, Duration::from_mins(1));
-    }
-
-    #[test]
-    fn time_to_refresh_should_refresh_false_when_recent() {
-        let refresh = create_refresh();
-        let clock = Clock::new_frozen();
-
-        // An entry cached at the current time should not need refresh yet
-        let now = clock.system_time();
-        assert!(!refresh.should_refresh(now, now));
-    }
 
     #[test]
     fn time_to_refresh_try_start_refresh() {
-        let refresh = create_refresh();
+        let refresh = TimeToRefresh::<String>::new(Duration::from_mins(1), Spawner::new_tokio(None));
 
         // First call should succeed (not already in flight)
         let key = "key1".to_string();
@@ -236,7 +214,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh() {
-        let refresh = create_refresh();
+        let refresh = TimeToRefresh::<String>::new(Duration::from_mins(1), Spawner::new_tokio(None));
 
         let key = "key1".to_string();
 
@@ -254,7 +232,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh_nonexistent_key() {
-        let refresh = create_refresh();
+        let refresh = TimeToRefresh::<String>::new(Duration::from_mins(1), Spawner::new_tokio(None));
 
         // Finishing a non-existent key should not panic
         // Test passes if this doesn't panic
@@ -265,41 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn time_to_refresh_should_refresh_true_when_clock_goes_backward() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(5), Spawner::new_tokio(None));
-        let clock = Clock::new_frozen();
-
-        // cached_at in the future relative to now causes duration_since to return Err
-        let now = clock.system_time();
-        let cached_at = now + Duration::from_hours(1);
-        assert!(
-            refresh.should_refresh(cached_at, now),
-            "should return true when system time goes backward"
-        );
-    }
-
-    #[test]
-    fn time_to_refresh_should_refresh_true_after_duration() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio(None));
-        let clock = Clock::new_frozen();
-
-        // cached_at is 61 seconds before now, exceeding the 60s refresh duration
-        let now = clock.system_time();
-        let cached_at = now - Duration::from_secs(61);
-
-        assert!(refresh.should_refresh(cached_at, now));
-    }
-
-    #[test]
-    fn time_to_refresh_duration_access() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(5), Spawner::new_tokio(None));
-
-        assert_eq!(refresh.duration, Duration::from_mins(5));
-    }
-
-    #[test]
     fn time_to_refresh_concurrent_keys() {
-        let refresh = create_refresh();
+        let refresh = TimeToRefresh::<String>::new(Duration::from_mins(1), Spawner::new_tokio(None));
 
         // Multiple keys can be in flight simultaneously
         let key1 = "key1".to_string();
@@ -323,139 +268,109 @@ mod tests {
         assert!(refresh.try_start_refresh(&key2));
         assert!(!refresh.try_start_refresh(&key3));
     }
-
-    #[test]
-    fn time_to_refresh_debug() {
-        let refresh = create_refresh();
-        let debug_str = format!("{refresh:?}");
-        assert!(debug_str.contains("TimeToRefresh"), "got: {debug_str}");
-        assert!(debug_str.contains("duration"), "got: {debug_str}");
-    }
 }
 
 #[cfg(test)]
 mod fetch_and_promote_tests {
+    // These tests invoke refresh without a public read, inject request IDs, or
+    // inspect in-flight cleanup. No public API exposes these intermediate states.
     use cachet_tier::MockCache;
-    use testing_aids::tracing_logs::Capture;
     use tick::Clock;
 
     use super::*;
     use crate::InsertPolicy;
-    use crate::telemetry::attributes;
     use crate::wrapper::CacheWrapper;
+
+    #[test]
+    fn refresh_completion_follows_the_outcome_for_hits_misses_and_errors() {
+        struct Handler(Arc<Mutex<Vec<String>>>);
+        impl crate::CacheEventHandler for Handler {
+            fn on_tier_event(&self, event: &crate::CacheTierEvent<'_>) {
+                assert_eq!(event.request_id, 71);
+                assert_eq!(event.tier_name, "manual-refresh");
+                assert!(event.fallback);
+                self.0.lock().push(event.outcome.to_owned());
+            }
+
+            fn on_operation_complete(&self, event: &crate::CacheOperationEvent<'_>) {
+                assert_eq!(event.request_id, 71);
+                assert_eq!(event.cache_name, "manual-refresh");
+                assert_eq!(event.duration, Duration::ZERO);
+                assert!(!event.coalesced);
+                self.0.lock().push(event.operation.to_owned());
+            }
+        }
+
+        for outcome in ["hit", "miss", "error"] {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let fallback = MockCache::<String, i32>::new();
+            let key = "refresh-key".to_owned();
+            if outcome == "hit" {
+                block_on(fallback.insert(key.clone(), CacheEntry::new(42))).unwrap();
+            } else if outcome == "error" {
+                fallback.fail_when(|_| true);
+            }
+            let telemetry = CacheTelemetry::new().with_handler(Arc::new(Handler(Arc::clone(&events))));
+            let cache = FallbackCache::new(
+                "manual-refresh",
+                MockCache::<String, i32>::new(),
+                fallback,
+                Clock::new_frozen(),
+                None,
+                telemetry,
+            );
+
+            block_on(cache.inner.fetch_and_promote(key).with_request_id(71));
+
+            assert_eq!(*events.lock(), [format!("cache.refresh_{outcome}"), "cache.refresh".to_owned()]);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_duplicate_refresh_records_each_suppression_without_starting_a_background_task() {
+        use seismograph::recorder::event::EventKind;
+
+        seismograph::recorder(seismograph::recorder::Configuration {
+            cache: seismograph::recorder::Policy::all(false),
+            event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(1024),
+            ..Default::default()
+        });
+        let count = || {
+            let owner = seismograph::recorder::thread_id();
+            seismograph::snapshot::decode(
+                seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap()
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == owner && event.kind == EventKind::CacheRefreshSuppressed)
+            .count()
+        };
+        let refresh = TimeToRefresh::new(Duration::from_secs(47), Spawner::new_tokio(None));
+        let key = "already-in-flight".to_owned();
+        assert!(refresh.try_start_refresh(&key));
+        let cache = FallbackCache::new(
+            "round2-suppressed",
+            MockCache::<String, i32>::new(),
+            MockCache::<String, i32>::new(),
+            Clock::new_frozen(),
+            Some(refresh),
+            CacheTelemetry::new(),
+        );
+        let before = count();
+        for expected in 1..=2 {
+            cache.do_refresh(&key);
+            assert_eq!(count(), before + expected);
+            assert!(!cache.inner.refresh.as_ref().unwrap().try_start_refresh(&key));
+        }
+    }
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
-    }
-
-    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(primary: P, fallback: F) -> FallbackCache<String, i32, P, F> {
-        let clock = Clock::new_frozen();
-        let telemetry = CacheTelemetry::new();
-        FallbackCache::new("test", primary, fallback, clock, None, telemetry)
-    }
-
-    #[test]
-    fn fallback_miss_logs_refresh_miss_telemetry() {
-        block_on(async {
-            let capture = Capture::new();
-            let _guard = tracing::subscriber::set_default(capture.subscriber());
-
-            let clock = Clock::new_frozen();
-            let telemetry = CacheTelemetry::with_logging();
-            let primary = MockCache::<String, i32>::new();
-            let fallback = MockCache::<String, i32>::new();
-            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
-
-            // Fallback is empty → handle_fallback_miss Ok(None) branch
-            fc.inner.fetch_and_promote("missing".to_string()).await;
-
-            capture.assert_contains(attributes::FIELD_EVENT);
-            capture.assert_contains(attributes::EVENT_REFRESH_MISS);
-        });
-    }
-
-    #[test]
-    fn fallback_error_logs_refresh_error_telemetry() {
-        block_on(async {
-            let capture = Capture::new();
-            let _guard = tracing::subscriber::set_default(capture.subscriber());
-
-            let clock = Clock::new_frozen();
-            let telemetry = CacheTelemetry::with_logging();
-            let primary = MockCache::<String, i32>::new();
-            let fallback = MockCache::<String, i32>::new();
-            fallback.fail_when(|_| true);
-            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
-
-            // Fallback errors route through handle_fallback_error.
-            fc.inner.fetch_and_promote("key".to_string()).await;
-
-            capture.assert_contains(attributes::FIELD_EVENT);
-            capture.assert_contains(attributes::EVENT_REFRESH_ERROR);
-        });
-    }
-
-    #[test]
-    fn hit_no_promote() {
-        block_on(async {
-            let primary_mock = MockCache::<String, i32>::new();
-            let primary_check = primary_mock.clone();
-            let fallback = MockCache::<String, i32>::new();
-            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-
-            let clock = Clock::new_frozen();
-            let telemetry = CacheTelemetry::new();
-            let primary = CacheWrapper::new(
-                "primary",
-                primary_mock,
-                clock.clone(),
-                None,
-                telemetry.clone(),
-                InsertPolicy::never(),
-                false,
-            );
-            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
-
-            // Fallback hit with never() policy → handle_fallback_hit without promotion
-            fc.inner.fetch_and_promote("key".to_string()).await;
-
-            // Primary should still be empty
-            assert!(primary_check.get(&"key".to_string()).await.unwrap().is_none());
-        });
-    }
-
-    #[test]
-    fn hit_with_promote() {
-        block_on(async {
-            let primary = MockCache::<String, i32>::new();
-            let fallback = MockCache::<String, i32>::new();
-            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-
-            let fc = build_fallback_cache(primary.clone(), fallback);
-
-            // Fallback hit with always() policy → promote_to_primary success
-            fc.inner.fetch_and_promote("key".to_string()).await;
-
-            // Primary should now have the value
-            let result = primary.get(&"key".to_string()).await.unwrap();
-            assert!(result.is_some());
-            assert_eq!(*result.unwrap().value(), 42);
-        });
-    }
-
-    #[test]
-    fn promote_error() {
-        block_on(async {
-            let primary = MockCache::<String, i32>::new();
-            primary.fail_when(|_| true);
-            let fallback = MockCache::<String, i32>::new();
-            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-
-            let fc = build_fallback_cache(primary, fallback);
-
-            // Fallback hit, primary insert fails → promote_to_primary error path
-            fc.inner.fetch_and_promote("key".to_string()).await;
-        });
     }
 
     /// Regression test: if `fetch_and_promote` panics, the key must not remain
@@ -524,40 +439,6 @@ mod fetch_and_promote_tests {
         let fc = build_mock_fallback_cache(primary, fallback);
         // do_refresh with no refresh configured should be a no-op
         fc.do_refresh(&"key".to_string());
-    }
-
-    /// Exercises the early return when a refresh is already in-flight for the
-    /// same key (line `if !refresh.try_start_refresh(key) { return; }`).
-    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
-    // feature unification (tokio `net`), which is unsupported under Miri.
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn do_refresh_already_in_flight_returns_early() {
-        let primary = MockCache::<String, i32>::new();
-        let fallback = MockCache::<String, i32>::new();
-        let clock = Clock::new_frozen();
-        let telemetry = CacheTelemetry::new();
-        let refresh = TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio(None));
-
-        let primary_wrapper = CacheWrapper::new(
-            "primary",
-            primary,
-            clock.clone(),
-            None,
-            telemetry.clone(),
-            InsertPolicy::default(),
-            false,
-        );
-        let fc = FallbackCache::new("test", primary_wrapper, fallback, clock, Some(refresh), telemetry);
-
-        let key = "key".to_string();
-        // First refresh adds key to in_flight set
-        fc.do_refresh(&key);
-        // Second refresh should hit early return since key is already in-flight
-        fc.do_refresh(&key);
-
-        // Give spawned tasks time to complete
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     #[test]

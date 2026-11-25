@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph"
-version = "0.5.0"
+version = "0.6.0"
 description = "High-performance process telemetry with extensible snapshot sources."
 readme = "README.md"
 keywords = ["telemetry", "diagnostics", "profiling", "performance"]
@@ -36,6 +36,7 @@ monitor = ["dep:seismograph_protocol"]
 test-util = ["monitor", "seismograph_protocol/test-util"]
 
 [dependencies]
+backtrace = { workspace = true, features = ["std"] }
 seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -44,6 +45,10 @@ windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] 
 [dev-dependencies]
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 tempfile = { workspace = true }
+
+[[test]]
+name = "snapshot_symbols"
+required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

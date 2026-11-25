@@ -35,6 +35,33 @@ fn format(record: &SdkLogRecord, scope: &InstrumentationScope, config: LogFormat
 }
 
 #[test]
+fn gamma_survivor_minimal_omits_metadata_and_propagates_escaped_brace_write_errors() {
+    let (record, scope) = create_record_and_scope(|r| {
+        r.set_body("prefix{{name}}".into());
+        r.set_target("must-not-appear");
+        r.set_event_name("must-not-appear-either");
+    });
+    assert_eq!(format(&record, &scope, LogFormatConfig::minimal()), "prefix{name}\n");
+    for capacity in 0.."prefix{name}\n".len() {
+        let mut buffer = [0; 64];
+        let mut writer = &mut buffer[..capacity];
+        assert!(print_log_record(&mut writer, &record, &scope, LogFormatConfig::minimal()).is_err());
+    }
+}
+
+#[test]
+fn gamma_round2_unclosed_placeholder_decodes_inner_braces_and_returns_writer_errors() {
+    let (record, scope) = create_record_and_scope(|r| r.set_body("{unclosed{{tail".into()));
+    assert_eq!(format(&record, &scope, LogFormatConfig::minimal()), "{unclosed{tail\n");
+    for capacity in [0, "{unclosed".len()] {
+        let mut bytes = [0; 32];
+        let mut writer = &mut bytes[..capacity];
+        let result = print_log_record(&mut writer, &record, &scope, LogFormatConfig::minimal());
+        assert!(result.is_err(), "capacity {capacity} must propagate the writer failure");
+    }
+}
+
+#[test]
 fn format_body_string_inlines_attributes() {
     let (record, scope) = create_record_and_scope(|r| {
         r.set_body(AnyValue::String("hello {name}, {name}! {missing}".into()));

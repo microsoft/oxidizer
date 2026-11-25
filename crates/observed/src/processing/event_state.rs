@@ -6,10 +6,10 @@
 use std::borrow::Cow;
 use std::ops::ControlFlow;
 
-use crate::Event;
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::FieldVisitorFn;
+use crate::{Event, VisitFields};
 
 /// An intermediate event state that can be either a lazy typed event or a pre-constructed dynamic
 /// event reference.
@@ -140,8 +140,8 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
 /// the `T: Event` bound when the actual event is dispatched via `&dyn DynEvent`.
 pub(crate) struct NoopEvent;
 
-impl Event for NoopEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new("noop", None, None, None, false, false);
+impl VisitFields for NoopEvent {
+    const CONTAINS_METRICS: bool = false;
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
@@ -149,19 +149,33 @@ impl Event for NoopEvent {
     }
 }
 
+impl Event for NoopEvent {
+    const DESCRIPTION: EventDescription = EventDescription::new("noop", None, None, None, false, false);
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    #[should_panic(expected = "NoopEvent should never have its fields accessed")]
+    fn nov4_noop_type_parameter_cannot_be_visited_as_an_event() {
+        let _ = NoopEvent.visit_fields(&mut |_, _| ControlFlow::Continue(()));
+    }
+
     struct TestEvent;
 
-    impl Event for TestEvent {
-        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
+    impl VisitFields for TestEvent {
+        const CONTAINS_METRICS: bool = false;
 
         fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
+    }
+
+    impl Event for TestEvent {
+        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
     }
 
     #[test]

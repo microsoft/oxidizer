@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_runtime"
-version = "0.5.0"
+version = "0.6.0"
 description = "Process-wide multi-runtime telemetry source for seismograph."
 readme = "README.md"
 keywords = ["runtime", "telemetry", "diagnostics", "profiling"]
@@ -24,6 +24,12 @@ exclude = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["seismograph::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+test-util = ["tick/test-util"]
 
 [dependencies]
 seismograph.workspace = true

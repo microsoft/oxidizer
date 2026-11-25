@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// Make the shared fixture's test-only scope explicit for coverage filtering.
+#![cfg(test)]
+
 use std::alloc::{Layout, alloc, dealloc};
 use std::mem::MaybeUninit;
 use std::num::NonZero;

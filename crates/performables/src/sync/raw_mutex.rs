@@ -40,6 +40,8 @@ impl<T> RawMutex<T> {
 
 impl<T: ?Sized> RawMutex<T> {
     pub(super) fn lock(&self) -> RawMutexGuard<'_, T> {
+        #[cfg(test)]
+        crate::sync::effects::record_lock();
         // Keep the uncontended CAS visible to downstream monomorphizations;
         // the explicit readiness probe avoids an out-of-line call on value borrows.
         let guard = if let Some(guard) = self.lock.try_lock() {
@@ -107,10 +109,12 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for RawMutexGuard<'_, T> {
 }
 
 impl<T: ?Sized> Drop for RawMutexGuard<'_, T> {
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     fn drop(&mut self) {
         // SAFETY: constructors acquire this mutex's ownership once. The private
         // field is never otherwise moved, and Rust runs this destructor once.
         let guard = unsafe { ManuallyDrop::take(&mut self.ownership) };
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         self.mutex.lock.unlock(guard);
     }
 }

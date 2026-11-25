@@ -159,7 +159,8 @@ impl Builder {
             let field_path: Vec<_> = variable.field_path().split('.').map(str::to_owned).collect();
             let schema = self
                 .resolve_field(input, &field_path)
-                .expect("descriptor ingestion validates every path variable against the input message");
+                .unwrap_or_else(|| Schema::scalar("string", None));
+            // #[gamma::skip(range.exclusive_to_inclusive, reason = "position identifies a Single segment, and capture_literal filters Single out, so including it adds no literal")]
             let prefix = parts[..position].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
             let suffix = parts[position..].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
             parameters.push(Parameter {
@@ -229,10 +230,14 @@ impl Builder {
             {
                 // Cycle guard: a message reachable from itself (directly or
                 // mutually) would otherwise recurse forever.
-                if visited.iter().any(|name| name == nested.full_name()) {
+                if
+                // #[gamma::skip(cond.always_false, iter.any_to_all, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                visited.iter().any(|name| name == nested.full_name()) {
+                    // #[gamma::skip(loop.delete_continue, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
                     continue;
                 }
                 let mut next_visited = visited.to_vec();
+                // #[gamma::skip(stmt.delete_call, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
                 next_visited.push(nested.full_name().to_owned());
                 self.collect_query(nested, &proto_path, &json_path, filter, parameters, &next_visited);
                 continue;
@@ -242,6 +247,7 @@ impl Builder {
             if field.is_map() {
                 continue;
             }
+            // #[gamma::skip(logical.and_remove_left, reason = "The preceding singular-message branch continues for every non-list non-map nested message, and the preceding map branch continues for every map; a remaining nested_message therefore already proves is_list")]
             if field.is_list() && nested_message.is_some() {
                 continue;
             }
@@ -689,6 +695,23 @@ impl Schema {
 
 #[cfg(all(test, not(miri)))]
 mod tests {
+    #[test]
+    fn gamma_nov6_status_reference_preserves_an_existing_schema() {
+        let mut builder = super::Builder::default();
+        builder.schemas.insert(
+            "google.rpc.Status".to_owned(),
+            super::Schema::scalar("string", Some("cached-status")),
+        );
+        let before = serde_json::to_value(&builder.schemas).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                serde_json::to_value(builder.status_ref()).unwrap(),
+                serde_json::json!({"$ref":"#/components/schemas/google.rpc.Status"})
+            );
+            assert_eq!(serde_json::to_value(&builder.schemas).unwrap(), before);
+        }
+    }
+
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::{env, fs, process};
@@ -699,6 +722,151 @@ mod tests {
     use crate::build::{DescriptorOptions, Generator, ServiceDefinition};
 
     static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn gamma_nov4_message_and_enum_cache_hits_retain_the_exact_preexisting_schema() {
+        use prost_types::{DescriptorProto, EnumDescriptorProto, EnumValueDescriptorProto, FileDescriptorProto, FileDescriptorSet};
+        let pool = prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("cached.proto".into()),
+                package: Some("cached".into()),
+                message_type: vec![DescriptorProto {
+                    name: Some("Message".into()),
+                    ..Default::default()
+                }],
+                enum_type: vec![EnumDescriptorProto {
+                    name: Some("Choice".into()),
+                    value: vec![EnumValueDescriptorProto {
+                        name: Some("FIRST".into()),
+                        number: Some(0),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+        let mut builder = Builder::default();
+        builder
+            .schemas
+            .insert("cached.Message".into(), Schema::scalar("string", Some("message-sentinel")));
+        builder
+            .schemas
+            .insert("cached.Choice".into(), Schema::scalar("integer", Some("enum-sentinel")));
+        let before = serde_json::to_value(&builder.schemas).unwrap();
+        for _ in 0..2 {
+            let message = builder.message_ref(&pool.get_message_by_name("cached.Message").unwrap());
+            let enumeration = builder.enum_ref(&pool.get_enum_by_name("cached.Choice").unwrap());
+            assert_eq!(
+                serde_json::to_value(message).unwrap(),
+                serde_json::json!({"$ref":"#/components/schemas/cached.Message"})
+            );
+            assert_eq!(
+                serde_json::to_value(enumeration).unwrap(),
+                serde_json::json!({"$ref":"#/components/schemas/cached.Choice"})
+            );
+            assert_eq!(serde_json::to_value(&builder.schemas).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_body_field_exclusion_applies_only_at_the_request_root() {
+        use prost_types::field_descriptor_proto::{Label, Type};
+        use prost_types::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet};
+
+        let scalar = FieldDescriptorProto {
+            name: Some("body".to_owned()),
+            number: Some(1),
+            label: Some(Label::Optional.into()),
+            r#type: Some(Type::String.into()),
+            ..Default::default()
+        };
+        let nested = FieldDescriptorProto {
+            name: Some("nested".to_owned()),
+            number: Some(2),
+            label: Some(Label::Optional.into()),
+            r#type: Some(Type::Message.into()),
+            type_name: Some(".Inner".to_owned()),
+            ..Default::default()
+        };
+        let pool = prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("round2_nested.proto".to_owned()),
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("Input".to_owned()),
+                        field: vec![scalar.clone(), nested],
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Inner".to_owned()),
+                        field: vec![scalar],
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+        let input = pool.get_message_by_name("Input").unwrap();
+        let route = Route::new(
+            "Fetch".to_owned(),
+            routerama::HttpMethod::POST,
+            "/".to_owned(),
+            RequestBody::Field("body".to_owned()),
+            ResponseBody::Whole,
+        );
+        let parameters = serde_json::to_value(Builder::default().parameters(&route, &input)).unwrap();
+        assert_eq!(
+            parameters,
+            serde_json::json!([{
+                "name": "nested.body",
+                "in": "query",
+                "required": false,
+                "schema": {"type": "string"}
+            }])
+        );
+    }
+
+    #[test]
+    fn gamma_round2_unresolved_parameter_paths_use_string_schema_without_panicking() {
+        use prost_types::{DescriptorProto, FileDescriptorProto, FileDescriptorSet};
+
+        let pool = prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("round2_empty.proto".to_owned()),
+                message_type: vec![DescriptorProto {
+                    name: Some("Empty".to_owned()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+        let input = pool.get_message_by_name("Empty").unwrap();
+        let mut builder = Builder::default();
+        assert!(builder.resolve_field(&input, &[]).is_none());
+        assert!(builder.resolve_field(&input, &["missing".to_owned(), "leaf".to_owned()]).is_none());
+        let route = Route::new(
+            "Fetch".to_owned(),
+            routerama::HttpMethod::GET,
+            "/{missing.leaf}".to_owned(),
+            RequestBody::Whole,
+            ResponseBody::Whole,
+        );
+        let parameters = serde_json::to_value(builder.parameters(&route, &input)).unwrap();
+        assert_eq!(
+            parameters,
+            serde_json::json!([{
+                "name": "missing.leaf",
+                "in": "path",
+                "required": true,
+                "schema": {"type": "string"}
+            }])
+        );
+        assert!(builder.schemas.is_empty());
+    }
 
     #[test]
     fn capture_representation_requires_at_most_one_single_segment() {

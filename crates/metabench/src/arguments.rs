@@ -77,7 +77,14 @@ impl Arguments {
     }
 
     pub(crate) fn parse() -> Result<Self, Error> {
-        Self::parse_from(env::args_os().skip(1), env::var_os("BENCH_ENGINE"))
+        Self::parse_process(env::args_os(), |name| env::var_os(name))
+    }
+
+    fn parse_process(
+        arguments: impl IntoIterator<Item = OsString>,
+        environment: impl FnOnce(&str) -> Option<OsString>,
+    ) -> Result<Self, Error> {
+        Self::parse_from(arguments.into_iter().skip(1), environment("BENCH_ENGINE"))
     }
 
     pub(crate) fn args_for(&self, mode: Mode) -> &[OsString] {
@@ -191,6 +198,7 @@ impl Arguments {
                     }
                     no_output = true;
                 }
+                // #[gamma::skip(assign_value.default, reason = "bool Default is exactly the assigned false value")]
                 Some("--no-baseline") => automatic_baseline = false,
                 // Native benchmark flags are added when finalizing non-smoke invocations.
                 Some("--bench") => {}
@@ -307,33 +315,125 @@ impl Arguments {
 }
 
 pub(crate) fn paths_alias(left: &Path, right: &Path) -> bool {
+    paths_alias_with(left, right, path_metadata, metadata_identifies_same_file, resolved_path)
+}
+
+fn path_metadata(path: &Path) -> std::io::Result<std::fs::Metadata> {
+    #[cfg(test)]
+    if TEST_RESOLUTION_HOOKS.get().is_some() {
+        return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+    }
+    path.metadata()
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_paths<R>(run: impl FnOnce() -> R) -> R {
+    struct Reset(Option<TestResolutionHooks>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_RESOLUTION_HOOKS.set(self.0);
+        }
+    }
+    let reset = Reset(TEST_RESOLUTION_HOOKS.replace(Some(TestResolutionHooks {
+        current_directory: || Ok(PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
+        exists: |_| true,
+        canonicalize: |path| Ok(path.to_owned()),
+    })));
+    let result = run();
+    drop(reset);
+    result
+}
+
+fn paths_alias_with<M>(
+    left: &Path,
+    right: &Path,
+    mut metadata: impl FnMut(&Path) -> std::io::Result<M>,
+    same_file: impl FnOnce(&M, &M) -> bool,
+    mut resolve: impl FnMut(&Path) -> Option<PathBuf>,
+) -> bool {
     if left == right {
         return true;
     }
-    if let (Ok(left_metadata), Ok(right_metadata)) = (left.metadata(), right.metadata())
-        && metadata_identifies_same_file(&left_metadata, &right_metadata)
+    if let (Ok(left_metadata), Ok(right_metadata)) = (metadata(left), metadata(right))
+        && same_file(&left_metadata, &right_metadata)
     {
         return true;
     }
-    resolved_path(left)
-        .zip(resolved_path(right))
-        .is_some_and(|(left, right)| left == right)
+    resolve(left).zip(resolve(right)).is_some_and(|(left, right)| left == right)
 }
 
 fn resolved_path(path: &Path) -> Option<PathBuf> {
+    resolved_path_with(path, resolve_current_directory, resolve_path_exists, resolve_canonical_path)
+}
+
+fn resolve_current_directory() -> std::io::Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(hooks) = TEST_RESOLUTION_HOOKS.get() {
+        return (hooks.current_directory)();
+    }
+    env::current_dir()
+}
+
+fn resolve_path_exists(path: &Path) -> bool {
+    #[cfg(test)]
+    let path = ResolutionPath(path);
+    path.exists()
+}
+
+#[cfg(test)]
+struct ResolutionPath<'a>(&'a Path);
+
+#[cfg(test)]
+impl ResolutionPath<'_> {
+    fn exists(&self) -> bool {
+        TEST_RESOLUTION_HOOKS
+            .get()
+            .map_or_else(|| self.0.exists(), |hooks| (hooks.exists)(self.0))
+    }
+}
+
+fn resolve_canonical_path(path: &Path) -> std::io::Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(hooks) = TEST_RESOLUTION_HOOKS.get() {
+        return (hooks.canonicalize)(path);
+    }
+    path.canonicalize()
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestResolutionHooks {
+    current_directory: fn() -> std::io::Result<PathBuf>,
+    exists: fn(&Path) -> bool,
+    canonicalize: fn(&Path) -> std::io::Result<PathBuf>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_RESOLUTION_HOOKS: std::cell::Cell<Option<TestResolutionHooks>> = const { std::cell::Cell::new(None) };
+}
+
+fn resolved_path_with(
+    path: &Path,
+    current_dir: impl FnOnce() -> std::io::Result<PathBuf>,
+    mut exists: impl FnMut(&Path) -> bool,
+    canonicalize: impl FnOnce(&Path) -> std::io::Result<PathBuf>,
+) -> Option<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {
-        env::current_dir().ok()?.join(path)
+        current_dir().ok()?.join(path)
     };
     let normalized = normalize_path(&absolute);
     let mut existing = normalized.as_path();
     let mut suffix = Vec::new();
-    while !existing.exists() {
+    while !exists(existing) {
         suffix.push(existing.file_name()?.to_owned());
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding successful file_name proves this path is not a root or empty path and therefore has a parent")]
         existing = existing.parent()?;
     }
-    let mut resolved = existing.canonicalize().ok()?;
+    let mut resolved = canonicalize(existing).ok()?;
     for component in suffix.iter().rev() {
         resolved.push(component);
     }
@@ -403,7 +503,14 @@ fn normalize_gungraun_test_arguments(arguments: &mut [OsString], force_smoke: bo
             .ok_or_else(|| Error::InvalidGungraunTestArgument(argument.clone()))?;
         // Use the same boolean parser as Gungraun.
         smoke |= BoolishValueParser::new()
-            .parse_ref(&clap::Command::new("gungraun"), None, OsStr::new(value))
+            .parse_ref(
+                &clap::Command::new({
+                    // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "BoolishValueParser uses the command name only in its diagnostic context; this caller discards every clap error and returns the original argument unchanged")]
+                    "gungraun"
+                }),
+                None,
+                OsStr::new(value),
+            )
             .map_err(|_error| Error::InvalidGungraunTestArgument(argument.clone()))?;
     }
     for argument in arguments {
@@ -439,6 +546,7 @@ fn parse_duration(value: &OsStr) -> Result<Duration, Error> {
     } else {
         return Err(Error::InvalidTimeout(text.into_owned()));
     };
+    // #[gamma::skip(logical.or_remove_left, reason = "an empty number fails the following u64 parse and returns the same InvalidTimeout with the same original input")]
     if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(Error::InvalidTimeout(text.into_owned()));
     }
@@ -455,6 +563,293 @@ fn parse_duration(value: &OsStr) -> Result<Duration, Error> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn november_actual_path_resolution_retains_declared_identity_and_native_errors_without_filesystem_observation() {
+        struct Restore(Option<TestResolutionHooks>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_RESOLUTION_HOOKS.set(self.0);
+            }
+        }
+        fn root() -> PathBuf {
+            if cfg!(windows) {
+                PathBuf::from(r"C:\canonical")
+            } else {
+                PathBuf::from(std::path::MAIN_SEPARATOR_STR).join("canonical")
+            }
+        }
+        let _restore = Restore(TEST_RESOLUTION_HOOKS.replace(Some(TestResolutionHooks {
+            current_directory: || Ok(root()),
+            exists: |path| path == root(),
+            canonicalize: |path| {
+                assert_eq!(path, root());
+                Ok(root().join("resolved"))
+            },
+        })));
+        assert_eq!(
+            resolved_path(Path::new("first").join("second").as_path()),
+            Some(root().join("resolved").join("first").join("second"))
+        );
+        TEST_RESOLUTION_HOOKS.set(Some(TestResolutionHooks {
+            current_directory: || Err(std::io::Error::from_raw_os_error(5)),
+            exists: |_| panic!("failed working-directory observation must short-circuit"),
+            canonicalize: |_| panic!("failed working-directory observation must short-circuit"),
+        }));
+        assert_eq!(resolved_path(Path::new("declared")), None);
+    }
+
+    #[test]
+    fn november_boolish_command_name_changes_only_discarded_error_context() {
+        for value in [
+            "true", "false", "yes", "no", "y", "n", "1", "0", "on", "off", "TRUE", "TrUe", "", "xyzzy",
+        ] {
+            let parse = |command: &'static str| {
+                BoolishValueParser::new()
+                    .parse_ref(&clap::Command::new(command), None, OsStr::new(value))
+                    .map_err(|_error| ())
+            };
+            assert_eq!(parse("gungraun"), parse(""));
+            assert_eq!(parse("gungraun"), parse("xyzzy"));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_path_resolution_retains_missing_suffix_order_and_failure_policy() {
+        let working = if cfg!(windows) {
+            PathBuf::from(r"C:\working")
+        } else {
+            PathBuf::from(std::path::MAIN_SEPARATOR_STR).join("working")
+        };
+        let input = Path::new("existing").join("first").join("second");
+        let existing = working.join("existing");
+        let mut visited = Vec::new();
+        let result = resolved_path_with(
+            &input,
+            || Ok(working.clone()),
+            |path| {
+                visited.push(path.to_owned());
+                path == existing
+            },
+            |path| {
+                assert_eq!(path, existing);
+                Ok(working.join("physical"))
+            },
+        );
+        assert_eq!(result, Some(working.join("physical").join("first").join("second")));
+        assert_eq!(
+            visited,
+            [existing.join("first").join("second"), existing.join("first"), existing.clone()]
+        );
+        let result = resolved_path_with(
+            &existing,
+            || panic!("absolute path needs no current directory"),
+            |_| true,
+            |path| Ok(path.to_owned()),
+        );
+        assert_eq!(result, Some(existing.clone()));
+        assert!(
+            resolved_path_with(
+                &input,
+                || Err(std::io::Error::other("no current directory")),
+                |_| panic!("no directory"),
+                |_| panic!("no directory")
+            )
+            .is_none()
+        );
+        assert!(
+            resolved_path_with(
+                &existing,
+                || panic!("absolute path"),
+                |_| true,
+                |_| Err(std::io::Error::other("canonicalize refused"))
+            )
+            .is_none()
+        );
+        assert!(resolved_path_with(&existing, || panic!("absolute path"), |_| false, |_| panic!("no existing ancestor")).is_none());
+    }
+
+    #[test]
+    fn gamma_round2_path_alias_preserves_metadata_short_circuit_and_resolved_fallback() {
+        let left = Path::new("left");
+        let right = Path::new("right");
+        assert!(paths_alias_with::<u8>(
+            left,
+            left,
+            |_| panic!("identical path"),
+            |_, _| panic!("identical path"),
+            |_| panic!("identical path")
+        ));
+        assert!(paths_alias_with(
+            left,
+            right,
+            |_| Ok(7),
+            |first, second| {
+                assert_eq!((*first, *second), (7, 7));
+                true
+            },
+            |_| panic!("same native file")
+        ));
+        for (first, second, expected) in [
+            (Some("canonical"), Some("canonical"), true),
+            (Some("canonical"), Some("other"), false),
+            (None, Some("canonical"), false),
+            (Some("canonical"), None, false),
+        ] {
+            let mut resolved = Vec::new();
+            let actual = paths_alias_with::<u8>(
+                left,
+                right,
+                |_| Err(std::io::Error::other("no metadata")),
+                |_, _| panic!("failed metadata"),
+                |path| {
+                    resolved.push(path.to_owned());
+                    if path == left {
+                        first.map(PathBuf::from)
+                    } else {
+                        assert_eq!(path, right);
+                        second.map(PathBuf::from)
+                    }
+                },
+            );
+            assert_eq!(actual, expected);
+            assert_eq!(resolved, [left, right]);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_process_arguments_skip_only_the_program_and_read_bench_engine() {
+        let arguments = Arguments::parse_process(["program.exe", "--vtune", "--show-engine-output"].map(OsString::from), |name| {
+            assert_eq!(name, "BENCH_ENGINE");
+            None
+        })
+        .unwrap();
+        assert_eq!(arguments.modes, [Mode::Vtune]);
+        assert!(arguments.show_engine_output);
+        let arguments = Arguments::parse_process([OsString::from("program.exe")], |name| {
+            assert_eq!(name, "BENCH_ENGINE");
+            Some("perf".into())
+        })
+        .unwrap();
+        assert_eq!(arguments.modes, [Mode::Perf]);
+    }
+
+    #[test]
+    fn gamma_survivor_native_argument_selection() {
+        use super::*;
+        for (option, mode) in [
+            ("--criterion-arg", Mode::Criterion),
+            ("--gungraun-arg", Mode::Gungraun),
+            ("--perf-arg", Mode::Perf),
+            ("--vtune-arg", Mode::Vtune),
+        ] {
+            for selected in Mode::ALL {
+                let mut arguments =
+                    Arguments::parse_from([format!("--{}", selected.as_str()).into(), option.into(), "native".into()], None).unwrap();
+                let accepted = mode == selected || (mode == Mode::Criterion && selected != Mode::Gungraun);
+                assert_eq!(arguments.finalize_native_args(&[selected]).is_ok(), accepted, "{option}/{selected}");
+                if accepted {
+                    assert_eq!(arguments.args_for(mode)[0], "native");
+                }
+            }
+        }
+        let mut empty = Arguments::parse_from(["--gungraun".into()], None).unwrap();
+        empty.finalize_native_args(&[Mode::Gungraun]).unwrap();
+        assert!(empty.criterion_args().is_empty());
+        for option in ["--perf-arg", "--vtune-arg"] {
+            assert!(matches!(
+                Arguments::parse_from([option.into()], None),
+                Err(Error::MissingOptionValue(found)) if found == option
+            ));
+        }
+        let arguments = Arguments::parse_from(["--perf".into(), "--perf-arg=--event=cycles".into()], None).unwrap();
+        assert_eq!(arguments.args_for(Mode::Perf), [OsString::from("--event=cycles")]);
+    }
+
+    #[test]
+    fn gamma_survivor_argument_modes_outputs_and_numbers() {
+        use super::*;
+        assert_eq!(Arguments::parse_from(["--all-engines".into()], None).unwrap().modes, Mode::ALL);
+        assert_eq!(
+            Arguments::parse_from(["--no-output".into()], None).unwrap().modes,
+            Mode::default_set()
+        );
+        let expected = if cfg!(target_os = "linux") {
+            vec![Mode::Criterion, Mode::Gungraun, Mode::Allocations]
+        } else {
+            vec![Mode::Criterion, Mode::Allocations]
+        };
+        assert_eq!(Mode::default_set(), expected);
+        for mode in Mode::ALL {
+            assert_eq!(mode.to_string(), mode.as_str());
+        }
+        assert_eq!(
+            Arguments::parse_from(["--perf".into()], Some("vtune".into())).unwrap().modes,
+            [Mode::Perf]
+        );
+        for output in ["--output", "--export-json", "--export-md"] {
+            assert!(matches!(
+                Arguments::parse_from(["--no-output".into(), output.into(), "report".into()], None,),
+                Err(Error::ConflictingOutputOptions)
+            ));
+        }
+        assert!(matches!(
+            Arguments::parse_from(["--no-output".into(), "--no-output".into()], None),
+            Err(Error::ConflictingOutputOptions)
+        ));
+        assert_eq!(
+            Arguments::parse_from(["--all-engines".into()], Some("not-an-engine".into()))
+                .unwrap()
+                .modes,
+            Mode::ALL
+        );
+        assert!(matches!(
+            Arguments::parse_from(["--output".into(), "report".into(), "--export-md".into(), "other".into()], None,),
+            Err(Error::ConflictingOutputOptions)
+        ));
+        for option in ["--timeout=bad", "--timeout=s", "--regression-threshold=bad"] {
+            Arguments::parse_from([option.into()], None).unwrap_err();
+        }
+        for text in ["ms", "s", "m", "h", "18446744073709551616s"] {
+            parse_duration(OsStr::new(text)).unwrap_err();
+        }
+        let arguments = Arguments::parse_from(["--no-baseline".into()], None).unwrap();
+        assert!(!arguments.automatic_baseline);
+    }
+
+    #[test]
+    fn gamma_survivor_lexical_path_normalization() {
+        use std::path::PathBuf;
+
+        use super::normalize_path;
+        for (input, output) in [
+            (&["a", ".", "b", "..", "c"][..], &["a", "c"][..]),
+            (&["..", "a", "..", "b"][..], &["..", "b"][..]),
+            (&["..", "..", "a"][..], &["..", "..", "a"][..]),
+            (&[".", "a"][..], &["a"][..]),
+        ] {
+            assert_eq!(
+                normalize_path(&input.iter().collect::<PathBuf>()),
+                output.iter().collect::<PathBuf>()
+            );
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn gamma_survivor_invalid_engine_encoding() {
+        #[cfg(windows)]
+        let value = {
+            use std::os::windows::ffi::OsStringExt as _;
+            std::ffi::OsString::from_wide(&[0xd800])
+        };
+        #[cfg(unix)]
+        let value = {
+            use std::os::unix::ffi::OsStringExt as _;
+            std::ffi::OsString::from_vec(vec![0xff])
+        };
+        assert!(matches!(super::Mode::from_os_str(&value), Err(super::Error::InvalidMode(_))));
+    }
+
     use super::*;
 
     fn parse(arguments: &[&str], environment: Option<&str>) -> Result<Arguments, Error> {

@@ -14,6 +14,38 @@ import 'justfiles/anvil/mod.just'
 
 # Repository-specific utilities outside Cargo Anvil.
 
+# Test feature combinations excluded by all-features and no-default-features runs.
+[arg("package", long, pattern='(?:compressors|fetch)')]
+[script("pwsh", "-NoProfile")]
+test-feature-regressions package: anvil-tool-rustc-validate-prereqs
+    $ErrorActionPreference = 'Stop'
+    $testArgs = @('--locked', '--package', '{{ package }}', '--no-default-features')
+    switch ('{{ package }}') {
+        'compressors' {
+            $testArgs += @('--features', 'deflate', '--test', 'public_api')
+            $requiredTests = @(
+                'afternoon_raw_deflate_pool_restores_raw_headers_without_the_zlib_feature: test'
+            )
+        }
+        'fetch' {
+            $testArgs += @('--features', 'tokio,native-tls', '--test', 'gamma_round2_native_default', '--test', 'november4_native_default')
+            $requiredTests = @(
+                'gamma_round2_native_only_client_has_a_selected_backend: test',
+                'native_only_unpinned_tls_builds_with_explicit_transport_options_and_alpn: test'
+            )
+        }
+    }
+    $tests = & cargo {{ _anvil_stable_toolchain_args }} test @testArgs -- --list
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $tests | Write-Output
+    foreach ($required in $requiredTests) {
+        if ($tests -notcontains $required) {
+            throw "required feature regression test is missing: $required"
+        }
+    }
+    & cargo {{ _anvil_stable_toolchain_args }} test @testArgs
+    exit $LASTEXITCODE
+
 # Apply license boilerplate headers.
 license: anvil-license-headers-validate-prereqs
     cargo heather --fix

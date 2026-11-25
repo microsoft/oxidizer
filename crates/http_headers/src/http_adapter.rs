@@ -69,6 +69,7 @@ impl FieldSink for HeaderMap {
     {
         let mut output = HttpOutput::default();
         encoder.encode(&mut output)?;
+        // #[gamma::skip(cond.always_false, relational.gt_to_ge, literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "Both append paths reserve the exact encoded count before appending every value with the same name; changing this threshold only selects identical inline or outlined implementations")]
         if output.values.len() > 1 {
             return append_http_values(self, http_name(name), output.values);
         }
@@ -179,6 +180,10 @@ enum WriterState {
 }
 
 fn buffered(expected: usize, bytes: &[u8]) -> Result<SmallVec<[u8; 32]>, InsertError> {
+    #[cfg(test)]
+    if tests::FAIL_NEXT_BUFFER_RESERVATION.replace(false) {
+        return Err(InsertError::new(InsertErrorKind::AllocationFailed));
+    }
     let mut buffer = SmallVec::new();
     buffer
         .try_reserve_exact(expected)
@@ -194,6 +199,12 @@ fn try_push_http_value(values: &mut SmallVec<[HeaderValue; 1]>, value: HeaderVal
 }
 
 fn reserve_http_values(values: &mut SmallVec<[HeaderValue; 1]>, additional: usize) -> Result<(), InsertError> {
+    #[cfg(test)]
+    tests::LAST_VALUE_RESERVATION.set(Some(additional));
+    #[cfg(test)]
+    if tests::FAIL_NEXT_VALUE_RESERVATION.replace(false) {
+        return Err(InsertError::new(InsertErrorKind::AllocationFailed));
+    }
     values
         .try_reserve(additional)
         .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))?;
@@ -216,6 +227,7 @@ impl FieldEncodeOutput for HttpOutput {
     }
 
     fn push_value(&mut self, value: FieldValue) -> Result<(), InsertError> {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Every owned FieldValue already satisfies the HTTP field-value byte invariant required by HeaderValue")]
         let value = HeaderValue::try_from(value).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?;
         try_push_http_value(&mut self.values, value)
     }
@@ -268,10 +280,14 @@ impl FieldValueWriter for HttpWriter<'_> {
                     return Err(InsertError::new(InsertErrorKind::InvalidEncoding));
                 }
                 if bytes.spilled() {
+                    #[cfg(test)]
+                    tests::LAST_BUFFER_CONVERSION.set(Some("owned"));
                     // `into_vec` retains the spilled allocation; doing this for
                     // inline bytes would allocate before constructing the value.
                     HeaderValue::try_from(bytes.into_vec()).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
                 } else {
+                    #[cfg(test)]
+                    tests::LAST_BUFFER_CONVERSION.set(Some("copied"));
                     HeaderValue::from_bytes(&bytes).map_err(|_invalid| InsertError::new(InsertErrorKind::InvalidValue))?
                 }
             }
@@ -287,6 +303,7 @@ fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
     let first = values
         .next()
         .expect("append_http_values is called only for multiple encoded values");
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "try_reserve above reserved room for every encoded value; encoded is nonempty here and no map mutation has consumed the reserved capacity")]
     match map.try_entry(name).map_err(capacity_exceeded)? {
         Entry::Occupied(mut entry) => {
             entry.append(first);
@@ -295,7 +312,8 @@ fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry.try_insert_entry(first)?;
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The successful reservation above covers this first insertion and no intervening insertion has consumed it")]
+            let mut entry = entry.try_insert_entry(first).map_err(capacity_exceeded)?;
             for value in values {
                 entry.append(value);
             }
@@ -312,6 +330,7 @@ fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
         map.remove(&name);
         return Ok(());
     };
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "try_reserve above reserved room for every encoded value; the empty case returned and no intervening insertion consumed that capacity")]
     match map.try_entry(name).map_err(capacity_exceeded)? {
         Entry::Occupied(mut entry) => {
             entry.insert(first);
@@ -320,7 +339,8 @@ fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry.try_insert_entry(first)?;
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The successful reservation above covers this first insertion and no intervening insertion has consumed it")]
+            let mut entry = entry.try_insert_entry(first).map_err(capacity_exceeded)?;
             for value in values {
                 entry.append(value);
             }
@@ -334,6 +354,8 @@ fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
 mod tests {
     use std::sync::LazyLock;
 
+    use http::{HeaderMap, HeaderValue};
+
     use super::{HttpOutput, append_http_values, buffered, insert_http_values, reserve_http_values, try_push_http_value};
     use crate::sink::{EncodedValues, FieldEncodeOutput, FieldSink, FieldValueWriter, InsertError, InsertErrorKind, U64Encoder};
     use crate::source::FieldSource;
@@ -344,6 +366,94 @@ mod tests {
     const ENCODING_ERROR: InsertError = InsertError::new(InsertErrorKind::InvalidEncoding);
     const VALUE_ERROR: InsertError = InsertError::new(InsertErrorKind::InvalidValue);
     const CAPACITY_ERROR: InsertError = InsertError::new(InsertErrorKind::CapacityExceeded);
+
+    // One-shot, thread-local faults exercise propagation without exhausting memory.
+    std::thread_local! {
+        pub(super) static FAIL_NEXT_BUFFER_RESERVATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static FAIL_NEXT_VALUE_RESERVATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static LAST_VALUE_RESERVATION: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+        pub(super) static LAST_BUFFER_CONVERSION: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn http_adapter_gamma_afternoon_preserves_native_and_buffered_ownership_policies() {
+        for length in [1, 64, 65] {
+            let bytes = vec![b'a'; length];
+            let mut output = HttpOutput::default();
+            let mut writer = output.begin_value(length, crate::sink::FieldSensitivity::Sensitive).unwrap();
+            writer.write_bytes(&bytes).unwrap();
+            assert!(matches!(&writer.state, super::WriterState::Single(_)));
+            writer.finish().unwrap();
+            assert_eq!(output.values[0].as_bytes(), bytes);
+            assert!(output.values[0].is_sensitive());
+        }
+        for length in [32, 33] {
+            let bytes = vec![b'a'; length];
+            let mut output = HttpOutput::default();
+            let mut writer = output.begin_value(length, crate::sink::FieldSensitivity::Sensitive).unwrap();
+            writer.write_bytes(&bytes[..1]).unwrap();
+            writer.write_bytes(&bytes[1..]).unwrap();
+            let pointer = match &writer.state {
+                super::WriterState::Buffered(buffer) => buffer.as_ptr(),
+                _ => panic!("a partial first write must use buffered storage"),
+            };
+            LAST_BUFFER_CONVERSION.set(None);
+            writer.finish().unwrap();
+            assert_eq!(LAST_BUFFER_CONVERSION.get(), Some(if length > 32 { "owned" } else { "copied" }));
+            assert_eq!(output.values[0].as_bytes(), bytes);
+            assert!(output.values[0].is_sensitive());
+            if length > 32 {
+                assert!(std::ptr::eq(output.values[0].as_bytes().as_ptr(), pointer));
+            }
+        }
+    }
+
+    #[test]
+    fn http_adapter_gamma_afternoon_returns_reservation_failures_without_committing() {
+        let mut map = HeaderMap::new();
+        map.insert(http::header::USER_AGENT, HeaderValue::from_static("original"));
+        let original = map.clone();
+        FAIL_NEXT_VALUE_RESERVATION.set(true);
+        assert_eq!(
+            map.set_encoded(&crate::FieldName::UserAgent, FieldValue::from_static("new")),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert!(!FAIL_NEXT_VALUE_RESERVATION.get());
+        assert_eq!(LAST_VALUE_RESERVATION.get(), Some(1));
+        assert_eq!(map, original);
+
+        FAIL_NEXT_VALUE_RESERVATION.set(true);
+        assert_eq!(
+            map.append_encoded(&crate::FieldName::UserAgent, U64Encoder::new(42)),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert!(!FAIL_NEXT_VALUE_RESERVATION.get());
+        assert_eq!(LAST_VALUE_RESERVATION.get(), Some(1));
+        assert_eq!(map, original);
+    }
+
+    #[test]
+    fn http_adapter_gamma_afternoon_returns_both_buffer_reservation_failures() {
+        let mut map = HeaderMap::new();
+        map.insert(http::header::USER_AGENT, HeaderValue::from_static("original"));
+        let original = map.clone();
+        let invalid = [b'\n'; 64];
+        FAIL_NEXT_BUFFER_RESERVATION.set(true);
+        assert_eq!(
+            map.set_encoded(&crate::FieldName::UserAgent, FieldValueRef::new(&invalid)),
+            Err(InsertError::new(InsertErrorKind::AllocationFailed))
+        );
+        assert!(!FAIL_NEXT_BUFFER_RESERVATION.get());
+        assert_eq!(map, original);
+
+        let mut output = HttpOutput::default();
+        let mut writer = output.begin_value(64, crate::sink::FieldSensitivity::NonSensitive).unwrap();
+        FAIL_NEXT_BUFFER_RESERVATION.set(true);
+        assert_eq!(writer.write_bytes(b"x"), Err(InsertError::new(InsertErrorKind::AllocationFailed)));
+        assert!(!FAIL_NEXT_BUFFER_RESERVATION.get());
+        assert_eq!(writer.finish(), Err(ENCODING_ERROR));
+        assert!(output.values.is_empty());
+    }
 
     struct RejectEncoder;
 

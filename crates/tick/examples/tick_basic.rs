@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
+use jiff::Timestamp;
 use tick::Clock;
-use tick::fmt::{Iso8601, Rfc2822};
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
@@ -23,13 +23,10 @@ async fn main() -> Result<(), ohno::AppError> {
     // Retrieve the current time.
     let time = clock.system_time();
 
-    // Convert the time to various formats.
-    let iso: Iso8601 = time.try_into()?;
-    let rfc: Rfc2822 = time.try_into()?;
+    // Convert the time to Jiff for parsing and formatting.
+    let timestamp = Timestamp::try_from(time)?;
 
-    // Print the current time in various formats.
-    println!("Current time (ISO 8601): {iso}");
-    println!("Current time (RFC 2822): {rfc}");
+    println!("Current time: {timestamp}");
 
     // Measure the duration between two times.
     clock.delay(Duration::from_secs(1)).await;

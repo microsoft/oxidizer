@@ -74,6 +74,31 @@ fn unicode_xid_route_identifiers_generate_valid_rust() {
 }
 
 #[test]
+fn generate_output_unchanged_snapshot() {
+    let mut generator = Generator::new("Route", true);
+    generator.add_all([
+        rule("Health", "/health"),
+        rule("ListBooks", "/books"),
+        Route::new("CreateBook", "POST", PathTemplate::parse("/books", Grammar::default()).unwrap()),
+        rule("GetBook", "/books/{book}"),
+        rule("ArchiveBook", "/books/{book}:archive"),
+        rule("Files", "/files/{path=**}"),
+        rule("Static", "/static/**"),
+        Route::new(
+            "Image",
+            "GET",
+            PathTemplate::parse("/img-{id}.png", Grammar::default().with_segment_affixes()).unwrap(),
+        ),
+        rule("Typed", "/x/{type}"),
+        rule("Dotted", "/shelves/{shelf.id}"),
+        rule("User", "/users/{user}"),
+        rule("User", "/accounts/{user}"),
+    ]);
+    let file = syn::parse2::<syn::File>(generator.generate()).unwrap();
+    insta::assert_snapshot!(prettyplease::unparse(&file));
+}
+
+#[test]
 fn route_name_is_not_reserved_by_a_trait_method() {
     let mut generator = Generator::new("Route", true);
     generator.add(rule("name", "/name"));

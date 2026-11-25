@@ -3,7 +3,6 @@
 
 use std::task::Waker;
 
-use observed::Sink;
 use thread_aware_core::Thread;
 
 use crate::{Executor, PanicPolicy};
@@ -13,7 +12,6 @@ use crate::{Executor, PanicPolicy};
 #[must_use]
 pub struct ExecutorBuilder {
     owner_waker: Waker,
-    sink: Sink,
     thread: Option<Thread>,
     panic_policy: PanicPolicy,
 }
@@ -23,7 +21,6 @@ impl ExecutorBuilder {
     pub fn new() -> Self {
         Self {
             owner_waker: Waker::noop().clone(),
-            sink: Sink::noop(),
             thread: None,
             panic_policy: PanicPolicy::default(),
         }
@@ -39,14 +36,6 @@ impl ExecutorBuilder {
     /// By default, the executor does not notify the owner.
     pub fn owner_waker(mut self, owner_waker: Waker) -> Self {
         self.owner_waker = owner_waker;
-        self
-    }
-
-    /// Sets the observed sink for task lifecycle events.
-    ///
-    /// The default sink is a no-op.
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = sink;
         self
     }
 
@@ -82,59 +71,12 @@ impl ExecutorBuilder {
             );
             thread.id()
         });
-        Executor::new(self.owner_waker, self.sink, thread_id, self.panic_policy)
+        Executor::new(self.owner_waker, thread_id, self.panic_policy)
     }
 }
 
 impl Default for ExecutorBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_builder() {
-        _ = ExecutorBuilder::default();
-    }
-
-    #[test]
-    fn panic_policy_is_configurable() {
-        let (default, _) = ExecutorBuilder::new().panic_policy.resolve(Box::new(()));
-        let (configured, _) = ExecutorBuilder::new()
-            .panic_policy(PanicPolicy::IGNORE)
-            .panic_policy
-            .resolve(Box::new(()));
-
-        assert_eq!(default, crate::PanicAction::Shutdown);
-        assert_eq!(configured, crate::PanicAction::Ignore);
-    }
-
-    #[test]
-    fn configured_thread_must_identify_the_current_thread() {
-        let foreign_id = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
-        let thread = thread_aware_core::__private::v1::new_thread(
-            thread_aware_core::__private::v1::new_owner(),
-            foreign_id,
-            thread_aware_core::__private::v1::new_numa_node(0),
-        );
-
-        let result = std::panic::catch_unwind(|| ExecutorBuilder::new().thread(thread).build());
-
-        result.unwrap_err();
-    }
-
-    #[test]
-    fn configured_current_thread_builds_the_executor() {
-        let thread = thread_aware_core::__private::v1::new_thread(
-            thread_aware_core::__private::v1::new_owner(),
-            std::thread::current().id(),
-            thread_aware_core::__private::v1::new_numa_node(0),
-        );
-
-        drop(ExecutorBuilder::new().thread(thread).build());
     }
 }

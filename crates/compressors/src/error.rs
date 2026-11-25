@@ -51,6 +51,7 @@ fn detect_recovery(source: &(dyn StdError + 'static)) -> RecoveryInfo {
             return RecoveryInfo::from(io.kind());
         }
 
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         current = error.source();
     }
 

@@ -79,6 +79,7 @@ pub(crate) enum TemplatePart<'a> {
 impl<'a> TemplatePart<'a> {
     /// Parse one part of the template, which can either be a parameter group or a content string.
     fn parser() -> impl Parser<'a, &'a str, TemplatePart<'a>, Error<'a>> {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "none_of tests membership in an unordered set, so reversing the two delimiters accepts the same characters.")]
         ParamGroup::parser().map(TemplatePart::ParamGroup).or(none_of(['{', '}'])
             .repeated()
             .at_least(1)
@@ -217,6 +218,7 @@ impl ParamKind {
         let form_continue = just("&").to(Self::Form { start_char: false });
         let prefixed_dot = just(".").to(Self::Prefixed(Prefix::Dot));
         let prefixed_slash = just("/").to(Self::Prefixed(Prefix::Slash));
+        // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "The empty parser always succeeds, so its error label is never emitted.")]
         let simple = empty().to(Self::Simple).labelled("no prefix");
         choice((
             unfiltered,

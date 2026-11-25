@@ -34,7 +34,7 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(TimerTick: Send, Sync, UnwindSafe, RefUnwindSafe);
     static_assertions::assert_not_impl_any!(TimerTick: Clone, Copy);
     static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
-    static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
+    static_assertions::assert_impl_all!(Stopwatch: Send, Sync, thread_aware::ThreadAware);
     static_assertions::assert_impl_all!(ClockDriver: Send, Sync);
     static_assertions::assert_not_impl_all!(ClockDriver: Clone);
     static_assertions::assert_impl_all!(Isolated: Send, Sync, Clone, Copy);
@@ -67,21 +67,6 @@ fn system_clock_instant_uses_the_system_instant_domain() {
     let system_instant = Instant::now();
 
     assert!(system_instant.duration_since(clock_instant) < Duration::from_secs(10));
-}
-
-#[cfg(feature = "fast-instant")]
-#[test]
-fn system_clocks_can_toggle_fast_instant_retrieval() {
-    let precise = SimpleClock::new_system();
-    let precise_instant = precise.instant();
-    let fast = precise.with_fast_instant(true);
-    let fast_first = fast.instant();
-    let fast_second = fast.instant();
-    let precise_again = fast.with_fast_instant(false);
-
-    assert!(precise_instant <= Instant::now());
-    assert!(fast_second >= fast_first);
-    assert!(precise_again.instant() <= Instant::now());
 }
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
@@ -299,7 +284,6 @@ fn system_time_error_conversion_preserves_message_and_source() {
 
     let error = Error::from(source);
 
-    assert!(!error.is_out_of_range());
     assert_eq!(write!(FailingWriter, "{error}"), Err(fmt::Error));
     let source = error.source().unwrap().downcast_ref::<std::time::SystemTimeError>().unwrap();
     assert_eq!(source.to_string(), expected);

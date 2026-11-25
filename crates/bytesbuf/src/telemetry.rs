@@ -97,7 +97,19 @@ const fn identity_after_allocation_race(existing: u64) -> u64 {
 
 #[cfg(all(test, feature = "seismograph"))]
 mod tests {
+    // The test exercises private identity transfer and clearing primitives.
     use super::*;
+
+    #[test]
+    fn gamma_round2_empty_transfer_restores_the_unallocated_identity_state() {
+        let identity = BufferIdentity::new();
+        let original = identity.get_or_allocate();
+        identity.replace(BufferIdentity::empty_transfer());
+        assert_eq!(identity.0.load(Ordering::Relaxed), 0);
+        assert_eq!(identity.take(), None);
+        let next = identity.get_or_allocate();
+        assert_ne!(next, original);
+    }
 
     #[test]
     fn identity_transfer_clear_and_clone_have_exact_semantics() {

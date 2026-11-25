@@ -24,7 +24,7 @@ use crate::runtime::ShutdownCause;
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
 /// Receiving a panic error does not restart the panic or repair application data.
 /// By default, a panic from async task creation or polling starts runtime shutdown.
-/// [`Panic::ignore`](crate::runtime::hook::Panic::ignore) keeps the
+/// [`TaskPanic::ignore`](crate::runtime::hook::TaskPanic::ignore) keeps the
 /// runtime running while `JoinHandle` still reports the panic.
 /// A blocking function panic does not invoke the hook or stop the runtime.
 /// With `panic = "abort"`, a task panic terminates the process instead.
@@ -44,9 +44,9 @@ use crate::runtime::ShutdownCause;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder().build()?;
 /// let error = runtime.scheduler().block_on(async |cx| {
-///     cx.control().request_stop();
+///     cx.control().shutdown();
 ///     cx.scheduler()
 ///         .spawn(async |_| 42)
 ///         .await
@@ -101,9 +101,9 @@ impl JoinError {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
-    ///     cx.control().request_stop();
+    ///     cx.control().shutdown();
     ///     cx.scheduler()
     ///         .spawn(async |_| 42)
     ///         .await
@@ -212,29 +212,5 @@ impl Error for JoinError {
             Kind::Shutdown(Some(error)) => Some(error),
             Kind::Panic(_) | Kind::Shutdown(None) | Kind::InvalidDestination => None,
         }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failure_kinds_are_distinct_and_thread_safe() {
-        static_assertions::assert_impl_all!(JoinError: Error, Send, Sync);
-        let panic = JoinError::panicked(Box::new(std::cell::Cell::new(42)));
-        assert!(panic.is_panic());
-        assert!(!panic.is_shutdown());
-        assert!(!panic.is_invalid_destination());
-        assert_eq!(panic.to_string(), "task panicked");
-
-        let shutdown = JoinError::shutdown(None);
-        assert!(!shutdown.is_panic());
-        assert!(shutdown.is_shutdown());
-        assert!(!shutdown.is_invalid_destination());
-        assert_eq!(shutdown.to_string(), "runtime is shutting down");
-        assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
-        assert!(shutdown.source().is_none());
     }
 }

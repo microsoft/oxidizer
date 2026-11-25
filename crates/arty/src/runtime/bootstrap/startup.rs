@@ -11,6 +11,7 @@ use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::monitoring::RuntimeMonitoring;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::{WorkerJoiner, asynchronous};
 
@@ -25,25 +26,69 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
+    let prepared = prepare_workers(
+        processor_config,
+        clock,
+        thread_builder,
+        available,
+        |name| std::env::var(name).ok(),
+        asynchronous::start,
+    )?;
+    let workers = prepared.workers;
+
+    let dispatcher = DispatcherCore::new(
+        NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
+            .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
+        prepared.shutdown,
+        prepared.hook_registrations,
+        prepared.monitoring.as_ref().map(RuntimeMonitoring::handle),
+    );
+    let dispatcher_client = DispatcherClient::new(dispatcher);
+    let mut join_handles = Vec::with_capacity(workers.len());
+    for worker in workers {
+        join_handles.push(worker.activate(dispatcher_client.clone()));
+    }
+    let worker_joiner = WorkerJoiner::new(join_handles);
+    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner, prepared.monitoring))
+}
+
+struct PreparedWorkers<W> {
+    workers: Vec<W>,
+    shutdown: Shutdown,
+    hook_registrations: Vec<crate::runtime::hook::HookRegistration>,
+    monitoring: Option<RuntimeMonitoring>,
+}
+
+fn prepare_workers<W>(
+    processor_config: RuntimeConfig,
+    clock: &InactiveClock,
+    thread_builder: &ThreadBuilder,
+    available: &ProcessorSet,
+    environment: impl FnOnce(&str) -> Option<String>,
+    mut start: impl FnMut(asynchronous::StartOptions) -> W,
+) -> Result<PreparedWorkers<W>, Error> {
     let name = processor_config.name;
     name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
-    let mut workers = Vec::with_capacity(processors.len());
+    let worker_count = processors.len();
+    let mut workers = Vec::with_capacity(worker_count);
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
-    let stack_size = processor_config
-        .stack_size
-        .get()
-        .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
-    let monitor_options = processor_config.monitor_options;
-    let hook_registrations = processor_config.hook_registrations;
+    let stack_size = select_stack_size(processor_config.stack_size, environment);
+    let mut monitor_options = processor_config.monitor_options;
+    let hook_registrations = processor_config
+        .hook_registrations
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
+    let monitoring = RuntimeMonitoring::start(monitor_options.policy(), &name, worker_count)?;
+    monitor_options.set_runtime(monitoring.as_ref().map(RuntimeMonitoring::handle));
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
-        workers.push(asynchronous::start(asynchronous::StartOptions {
+        workers.push(start(asynchronous::StartOptions {
             stack_size,
             inactive_clock: clock.clone(),
             processor,
@@ -58,21 +103,19 @@ fn build_with_processors(
         }));
     }
 
-    let dispatcher = DispatcherCore::new(
-        NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
-            .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
+    Ok(PreparedWorkers {
+        workers,
         shutdown,
-    );
+        hook_registrations,
+        monitoring,
+    })
+}
 
-    let dispatcher_client = DispatcherClient::new(dispatcher);
-
-    let mut join_handles = Vec::with_capacity(workers.len());
-    for worker in workers {
-        join_handles.push(worker.activate(dispatcher_client.clone()));
-    }
-    let worker_joiner = WorkerJoiner::new(join_handles);
-
-    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
+fn select_stack_size(configured: std::num::NonZeroUsize, environment: impl FnOnce(&str) -> Option<String>) -> usize {
+    configured
+        .get()
+        // #[gamma::skip(literal.int_increment, reason = "configured is NonZeroUsize, so max(configured, 0) and max(configured, 1) coincide.")]
+        .max(environment("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0))
 }
 
 fn available_processors() -> ProcessorSet {
@@ -93,6 +136,7 @@ fn available_processors() -> ProcessorSet {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// The public builder cannot inject the fake processor topology used by these startup checks.
 mod tests {
     use std::collections::HashSet;
     use std::num::NonZero;
@@ -102,6 +146,100 @@ mod tests {
     use std::thread;
     use std::thread::ThreadId;
 
+    #[test]
+    fn monitor_start_failure_returns_before_starting_async_workers() {
+        use seismograph_protocol::io::{IoOperation, MonitorIo};
+
+        let (io, control) = MonitorIo::new_mocked();
+        control.fail_next(
+            IoOperation::CreateDirectory,
+            std::io::Error::other("runtime monitor startup failed"),
+        );
+        let started = std::cell::Cell::new(false);
+        let hardware = fake_hardware(1);
+        let result = crate::runtime::monitoring::RuntimeMonitoring::with_test_io(io, || {
+            prepare_workers(
+                RuntimeConfig {
+                    name: crate::runtime::config::RuntimeName::default(),
+                    workers_policy: WorkersPolicy::exactly(1),
+                    stack_size: NonZero::new(16_384).unwrap(),
+                    blocking_pool_policy: BlockingPoolPolicy::shared(),
+                    monitor_options: MonitorPolicy::enabled().into(),
+                    hook_registrations: std::sync::Mutex::new(Vec::new()),
+                },
+                &InactiveClock::new_isolated(),
+                &ThreadBuilder::default(),
+                &hardware.processors(),
+                |_| None,
+                |_| started.set(true),
+            )
+        });
+
+        let error = result.err().unwrap();
+        assert!(!started.get());
+        let mut source: &dyn std::error::Error = &error;
+        while let Some(inner) = source.source() {
+            source = inner;
+        }
+        assert_eq!(source.to_string(), "runtime monitor startup failed");
+    }
+
+    #[test]
+    fn nov4_startup_passes_the_selected_stack_size_to_each_native_worker_request() {
+        let hardware = many_cpus::SystemHardware::fake(HardwareBuilder::from_counts(NonZero::new(2).unwrap(), NonZero::new(1).unwrap()));
+        for environment in [None, Some("32769")] {
+            let prepared = prepare_workers(
+                RuntimeConfig {
+                    name: crate::runtime::config::RuntimeName::default(),
+                    workers_policy: WorkersPolicy::at_most(2),
+                    stack_size: NonZero::new(16_385).unwrap(),
+                    blocking_pool_policy: BlockingPoolPolicy::shared(),
+                    monitor_options: MonitorOptions::default(),
+                    hook_registrations: std::sync::Mutex::new(Vec::new()),
+                },
+                &InactiveClock::new_isolated(),
+                &ThreadBuilder::default(),
+                &hardware.processors(),
+                |name| {
+                    assert_eq!(name, "RUST_MIN_STACK");
+                    environment.map(str::to_owned)
+                },
+                |request| request,
+            )
+            .unwrap();
+            let requests = prepared.workers;
+            let shutdown = prepared.shutdown;
+            assert_eq!(requests.len(), 2);
+            assert!(
+                requests
+                    .iter()
+                    .all(|request| request.stack_size == if environment.is_some() { 32_769 } else { 16_385 })
+            );
+            assert!(matches!(shutdown.state(), crate::runtime::shutdown::ShutdownState::Running));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_stack_selection_uses_the_named_environment_lower_bound() {
+        let configured = NonZero::new(16_384).unwrap();
+        for (environment, expected) in [
+            (None, 16_384),
+            (Some(""), 16_384),
+            (Some("invalid"), 16_384),
+            (Some("1"), 16_384),
+            (Some("32768"), 32_768),
+            (Some("99999999999999999999999999999999999999"), 16_384),
+        ] {
+            assert_eq!(
+                super::select_stack_size(configured, |name| {
+                    assert_eq!(name, "RUST_MIN_STACK");
+                    environment.map(str::to_owned)
+                }),
+                expected
+            );
+        }
+    }
+
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use many_cpus::fake::HardwareBuilder;
     use performables::arc::{Arc, PerThread};
@@ -109,7 +247,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::MonitorOptions;
-    use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+    use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };
@@ -184,7 +322,7 @@ mod tests {
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
-            MonitorPolicy::enabled().into(),
+            MonitorPolicy::disabled().into(),
             &hardware.processors(),
         );
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
@@ -197,10 +335,9 @@ mod tests {
         let tasks: Vec<_> = cx
             .control()
             .workers()
-            .into_iter()
             .map(|worker| {
                 scheduler.spawn_at(
-                    worker,
+                    &worker,
                     (cx.clone(), counts.clone(), per_thread.clone(), HardwareProbe(hardware.clone())),
                     |(cx, counts, value, hardware)| async move {
                         let thread = thread::current().id();
@@ -248,8 +385,7 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .into_iter()
-            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
+            .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 
@@ -269,8 +405,7 @@ mod tests {
         let workers: HashSet<_> = cx
             .control()
             .workers()
-            .into_iter()
-            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
+            .map(|worker| cx.scheduler().spawn_at(&worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 
@@ -293,7 +428,7 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
-                hook_registrations: Vec::new(),
+                hook_registrations: std::sync::Mutex::new(Vec::new()),
             },
             &InactiveClock::new_isolated(),
             &ThreadBuilder::default(),

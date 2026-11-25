@@ -86,18 +86,13 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
         return BytesBuf::default();
     };
 
-    let block_count = min_bytes.get().div_ceil(BlockSize::MAX as usize);
+    let block_count = reservation_block_count(min_bytes.get());
     let mut bytes_remaining = min_bytes.get();
 
     let mut blocks = Vec::with_capacity(block_count);
 
     for _ in 0..block_count {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the usize never contains a value outside bounds of BlockSize - guarded by min()"
-        )]
-        let bytes_in_block = NonZero::new(bytes_remaining.min(BlockSize::MAX as usize) as BlockSize)
-            .expect("ran out of bytes before calculated block count - the math must be wrong");
+        let bytes_in_block = reservation_block_size(bytes_remaining);
 
         bytes_remaining = bytes_remaining
             .checked_sub(bytes_in_block.get() as usize)
@@ -109,54 +104,44 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
     BytesBuf::from_blocks(blocks)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use static_assertions::assert_impl_all;
+fn reservation_block_count(bytes: usize) -> usize {
+    bytes.div_ceil(BlockSize::MAX as usize)
+}
 
-    use super::*;
-    use crate::mem::MemoryShared;
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the usize never contains a value outside bounds of BlockSize - guarded by min()"
+)]
+fn reservation_block_size(bytes_remaining: usize) -> NonZero<BlockSize> {
+    NonZero::new(bytes_remaining.min(BlockSize::MAX as usize) as BlockSize)
+        .expect("ran out of bytes before calculated block count - the math must be wrong")
+}
 
-    assert_impl_all!(TransparentMemory: MemoryShared, ThreadAware);
-
-    #[test]
-    fn smoke_test() {
-        let memory = TransparentMemory::new();
-
-        let mut buf = memory.reserve(0);
-        assert_eq!(buf.len(), 0);
-        assert_eq!(buf.capacity(), 0);
-
-        buf = memory.reserve(1313);
-
-        assert_eq!(buf.capacity(), 1313);
-
-        buf.put_byte_repeated(3, 1313);
-
-        let data = buf.consume_all();
-
-        assert_eq!(data.len(), 1313);
-        assert_eq!(data.first_slice().len(), 1313);
-    }
-
-    #[test]
-    fn giant_allocation() {
-        // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
-        // where this may not be available, so we skip this test in that environment.
-        #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-        if crate::testing::system_memory() < 10_000_000_000 {
-            eprintln!("Skipping giant allocation test due to insufficient memory.");
-            return;
+#[test]
+fn gamma_round2_transparent_reservation_plans_keep_exact_block_counts_and_lengths() {
+    let maximum = BlockSize::MAX as usize;
+    let cases = [
+        Some((1, 1)),
+        Some((maximum - 1, 1)),
+        Some((maximum, 1)),
+        maximum.checked_add(1).map(|bytes| (bytes, 2)),
+        maximum.checked_mul(2).map(|bytes| (bytes, 2)),
+    ];
+    for (bytes, expected_count) in cases.into_iter().flatten() {
+        let count = reservation_block_count(bytes);
+        assert_eq!(count, expected_count);
+        let mut remaining = bytes;
+        let mut blocks = Vec::new();
+        for _ in 0..count {
+            let size = reservation_block_size(remaining).get() as usize;
+            blocks.push(size);
+            remaining -= size;
         }
-
-        // This is a giant allocation that does not fit into one memory block.
-
-        let memory = TransparentMemory::new();
-        let buf = memory.reserve(5_000_000_000);
-
-        assert_eq!(buf.capacity(), 5_000_000_000);
-
-        // NB! We cannot simply check the first chunk length because there is no guarantee on which
-        // order a BytesBuf consumes its blocks in - the first might not be u32::MAX here!
+        assert_eq!(remaining, 0);
+        assert_eq!(blocks.iter().sum::<usize>(), bytes);
+        assert_eq!(blocks[0], bytes.min(maximum));
+        if Some(bytes) == maximum.checked_add(1) {
+            assert_eq!(blocks, [maximum, 1]);
+        }
     }
 }

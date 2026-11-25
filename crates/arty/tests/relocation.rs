@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 use futures::future::join_all;
@@ -155,7 +156,7 @@ fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
 #[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
-        (Runtime::new().unwrap(), 1),
+        (Runtime::builder().build().unwrap(), 1),
         (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
     ] {
         runtime
@@ -199,13 +200,7 @@ fn spawn_anywhere_relocates_results_on_the_source_worker() {
 fn spawn_at_relocates_results_to_the_source_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let source = runtime.scheduler().block_on(async |cx| cx).unwrap();
-    let destination = source
-        .control()
-        .workers()
-        .into_iter()
-        .find(|worker| worker != &source.thread())
-        .cloned()
-        .unwrap();
+    let destination = source.control().workers().find(|worker| worker != source.thread()).unwrap();
     let task = source.scheduler().spawn_at(
         &destination,
         ReturnedProbe {
@@ -518,9 +513,7 @@ fn relocated_context_initializes_io_on_the_destination_worker() {
                 let there = cx
                     .control()
                     .workers()
-                    .into_iter()
-                    .find(|worker| worker != &&here)
-                    .cloned()
+                    .find(|worker| worker != &here)
                     .expect("two-worker runtime exposes a relocation destination");
                 let mut relocated = cx.clone();
                 relocated.relocate(Some(&here), &there);

@@ -58,6 +58,7 @@ impl EvictionHook {
 
 #[cfg(test)]
 mod tests {
+    // Public caches cannot inject removal causes or invoke an uninitialized hook.
     use std::sync::Arc;
 
     use testing_aids::tracing_logs::Capture;

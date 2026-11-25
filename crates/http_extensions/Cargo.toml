@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.15.0"
+version = "0.16.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -69,6 +69,7 @@ futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
+jiff = { workspace = true, features = ["std"] }
 layered = { workspace = true }
 ohno = { workspace = true }
 pin-project = { workspace = true }
@@ -77,7 +78,7 @@ serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
-tick = { workspace = true, features = ["fmt"] }
+tick = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
@@ -96,7 +97,7 @@ serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { path = "../templated_uri", features = ["uuid"] }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-tick = { path = "../tick", features = ["fmt", "test-util", "tokio"] }
+tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
 

@@ -647,6 +647,7 @@ mod constants;
 mod memory_guard;
 mod span;
 mod span_builder;
+mod sync_fence;
 mod telemetry;
 mod vec;
 mod view;
@@ -663,6 +664,3 @@ pub use memory_guard::MemoryGuard;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 pub use view::{BytesView, BytesViewSlices};
-
-#[cfg(test)]
-mod testing;

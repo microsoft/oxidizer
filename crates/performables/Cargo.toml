@@ -3,7 +3,7 @@
 
 [package]
 name = "performables"
-version = "0.4.0"
+version = "0.5.0"
 description = "Performance-oriented ownership and asynchronous synchronization primitives."
 readme = "README.md"
 keywords = ["async", "concurrency", "synchronization", "telemetry"]
@@ -58,7 +58,7 @@ alloc_tracker.workspace = true
 criterion.workspace = true
 many_cpus.workspace = true
 metabench.workspace = true
-seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph = { path = "../seismograph", features = ["test-util"] }
 seismograph_protocol = { path = "../seismograph_protocol" }
 serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true

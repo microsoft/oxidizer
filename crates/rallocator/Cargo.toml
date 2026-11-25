@@ -3,7 +3,7 @@
 
 [package]
 name = "rallocator"
-version = "0.4.0"
+version = "0.5.0"
 description = "Windows, Linux and macOS x64/ARM64 owner-return allocator with Seismograph allocation events."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
@@ -37,6 +37,9 @@ targets = [
 # Native tests, coverage and cargo careful remain enabled.
 # Mutation testing is excluded by the workspace mutation configurations.
 exclude = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Environment", "Win32_System_IO"] }
 
 [dependencies]
 seismograph.workspace = true

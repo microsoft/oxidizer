@@ -56,10 +56,10 @@ impl Io {
     ///
     /// # Panics
     ///
-    /// Panics if context access cannot complete, such as during shutdown, from
-    /// another Arty async worker, or if creating the driver fails.
-    /// Panics in the I/O library or code that reports runtime information also
-    /// pass through this method. So do panics from broken internal assumptions.
+    /// Panics if context access cannot complete. This can occur during shutdown,
+    /// when called from another Arty async worker, or when driver creation fails.
+    /// Panics from the I/O library, runtime-reporting code, or broken internal
+    /// assumptions also pass through this method.
     #[must_use]
     pub fn context<C>(&self, options: &C::ContextOptions) -> C
     where
@@ -143,6 +143,7 @@ impl fmt::Debug for Io {
 }
 
 impl ThreadAware for Io {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source coordinate is deliberately unused; relocation resolves ownership from the destination.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.dispatcher.owns(destination) {
             self.thread = destination.clone();
@@ -176,6 +177,7 @@ fn panic_context(error: &Error) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// This teardown check installs a private worker marker on an otherwise external thread.
 mod tests {
     use std::cell::RefCell;
     use std::error::Error as _;
@@ -273,7 +275,7 @@ mod tests {
 
     #[test]
     fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
-        let runtime = crate::runtime::Runtime::new().unwrap();
+        let runtime = crate::runtime::Runtime::builder().build().unwrap();
         let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = context.scheduler().clone();
         let io = context.io().clone();

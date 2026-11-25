@@ -4,7 +4,7 @@
 [package]
 name = "fetch_winhttp_impl"
 description = "Implementation of the fetch_winhttp WinHTTP transport (Windows only)."
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
 categories = ["network-programming", "web-programming::http-client"]
@@ -110,6 +110,7 @@ windows = { workspace = true, features = [
 [target.'cfg(windows)'.dev-dependencies]
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["std"] }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
 mockall = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 performables = { path = "../performables" }

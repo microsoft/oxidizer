@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
 
-use super::app::{App, MonitorTab, RuntimeFocus, Screen};
+use super::app::{AllocatorBackend, App, MonitorTab, RuntimeFocus, Screen};
 
 pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Info, "  Info  "),
@@ -251,7 +251,14 @@ impl App {
             self.panels.cancel_drag();
             if let Some(key) = info_scroll_key(event.kind) {
                 if let Some((target, _)) = self.panels.rows.at(area, event.column, event.row) {
-                    self.heap_view.native.focus_list(target);
+                    let capture = match &self.screen {
+                        Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot.as_deref(),
+                        Screen::Browse => None,
+                    };
+                    match self.heap_view.backend(capture) {
+                        AllocatorBackend::Snmalloc => self.heap_view.native.focus_list(target),
+                        AllocatorBackend::Mimalloc => self.heap_view.mimalloc.focus_list(target),
+                    }
                 }
                 self.handle_key(key);
             } else {
@@ -298,6 +305,51 @@ const fn info_scroll_key(kind: MouseEventKind) -> Option<KeyCode> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_minimum_panel_geometry_and_popup_cancel_drag() {
+        use super::*;
+        let mut panels = Panels::default();
+        panels.sizes[Split::Io as usize] = Some(Constraint::Length(99));
+        let layout = panels.arrange(MonitorTab::Io, Rect::new(0, 0, 100, 20));
+        assert_eq!((layout.areas[0].width, layout.areas[1].width), (97, 3));
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut app = App::with_io(io);
+        app.panels.dragging = Some((MonitorTab::Io, Split::Io));
+        app.recording_configuration_popup = Some(super::super::app::RecordingConfigurationPopup::new(
+            seismograph_protocol::message::RecordingConfiguration::default(),
+        ));
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 0,
+                row: 0,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, 100, 20),
+        );
+        assert!(app.panels.dragging.is_none());
+        app.recording_configuration_popup = None;
+        app.handle_key(KeyCode::F(1));
+        app.panels.dragging = Some((MonitorTab::Io, Split::Io));
+        app.handle_mouse(mouse(MouseEventKind::Moved, 0, 0), Rect::new(0, 0, 100, 20));
+        assert!(app.panels.dragging.is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_tab_mouse_rows_match_tiny_connected_layout() {
+        for (height, expected) in [(3, MonitorTab::Info), (4, MonitorTab::Heaps)] {
+            let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+            let mut app = App::with_io(io);
+            app.screen = Screen::Offline {
+                path: "pending.seismograph".into(),
+                tab: MonitorTab::Info,
+                snapshot: None,
+            };
+            app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 11, 1), Rect::new(0, 0, 80, height));
+            assert_eq!(offline_tab(&app), expected);
+        }
+    }
+
     use crossterm::event::KeyModifiers;
 
     use super::*;

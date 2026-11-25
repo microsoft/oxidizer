@@ -15,9 +15,12 @@
 //! their negative cases live in the macro's own tests; what is checked here is
 //! that the accepted shapes actually reach a processor as a measurement.
 
-use observed::{Event, Severity, Value, emit, event};
+use std::sync::Arc;
+
+use observed::metadata::EventDescription;
+use observed::{Event, Severity, Sink, Value, emit, event};
 use observed_testing::types::PublicString;
-use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
+use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID, test_emitter};
 
 #[expect(clippy::inline_always, reason = "this is a one line assertion")]
 #[track_caller]
@@ -379,4 +382,67 @@ fn gauge_records_a_float_value() {
     emit!(sink, Temperature { celsius: 21.5 });
 
     assert_f64_eq(processor.single_event().field_metrics()[0].value(), 21.5);
+}
+
+/// A processor that selects metric events receives an event whose only measurement comes from a `#[flatten]` field,
+/// and does not receive an event that flattens only log fields or only an event-level counter.
+#[test]
+fn metric_processor_receives_measurement_of_flattened_value() {
+    #[event("test.timing")]
+    #[histogram(duration, name = "test.timing.duration")]
+    struct Timing {
+        #[unredacted]
+        duration: f64,
+    }
+
+    #[event("test.timed")]
+    struct Timed {
+        #[flatten]
+        timing: Timing,
+    }
+
+    #[event("test.note")]
+    #[info]
+    struct Note {
+        #[unredacted]
+        value: i64,
+    }
+
+    #[event("test.noted")]
+    #[info]
+    struct Noted {
+        #[flatten]
+        note: Note,
+    }
+
+    #[event("test.tick")]
+    #[counter(name = "test.tick.total")]
+    struct Tick;
+
+    #[event("test.ticked")]
+    #[info]
+    struct Ticked {
+        #[flatten]
+        tick: Tick,
+    }
+
+    let processor = MockProcessor::with_filter(EventDescription::contains_metrics);
+    let sink = Sink::builder("test")
+        .clock(tick::SimpleClock::new_frozen())
+        .processors(vec![Arc::new(processor.clone())])
+        .build();
+
+    emit!(sink, Noted { note: Note { value: 1 } });
+    emit!(sink, Ticked { tick: Tick });
+    emit!(
+        sink,
+        Timed {
+            timing: Timing { duration: 0.5 }
+        }
+    );
+
+    let event = processor.single_event();
+    assert_eq!(event.name(), "test.timed");
+    assert_eq!(event.field_metrics()[0].metric().instrument_name(), "test.timing.duration");
+    assert_f64_eq(event.field_metrics()[0].value(), 0.5);
 }

@@ -4,18 +4,6 @@
 //! Private event-view projection and presentation regression fixtures.
 //! No source codec or compatibility API is attached to this model.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Version {
-    pub(crate) major: u16,
-    pub(crate) minor: u16,
-    pub(crate) patch: u16,
-}
-impl Version {
-    pub(crate) const fn new(major: u16, minor: u16, patch: u16) -> Self {
-        Self { major, minor, patch }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Estimate {
     pub(crate) value: u64,
@@ -28,14 +16,6 @@ pub(crate) enum PeakLiveBytesScope {
     #[default]
     Unavailable,
 }
-impl std::fmt::Display for PeakLiveBytesScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Unavailable => "unavailable",
-        })
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stats {
     pub(crate) allocated_bytes: u64,
@@ -92,24 +72,10 @@ pub(crate) struct Histograms {
     pub(crate) live: Vec<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Metadata {
-    pub(crate) wire_format_version: u16,
-    pub(crate) telemetry_schema_version: u16,
-    pub(crate) producer_version: Version,
-    pub(crate) capture_duration_nanos: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SkippedSection {
-    pub(crate) id: u16,
-    pub(crate) version: u16,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Snapshot {
     pub(crate) native: Option<std::sync::Arc<seismograph_rallocator::native::Snapshot>>,
-    pub(crate) metadata: Metadata,
+    pub(crate) mimalloc: Option<std::sync::Arc<seismograph_rallocator::snapshot::Snapshot>>,
     pub(crate) allocator_state_available: bool,
     pub(crate) stats: Stats,
     pub(crate) size_classes: Vec<SizeClass>,
@@ -120,18 +86,12 @@ pub(crate) struct Snapshot {
     pub(crate) runtime_events: Option<seismograph::recorder::event::Events>,
     pub(crate) histograms: Histograms,
     pub(crate) addresses: Vec<seismograph_rallocator::callers::AddressLookup>,
-    pub(crate) skipped_sections: Vec<SkippedSection>,
 }
 impl Snapshot {
-    pub(crate) fn new(producer_version: Version) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             native: None,
-            metadata: Metadata {
-                wire_format_version: 1,
-                telemetry_schema_version: 3,
-                producer_version,
-                capture_duration_nanos: 0,
-            },
+            mimalloc: None,
             allocator_state_available: true,
             stats: Stats::default(),
             size_classes: Vec::new(),
@@ -142,11 +102,10 @@ impl Snapshot {
             runtime_events: None,
             histograms: Histograms::default(),
             addresses: Vec::new(),
-            skipped_sections: Vec::new(),
         }
     }
-    pub(crate) fn event_only(producer_version: Version) -> Self {
-        let mut snapshot = Self::new(producer_version);
+    pub(crate) fn event_only() -> Self {
+        let mut snapshot = Self::new();
         snapshot.allocator_state_available = false;
         snapshot
     }

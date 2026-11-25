@@ -31,11 +31,142 @@ struct FlatNode {
     rest: Box<[Leaf]>,
 }
 
+#[cfg(test)]
+mod gamma_round2_tests {
+    use http_path_template::{Grammar, PathTemplate};
+    use routerama_build::Route;
+    use routerama_build::trie::build_trie;
+
+    use super::*;
+
+    std::thread_local! {
+        static DROP_EVENTS: std::cell::RefCell<Option<Vec<Vec<String>>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn observe_drop(node: &RtNode) {
+        DROP_EVENTS.with_borrow_mut(|events| {
+            if let Some(events) = events {
+                events.push(node.exact.iter().chain(node.rest.iter()).map(|leaf| leaf.name.clone()).collect());
+            }
+        });
+    }
+
+    #[test]
+    fn gamma_nov4_actual_drop_visits_every_descendant_in_iterative_family_order() {
+        let routes = [
+            route("literal", "/literal/deep"),
+            route("affix", "/pre-{id}.txt/deep"),
+            route("single", "/{id}/deep"),
+            route("root", "/root"),
+        ];
+        let root = RtNode::compile(build_trie(&routes).root);
+        DROP_EVENTS.with_borrow_mut(|events| assert!(events.replace(Vec::new()).is_none()));
+        drop(root);
+        let events = DROP_EVENTS.with_borrow_mut(Option::take).unwrap();
+        assert_eq!(
+            events,
+            [
+                vec![],
+                vec![String::from("single")],
+                vec![],
+                vec![String::from("affix")],
+                vec![String::from("root")],
+                vec![],
+                vec![String::from("literal")],
+            ]
+        );
+    }
+
+    fn route(name: &str, path: &str) -> Route {
+        Route::new(
+            name,
+            "GET",
+            PathTemplate::parse(path, Grammar::default().with_segment_affixes()).unwrap(),
+        )
+    }
+
+    #[test]
+    fn gamma_round2_child_extraction_empties_all_edge_families_once() {
+        let trie = build_trie(&[
+            route("literal", "/literal"),
+            route("affix", "/pre-{id}.txt"),
+            route("single", "/{id}"),
+        ]);
+        let mut root = RtNode::compile(trie.root);
+        let mut children = Vec::new();
+        root.move_children_to(&mut children);
+        assert!(root.literals.is_empty());
+        assert!(root.affix.is_empty());
+        assert!(root.single.is_none());
+        assert_eq!(children.len(), 3);
+        assert_eq!(children.iter().map(|node| node.exact.len()).sum::<usize>(), 3);
+        root.move_children_to(&mut children);
+        assert_eq!(children.len(), 3);
+    }
+
+    #[test]
+    fn gamma_round2_iterative_destruction_visits_every_edge_family_and_grandchild_once() {
+        let routes = [
+            route("literal", "/literal/deep"),
+            route("affix", "/pre-{id}.txt/deep"),
+            route("single", "/{id}/deep"),
+            route("root", "/root"),
+        ];
+        let mut source_names = Vec::new();
+        let mut source_nodes = 0;
+        RtNode::discard_source_with(build_trie(&routes).root, |node| {
+            source_nodes += 1;
+            source_names.extend(node.exact.iter().map(|leaf| leaf.name.clone()));
+        });
+        source_names.sort();
+        assert_eq!(source_nodes, 8);
+        assert_eq!(source_names, ["affix", "literal", "root", "single"]);
+        let mut root = RtNode::compile(build_trie(&routes).root);
+        let mut runtime_names = Vec::new();
+        let mut runtime_nodes = 0;
+        root.drop_descendants_with(|node| {
+            runtime_nodes += 1;
+            runtime_names.extend(node.exact.iter().map(|leaf| leaf.name.clone()));
+        });
+        runtime_names.sort();
+        assert_eq!(runtime_nodes, 7);
+        assert_eq!(runtime_names, ["affix", "literal", "root", "single"]);
+        assert!(root.literals.is_empty());
+        assert!(root.affix.is_empty());
+        assert!(root.single.is_none());
+    }
+
+    #[test]
+    fn gamma_round2_compile_orders_literals_by_descendant_leaf_weight() {
+        let trie = build_trie(&[
+            route("light", "/a"),
+            route("heavy1", "/z/one"),
+            route("heavy2", "/z/two"),
+            route("heavy3", "/z/{id}"),
+        ]);
+        let root = RtNode::compile(trie.root);
+        assert_eq!(root.literals.iter().map(|(key, _)| &**key).collect::<Vec<_>>(), ["z", "a"]);
+        let empty = FlatNode {
+            literals: Vec::new(),
+            affix: Vec::new(),
+            single: None,
+            exact: Box::new([]),
+            rest: Box::new([]),
+        };
+        assert_eq!(node_weights(&[empty]), [0]);
+    }
+}
+
 impl RtNode {
     /// Destroys a build-time trie without recursively dropping its nodes.
     pub(crate) fn discard_source(node: Node) {
+        Self::discard_source_with(node, |_| {});
+    }
+
+    fn discard_source_with(node: Node, mut visit: impl FnMut(&Node)) {
         let mut pending = vec![node];
         while let Some(node) = pending.pop() {
+            visit(&node);
             let Node {
                 literals, affix, single, ..
             } = node;
@@ -155,6 +286,15 @@ impl RtNode {
             pending.push(*child);
         }
     }
+
+    fn drop_descendants_with(&mut self, mut visit: impl FnMut(&Self)) {
+        let mut pending = Vec::new();
+        self.move_children_to(&mut pending);
+        while let Some(mut node) = pending.pop() {
+            visit(&node);
+            node.move_children_to(&mut pending);
+        }
+    }
 }
 
 fn order_literals_by_weight(nodes: &mut [FlatNode]) {
@@ -166,7 +306,12 @@ fn order_literals_by_weight(nodes: &mut [FlatNode]) {
 
 fn node_weights(nodes: &[FlatNode]) -> Vec<usize> {
     let mut weights = vec![0_usize; nodes.len()];
-    for index in (0..nodes.len()).rev() {
+    for index in (
+        // #[gamma::skip(literal.int_increment, reason = "Flat node zero is the root and is never a child; order_literals_by_weight reads only child weights, so computing or leaving the unused root weight at zero cannot affect ordering")]
+        0..nodes.len()
+    )
+        .rev()
+    {
         let node = &nodes[index];
         weights[index] = node.exact.len()
             + node.rest.len()
@@ -179,13 +324,15 @@ fn node_weights(nodes: &[FlatNode]) -> Vec<usize> {
 
 impl Drop for RtNode {
     fn drop(&mut self) {
-        let mut pending = Vec::new();
-        self.move_children_to(&mut pending);
-        while let Some(mut node) = pending.pop() {
-            node.move_children_to(&mut pending);
-        }
+        self.drop_descendants_with(observe_drop);
     }
 }
+
+#[cfg(test)]
+use gamma_round2_tests::observe_drop;
+
+#[cfg(not(test))]
+fn observe_drop(_: &RtNode) {}
 
 #[cfg(test)]
 mod tests {

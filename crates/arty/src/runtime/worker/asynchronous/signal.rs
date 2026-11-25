@@ -84,6 +84,7 @@ impl Wake for Signal {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// The internal notification and parking protocol has no standalone public API.
 mod tests {
     use std::sync::mpsc;
     use std::thread;
@@ -91,6 +92,34 @@ mod tests {
     use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_driver_waker_is_installed_once_and_interrupted_for_every_notification() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: StdArc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let (waited, wait_observer) = mpsc::channel();
+        let signal = Signal::with_wait_observer(waited);
+        let counter = StdArc::new(Counter(AtomicUsize::new(0)));
+        signal.set_driver_waker(Waker::from(StdArc::clone(&counter)));
+        assert!(std::panic::catch_unwind(|| signal.set_driver_waker(Waker::noop().clone())).is_err());
+        signal.notify();
+        signal.notify();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 2);
+        signal.wait_for_notification();
+        assert!(wait_observer.try_recv().is_err());
+        assert!(!signal.take_notification());
+        signal.notify();
+        assert!(signal.take_notification());
+        assert!(!signal.take_notification());
+        assert_eq!(counter.0.load(Ordering::Relaxed), 3);
+    }
 
     #[test]
     fn notification_before_wait_is_retained_and_consumed() {

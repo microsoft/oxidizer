@@ -18,7 +18,7 @@ use std::thread;
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::Runtime;
 #[cfg(not(miri))]
-use arty::runtime::WorkersPolicy;
+use arty::runtime::policy::WorkersPolicy;
 #[cfg(feature = "macros")]
 use arty::task::Context;
 use arty::task::Scheduler;
@@ -37,7 +37,7 @@ fn assert_send_sync() {
 #[test]
 fn spawned_future_preserves_mutable_self_borrows_across_polls() {
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -108,7 +108,7 @@ async fn spawn_some_tasks(cx: Context) {
 #[test]
 fn local_factory_runs_once_and_preserves_future_borrows() {
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     runtime
@@ -183,7 +183,7 @@ fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
     };
 
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     runtime
@@ -242,7 +242,7 @@ fn test_worker_affinity() {
 
 #[test]
 fn remote_factories_create_non_send_futures_on_the_worker() {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (created, polled, associated) = runtime
         .scheduler()
         .spawn_anywhere((), |cx: arty::task::Context, ()| {
@@ -274,7 +274,7 @@ fn queued_factory_outlives_its_submitting_thread_and_accepts_non_unpin_captures(
     static_assertions::assert_impl_all!(Capture: Send);
     static_assertions::assert_not_impl_any!(Capture: Unpin);
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::at_most(1))
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(1))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
@@ -329,7 +329,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
         }
     }
 
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (source, destination, worker, executed_on) = runtime
         .scheduler()
         .spawn_anywhere(
@@ -363,7 +363,7 @@ fn runtime_spawn_anywhere_accepts_send_only_non_sync_results() {
     static_assertions::assert_impl_all!(ResultValue: Send);
     static_assertions::assert_not_impl_any!(ResultValue: Sync, ThreadAware);
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::at_most(1))
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(1))
         .build()
         .unwrap();
     let result = runtime
@@ -394,15 +394,14 @@ impl ThreadAware for DestinationProbe {
 async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Context) {
     let expected_workers = 2;
     let home = cx.thread().id();
-    let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();
+    let destinations: Vec<_> = cx.control().workers().map(|worker| worker.id()).collect();
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .into_iter()
         .map(|worker| {
             drop(cx.scheduler().spawn_anywhere((), |()| async {}));
             cx.scheduler().spawn_at(
-                worker,
+                &worker,
                 DestinationProbe {
                     source: None,
                     destination: None,
@@ -440,7 +439,7 @@ async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving
 #[test]
 fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::at_most(2))
+        .workers(arty::runtime::policy::WorkersPolicy::at_most(2))
         .build()
         .unwrap();
     let (scheduler, control) = runtime
@@ -448,11 +447,10 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
         .spawn_anywhere((), |cx, ()| async move { (cx.scheduler().clone(), cx.control().clone()) })
         .join()
         .unwrap();
-    control.request_stop();
+    control.shutdown();
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at::<(), _, ()>(worker, (), |()| async { panic!("rejected factories must not run") }))
+        .map(|worker| scheduler.spawn_at::<(), _, ()>(&worker, (), |()| async { panic!("rejected factories must not run") }))
         .collect();
     assert!(!tasks.is_empty());
     for task in tasks {
@@ -475,7 +473,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     }
 
     let runtime = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let (scheduler, control) = runtime
@@ -483,12 +481,12 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .block_on(async |cx| (cx.scheduler().clone(), cx.control().clone()))
         .unwrap();
     let other = Runtime::builder()
-        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .workers(arty::runtime::policy::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
     let destination = other
         .scheduler()
-        .block_on(async |cx| cx.control().workers().into_iter().next().unwrap().clone())
+        .block_on(async |cx| cx.control().workers().next().unwrap())
         .unwrap();
     let relocations = Arc::new(AtomicUsize::new(0));
     let invocations = Arc::new(AtomicUsize::new(0));
@@ -513,7 +511,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));
-    assert_eq!(control.workers().into_iter().len(), 1);
+    assert_eq!(control.workers().len(), 1);
     runtime.stop().unwrap();
     other.stop().unwrap();
 }

@@ -123,3 +123,34 @@ impl<T: ?Sized> RwLockWriteGuard<'_, T, Sync> {
         lock.record(EventKind::RwLockWriteRelease);
     }
 }
+
+#[cfg(all(test, feature = "seismograph"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod gamma_round2_tests {
+    use seismograph::recorder::event::EventKind as RecordedKind;
+
+    use super::*;
+    use crate::gamma_round2_telemetry::recorded_test_events;
+
+    #[test]
+    fn gamma_round2_native_cold_acquisition_records_contention_after_a_resolved_conflict() {
+        crate::gamma_round2_telemetry::enable_recording();
+        let lock = RwLock::new(37);
+        let held = lock.write();
+        assert!(lock.try_read().is_none());
+        drop(held);
+        let before_read = recorded_test_events(RecordedKind::RwLockReadContention);
+        let guard = lock.acquired_read_native(lock.read_contended_native()).unwrap();
+        assert_eq!(*guard, 37);
+        drop(guard);
+        assert_eq!(recorded_test_events(RecordedKind::RwLockReadContention), before_read + 1);
+        let held = lock.read();
+        assert!(lock.try_write().is_none());
+        drop(held);
+        let before_write = recorded_test_events(RecordedKind::RwLockWriteContention);
+        let guard = lock.acquired_write_native(lock.write_contended_native()).unwrap();
+        assert_eq!(*guard, 37);
+        drop(guard);
+        assert_eq!(recorded_test_events(RecordedKind::RwLockWriteContention), before_write + 1);
+    }
+}

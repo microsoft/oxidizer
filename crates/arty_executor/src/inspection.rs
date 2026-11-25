@@ -1,13 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(feature = "inspection")]
 use std::any::Any;
-#[cfg(feature = "inspection")]
 use std::marker::PhantomData;
+use std::task::Poll;
 
 /// Scheduling state read from native executor storage.
-#[cfg(feature = "inspection")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskState {
     /// Submitted or notified and awaiting a poll.
@@ -19,7 +17,6 @@ pub enum TaskState {
 }
 
 /// Completeness of a bounded inspection.
-#[cfg(feature = "inspection")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InspectionStatus {
     /// All native live tasks were inspected.
@@ -29,85 +26,169 @@ pub enum InspectionStatus {
 }
 
 /// Failure to inspect native task storage.
-#[cfg(feature = "inspection")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InspectionError {
     /// The work limit was zero.
     InvalidLimit,
     /// Submission storage is borrowed by another operation.
     Busy,
-    /// An inspector or visitor panicked.
+    /// Task instrumentation or the visitor panicked.
     Panicked,
 }
 
-#[cfg(feature = "inspection")]
 impl std::fmt::Display for InspectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::InvalidLimit => "the task inspection limit must be greater than zero",
             Self::Busy => "native task storage is busy",
-            Self::Panicked => "the task inspector or visitor panicked",
+            Self::Panicked => "the task instrumentation or visitor panicked",
         })
     }
 }
 
-#[cfg(feature = "inspection")]
 impl std::error::Error for InspectionError {}
 
 /// Runtime-owned callbacks used only by an explicitly observed execution cycle.
-///
-/// Start and finish callbacks are paired only when the task supplies a description.
-/// These callbacks must not panic. Diagnostic consumers must receive owned results
-/// separately, not run on the executor's polling thread.
-#[cfg(feature = "inspection")]
 pub trait PollObserver: std::fmt::Debug {
     /// Receives a description immediately before the task is polled.
     fn poll_started(&self, description: &dyn Any);
     /// Finishes an observed poll, including a task that completed.
-    fn poll_finished(&self, completed: bool);
-    /// Reports an inspector panic without preventing the task from running.
-    fn inspection_failed(&self, error: InspectionError);
+    fn poll_finished(&self);
+    /// Reports an instrumentation panic without preventing the task from running.
+    fn inspection_failed(&self);
 }
 
-/// Builds a temporary description while the native future is borrowed on its owner.
-// The private module seals this trait. Public visibility permits opaque builder returns.
-pub trait Inspector<F>: 'static {
-    #[cfg(feature = "inspection")]
-    /// Visits the description of a live future.
-    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
+/// Runtime-owned behavior attached to one task.
+pub trait TaskInstrumentation: 'static {
+    /// Visits a temporary description of the task.
+    fn inspect(&self, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+
+    /// Runs immediately before the executor polls the task.
+    fn poll_start(&mut self) {}
+
+    /// Runs immediately after the executor polls the task.
+    fn poll_end(&mut self, _outcome: Poll<()>) {}
+
+    /// Reports successful completion.
+    fn completed(&mut self) {}
+
+    /// Reports panic completion.
+    fn panicked(&mut self) {}
+
+    /// Reports cancellation.
+    fn cancelled(&mut self) {}
 }
 
-impl<F> Inspector<F> for () {
-    #[cfg(feature = "inspection")]
-    fn inspect(&self, _future: &F, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+impl TaskInstrumentation for () {}
+
+pub(crate) struct InspectWith<I, J, D> {
+    instrumentation: I,
+    inspect: J,
+    marker: PhantomData<fn() -> D>,
 }
 
-#[cfg(feature = "inspection")]
-/// Stores the description closure inline with its native task.
-pub(crate) struct InspectWith<I, D> {
-    inspect: I,
-    _description: PhantomData<fn() -> D>,
-}
-
-#[cfg(feature = "inspection")]
-impl<I, D> InspectWith<I, D> {
-    pub(crate) const fn new(inspect: I) -> Self {
+impl<I, J, D> InspectWith<I, J, D> {
+    pub(crate) const fn new(instrumentation: I, inspect: J) -> Self {
         Self {
+            instrumentation,
             inspect,
-            _description: PhantomData,
+            marker: PhantomData,
         }
     }
 }
 
-#[cfg(feature = "inspection")]
-impl<F, I, D> Inspector<F> for InspectWith<I, D>
+impl<I, J, D> TaskInstrumentation for InspectWith<I, J, D>
 where
-    I: Fn(&F, TaskState) -> Option<D> + 'static,
+    I: TaskInstrumentation,
+    J: Fn(TaskState) -> Option<D> + 'static,
     D: 'static,
 {
-    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
-        if let Some(description) = (self.inspect)(future, state) {
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        self.instrumentation.inspect(state, visitor);
+        if let Some(description) = (self.inspect)(state) {
             visitor(&description);
         }
+    }
+
+    fn poll_start(&mut self) {
+        self.instrumentation.poll_start();
+    }
+
+    fn poll_end(&mut self, outcome: Poll<()>) {
+        self.instrumentation.poll_end(outcome);
+    }
+
+    fn completed(&mut self) {
+        self.instrumentation.completed();
+    }
+
+    fn panicked(&mut self) {
+        self.instrumentation.panicked();
+    }
+
+    fn cancelled(&mut self) {
+        self.instrumentation.cancelled();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+
+    struct Recorder(Rc<RefCell<Vec<&'static str>>>);
+
+    impl TaskInstrumentation for Recorder {
+        fn inspect(&self, _state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+            visitor(&"instrumentation");
+        }
+
+        fn poll_start(&mut self) {
+            self.0.borrow_mut().push("start");
+        }
+
+        fn poll_end(&mut self, _outcome: Poll<()>) {
+            self.0.borrow_mut().push("end");
+        }
+
+        fn completed(&mut self) {
+            self.0.borrow_mut().push("completed");
+        }
+
+        fn panicked(&mut self) {
+            self.0.borrow_mut().push("panicked");
+        }
+
+        fn cancelled(&mut self) {
+            self.0.borrow_mut().push("cancelled");
+        }
+    }
+
+    #[test]
+    fn inspect_wrapper_forwards_instrumentation_callbacks() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut instrumentation = InspectWith::new(Recorder(Rc::clone(&calls)), Some);
+        let mut description = None;
+        let mut wrapped_description = None;
+
+        instrumentation.inspect(TaskState::Ready, &mut |value| {
+            if let Some(value) = value.downcast_ref::<TaskState>() {
+                description = Some(*value);
+            }
+            if let Some(value) = value.downcast_ref::<&'static str>() {
+                wrapped_description = Some(*value);
+            }
+        });
+        instrumentation.poll_start();
+        instrumentation.poll_end(Poll::Pending);
+        instrumentation.completed();
+        instrumentation.panicked();
+        instrumentation.cancelled();
+
+        assert_eq!(description, Some(TaskState::Ready));
+        assert_eq!(wrapped_description, Some("instrumentation"));
+        assert_eq!(*calls.borrow(), ["start", "end", "completed", "panicked", "cancelled"]);
     }
 }

@@ -17,6 +17,7 @@ use crate::internal::thin_dst::Strong;
 use crate::internal::uninit::Uninit;
 
 impl<A: Allocator + Clone> Arena<A> {
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Try to reserve uninitialized storage for one `T` in the current
     /// chunk. Returns a [`Uninit`] ticket whose lifetime is bound
     /// to `&self`.
@@ -28,6 +29,7 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Try to reserve uninitialized storage for `len` consecutive `T`s
     /// in the current chunk.
     #[inline(always)]
@@ -37,6 +39,7 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Like [`Self::try_reserve_local_slice`] but takes the precomputed
     /// byte size; the slice-copy/clone fast paths hold an existing
     /// `&[T]` and compute `size_of_val(src)` once outside the refill
@@ -57,6 +60,7 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Like [`Self::try_reserve_local_slice`] but reserves the shared-owner
     /// freeze prefix (`[strong][pad][len]`) ahead of the payload so the
     /// resulting buffer can later be frozen into a `Box<[T]>`, `Rc<[T]>`, or
@@ -75,6 +79,7 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Try to reserve `len` consecutive bytes in the current chunk.
     /// Byte-slice fast path that skips alignment math and overflow checks.
     #[inline(always)]
@@ -99,6 +104,7 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Try to reserve uninitialized storage for `len` consecutive `T`s
     /// in the current chunk, taking the precomputed payload byte
     /// size; the slice-copy fast paths hold an existing `&[T]` and
@@ -126,9 +132,11 @@ impl<A: Allocator + Clone> Arena<A> {
         // SAFETY: required by this function's contract.
         let ticket = unsafe { mutator.try_alloc_uninit_slice_prefixed_with_size::<T>(len, payload_bytes) }?;
         // SAFETY: the caller acquires chunk ownership before this borrow ends.
+        // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Try to reserve storage for one strong-prefixed `Arc<T>` value in
     /// the current chunk. The returned ticket addresses the
     /// payload (the strong count is already initialized to `1`).
@@ -136,9 +144,11 @@ impl<A: Allocator + Clone> Arena<A> {
     pub(in crate::arena) fn try_reserve_arc_value<S: Strong, T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let (ticket, chunk) = self.current().try_alloc_arc_value::<S, T>()?;
         // SAFETY: the caller acquires chunk ownership before this borrow ends.
+        // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Slice form of [`Self::try_reserve_arc_value`]: reserves a strong
     /// prefix, slice-length metadata, and `len` `T`s.
     #[inline(always)]
@@ -149,9 +159,11 @@ impl<A: Allocator + Clone> Arena<A> {
     pub(in crate::arena) fn try_reserve_arc_slice<S: Strong, T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
         let (ticket, chunk) = self.current().try_alloc_arc_slice::<S, T>(len)?;
         // SAFETY: the caller acquires chunk ownership before this borrow ends.
+        // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Like [`Self::try_reserve_arc_slice`] but takes the precomputed
     /// payload byte size (held by callers with a live `&[T]`).
     ///
@@ -171,6 +183,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // SAFETY: required by this function's contract.
         let (ticket, chunk) = unsafe { self.current().try_alloc_arc_slice_with_size::<S, T>(len, payload_bytes) }?;
         // SAFETY: the caller acquires chunk ownership before this borrow ends.
+        // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 }

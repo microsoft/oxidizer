@@ -35,7 +35,10 @@ fn compression_level(level: Level) -> i32 {
     // regression against a recorded measurement.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
 
-    MAPPING[usize::from(level.get().min(9))]
+    MAPPING[usize::from(level.get().min(
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Level is bounded by nine, so increasing this redundant clamp to ten preserves every mapping index")]
+        9,
+    ))]
 }
 
 /// Lends zstd an output slice that is still uninitialized.
@@ -80,6 +83,7 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // written, but an invalid report gives no reason to believe that. Therefore, an
     // out-of-range count aborts instead.
     unsafe fn filled_until(&mut self, n: usize) {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "WriteBuf::filled_until requires the caller to have initialized n bytes in this buffer; that unsafe caller contract already proves n does not exceed its length")]
         self.check_reported_count(n);
         self.filled = n;
     }
@@ -202,6 +206,7 @@ impl ZstdCompress {
 
         // Applied unconditionally: a recycled context comes back with its parameters cleared, so
         // that a recycled compressor is indistinguishable from a fresh one.
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Fresh or pool-reset contexts are in init stage; bundled zstd 1.5.7 clamps its supported compression-level parameter without allocation and cannot return an error here")]
         context
             .set_parameter(CParameter::CompressionLevel(level))
             .map_err(compression_level_rejected(level))?;
@@ -289,6 +294,7 @@ impl ZstdDecompress {
         let mut context = pool.take_zstd_decompressor().unwrap_or_else(DCtx::create);
 
         if let Some(window) = options.max_window_log {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The context is fresh or pool-reset to init and WindowLog enforces zstd 1.5.7's exact target-specific bounds; setting this supported scalar parameter allocates nothing and succeeds")]
             context
                 .set_parameter(DParameter::WindowLogMax(window.get()))
                 .map_err(window_log_rejected(window.get()))?;
@@ -330,6 +336,7 @@ impl Drop for ZstdDecompress {
 unsafe impl Codec for ZstdDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Bundled zstd 1.5.7 ZSTD_DCtx_reset with SessionOnly only resets scalar state and returns zero; its stage error applies exclusively to the parameter-reset branch")]
             self.engine()
                 .reset(ResetDirective::SessionOnly)
                 .map_err(reset_for_next_frame_failed)?;
@@ -383,6 +390,71 @@ unsafe impl Codec for ZstdDecompress {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_pledged_source_size_mismatch_returns_a_codec_error() {
+        let mut codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).unwrap();
+        codec.engine().set_pledged_src_size(Some(5)).unwrap();
+        let mut output = [MaybeUninit::uninit(); 128];
+        assert_eq!(codec.step(b"ab", &mut output, Operation::Process).unwrap().1, 2);
+        let error = codec.step(b"cd", &mut output, Operation::Finish).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert!(error.to_string().contains("Src size is incorrect"));
+    }
+
+    #[test]
+    fn gamma_survivor_zstd_reset_and_limit_forwarding() {
+        use crate::engine::Codec as _;
+        let limits = crate::limits::FormatLimits::new(Some(1), None, Some(2));
+        let mut decoder = super::ZstdDecompress::new(
+            limits,
+            true,
+            crate::TrailingData::Reject,
+            &crate::zstd::Zstd::new(),
+            crate::pool::Pool::disabled().clone(),
+        )
+        .unwrap();
+        assert!(!decoder.needs_reset);
+        decoder.check_limits(40_000, 40_000, 2).unwrap();
+        assert!(decoder.check_limits(40_000, 40_001, 2).unwrap_err().is_limit_exceeded());
+        assert!(decoder.check_limits(40_000, 40_000, 3).unwrap_err().is_limit_exceeded());
+        decoder.needs_reset = true;
+        let mut output = [std::mem::MaybeUninit::uninit(); 16];
+        decoder.step(&[], &mut output, crate::engine::Operation::Process).unwrap();
+        assert!(!decoder.needs_reset);
+        let debug = format!("{decoder:?}");
+        assert!(debug.starts_with("ZstdDecompress { limits: "));
+        assert!(debug.contains("multi_stream: true"));
+        decoder.stream_ended().unwrap();
+        assert!(decoder.needs_reset);
+    }
+
+    #[test]
+    fn gamma_survivor_zstd_error_translation_keeps_native_code_and_settings() {
+        let code = usize::MAX;
+        let native = zstd_safe::get_error_name(code);
+        assert_ne!(native, zstd_safe::get_error_name(0));
+        assert_eq!(
+            super::compression_failed(code).to_string(),
+            format!("zstd compression failed: {native}")
+        );
+        assert_eq!(
+            super::decompression_failed(code).to_string(),
+            format!("zstd decompression failed: {native}")
+        );
+        assert_eq!(
+            super::compression_level_rejected(7)(code).to_string(),
+            format!("zstd rejected compression level 7: {native}")
+        );
+        assert_eq!(
+            super::window_log_rejected(20)(code).to_string(),
+            format!("zstd rejected maximum window log 20: {native}")
+        );
+        assert_eq!(
+            super::reset_for_next_frame_failed(code).to_string(),
+            format!("zstd failed to reset for the next frame: {native}")
+        );
+    }
+
     use super::*;
 
     #[test]

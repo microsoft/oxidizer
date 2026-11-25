@@ -16,8 +16,9 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
-use arty::runtime::hook::Panic;
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
+use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
@@ -41,8 +42,7 @@ fn count_workers(runtime: &Runtime) -> usize {
         .unwrap();
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at(worker, (), |()| async { thread::current().id() }))
+        .map(|worker| scheduler.spawn_at(&worker, (), |()| async { thread::current().id() }))
         .collect();
     let count = tasks.len();
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
@@ -330,9 +330,8 @@ fn context_publishes_scheduler_and_clock_on_every_worker() {
     let tasks: Vec<_> = context
         .control()
         .workers()
-        .into_iter()
         .map(|worker| {
-            context.scheduler().spawn_at(worker, context.clone(), |cx: Context| async move {
+            context.scheduler().spawn_at(&worker, context.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
                 assert!(std::ptr::eq(scheduler, cx.scheduler()));
@@ -413,7 +412,7 @@ fn stopping_one_runtime_does_not_stop_another() {
     let first_worker = first_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     let second_worker = second_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     assert_ne!(first_worker, second_worker);
-    support::runtime_control(&first).request_stop();
+    support::runtime_control(&first).shutdown();
     first.stop().unwrap();
     assert!(first_scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     assert_eq!(second_scheduler.spawn(async |_| 42).join().unwrap(), 42);
@@ -425,7 +424,7 @@ fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
     let caller = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(Panic::IGNORE)
+        .on(TaskPanic::ignore())
         .build()
         .unwrap();
     let retained = worker_scheduler(&target);
@@ -490,7 +489,7 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
 #[test]
 fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     let runtime = runtime(1);
-    support::runtime_control(&runtime).request_stop();
+    support::runtime_control(&runtime).shutdown();
     let mut task = Box::pin(runtime.scheduler().spawn_anywhere((), |_, ()| async {}));
     let Poll::Ready(Err(error)) = task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("a rejected submission must be immediately ready");

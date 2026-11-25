@@ -3,7 +3,7 @@
 
 [package]
 name = "routerama_build"
-version = "0.3.1"
+version = "0.3.2"
 description = "Build-time code generator for routerama."
 readme = "README.md"
 keywords = ["http", "router", "routing", "codegen", "build"]
@@ -46,9 +46,10 @@ unicode-ident = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+insta = { workspace = true }
 prettyplease = { workspace = true }
 proc-macro-crate = { workspace = true }
-proc-macro2 = { workspace = true }
+proc-macro2 = { workspace = true, features = ["span-locations"] }
 quote = { workspace = true }
 syn = { workspace = true, features = ["clone-impls", "parsing", "proc-macro", "printing", "derive", "full", "visit"] }
 

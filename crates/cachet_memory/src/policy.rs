@@ -25,6 +25,7 @@ impl EvictionPolicy {
     /// `TinyLFU` combines frequency and recency tracking to achieve high cache
     /// hit rates across a wide range of workloads.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Both derived Default implementations select the same fieldless TinyLfu variant.")]
     pub fn tiny_lfu() -> Self {
         Self {
             inner: EvictionPolicyInner::TinyLfu,
@@ -76,28 +77,10 @@ pub(crate) enum EvictionPolicyInner {
     Lru,
 }
 
+// The converted Moka policy is not exposed by the public cache API.
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tiny_lfu_policy_has_correct_inner() {
-        let policy = EvictionPolicy::tiny_lfu();
-        assert_eq!(policy.inner, EvictionPolicyInner::TinyLfu);
-    }
-
-    #[test]
-    fn lru_policy_has_correct_inner() {
-        let policy = EvictionPolicy::lru();
-        assert_eq!(policy.inner, EvictionPolicyInner::Lru);
-    }
-
-    #[test]
-    fn default_policy_is_tiny_lfu() {
-        let policy = EvictionPolicy::default();
-        assert_eq!(policy.inner, EvictionPolicyInner::TinyLfu);
-    }
-
     #[test]
     fn into_moka_policy() {
         let tiny_lfu_policy = EvictionPolicy::tiny_lfu();

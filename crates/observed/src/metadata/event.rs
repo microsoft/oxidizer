@@ -101,8 +101,9 @@ impl EventDescription {
         self.log.is_some()
     }
 
-    /// Returns `true` if this event produces metric data points
-    /// (either an event-level metric or at least one field-level metric).
+    /// Returns `true` if this event produces metric data points: it has an
+    /// event-level metric, a field-level metric, or a `#[flatten]` field whose
+    /// type has field-level metrics.
     #[must_use]
     #[inline]
     pub const fn contains_metrics(&self) -> bool {

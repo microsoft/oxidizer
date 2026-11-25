@@ -11,9 +11,10 @@ use std::time::Duration;
 
 use http::{Request, Response};
 use layered::{Execute, Service, Stack};
+use observed_destination_core::MeterProviderBuilderExt;
+use observed_destination_stdout::stdout_metrics;
 use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
 use seatbelt::{Attempt, RecoveryInfo, ResilienceContext};
 use tick::Clock;
@@ -95,6 +96,7 @@ fn configure_telemetry() -> SdkMeterProvider {
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
-        .with_periodic_exporter(MetricExporter::default())
+        .register(stdout_metrics())
+        .expect("the stdout metric destination has no fallible configuration")
         .build()
 }

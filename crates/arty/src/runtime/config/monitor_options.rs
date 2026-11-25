@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::runtime::config::MonitorPolicy;
+use crate::runtime::policy::MonitorPolicy;
 
 /// Worker-owned monitoring configuration derived from the runtime policy.
 #[derive(Clone, Debug)]
 pub(crate) struct MonitorOptions {
     policy: MonitorPolicy,
+    runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
 impl MonitorOptions {
@@ -19,6 +20,14 @@ impl MonitorOptions {
     pub(crate) const fn policy(&self) -> &MonitorPolicy {
         &self.policy
     }
+
+    pub(crate) fn set_runtime(&mut self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        self.runtime = runtime;
+    }
+
+    pub(crate) fn runtime(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
+        self.runtime.as_ref()
+    }
 }
 
 impl Default for MonitorOptions {
@@ -29,12 +38,13 @@ impl Default for MonitorOptions {
 
 impl From<MonitorPolicy> for MonitorOptions {
     fn from(policy: MonitorPolicy) -> Self {
-        Self { policy }
+        Self { policy, runtime: None }
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Monitoring currently stores configuration without a public observable effect.
 mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -44,8 +54,8 @@ mod tests {
     assert_not_impl_any!(MonitorOptions: Copy);
 
     #[test]
-    fn default_options_enable_monitoring() {
-        assert!(MonitorOptions::default().policy().is_enabled());
+    fn default_options_disable_monitoring_in_tests() {
+        assert!(!MonitorOptions::default().policy().is_enabled());
     }
 
     #[test]
