@@ -204,9 +204,13 @@ pub struct Weak<T: ?Sized> {
 }
 
 #[doc(hidden)]
+#[derive(derive_more::Debug)]
 pub struct AffinityState<T: ?Sized, S: private::AffinityStrategy> {
+    #[debug(skip)]
     shared: StdArc<AffinityShared<T, S>>,
+    #[debug(skip)]
     current: StdArc<T>,
+    #[debug(skip)]
     current_owner: Option<Owner>,
 }
 
@@ -223,13 +227,6 @@ struct AffinityInner<T: ?Sized, S: private::AffinityStrategy> {
 struct AffinityStorage<T, S: private::AffinityStrategy> {
     owner: Option<Owner>,
     values: HashMap<S::Key, T>,
-}
-
-impl<T: ?Sized, S: private::AffinityStrategy> fmt::Debug for AffinityState<T, S> {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Private diagnostic formatting; public Arc formatting delegates to the value.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AffinityState").finish_non_exhaustive()
-    }
 }
 
 impl<T, S: private::AffinityStrategy> AffinityStorage<T, S> {

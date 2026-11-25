@@ -43,6 +43,7 @@ seismograph = ["dep:seismograph"]
 serde = ["dep:serde"]
 
 [dependencies]
+derive_more = { workspace = true, features = ["debug"] }
 seismograph = { workspace = true, optional = true }
 serde = { workspace = true, features = ["std"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
