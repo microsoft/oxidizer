@@ -165,7 +165,7 @@ impl BlockingWorkerMonitoring {
                 .as_ref()
                 .and_then(|(_, poll)| poll.as_ref())
                 .and_then(|_| body.monitoring())
-                .map(|body| super::task::enter_current(body.info().id()));
+                .map(|body| seismograph_runtime::task::enter_task(body.info().id()));
             if canceled {
                 drop(body);
             } else {
