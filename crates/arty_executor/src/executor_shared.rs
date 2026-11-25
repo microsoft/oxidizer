@@ -137,17 +137,17 @@ impl ExecutorShared {
             }};
         }
         if self.shutdown().is_triggered() {
-            match (self.monitoring(), monitored.take()) {
-                (Some(_), Some(task)) => reject!(RecordedTask::new(task)),
-                _ => reject!(()),
+            if let (Some(_), Some(task)) = (self.monitoring(), monitored.take()) {
+                reject!(RecordedTask::new(task));
             }
+            reject!(());
         }
         let future = future.into_future();
         if self.shutdown().is_triggered() {
-            match (self.monitoring(), monitored.take()) {
-                (Some(_), Some(task)) => reject!(RecordedTask::new(task)),
-                _ => reject!(()),
+            if let (Some(_), Some(task)) = (self.monitoring(), monitored.take()) {
+                reject!(RecordedTask::new(task));
             }
+            reject!(());
         }
 
         macro_rules! register {
@@ -180,9 +180,8 @@ impl ExecutorShared {
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(observer))) {
             discard_task_panic_payload(panic);
         }
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(monitoring))) {
-            discard_task_panic_payload(panic);
-        }
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The private monitoring implementations contain only nonpanicking value fields; the call remains defensive for future implementations.")]
+        Self::discard_monitoring(monitoring);
         completion.cancelled(cause);
     }
 
@@ -199,6 +198,15 @@ impl ExecutorShared {
         self.inner
             .task_count
             .set(self.inner.task_count.get().checked_add(1).expect("live task count cannot overflow"));
+    }
+
+    // #[gamma::skip(fn_value.unit, tag = "equivalent", reason = "The private monitoring implementations contain only nonpanicking value fields, so the defensive catch has no observable effect today.")]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Private monitoring implementations cannot panic during drop.
+    fn discard_monitoring(monitoring: impl TaskMonitoring) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(monitoring))) {
+            // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The private monitoring implementations contain only nonpanicking value fields; the discard remains defensive for future implementations.")]
+            discard_task_panic_payload(panic);
+        }
     }
 
     pub(crate) fn has_tasks(&self) -> bool {

@@ -310,8 +310,8 @@ impl Worker {
                     access.into_inner()(&state.context);
                 }
                 SystemCommand::Inspect { request } => {
-                    if let Some(monitoring) = &self.monitoring {
-                        monitoring.collect(&state.executor, request);
+                    if self.monitoring.is_some() {
+                        WorkerMonitoring::collect(&state.executor, request);
                     }
                 }
                 SystemCommand::RegisterHook { hook, source } => {

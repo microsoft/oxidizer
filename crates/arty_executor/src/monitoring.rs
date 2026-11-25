@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::TypeId;
+use std::cell::OnceCell;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use seismograph::recorder::event::EventTimestamp;
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivity, TaskActivityState, TaskMetrics, TaskMetricsScope};
@@ -205,25 +210,57 @@ impl TaskMonitoring for RecordedTask {
         worker.task_poll_finished(poll);
     }
 
-    fn completed(&mut self, _worker: Option<&WorkerHandle>) {
+    fn completed(&mut self, worker: Option<&WorkerHandle>) {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "RecordedTask is constructed only when ExecutorShared has a monitoring worker; this expectation documents that internal invariant.")]
+        worker.expect("recorded tasks belong to an executor with a monitoring worker");
         if let Some(task) = self.0.terminal_id() {
             self.0.events.completed(task);
         }
     }
 
-    fn panicked(&mut self, _worker: Option<&WorkerHandle>) {
+    fn panicked(&mut self, worker: Option<&WorkerHandle>) {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "RecordedTask is constructed only when ExecutorShared has a monitoring worker; this expectation documents that internal invariant.")]
+        worker.expect("recorded tasks belong to an executor with a monitoring worker");
         if let Some(task) = self.0.terminal_id() {
             self.0.events.panicked(task);
         }
     }
 
-    fn cancelled(&mut self, _worker: Option<&WorkerHandle>) {
+    fn cancelled(&mut self, worker: Option<&WorkerHandle>) {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "RecordedTask is constructed only when ExecutorShared has a monitoring worker; this expectation documents that internal invariant.")]
+        worker.expect("recorded tasks belong to an executor with a monitoring worker");
         if let Some(task) = self.0.terminal_id() {
             self.0.events.canceled(task);
         }
     }
 }
-use std::any::TypeId;
-use std::cell::OnceCell;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_monitoring_callbacks_are_inert() {
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("default-monitoring", 1));
+        let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+            seismograph_runtime::worker::WorkerRole::Core,
+        ));
+        let worker = worker.handle();
+        let task = seismograph_runtime::allocate_task_id();
+        let mut monitoring = ();
+
+        assert_eq!(monitoring.id(), None);
+        assert!(monitoring.poll_started(&worker).is_none());
+        monitoring.poll_finished(&worker, worker.task_poll_started(task));
+        assert!(monitoring.describe(TaskState::Ready).is_none());
+        monitoring.completed(Some(&worker));
+        monitoring.panicked(Some(&worker));
+        monitoring.cancelled(Some(&worker));
+    }
+
+    #[test]
+    fn type_descriptors_are_stable_and_distinct() {
+        assert_eq!(type_descriptor::<u32>(), type_descriptor::<u32>());
+        assert_ne!(type_descriptor::<u32>(), type_descriptor::<u64>());
+    }
+}

@@ -48,6 +48,21 @@ impl TaskCompletion<()> for CaptureCompletion {
 }
 
 #[derive(Debug)]
+struct FlagCompletion(Rc<Cell<bool>>);
+
+impl TaskCompletion<()> for FlagCompletion {
+    fn completed(self, (): ()) {
+        self.0.set(true);
+    }
+
+    fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+        arty_executor::discard_task_panic_payload(panic);
+    }
+
+    fn cancelled(self, _cause: ShutdownCause) {}
+}
+
+#[derive(Debug)]
 struct Notify(mpsc::Sender<()>);
 
 impl Wake for Notify {
@@ -79,14 +94,33 @@ fn receive<T>(receiver: &mpsc::Receiver<T>) -> T {
     }
 }
 
-fn task_metadata<T: 'static>(worker: WorkerHandle) -> Option<TaskMetadata> {
-    Some(TaskMetadata::capture::<T>(worker.task_events(), None, size_of::<T>()))
+fn task_metadata<T: 'static>(worker: &WorkerHandle) -> TaskMetadata {
+    TaskMetadata::capture::<T>(worker.task_events(), None, size_of::<T>())
+}
+
+fn task_metadata_with<T: 'static>(
+    worker: &WorkerHandle,
+    parent: Option<seismograph::recorder::runtime::TaskId>,
+    body_size: usize,
+) -> TaskMetadata {
+    TaskMetadata::capture::<T>(worker.task_events(), parent, body_size)
 }
 
 #[derive(Debug)]
 struct Observer {
     starts: Rc<Cell<usize>>,
     ends: Rc<Cell<usize>>,
+}
+
+struct PanicDropObserver;
+
+impl TaskObserver for PanicDropObserver {}
+
+impl Drop for PanicDropObserver {
+    #[expect(clippy::panic, reason = "the test verifies containment of observer destructor panics")]
+    fn drop(&mut self) {
+        panic!("observer drop panic");
+    }
 }
 
 impl TaskObserver for Observer {
@@ -120,6 +154,112 @@ fn task_observer_receives_paired_poll_callbacks() {
 }
 
 #[test]
+fn inspection_preserves_queue_state_and_limit() {
+    let _monitoring = MONITORING.lock().unwrap();
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("inspection-states", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let wake = Rc::new(RefCell::new(None));
+    let captured_wake = Rc::clone(&wake);
+    let mut executor = Executor::builder().monitor(worker.handle()).build();
+    executor
+        .tasks()
+        .task(std::future::poll_fn(move |cx| {
+            *captured_wake.borrow_mut() = Some(cx.waker().clone());
+            Poll::<()>::Pending
+        }))
+        .register(Completion);
+    executor.tasks().task(pending::<()>()).register(Completion);
+
+    let mut tasks = Vec::new();
+    assert!(executor.inspect_tasks(1, |task| tasks.push(task)));
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].activity.unwrap().state, TaskActivityState::Ready);
+
+    tasks.clear();
+    assert!(!executor.inspect_tasks(2, |task| tasks.push(task)));
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().all(|task| task.activity.unwrap().state == TaskActivityState::Ready));
+
+    let _ = executor.execute_cycle();
+    tasks.clear();
+    assert!(!executor.inspect_tasks(2, |task| tasks.push(task)));
+    assert!(tasks.iter().all(|task| task.activity.unwrap().state == TaskActivityState::Waiting));
+
+    wake.borrow().as_ref().unwrap().wake_by_ref();
+    tasks.clear();
+    assert!(!executor.inspect_tasks(2, |task| tasks.push(task)));
+    let states = tasks.into_iter().map(|task| task.activity.unwrap().state).collect::<Vec<_>>();
+    assert_eq!(states.iter().filter(|&&state| state == TaskActivityState::Ready).count(), 1);
+    assert_eq!(states.iter().filter(|&&state| state == TaskActivityState::Waiting).count(), 1);
+}
+
+#[test]
+fn recorded_metadata_preserves_parent_size_timestamp_and_type() {
+    let _monitoring = MONITORING.lock().unwrap();
+    let _reset = ResetRecorder;
+    seismograph::recorder(seismograph::recorder::Configuration {
+        runtime_tasks: seismograph::recorder::Policy::all(false),
+        ..seismograph::recorder::Configuration::default()
+    });
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("recorded-metadata", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let parent = seismograph_runtime::allocate_task_id();
+    let executor = Executor::builder().monitor(worker.handle()).build();
+    executor
+        .tasks()
+        .task(pending::<()>())
+        .monitor(Some(task_metadata_with::<u32>(&worker.handle(), Some(parent), 37)))
+        .register(Completion);
+
+    let mut tasks = Vec::new();
+    assert!(!executor.inspect_tasks(1, |task| tasks.push(task)));
+    let [task] = tasks.as_slice() else {
+        panic!("expected exactly one task");
+    };
+    assert_eq!(task.parent, Some(parent));
+    assert_eq!(task.future_size_bytes, Some(37));
+    assert!(task.spawned_at.is_some());
+    assert_ne!(task.type_descriptor, TypeDescriptorId::unknown());
+    let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+    assert!(
+        snapshot
+            .events
+            .events
+            .iter()
+            .any(|event| { event.kind == EventKind::TaskSpawned && event.runtime().is_some_and(|payload| payload.value_1 == 38) })
+    );
+}
+
+#[test]
+fn unrecorded_metadata_preserves_parent_size_and_type_without_events() {
+    let _monitoring = MONITORING.lock().unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("unrecorded-metadata", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let parent = seismograph_runtime::allocate_task_id();
+    let metadata = seismograph::recorder::without_recording(|| task_metadata_with::<u32>(&worker.handle(), Some(parent), 37));
+    let executor = Executor::builder().monitor(worker.handle()).build();
+    executor.tasks().task(pending::<()>()).monitor(Some(metadata)).register(Completion);
+
+    let mut tasks = Vec::new();
+    assert!(!executor.inspect_tasks(1, |task| tasks.push(task)));
+    let [task] = tasks.as_slice() else {
+        panic!("expected exactly one task");
+    };
+    assert_eq!(task.parent, Some(parent));
+    assert_eq!(task.future_size_bytes, Some(37));
+    assert_eq!(task.spawned_at, None);
+    assert_ne!(task.type_descriptor, TypeDescriptorId::unknown());
+}
+
+#[test]
 fn terminal_callbacks_run_outside_the_finished_task_context() {
     let _monitoring = MONITORING.lock().unwrap();
     let _reset = ResetRecorder;
@@ -139,12 +279,12 @@ fn terminal_callbacks_run_outside_the_finished_task_context() {
     executor
         .tasks()
         .task(async {})
-        .monitor(task_metadata::<()>(worker.handle()))
+        .monitor(Some(task_metadata::<()>(&worker.handle())))
         .register(CaptureCompletion(Rc::clone(&observed)));
     executor
         .tasks()
         .task(async { panic!("task panic") })
-        .monitor(task_metadata::<()>(worker.handle()))
+        .monitor(Some(task_metadata::<()>(&worker.handle())))
         .register(CaptureCompletion(Rc::clone(&observed)));
 
     let _ = executor.execute_cycle();
@@ -215,6 +355,116 @@ fn unrecorded_tasks_emit_terminal_events() {
                 .any(|event| event.kind == kind && event.runtime().is_some_and(|payload| payload.subject_id == task.get()))
         );
     }
+    assert_eq!(
+        snapshot
+            .events
+            .events
+            .iter()
+            .filter(|event| event.kind == EventKind::TaskPollStarted)
+            .count(),
+        3
+    );
+    assert_eq!(
+        snapshot
+            .events
+            .events
+            .iter()
+            .filter(|event| event.kind == EventKind::TaskPollFinished)
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn recorded_tasks_emit_poll_and_terminal_events() {
+    let _monitoring = MONITORING.lock().unwrap();
+    let _reset = ResetRecorder;
+    seismograph::recorder(seismograph::recorder::Configuration {
+        runtime_tasks: seismograph::recorder::Policy::all(false),
+        ..seismograph::recorder::Configuration::default()
+    });
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("recorded-lifecycle", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let mut executor = Executor::builder().monitor(worker.handle()).build();
+    executor
+        .tasks()
+        .task(async {})
+        .monitor(Some(task_metadata::<()>(&worker.handle())))
+        .register(Completion);
+
+    let _ = executor.execute_cycle();
+
+    let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+    for kind in [EventKind::TaskPollStarted, EventKind::TaskPollFinished, EventKind::TaskCompleted] {
+        assert!(snapshot.events.events.iter().any(|event| event.kind == kind));
+    }
+}
+
+#[test]
+fn recorded_tasks_without_events_complete_panic_and_cancel() {
+    let _monitoring = MONITORING.lock().unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("unrecorded-lifecycle", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let mut executor = Executor::builder()
+        .panic_policy(PanicPolicy::IGNORE)
+        .monitor(worker.handle())
+        .build();
+    executor
+        .tasks()
+        .task(async {})
+        .monitor(Some(seismograph::recorder::without_recording(|| {
+            task_metadata::<()>(&worker.handle())
+        })))
+        .register(Completion);
+    executor
+        .tasks()
+        .task(async { panic!("task panic") })
+        .monitor(Some(seismograph::recorder::without_recording(|| {
+            task_metadata::<()>(&worker.handle())
+        })))
+        .register(Completion);
+    executor
+        .tasks()
+        .task(pending::<()>())
+        .monitor(Some(seismograph::recorder::without_recording(|| {
+            task_metadata::<()>(&worker.handle())
+        })))
+        .register(Completion);
+
+    let _ = executor.execute_cycle();
+    executor.shutdown().trigger(ShutdownCause::default());
+    let _ = executor.execute_cycle();
+
+    let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+    assert!(!snapshot.events.events.iter().any(|event| {
+        matches!(
+            event.kind,
+            EventKind::TaskCompleted | EventKind::TaskPanicked | EventKind::TaskCanceled
+        ) && event.runtime().is_some_and(|payload| payload.runtime_id == runtime.id())
+    }));
+}
+
+#[test]
+fn task_observer_drop_panic_does_not_replace_completion() {
+    let completed = Rc::new(Cell::new(false));
+
+    let mut executor = Executor::builder().build();
+    executor
+        .tasks()
+        .task(async {})
+        .observe(PanicDropObserver)
+        .register(FlagCompletion(Rc::clone(&completed)));
+
+    let _ = executor.execute_cycle();
+
+    assert!(completed.get());
 }
 
 #[test]
@@ -291,7 +541,7 @@ fn canceled_capture_does_not_observe_the_next_poll() {
             polled.set(arty_executor::current_task());
             Poll::Ready(())
         }))
-        .monitor(task_metadata::<()>(worker.handle()))
+        .monitor(Some(task_metadata::<()>(&worker.handle())))
         .register(Completion);
     seismograph::recorder(seismograph::recorder::Configuration::default());
 
@@ -340,7 +590,7 @@ fn capture_limit_includes_unrecorded_tasks() {
     executor
         .tasks()
         .task(pending::<()>())
-        .monitor(task_metadata::<()>(worker.handle()))
+        .monitor(Some(task_metadata::<()>(&worker.handle())))
         .register(Completion);
     let capture = std::thread::spawn(move || {
         runtime

@@ -33,7 +33,7 @@ impl WorkerMonitoring {
         &self.handle
     }
 
-    pub(crate) fn collect(&self, executor: &Executor, request: TaskRequest) {
+    pub(crate) fn collect(executor: &Executor, request: TaskRequest) {
         if request.is_canceled() {
             return;
         }
