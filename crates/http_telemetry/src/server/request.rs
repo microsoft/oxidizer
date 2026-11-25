@@ -11,14 +11,14 @@ use http_extensions::HttpError;
 use http_headers::SingleValueField;
 use http_headers::headers::{Host, HostView};
 use observed::{Sink, Text, emit};
-use parking_lot::Mutex;
 use routerama::RouteTemplate;
 
-use super::body_buffer::BodyBuffer;
 use super::events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError, RouteParameters};
 use super::route_fields::RouteFields;
+use crate::body_buffer::BodyBuffer;
 use crate::drop_guard::EmitEvents;
 use crate::header_fields::{Headers, RequestAndResponseHeaders};
+use crate::request_body::RequestBodyBuffer;
 use crate::shared::{collect_error_labels, http_method_name, method_original, protocol_version};
 
 /// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
@@ -72,7 +72,7 @@ pub(crate) struct ServerRequest {
     pub(crate) uri_authority: Option<UriAuthority>,
     pub(crate) route_values: Option<RouteValues>,
     pub(crate) headers: Option<Box<RequestAndResponseHeaders>>,
-    pub(crate) request_body_buffer: Option<Arc<Mutex<BodyBuffer>>>,
+    pub(crate) request_body_buffer: RequestBodyBuffer,
     pub(crate) response_body_buffer: Option<BodyBuffer>,
 }
 
@@ -160,7 +160,7 @@ impl EmitEvents for ServerRequest {
                         duration_secs,
                         request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                         response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                        request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                        request_body: self.request_body_buffer.text(),
                         response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                     }
                 });
@@ -181,7 +181,7 @@ impl EmitEvents for ServerRequest {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    request_body: self.request_body_buffer.text(),
                     response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),
@@ -201,7 +201,7 @@ impl EmitEvents for ServerRequest {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    request_body: self.request_body_buffer.text(),
                     response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),
@@ -221,7 +221,7 @@ impl EmitEvents for ServerRequest {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    request_body: self.request_body_buffer.text(),
                     response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),

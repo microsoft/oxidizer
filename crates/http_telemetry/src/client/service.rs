@@ -15,17 +15,19 @@ use templated_uri::PathAndQuery;
 use super::events::{RequestAbandoned, RequestComplete, RequestError, RequestTotalAbandoned, RequestTotalComplete, RequestTotalError};
 use super::layer::Client;
 use super::request::{ClientRequest, RequestEnd};
+use super::response_body::emit_with_response_body;
 use crate::Telemetry;
 use crate::drop_guard::TelemetryDropGuard;
 use crate::header_fields::RequestAndResponseHeaders;
+use crate::request_body::RequestBodyBuffer;
 use crate::shared::{OTHER, known_scheme};
 
 impl<T: RequestHandler> Telemetry<T> {
     /// The [`execute`](layered::Service::execute) of a client middleware.
     pub(crate) fn execute_client<'a>(
         &'a self,
-        client: &'a Client,
-        input: HttpRequest,
+        client: &'a Arc<Client>,
+        mut input: HttpRequest,
     ) -> impl Future<Output = Result<HttpResponse>> + Send {
         // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "`is_interested` gives the same answer in each order of the descriptions.")]
         let descriptions = if client.report_total_duration {
@@ -56,8 +58,8 @@ impl<T: RequestHandler> Telemetry<T> {
         let authority = uri.authority().cloned();
         let mut guard = TelemetryDropGuard::new(
             ClientRequest {
-                sink: &self.sink,
-                client,
+                sink: self.sink.clone(),
+                client: Arc::clone(client),
                 method: input.method().clone(),
                 scheme,
                 server_port: authority.as_ref().and_then(|authority| authority.port_u16().or(default_port)),
@@ -72,10 +74,14 @@ impl<T: RequestHandler> Telemetry<T> {
                     client.response_header_fields.as_ref(),
                     input.headers(),
                 ),
+                request_body_buffer: RequestBodyBuffer::NotLogged,
             },
             &self.sink,
             &self.clock,
         );
+        if client.request_body_media_types.matches(input.headers()) {
+            guard.request.request_body_buffer = RequestBodyBuffer::new(&mut input, client.body_size_limit);
+        }
         // The middleware resumes each panic that it catches and never polls the handler again, so the
         // handler does not need to be unwind safe. The handler can panic in the call too, because
         // `Execute` runs the handler closure in `execute`.
@@ -92,8 +98,12 @@ impl<T: RequestHandler> Telemetry<T> {
                     if let Some(headers) = &mut guard.request.headers {
                         headers.set_response(client.response_header_fields.as_ref(), response.headers());
                     }
-                    guard.emit(RequestEnd::Complete(response.status(), response.version()));
-                    Ok(response)
+                    if client.response_body_media_types.matches(response.headers()) {
+                        Ok(emit_with_response_body(guard, response))
+                    } else {
+                        guard.emit(RequestEnd::Complete(response.status(), response.version(), None));
+                        Ok(response)
+                    }
                 }
                 Ok(Err(error)) => {
                     guard.emit(RequestEnd::Error(&error));

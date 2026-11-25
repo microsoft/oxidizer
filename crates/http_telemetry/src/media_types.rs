@@ -17,7 +17,7 @@ pub struct MediaTypeError {
 }
 
 /// The media types whose bodies the layer logs.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct MediaTypes(Arc<[MediaRange<'static>]>);
 
 impl MediaTypes {

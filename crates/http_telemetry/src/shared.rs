@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The values of the fields that the events of both sides record.
+//! The values of the fields that the events of the client and the server middleware record.
 
 use std::error::Error;
 use std::sync::Arc;

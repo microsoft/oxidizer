@@ -14,7 +14,9 @@ use observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
 use observed::{Sink, Text};
 use ohno::ErrorLabel;
 
+use crate::body_buffer::{DEFAULT_BODY_SIZE_LIMIT, MAX_BODY_SIZE_LIMIT};
 use crate::header_fields::{HeaderField, REQUEST_HEADER_PREFIX, RESPONSE_HEADER_PREFIX, header_fields};
+use crate::media_types::{MediaTypeError, MediaTypes};
 use crate::shared::collect_error_labels;
 use crate::telemetry::Role;
 use crate::{Telemetry, TelemetryLayer};
@@ -32,6 +34,9 @@ pub struct Client {
     pub(crate) request_header_fields: Option<Arc<[HeaderField]>>,
     pub(crate) response_header_data_classes: HeaderMap<DataClass>,
     pub(crate) response_header_fields: Option<Arc<[HeaderField]>>,
+    pub(crate) request_body_media_types: MediaTypes,
+    pub(crate) response_body_media_types: MediaTypes,
+    pub(crate) body_size_limit: usize,
 }
 
 impl Telemetry<()> {
@@ -49,6 +54,9 @@ impl Telemetry<()> {
                 request_header_fields: None,
                 response_header_data_classes: HeaderMap::default(),
                 response_header_fields: None,
+                request_body_media_types: MediaTypes::default(),
+                response_body_media_types: MediaTypes::default(),
+                body_size_limit: DEFAULT_BODY_SIZE_LIMIT,
             },
         )
     }
@@ -114,6 +122,41 @@ impl TelemetryLayer<Client> {
         self
     }
 
+    /// Sets the media types of the request bodies to log, such as `application/json`.
+    ///
+    /// If the list is not empty, the middleware also logs all `text/*`, `application/*+json` and `application/*+xml`
+    /// bodies. [Bodies](crate#bodies) tells which `Content-Type` values the types cover.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an entry is not a media type, such as `json` or `text/*`.
+    pub fn request_body_media_types(mut self, types: impl IntoIterator<Item = &'static str>) -> std::result::Result<Self, MediaTypeError> {
+        self.role.request_body_media_types = MediaTypes::parse(types)?;
+        Ok(self)
+    }
+
+    /// Sets the media types of the response bodies to log, such as `application/json`.
+    ///
+    /// If the list is not empty, the middleware also logs all `text/*`, `application/*+json` and `application/*+xml`
+    /// bodies. [Bodies](crate#bodies) tells which `Content-Type` values the types cover.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an entry is not a media type, such as `json` or `text/*`.
+    pub fn response_body_media_types(mut self, types: impl IntoIterator<Item = &'static str>) -> std::result::Result<Self, MediaTypeError> {
+        self.role.response_body_media_types = MediaTypes::parse(types)?;
+        Ok(self)
+    }
+
+    /// Sets the number of bytes to log from each body.
+    ///
+    /// The default is 32 KiB. Values above 1.5 MiB become 1.5 MiB.
+    #[must_use]
+    pub fn body_size_limit(mut self, limit: usize) -> Self {
+        self.role.body_size_limit = limit.min(MAX_BODY_SIZE_LIMIT);
+        self
+    }
+
     /// Adds the field `key` with `value` to each event of the layer, as a log field and as a metric dimension.
     ///
     /// A second call with the same key replaces the value. The key is not checked against the keys of the other
@@ -151,7 +194,7 @@ impl<S> Layer<S> for TelemetryLayer<Client> {
             inner,
             sink: self.sink.clone(),
             clock: self.clock.clone(),
-            role: Role::Client(self.role.clone()),
+            role: Role::Client(Arc::new(self.role.clone())),
         }
     }
 }

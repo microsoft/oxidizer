@@ -82,8 +82,8 @@
 //! | `http.route.parameter.<name>` | string | The value of a [configured route parameter](TelemetryLayer::route_parameter_data_classes), percent-encoded as in the request, redacted according to its data class. | `1` | If the request matches a route that has the parameter. |
 //! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer), redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`. | `0f3a9c` | If the request has the header. |
 //! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer), as for a request header. | `120` | If the response has the header. |
-//! | `http.request.body.content` | string | The start of the request body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer::request_body_media_types) cover the `Content-Type` of the request. |
-//! | `http.response.body.content` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer::response_body_media_types) cover the `Content-Type` of the response. |
+//! | `http.request.body.content` | string | The start of the request body, up to the [size limit](TelemetryLayer), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer) cover the `Content-Type` of the request. |
+//! | `http.response.body.content` | string | The start of the response body, up to the [size limit](TelemetryLayer), as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer) cover the `Content-Type` of the response. |
 //!
 //! ## Server metrics
 //!
@@ -175,18 +175,32 @@
 //! from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
 //! `identity`, because the text of compressed bytes cannot be read. To log the bodies that the
 //! server layer of `http_compression` compresses or decompresses, put this layer after that layer
-//! in the tuple.
+//! in the tuple. To log the response bodies that its client layer decompresses, put this layer
+//! before that layer.
 //!
 //! The middleware copies the bytes of a logged request body while the handler reads the body, so
 //! the events show the bytes that the handler read before the request ended. The middleware does
 //! not read a request body by itself, so it does not delay the handler. A request body whose bytes
 //! are already in memory is copied when the request arrives, also if the handler does not read it.
 //!
-//! The middleware copies the bytes of a logged response body while the server reads the body, so
-//! the error and abandoned events show the bytes that the server read before the request ended.
+//! The server middleware copies the bytes of a logged response body while the server reads the
+//! body, so the error and abandoned events show the bytes that the server read before the request
+//! ended.
 //!
-//! The copy of a body grows only with the bytes that arrive, up to the size limit, so the length
-//! that a client declares does not decide how much memory the middleware uses.
+//! The client middleware copies the bytes of a logged response body while the caller reads the
+//! body. It emits the complete event when the caller drops the body, and the event shows the bytes
+//! that the caller read. The duration still ends when the handler returns. An error of the body,
+//! or a drop before its end, does not change the complete event. A response body whose bytes are
+//! already in memory, or that is at its end, is copied when the handler returns, and the event
+//! comes then. Methods that read a whole body, such as
+//! [`HttpBody::into_bytes`](http_extensions::HttpBody::into_bytes), drop it at its end.
+//!
+//! The middleware copies the bytes of a streamed body into room that it takes from a
+//! [`GlobalPool`](bytesbuf::mem::GlobalPool) when the first bytes arrive. All layers share the pool.
+//! The room holds the whole size limit, so a length that the other side declares does not decide how
+//! much memory the middleware uses. The middleware gives the room back when it drops the buffer. The
+//! pool keeps the memory that it hands out until the process ends, so it holds room for as many
+//! bodies as were once logged at the same time.
 //!
 //! ## When the server middleware emits no event
 //!
@@ -197,8 +211,9 @@
 //!
 //! # Client
 //!
-//! A client request ends when the handler returns. The middleware does not read or wrap the
-//! response body.
+//! A client request ends when the handler returns. The middleware does not read the response body.
+//! If it logs the response body, it wraps the body and emits the complete event when the caller
+//! drops the body. See [Bodies](#bodies).
 //!
 //! ## Client events
 //!
@@ -211,7 +226,7 @@
 //!
 //! | Event | Severity | Message | When |
 //! |---|---|---|---|
-//! | `http.client.request.complete` | Debug | `HTTP request attempt completed` | The handler returned a response, with any status. |
+//! | `http.client.request.complete` | Debug | `HTTP request attempt completed` | The handler returned a response, with any status. See [Bodies](#bodies) for a logged response body. |
 //! | `http.client.request.error` | Warn | `HTTP request attempt failed` | The handler returned an error or panicked. |
 //! | `http.client.request.abandoned` | Warn | `HTTP request attempt abandoned` | The caller dropped the request future before the handler returned. |
 //! | `http.client.request.total.complete` | Debug | `HTTP request completed` | As `http.client.request.complete`, for a whole request. |
@@ -230,6 +245,8 @@
 //! | `exception.message` | string | The message of the error that the handler returned. | `the review has no text` | If the handler returned an error. |
 //! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer), as on the server. | `0f3a9c` | If the request has the header when it reaches the layer. |
 //! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer), as on the server. | `120` | If the handler returned a response with the header. |
+//! | `http.request.body.content` | string | The start of the request body, as on the server. | `{"stars":5}` | If the [request body media types](TelemetryLayer) cover the `Content-Type` of the request. |
+//! | `http.response.body.content` | string | The start of the response body, up to the size limit, as text, as on the server. It holds only the bytes that the caller read before it dropped the body, unless the body is in memory. See [Bodies](#bodies). | `{"book":"1"}` | In the complete events, if the [response body media types](TelemetryLayer) cover the `Content-Type` of the response. |
 //!
 //! The middleware does not redact `exception.message`, so the logs can contain personal data from
 //! the message of an error.
@@ -274,7 +291,8 @@
 //!
 //! ## When the client middleware emits no event
 //!
-//! - The request future is dropped while its thread panics.
+//! - The request future, or a response body that the middleware logs, is dropped while its thread
+//!   panics.
 //! - There is no destination interested in processing the event further.
 //!
 //! # Panics
@@ -320,14 +338,18 @@
 //! # }
 //! ```
 
+mod body_buffer;
 mod client;
 mod drop_guard;
 mod header_fields;
 mod interner;
+mod media_types;
+mod request_body;
 mod server;
 mod shared;
 mod telemetry;
 
 pub use client::Client;
-pub use server::{MediaTypeError, Server};
+pub use media_types::MediaTypeError;
+pub use server::Server;
 pub use telemetry::{Telemetry, TelemetryLayer};

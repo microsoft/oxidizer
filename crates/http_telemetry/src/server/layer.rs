@@ -16,17 +16,12 @@ use routerama::RouteTable;
 use templated_uri::BasePath;
 
 use super::excluded_paths::ExcludedPaths;
-use super::media_types::{MediaTypeError, MediaTypes};
 use super::route_fields::RouteFields;
+use crate::body_buffer::{DEFAULT_BODY_SIZE_LIMIT, MAX_BODY_SIZE_LIMIT};
 use crate::header_fields::{HeaderField, REQUEST_HEADER_PREFIX, RESPONSE_HEADER_PREFIX, header_fields};
+use crate::media_types::{MediaTypeError, MediaTypes};
 use crate::telemetry::Role;
 use crate::{Telemetry, TelemetryLayer};
-
-/// Default logged body size in bytes.
-const DEFAULT_BODY_SIZE_LIMIT: usize = 32 * 1024;
-
-/// The maximum supported value for `body_size_limit`.
-const MAX_BODY_SIZE_LIMIT: usize = 1536 * 1024;
 
 /// Server-side configuration held by a [`TelemetryLayer`].
 ///

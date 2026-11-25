@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The store of the field names that the layers of both sides build when they are set up.
+//! The store of the field names that the client and the server layers build when they are set up.
 
 use std::collections::BTreeSet;
 

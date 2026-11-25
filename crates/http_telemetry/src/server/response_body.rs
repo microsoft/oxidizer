@@ -104,7 +104,11 @@ impl Body for TelemetryBody {
                 if let Some(data) = frame.data_ref() {
                     this.bytes_read += data.len() as u64;
                     if let Some(buffer) = &mut this.guard.request.response_body_buffer {
-                        buffer.push(data);
+                        if ended {
+                            buffer.push_last(data);
+                        } else {
+                            buffer.push(data);
+                        }
                     }
                 }
                 if ended || frame.is_trailers() {

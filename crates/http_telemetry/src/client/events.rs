@@ -13,7 +13,8 @@ use templated_uri::PathAndQuery;
 use crate::header_fields::Headers;
 use crate::shared::DURATION_BOUNDARIES;
 
-/// Produces the event `http.client.request.complete` when the handler returned a response.
+/// Produces the event `http.client.request.complete` when the handler returned a response, or when the caller dropped
+/// a response body that the layer logs.
 #[event("http.client.request.complete")]
 #[debug("HTTP request attempt completed")]
 #[histogram(
@@ -66,6 +67,14 @@ pub(crate) struct RequestComplete<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
+    #[dimension(log = "http.response.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) response_body: Option<Text>,
 }
 
 /// Produces the event `http.client.request.error` when the handler returned an error or panicked.
@@ -117,6 +126,10 @@ pub(crate) struct RequestError<'a> {
     pub(crate) duration_secs: f64,
     #[flatten]
     pub(crate) request_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
 }
 
 /// Produces the event `http.client.request.abandoned` when the caller dropped the request future before the handler
@@ -165,10 +178,14 @@ pub(crate) struct RequestAbandoned<'a> {
     pub(crate) duration_secs: f64,
     #[flatten]
     pub(crate) request_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
 }
 
 /// Produces the event `http.client.request.total.complete` when the handler of a layer that reports the total
-/// duration returned a response.
+/// duration returned a response, or when the caller dropped a response body that the layer logs.
 #[event("http.client.request.total.complete")]
 #[debug("HTTP request completed")]
 #[histogram(
@@ -221,6 +238,14 @@ pub(crate) struct RequestTotalComplete<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
+    #[dimension(log = "http.response.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) response_body: Option<Text>,
 }
 
 /// Produces the event `http.client.request.total.error` when the handler of a layer that reports the total duration
@@ -273,6 +298,10 @@ pub(crate) struct RequestTotalError<'a> {
     pub(crate) duration_secs: f64,
     #[flatten]
     pub(crate) request_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
 }
 
 /// Produces the event `http.client.request.total.abandoned` when the caller dropped the request future of a layer that
@@ -321,6 +350,10 @@ pub(crate) struct RequestTotalAbandoned<'a> {
     pub(crate) duration_secs: f64,
     #[flatten]
     pub(crate) request_headers: Headers<'a>,
+    #[dimension(log = "http.request.body.content")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
 }
 
 /// The fields that the layer adds to each of its events, each one a log field and a metric dimension.

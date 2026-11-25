@@ -178,43 +178,58 @@ The middleware does not redact the bodies that it logs, so the logs can contain 
 from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
 `identity`, because the text of compressed bytes cannot be read. To log the bodies that the
 server layer of `http_compression` compresses or decompresses, put this layer after that layer
-in the tuple.
+in the tuple. To log the response bodies that its client layer decompresses, put this layer
+before that layer.
 
 The middleware copies the bytes of a logged request body while the handler reads the body, so
 the events show the bytes that the handler read before the request ended. The middleware does
 not read a request body by itself, so it does not delay the handler. A request body whose bytes
 are already in memory is copied when the request arrives, also if the handler does not read it.
 
-The middleware copies the bytes of a logged response body while the server reads the body, so
-the error and abandoned events show the bytes that the server read before the request ended.
+The server middleware copies the bytes of a logged response body while the server reads the
+body, so the error and abandoned events show the bytes that the server read before the request
+ended.
 
-The copy of a body grows only with the bytes that arrive, up to the size limit, so the length
-that a client declares does not decide how much memory the middleware uses.
+The client middleware copies the bytes of a logged response body while the caller reads the
+body. It emits the complete event when the caller drops the body, and the event shows the bytes
+that the caller read. The duration still ends when the handler returns. An error of the body,
+or a drop before its end, does not change the complete event. A response body whose bytes are
+already in memory, or that is at its end, is copied when the handler returns, and the event
+comes then. Methods that read a whole body, such as
+[`HttpBody::into_bytes`][__link17], drop it at its end.
+
+The middleware copies the bytes of a streamed body into room that it takes from a
+[`GlobalPool`][__link18] when the first bytes arrive. All layers share the pool.
+The room holds the whole size limit, so a length that the other side declares does not decide how
+much memory the middleware uses. The middleware gives the room back when it drops the buffer. The
+pool keeps the memory that it hands out until the process ends, so it holds room for as many
+bodies as were once logged at the same time.
 
 ### When the server middleware emits no event
 
 * The URI path of the request matches one of the
-  [`excluded_paths`][__link17].
+  [`excluded_paths`][__link19].
 * The request future or the response body is dropped while its thread panics.
 * There is no destination interested in processing the event further.
 
 ## Client
 
-A client request ends when the handler returns. The middleware does not read or wrap the
-response body.
+A client request ends when the handler returns. The middleware does not read the response body.
+If it logs the response body, it wraps the body and emits the complete event when the caller
+drops the body. See [Bodies](#bodies).
 
 ### Client events
 
-When a request ends, the middleware emits one of these events to an [`observed::Sink`][__link18], except
+When a request ends, the middleware emits one of these events to an [`observed::Sink`][__link20], except
 in the cases listed under
 [When the client middleware emits no event](#when-the-client-middleware-emits-no-event). A
 layer emits the events of an attempt, or, with
-[`report_total_duration(true)`][__link19], the events of a whole
+[`report_total_duration(true)`][__link21], the events of a whole
 request.
 
 |Event|Severity|Message|When|
 |-----|--------|-------|----|
-|`http.client.request.complete`|Debug|`HTTP request attempt completed`|The handler returned a response, with any status.|
+|`http.client.request.complete`|Debug|`HTTP request attempt completed`|The handler returned a response, with any status. See [Bodies](#bodies) for a logged response body.|
 |`http.client.request.error`|Warn|`HTTP request attempt failed`|The handler returned an error or panicked.|
 |`http.client.request.abandoned`|Warn|`HTTP request attempt abandoned`|The caller dropped the request future before the handler returned.|
 |`http.client.request.total.complete`|Debug|`HTTP request completed`|As `http.client.request.complete`, for a whole request.|
@@ -229,10 +244,12 @@ Each event has the [attributes](#metric-httpclientrequestduration) of its metric
 |`http.client.request.duration`|double|HTTP request duration in seconds.|`0.012`|In the events of an attempt.|
 |`http.client.request.total_duration`|double|HTTP request duration in seconds.|`0.012`|In the events of a whole request.|
 |`http.request.method_original`|string|The method of the request.|`PURGE`|If `http.request.method` is `_OTHER`.|
-|`url.path.redacted`|string|The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated][__link20] path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`][__link21].|`/books/1`|If the request URI has a path.|
+|`url.path.redacted`|string|The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated][__link22] path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`][__link23].|`/books/1`|If the request URI has a path.|
 |`exception.message`|string|The message of the error that the handler returned.|`the review has no text`|If the handler returned an error.|
-|`http.request.header.<name>`|string|The value of a [configured request header][__link22], as on the server.|`0f3a9c`|If the request has the header when it reaches the layer.|
-|`http.response.header.<name>`|string|The value of a [configured response header][__link23], as on the server.|`120`|If the handler returned a response with the header.|
+|`http.request.header.<name>`|string|The value of a [configured request header][__link24], as on the server.|`0f3a9c`|If the request has the header when it reaches the layer.|
+|`http.response.header.<name>`|string|The value of a [configured response header][__link25], as on the server.|`120`|If the handler returned a response with the header.|
+|`http.request.body.content`|string|The start of the request body, as on the server.|`{"stars":5}`|If the [request body media types][__link26] cover the `Content-Type` of the request.|
+|`http.response.body.content`|string|The start of the response body, up to the size limit, as text, as on the server. It holds only the bytes that the caller read before it dropped the body, unless the body is in memory. See [Bodies](#bodies).|`{"book":"1"}`|In the complete events, if the [response body media types][__link27] cover the `Content-Type` of the response.|
 
 The middleware does not redact `exception.message`, so the logs can contain personal data from
 the message of an error.
@@ -257,15 +274,15 @@ Its bucket boundaries are those of `http.server.request.duration`.
 |`url.scheme`|string|The scheme of the request URI. `_OTHER` if the URI has no scheme.|`http`; `https`; `ftp`; `_OTHER`|Always|
 |`server.address`|string|Host of the request URI. An IPv6 address keeps its brackets.|`example.com`; `[2001:db8::1]`|If the request URI has a host.|
 |`server.port`|int|Port of the request URI, else 80 for `http` and 443 for `https`.|`443`; `8080`|If the request URI has a host, and the port is known.|
-|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link24] of the request, else the label or the template of its [templated][__link25] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
+|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link28] of the request, else the label or the template of its [templated][__link29] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
 |`network.protocol.name`|string|The protocol of the response.|`http`|If the handler returned a response.|
 |`network.protocol.version`|string|Version of the HTTP protocol of the response. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|If the handler returned a response.|
 |`http.response.status_code`|int|HTTP response status code.|`200`; `503`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link26] and the kind of each I/O error, unless the layer has [its own function][__link27]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link30] and the kind of each I/O error, unless the layer has [its own function][__link31]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
 
 The `url.template` of a request whose URI is given as text is `unknown`, because its path has no
-template. To record a template, build the URI from a [templated][__link28] type, or
-add a [`UriTemplateLabel`][__link29] to the extensions of the request.
+template. To record a template, build the URI from a [templated][__link32] type, or
+add a [`UriTemplateLabel`][__link33] to the extensions of the request.
 
 #### Metric: `http.client.request.total_duration`
 
@@ -277,7 +294,8 @@ It has the attributes and the bucket boundaries of `http.client.request.duration
 
 ### When the client middleware emits no event
 
-* The request future is dropped while its thread panics.
+* The request future, or a response body that the middleware logs, is dropped while its thread
+  panics.
 * There is no destination interested in processing the event further.
 
 ## Panics
@@ -321,31 +339,35 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrvX77DzHOR8bhWBRmAdzDfEbga1mJWq470Ib723kZ-jbe4RhZIaDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4wgm10ZW1wbGF0ZWRfdXJpZTAuNy4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbp34T2F6iqIob4EChM47UblcbPa5tqTon-W0bQ9PcQO1ipkhhZIeCaGJ5dGVzYnVmZjAuMTUuMINpaHR0cC1ib2R5ZTEuMS4waWh0dHBfYm9keYJvaHR0cF9leHRlbnNpb25zZjAuMTYuMIJuaHR0cF90ZWxlbWV0cnllMC4yLjCCZ2xheWVyZWRmMC4zLjEwgmhvYnNlcnZlZGYwLjMxLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://crates.io/crates/observed/0.31.0
  [__link1]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry
- [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit
- [__link11]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::request_body_media_types
- [__link12]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit
- [__link13]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::response_body_media_types
+ [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link11]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link12]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link13]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
  [__link14]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::route_resolver
  [__link15]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
  [__link16]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream
- [__link17]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::excluded_paths
- [__link18]: https://docs.rs/observed/0.31.0/observed/?search=Sink
- [__link19]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
+ [__link17]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpBody::into_bytes
+ [__link18]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool
+ [__link19]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::excluded_paths
  [__link2]: https://docs.rs/layered/0.3.10/layered/?search=Layer
- [__link20]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link21]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=Uri::DATA_CLASS
- [__link22]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
- [__link23]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
- [__link24]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
- [__link25]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link26]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
- [__link27]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
- [__link28]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link29]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
+ [__link20]: https://docs.rs/observed/0.31.0/observed/?search=Sink
+ [__link21]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
+ [__link22]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link23]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=Uri::DATA_CLASS
+ [__link24]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link25]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link26]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link27]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link28]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
+ [__link29]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
  [__link3]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::server
+ [__link30]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
+ [__link31]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
+ [__link32]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link33]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
  [__link4]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::client
  [__link5]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
  [__link6]: https://docs.rs/observed/0.31.0/observed/?search=Sink

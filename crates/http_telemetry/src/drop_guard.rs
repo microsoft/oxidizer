@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The drop guard that emits the event of one request, on both sides.
+//! The drop guard that emits the event of one request, for the client and the server middleware.
 
 use observed::Sink;
 use observed::context::Transfer;
@@ -47,8 +47,19 @@ impl<R: EmitEvents> TelemetryDropGuard<R> {
         if self.finished {
             return;
         }
+        let duration_secs = self.elapsed_secs();
+        self.emit_with_duration(end, duration_secs);
+    }
+
+    /// The duration of the request until now, in seconds.
+    pub(crate) fn elapsed_secs(&self) -> f64 {
+        self.stopwatch.elapsed().as_secs_f64()
+    }
+
+    /// Emits the event of the request with `duration_secs`, which the caller took earlier with
+    /// [`elapsed_secs`](Self::elapsed_secs). The guard emits nothing more.
+    pub(crate) fn emit_with_duration(&mut self, end: R::RequestEnd<'_>, duration_secs: f64) {
         self.finished = true;
-        let duration_secs = self.stopwatch.elapsed().as_secs_f64();
         let _enrichment = self.context_transfer.apply_current_thread();
         self.request.emit_events(end, duration_secs);
     }

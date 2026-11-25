@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use bytesbuf::BytesView;
 use data_privacy::{DataClass, RedactionEngine, Sensitive};
-use http::header::RETRY_AFTER;
+use http::header::{CONTENT_TYPE, RETRY_AFTER};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, RequestHandler};
@@ -473,6 +473,14 @@ pub(crate) fn abandon(handler: &impl RequestHandler, request: HttpRequest) {
     );
 }
 
+/// Sends `request` to `handler`, and polls the response body until it ends.
+pub(crate) fn read_to_end(handler: &impl RequestHandler, request: HttpRequest) {
+    let mut body = send(handler, request).unwrap().into_body();
+    while let Poll::Ready(Some(frame)) = poll_frame(&mut body) {
+        drop(black_box(frame));
+    }
+}
+
 /// A request with `method` and `version`, and an empty body.
 pub(crate) fn request(method: Method, version: Version) -> HttpRequest {
     Request::builder()
@@ -542,6 +550,29 @@ pub(crate) fn with_headers(retry_after: HeaderValue) -> HttpRequest {
     let mut request = get_to("http://example.com/books/1");
     request.headers_mut().insert(REQUEST_ID, HeaderValue::from_static("7"));
     request.headers_mut().insert(RETRY_AFTER, retry_after);
+    request
+}
+
+/// A `GET` request over HTTP/1.1 with `body` and with the `Content-Type` `application/json`.
+/// [`Echoing`] responds with both.
+pub(crate) fn json(body: HttpBody) -> HttpRequest {
+    typed("application/json", body)
+}
+
+/// A `GET` request over HTTP/1.1 with `body` and with `content_type` as its `Content-Type`.
+pub(crate) fn typed(content_type: &'static str, body: HttpBody) -> HttpRequest {
+    let mut request = get().map(|_| body);
+    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+    request
+}
+
+/// A `POST` request over HTTP/1.1 to `http://example.com/books/1/reviews`, with `body` and with `content_type` as
+/// its `Content-Type`. [`Echoing`] responds with both.
+pub(crate) fn post(content_type: &'static str, body: HttpBody) -> HttpRequest {
+    let mut request = Request::post(Uri::from_static("http://example.com/books/1/reviews"))
+        .body(body)
+        .unwrap();
+    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     request
 }
 
@@ -684,6 +715,50 @@ pub(crate) fn scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
 pub(crate) fn sized_scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
     let steps = steps.into_iter().collect();
     HttpBodyBuilder::new_fake().body(Scripted { steps, sized: true })
+}
+
+/// A body in memory with `bytes`.
+pub(crate) fn in_memory(bytes: &[u8]) -> HttpBody {
+    HttpBodyBuilder::new_fake().slice(bytes)
+}
+
+/// A body in memory with `length` bytes.
+pub(crate) fn filled(length: usize) -> HttpBody {
+    in_memory(&vec![b'a'; length])
+}
+
+/// 1024 bytes that are valid UTF-8 up to their last 3 bytes, which start a 4-byte character.
+/// `String::from_utf8_lossy` replaces them with one character of 3 bytes, so the text keeps the
+/// length of the bytes.
+pub(crate) fn invalid_utf8() -> Vec<u8> {
+    let mut bytes = vec![b'a'; 1021];
+    bytes.extend_from_slice(&"\u{1F600}".as_bytes()[..3]);
+    bytes
+}
+
+/// A streamed body of 1024 bytes in 32 frames, whose length is unknown.
+pub(crate) fn frames_32() -> HttpBody {
+    scripted((0..32).map(|_| data(&"a".repeat(32))))
+}
+
+/// A streamed body of `length` bytes with an exact size hint, as a request body with a `Content-Length` has. Its frames
+/// have the sizes in which hyper reads HTTP/1.1 when all the bytes are already there: 8 KiB, then twice as much after
+/// each read that fills its buffer.
+pub(crate) fn streamed_bytes(length: usize) -> HttpBody {
+    let mut frames = Vec::new();
+    let (mut start, mut size) = (0, 8192);
+    while start < length {
+        let end = length.min(start + size);
+        frames.push(data(&"a".repeat(end - start)));
+        (start, size) = (end, size * 2);
+    }
+    sized_scripted(frames)
+}
+
+/// A body whose exact size hint declares `declared` bytes, as a `Content-Length` does, but that sends only the first
+/// `sent` bytes and then stalls.
+pub(crate) fn stalled(sent: usize, declared: usize) -> HttpBody {
+    sized_scripted([data(&"a".repeat(sent)), Step::Pending, data(&"a".repeat(declared - sent))])
 }
 
 /// Polls `body` once, with a waker that does nothing.

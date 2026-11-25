@@ -44,7 +44,7 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-bytesbuf = { workspace = true }
+bytesbuf = { workspace = true, features = ["std"] }
 data_privacy = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }

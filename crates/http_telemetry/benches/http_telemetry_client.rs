@@ -11,19 +11,21 @@
 mod common;
 
 use std::borrow::Borrow;
+use std::future::ready;
 use std::sync::Arc;
+use std::task::Poll;
 
 use common::{
-    Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, abandon, interested_sink, reading_sink, send,
-    with_headers,
+    Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, abandon, filled, frames_32, in_memory,
+    interested_sink, invalid_utf8, json, post, read_to_end, reading_sink, send, stalled, streamed_bytes, typed, with_headers,
 };
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::DataClass;
 use http::header::RETRY_AFTER;
 use http::{HeaderValue, StatusCode};
-use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, UriTemplateLabel};
+use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, HttpResponse, UriTemplateLabel};
 use http_telemetry::{Client, Telemetry, TelemetryLayer};
-use layered::Layer;
+use layered::{Layer, Service};
 use observed::metadata::FieldDescriptor;
 use observed::processing::EventProcessor;
 use observed::{Sink, SinkId};
@@ -120,6 +122,60 @@ fn header_stack(class: DataClass, warm_up: HttpRequest) -> Telemetry<Echoing> {
         .response_header_data_classes([(RETRY_AFTER, class)])
         .layer(Echoing(StatusCode::OK));
     drop(send(&stack, warm_up));
+    stack
+}
+
+/// Polls the body of each request until it ends or is pending, as a transport does when it sends the request, and
+/// then responds with 200 and an empty body. It does not allocate.
+struct Sending(HttpBodyBuilder);
+
+impl Service<HttpRequest> for Sending {
+    type Out = http_extensions::Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+        let mut body = input.into_body();
+        while let Poll::Ready(Some(_)) = common::poll_frame(&mut body) {}
+        ready(Ok(HttpResponse::new(self.0.empty())))
+    }
+}
+
+/// The client middleware over a sink with two processors that read every field, in front of [`Echoing`]. The stack
+/// already got one request.
+fn echoing_stack() -> Telemetry<Echoing> {
+    let stack = Telemetry::client(reading_sink(2)).layer(Echoing(StatusCode::OK));
+    drop(send(&stack, get()));
+    stack
+}
+
+/// The client middleware that logs the bodies of `application/json` responses, over a sink with two processors that
+/// read every field, in front of [`Echoing`]. The stack already got two such responses, one in memory and one streamed
+/// in several frames.
+fn response_logging_stack() -> Telemetry<Echoing> {
+    let stack = Telemetry::client(reading_sink(2))
+        .response_body_media_types(["application/json"])
+        .expect("application/json is a media type")
+        .layer(Echoing(StatusCode::OK));
+    read_to_end(&stack, json(in_memory(b"{}")));
+    read_to_end(&stack, json(streamed_bytes(65536)));
+    stack
+}
+
+/// The client middleware over a sink with two processors that read every field, in front of [`Sending`]. The stack
+/// already got one request.
+fn sending_stack() -> Telemetry<Sending> {
+    let stack = Telemetry::client(reading_sink(2)).layer(Sending(HttpBodyBuilder::new_fake()));
+    drop(send(&stack, get()));
+    stack
+}
+
+/// The client middleware that logs the bodies of `application/json` requests, over a sink with two processors that
+/// read every field, in front of [`Sending`]. The stack already got one request.
+fn request_logging_stack() -> Telemetry<Sending> {
+    let stack = Telemetry::client(reading_sink(2))
+        .request_body_media_types(["application/json"])
+        .expect("application/json is a media type")
+        .layer(Sending(HttpBodyBuilder::new_fake()));
+    drop(send(&stack, post("application/json", streamed_bytes(1024))));
     stack
 }
 
@@ -226,6 +282,36 @@ fn fields_handler_error<S: Borrow<Telemetry<Failing>>>(stack: S, request: HttpRe
     (send(stack.borrow(), request), stack)
 }
 
+#[metabench::benchmark(FIELDS_COMPLETE_WITH_RESPONSE_BODY, FIELDS, "complete_with_response_body")]
+#[bench::logging_off(Box::new(echoing_stack()), json(filled(1024)))]
+#[bench::not_matching(Box::new(response_logging_stack()), typed("image/png", filled(1024)))]
+#[bench::bytes_1024(Box::new(response_logging_stack()), json(filled(1024)))]
+#[bench::frames_32(Box::new(response_logging_stack()), json(frames_32()))]
+#[bench::invalid_utf8(Box::new(response_logging_stack()), json(in_memory(&invalid_utf8())))]
+#[bench::bytes_65536(Box::new(response_logging_stack()), json(filled(65536)))]
+#[bench::streamed_1024(Box::new(response_logging_stack()), json(streamed_bytes(1024)))]
+#[bench::streamed_65536(Box::new(response_logging_stack()), json(streamed_bytes(65536)))]
+fn fields_complete_with_response_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_to_end(stack.borrow(), request);
+    stack
+}
+
+#[metabench::benchmark(FIELDS_COMPLETE_WITH_REQUEST_BODY, FIELDS, "complete_with_request_body")]
+#[bench::logging_off(Box::new(sending_stack()), post("application/json", streamed_bytes(1024)))]
+#[bench::not_matching(Box::new(request_logging_stack()), post("image/png", streamed_bytes(1024)))]
+#[bench::bytes_1024(Box::new(request_logging_stack()), post("application/json", filled(1024)))]
+#[bench::invalid_utf8(Box::new(request_logging_stack()), post("application/json", in_memory(&invalid_utf8())))]
+#[bench::streamed_1024(Box::new(request_logging_stack()), post("application/json", streamed_bytes(1024)))]
+#[bench::streamed_65536(Box::new(request_logging_stack()), post("application/json", streamed_bytes(65536)))]
+#[bench::stalled_1024_of_65536(Box::new(request_logging_stack()), post("application/json", stalled(1024, 65536)))]
+fn fields_complete_with_request_body<S: Borrow<Telemetry<Sending>>>(
+    stack: S,
+    request: HttpRequest,
+) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
+#[expect(clippy::too_many_lines, reason = "one registration for each case of the group")]
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ATTEMPT);
     let handler = common::responding(StatusCode::OK);
@@ -319,6 +405,55 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             );
         },
     );
+    let logging_off = echoing_stack();
+    let logging_on = response_logging_stack();
+    let json_1024: fn() -> HttpRequest = || json(filled(1024));
+    for (case, stack, request) in [
+        ("logging_off", &logging_off, json_1024),
+        ("not_matching", &logging_on, || typed("image/png", filled(1024))),
+        ("bytes_1024", &logging_on, json_1024),
+        ("frames_32", &logging_on, || json(frames_32())),
+        ("invalid_utf8", &logging_on, || json(in_memory(&invalid_utf8()))),
+        ("bytes_65536", &logging_on, || json(filled(65536))),
+        ("streamed_1024", &logging_on, || json(streamed_bytes(1024))),
+        ("streamed_65536", &logging_on, || json(streamed_bytes(65536))),
+    ] {
+        group.bench_function(
+            BenchmarkId::new(FIELDS_COMPLETE_WITH_RESPONSE_BODY.benchmark_name(), case),
+            |bencher| {
+                bencher.iter_batched(
+                    request,
+                    |request| fields_complete_with_response_body(stack, request),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    let logging_off = sending_stack();
+    let logging_on = request_logging_stack();
+    let streamed_1024: fn() -> HttpRequest = || post("application/json", streamed_bytes(1024));
+    for (case, stack, request) in [
+        ("logging_off", &logging_off, streamed_1024),
+        ("not_matching", &logging_on, || post("image/png", streamed_bytes(1024))),
+        ("bytes_1024", &logging_on, || post("application/json", filled(1024))),
+        ("invalid_utf8", &logging_on, || post("application/json", in_memory(&invalid_utf8()))),
+        ("streamed_1024", &logging_on, streamed_1024),
+        ("streamed_65536", &logging_on, || post("application/json", streamed_bytes(65536))),
+        ("stalled_1024_of_65536", &logging_on, || {
+            post("application/json", stalled(1024, 65536))
+        }),
+    ] {
+        group.bench_function(
+            BenchmarkId::new(FIELDS_COMPLETE_WITH_REQUEST_BODY.benchmark_name(), case),
+            |bencher| {
+                bencher.iter_batched(
+                    request,
+                    |request| fields_complete_with_request_body(stack, request).0,
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
     group.finish();
 }
 
@@ -336,5 +471,7 @@ metabench::main!(
         FIELDS_COMPLETE,
         FIELDS_COMPLETE_WITH_HEADERS,
         FIELDS_HANDLER_ERROR,
+        FIELDS_COMPLETE_WITH_RESPONSE_BODY,
+        FIELDS_COMPLETE_WITH_REQUEST_BODY,
     ],
 );

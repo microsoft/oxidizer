@@ -6,6 +6,7 @@
 mod events;
 mod layer;
 mod request;
+mod response_body;
 mod service;
 
 pub use layer::Client;

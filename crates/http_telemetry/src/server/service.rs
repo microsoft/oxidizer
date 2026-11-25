@@ -9,21 +9,18 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::future::Either;
 use http::header::HOST;
-use http_body::Body;
-use http_body_util::BodyExt;
-use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use observed::Event;
-use parking_lot::Mutex;
 
-use super::body_buffer::BodyBuffer;
 use super::events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
 use super::layer::Server;
 use super::request::{RequestEnd, RouteValues, ServerRequest, UriAuthority};
 use super::response_body::emit_when_body_ends;
 use crate::Telemetry;
+use crate::body_buffer::BodyBuffer;
 use crate::drop_guard::TelemetryDropGuard;
 use crate::header_fields::RequestAndResponseHeaders;
+use crate::request_body::RequestBodyBuffer;
 use crate::shared::{OTHER, known_scheme};
 
 impl<T: RequestHandler> Telemetry<T> {
@@ -70,7 +67,7 @@ impl<T: RequestHandler> Telemetry<T> {
                     server.response_header_fields.as_ref(),
                     input.headers(),
                 ),
-                request_body_buffer: None,
+                request_body_buffer: RequestBodyBuffer::NotLogged,
                 response_body_buffer: None,
             },
             &self.sink,
@@ -78,29 +75,7 @@ impl<T: RequestHandler> Telemetry<T> {
         );
         guard.request.add_active_request(1);
         if server.request_body_media_types.matches(input.headers()) {
-            let buffer = Arc::new(Mutex::new(BodyBuffer::new(server.body_size_limit)));
-            if !input.body().is_end_stream() {
-                input = input.map(|body| {
-                    body.map(|content| {
-                        Ok(match content {
-                            Content::Bytes(bytes) => {
-                                buffer.lock().push(&bytes);
-                                Content::Bytes(bytes)
-                            }
-                            Content::Streaming(inner) => {
-                                let buffer = Arc::clone(&buffer);
-                                Content::Streaming(StreamingBody::new(inner.inspect_frame(move |frame| {
-                                    if let Some(data) = frame.data_ref() {
-                                        buffer.lock().push(data);
-                                    }
-                                })))
-                            }
-                        })
-                    })
-                    .expect("map fails only for a consumed body, which is at its end, so the check above rules it out")
-                });
-            }
-            guard.request.request_body_buffer = Some(buffer);
+            guard.request.request_body_buffer = RequestBodyBuffer::new(&mut input, server.body_size_limit);
         }
         // The middleware resumes each panic that it catches and never polls the handler again, so the
         // handler does not need to be unwind safe. The handler can panic in the call too, because

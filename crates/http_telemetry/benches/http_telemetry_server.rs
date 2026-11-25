@@ -13,17 +13,16 @@ mod common;
 use std::borrow::Borrow;
 use std::hint::black_box;
 use std::sync::Arc;
-use std::task::Poll;
 
 use common::{
-    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, Step, Tenant, abandon, interested_sink,
-    reading_sink, send, with_headers,
+    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, Step, Tenant, abandon, filled, frames_32,
+    in_memory, interested_sink, invalid_utf8, json, post, read_to_end, reading_sink, send, stalled, streamed_bytes, typed, with_headers,
 };
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
-use http::header::{CONTENT_TYPE, RETRY_AFTER};
-use http::{HeaderValue, Request, StatusCode, Uri};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use http::header::RETRY_AFTER;
+use http::{HeaderValue, Request, StatusCode};
+use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
@@ -103,14 +102,6 @@ fn read_body(handler: &impl RequestHandler, request: HttpRequest, polls: usize) 
     }
 }
 
-/// Sends `request` to `handler`, and polls the response body until it ends.
-fn read_to_end(handler: &impl RequestHandler, request: HttpRequest) {
-    let mut body = send(handler, request).expect("the handler responds").into_body();
-    while let Poll::Ready(Some(frame)) = common::poll_frame(&mut body) {
-        drop(black_box(frame));
-    }
-}
-
 /// The server middleware in front of [`Responding`], over a sink that combines three sinks, and
 /// an enrichment for that sink. The stack already got one request.
 fn enriched_stack() -> (Telemetry<Responding>, Transfer) {
@@ -167,52 +158,16 @@ fn long_book() -> HttpRequest {
 }
 
 /// The server middleware that logs the bodies of `application/json` responses, over a sink with two
-/// processors that read every field, in front of [`Echoing`]. The stack already got one such
-/// response.
-fn body_logging_stack() -> Telemetry<Echoing> {
+/// processors that read every field, in front of [`Echoing`]. The stack already got two such
+/// responses, one in memory and one streamed in several frames.
+fn response_logging_stack() -> Telemetry<Echoing> {
     let stack = Telemetry::server(reading_sink(2))
         .response_body_media_types(["application/json"])
         .expect("application/json is a media type")
         .layer(Echoing(StatusCode::OK));
     read_to_end(&stack, json(in_memory(b"{}")));
+    read_to_end(&stack, json(streamed_bytes(65536)));
     stack
-}
-
-/// A `GET` request over HTTP/1.1 with `body` and with the `Content-Type` `application/json`.
-/// [`Echoing`] responds with both.
-fn json(body: HttpBody) -> HttpRequest {
-    typed("application/json", body)
-}
-
-/// A `GET` request over HTTP/1.1 with `body` and with `content_type` as its `Content-Type`.
-fn typed(content_type: &'static str, body: HttpBody) -> HttpRequest {
-    let mut request = common::get().map(|_| body);
-    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    request
-}
-
-/// A body in memory with `bytes`.
-fn in_memory(bytes: &[u8]) -> HttpBody {
-    HttpBodyBuilder::new_fake().slice(bytes)
-}
-
-/// A body in memory with `length` bytes.
-fn filled(length: usize) -> HttpBody {
-    in_memory(&vec![b'a'; length])
-}
-
-/// 1024 bytes that are valid UTF-8 up to their last 3 bytes, which start a 4-byte character.
-/// `String::from_utf8_lossy` replaces them with one character of 3 bytes, so the text keeps the
-/// length of the bytes.
-fn invalid_utf8() -> Vec<u8> {
-    let mut bytes = vec![b'a'; 1021];
-    bytes.extend_from_slice(&"\u{1F600}".as_bytes()[..3]);
-    bytes
-}
-
-/// A streamed body of 1024 bytes in 32 frames, whose length is unknown.
-fn frames_32() -> HttpBody {
-    common::scripted((0..32).map(|_| common::data(&"a".repeat(32))))
 }
 
 /// The server middleware that logs the bodies of `application/json` requests, over a sink with two processors that
@@ -224,35 +179,6 @@ fn request_logging_stack() -> Telemetry<Echoing> {
         .layer(Echoing(StatusCode::OK));
     read_to_end(&stack, post("application/json", streamed_bytes(1024)));
     stack
-}
-
-/// A `POST` request over HTTP/1.1 to `http://example.com/books/1/reviews`, with `body` and with `content_type` as
-/// its `Content-Type`. [`Echoing`] responds with both.
-fn post(content_type: &'static str, body: HttpBody) -> HttpRequest {
-    let mut request = Request::post(Uri::from_static("http://example.com/books/1/reviews"))
-        .body(body)
-        .expect("the URI is valid");
-    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    request
-}
-
-/// A streamed body of `length` bytes in frames of 8 KiB at most, with an exact size hint, as a request body with a
-/// `Content-Length` has.
-fn streamed_bytes(length: usize) -> HttpBody {
-    let frames = (0..length)
-        .step_by(8192)
-        .map(|start| common::data(&"a".repeat((length - start).min(8192))));
-    common::sized_scripted(frames)
-}
-
-/// A body whose exact size hint declares `declared` bytes, as a `Content-Length` does, but that sends only the first
-/// `sent` bytes and then stalls.
-fn stalled(sent: usize, declared: usize) -> HttpBody {
-    common::sized_scripted([
-        common::data(&"a".repeat(sent)),
-        Step::Pending,
-        common::data(&"a".repeat(declared - sent)),
-    ])
 }
 
 #[metabench::benchmark(INNER_ONLY, GROUP, "inner_only")]
@@ -431,11 +357,13 @@ fn complete_with_headers<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpR
 
 #[metabench::benchmark(COMPLETE_WITH_RESPONSE_BODY, GROUP, "complete_with_response_body")]
 #[bench::logging_off(Box::new(echoing_stack(reading_sink(2))), json(filled(1024)))]
-#[bench::not_matching(Box::new(body_logging_stack()), typed("image/png", filled(1024)))]
-#[bench::bytes_1024(Box::new(body_logging_stack()), json(filled(1024)))]
-#[bench::frames_32(Box::new(body_logging_stack()), json(frames_32()))]
-#[bench::invalid_utf8(Box::new(body_logging_stack()), json(in_memory(&invalid_utf8())))]
-#[bench::bytes_65536(Box::new(body_logging_stack()), json(filled(65536)))]
+#[bench::not_matching(Box::new(response_logging_stack()), typed("image/png", filled(1024)))]
+#[bench::bytes_1024(Box::new(response_logging_stack()), json(filled(1024)))]
+#[bench::frames_32(Box::new(response_logging_stack()), json(frames_32()))]
+#[bench::invalid_utf8(Box::new(response_logging_stack()), json(in_memory(&invalid_utf8())))]
+#[bench::bytes_65536(Box::new(response_logging_stack()), json(filled(65536)))]
+#[bench::streamed_1024(Box::new(response_logging_stack()), json(streamed_bytes(1024)))]
+#[bench::streamed_65536(Box::new(response_logging_stack()), json(streamed_bytes(65536)))]
 fn complete_with_response_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
     read_to_end(stack.borrow(), request);
     stack
@@ -608,7 +536,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     let logging_off = echoing_stack(reading_sink(2));
-    let logging_on = body_logging_stack();
+    let logging_on = response_logging_stack();
     let json_1024: fn() -> HttpRequest = || json(filled(1024));
     for (case, stack, request) in [
         ("logging_off", &logging_off, json_1024),
@@ -617,6 +545,8 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         ("frames_32", &logging_on, || json(frames_32())),
         ("invalid_utf8", &logging_on, || json(in_memory(&invalid_utf8()))),
         ("bytes_65536", &logging_on, || json(filled(65536))),
+        ("streamed_1024", &logging_on, || json(streamed_bytes(1024))),
+        ("streamed_65536", &logging_on, || json(streamed_bytes(65536))),
     ] {
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_RESPONSE_BODY.benchmark_name(), case), |bencher| {
             bencher.iter_batched(

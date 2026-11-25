@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The telemetry middleware and the layer that creates it: the parts that both sides share.
+//! The telemetry middleware and the layer that creates it: the parts that the client and the server middleware
+//! share.
 
 use std::any::type_name;
 use std::fmt;
+use std::sync::Arc;
 
 use futures::future::Either;
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
@@ -30,8 +32,12 @@ pub struct Telemetry<T> {
 
 /// The side of a [`Telemetry`] middleware, with its configuration.
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the middleware is built once for each layer, and its requests borrow it, so they do not move it"
+)]
 pub(crate) enum Role {
-    Client(Client),
+    Client(Arc<Client>),
     Server(Server),
 }
 

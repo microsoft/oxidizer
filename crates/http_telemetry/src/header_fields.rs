@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The header fields of both sides: the headers that a layer logs, their values in one request, and the fields of
-//! the events that log them.
+//! The header fields of the client and the server middleware: the headers that a layer logs, their values in one
+//! request, and the fields of the events that log them.
 
 use std::fmt::{self, Write as _};
 use std::ops::ControlFlow;

@@ -17,13 +17,15 @@ use super::events::{
     Dimensions, RequestAbandoned, RequestComplete, RequestError, RequestTotalAbandoned, RequestTotalComplete, RequestTotalError,
 };
 use super::layer::Client;
+use crate::body_buffer::BodyBuffer;
 use crate::drop_guard::EmitEvents;
 use crate::header_fields::{Headers, RequestAndResponseHeaders};
+use crate::request_body::RequestBodyBuffer;
 use crate::shared::{http_method_name, method_original, protocol_version};
 
 pub(crate) enum RequestEnd<'a> {
-    /// The handler returned a response with this status and version.
-    Complete(StatusCode, Version),
+    /// The handler returned a response with this status and version, and the buffer of its body if the layer logs it.
+    Complete(StatusCode, Version, Option<&'a BodyBuffer>),
     /// The handler returned this error.
     Error(&'a HttpError),
     /// The handler panicked.
@@ -34,10 +36,11 @@ pub(crate) enum RequestEnd<'a> {
 
 /// The values of one client request that its events record.
 ///
-/// The request ends when the handler returns, so the values can borrow the layer.
-pub(crate) struct ClientRequest<'a> {
-    pub(crate) sink: &'a Sink,
-    pub(crate) client: &'a Client,
+/// When the middleware logs a response body that streams, the drop guard of the request moves with these values into the
+/// pending event that the body owns, so they own their data.
+pub(crate) struct ClientRequest {
+    pub(crate) sink: Sink,
+    pub(crate) client: Arc<Client>,
     pub(crate) method: Method,
     pub(crate) scheme: Text,
     pub(crate) authority: Option<Authority>,
@@ -45,9 +48,10 @@ pub(crate) struct ClientRequest<'a> {
     pub(crate) url_template: Option<Cow<'static, str>>,
     pub(crate) path: Option<PathAndQuery>,
     pub(crate) headers: Option<Box<RequestAndResponseHeaders>>,
+    pub(crate) request_body_buffer: RequestBodyBuffer,
 }
 
-impl EmitEvents for ClientRequest<'_> {
+impl EmitEvents for ClientRequest {
     type RequestEnd<'a> = RequestEnd<'a>;
 
     const ABANDONED: RequestEnd<'static> = RequestEnd::Abandoned;
@@ -73,8 +77,9 @@ impl EmitEvents for ClientRequest<'_> {
         let headers = self.headers.as_deref();
         let request_headers = || Headers(headers.and_then(|headers| headers.request.as_ref()));
         let response_headers = || Headers(headers.and_then(|headers| headers.response.as_ref()));
+        let request_body = || self.request_body_buffer.text();
         match end {
-            RequestEnd::Complete(status_code, version) => {
+            RequestEnd::Complete(status_code, version, response_body_buffer) => {
                 if self.client.report_total_duration {
                     emit!(
                         self.sink,
@@ -93,6 +98,8 @@ impl EmitEvents for ClientRequest<'_> {
                             duration_secs,
                             request_headers: request_headers(),
                             response_headers: response_headers(),
+                            request_body: request_body(),
+                            response_body: response_body_buffer.map(BodyBuffer::text),
                         }
                     );
                 } else {
@@ -113,6 +120,8 @@ impl EmitEvents for ClientRequest<'_> {
                             duration_secs,
                             request_headers: request_headers(),
                             response_headers: response_headers(),
+                            request_body: request_body(),
+                            response_body: response_body_buffer.map(BodyBuffer::text),
                         }
                     );
                 }
@@ -134,6 +143,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 } else {
@@ -152,6 +162,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 }
@@ -173,6 +184,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 } else {
@@ -191,6 +203,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 }
@@ -211,6 +224,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 } else {
@@ -228,6 +242,7 @@ impl EmitEvents for ClientRequest<'_> {
                             dimensions: dimensions(),
                             duration_secs,
                             request_headers: request_headers(),
+                            request_body: request_body(),
                         }
                     );
                 }
