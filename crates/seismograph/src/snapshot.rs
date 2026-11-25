@@ -418,9 +418,7 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
         }
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
-        let Ok(data_len) = usize::try_from(reader.u64()?) else {
-            return Err(Error::invalid_format());
-        };
+        let data_len = snapshot_usize(reader.u64()?, reader.remaining().len())?;
         if reader.u32()? != 0 {
             return Err(Error::invalid_format());
         }
