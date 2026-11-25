@@ -5,6 +5,7 @@
 - Breaking: Move runtime policies into runtime::policy and replace panic configuration with hooks.
 - Use shutdown and owned worker access.
 - Add runtime names, worker and task hooks, shutdown causes, monitoring, and automatic monitor selection.
+- Remove the `monitor` Cargo feature and include monitoring support in `rt`. Use `MonitorPolicy` to control activation instead of a Cargo feature.
 - Update the local requirement for `arty_executor` from `=0.6.1` to `=0.7.0`.
 - Update the local requirement for `arty_io_core` from `^0.4.0` to `^0.5.0`.
 - Update the local requirement for `arty_io_host` from `=0.6.1` to `=0.7.0`.

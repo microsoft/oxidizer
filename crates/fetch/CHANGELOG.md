@@ -4,6 +4,7 @@
 
 - Breaking: Update body construction, compression, resilience, and timing integrations to the new contracts.
 - Expand connector and transport regression coverage.
+- Remove the forwarding `seismograph` feature. Enable recording directly on instrumented dependencies.
 - Update the local requirement for `anyspawn` from `^0.11.0` to `^0.12.0`.
 - Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
 - Update the local requirement for `compressors` from `^0.5.0` to `^0.6.0`.

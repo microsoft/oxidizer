@@ -4,6 +4,7 @@
 
 - Breaking: Split field visitation into VisitFields and require it for Event implementations.
 - Add #[flatten] fields with nested field routing, redaction, metrics, and visitor short-circuiting.
+- Remove the forwarding `seismograph` feature. Enable instrumentation directly on Performables when needed.
 - Update the local requirement for `data_privacy` from `^0.13.2` to `^0.13.3`.
 - Update the local requirement for `observed_macros` from `=0.30.1` to `=0.31.0`.
 - Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.

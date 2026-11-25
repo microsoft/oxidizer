@@ -44,7 +44,7 @@ std = [
 ]
 # Interoperability with the `bytes` crate.
 bytes-compat = ["dep:bytes"]
-seismograph = ["std", "dep:seismograph_io", "performables/seismograph"]
+seismograph = ["std", "dep:seismograph_io"]
 test-util = ["std"]
 
 [dependencies]

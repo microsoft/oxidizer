@@ -24,10 +24,8 @@
 
 use std::hint::black_box;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(feature = "monitor")]
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,9 +34,7 @@ use arty::runtime::Runtime;
 use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 use arty::task::JoinHandle;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-#[cfg(feature = "monitor")]
 use seismograph::recorder::{Configuration, Policy};
-#[cfg(feature = "monitor")]
 use seismograph::snapshot::SnapshotOptions;
 
 const OPERATIONS: u64 = 64;
@@ -46,28 +42,19 @@ const OPERATIONS: u64 = 64;
 #[derive(Clone, Copy)]
 enum Mode {
     Disabled,
-    #[cfg(feature = "monitor")]
     Idle,
-    #[cfg(feature = "monitor")]
     Collecting,
-    #[cfg(feature = "monitor")]
     Recording,
 }
 
 impl Mode {
-    #[cfg(feature = "monitor")]
     const ALL: &[Self] = &[Self::Disabled, Self::Idle, Self::Collecting, Self::Recording];
-    #[cfg(not(feature = "monitor"))]
-    const ALL: &[Self] = &[Self::Disabled];
 
     fn name(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
-            #[cfg(feature = "monitor")]
             Self::Idle => "idle",
-            #[cfg(feature = "monitor")]
             Self::Collecting => "collecting",
-            #[cfg(feature = "monitor")]
             Self::Recording => "recording",
         }
     }
@@ -106,7 +93,6 @@ struct Case {
 
 impl Case {
     fn new(mode: Mode, workload: Workload) -> Self {
-        #[cfg(feature = "monitor")]
         seismograph::recorder(Configuration::default());
         let workers = if matches!(workload, Workload::RemoteBatch | Workload::BlockingBatch) {
             4
@@ -126,7 +112,6 @@ impl Case {
             .expect("benchmark runtime configuration is valid");
         let stop = Arc::new(AtomicBool::new(false));
         let captures = Arc::new(AtomicU64::new(0));
-        #[cfg(feature = "monitor")]
         let collector = matches!(mode, Mode::Collecting).then(|| {
             let stop = Arc::clone(&stop);
             let captures = Arc::clone(&captures);
@@ -146,9 +131,6 @@ impl Case {
                 .expect("benchmark collector must complete its first snapshot before measurement");
             collector
         });
-        #[cfg(not(feature = "monitor"))]
-        let collector = None;
-        #[cfg(feature = "monitor")]
         if matches!(mode, Mode::Recording) {
             seismograph::recorder(Configuration {
                 runtime_tasks: Policy::all(false),
@@ -219,7 +201,6 @@ impl Drop for Case {
             collector.join().expect("benchmark diagnostic caller succeeds");
             eprintln!("Completed process snapshots: {}", self.captures.load(Ordering::Relaxed));
         }
-        #[cfg(feature = "monitor")]
         seismograph::recorder(Configuration::default());
     }
 }

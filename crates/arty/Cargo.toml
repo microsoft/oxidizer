@@ -34,14 +34,8 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["rt", "macros", "monitor"]
+default = ["rt", "macros"]
 macros = ["rt", "dep:arty_macros"]
-monitor = [
-    "dep:seismograph",
-    "dep:seismograph_runtime",
-    "seismograph/monitor",
-    "performables?/seismograph",
-]
 rt = [
     "dep:arc-swap",
     "dep:arty_executor",
@@ -57,6 +51,8 @@ rt = [
     "dep:performables",
     "dep:pin-project",
     "dep:plurality",
+    "dep:seismograph",
+    "dep:seismograph_runtime",
     "dep:smallvec",
     "dep:thread_aware",
 ]
@@ -76,11 +72,11 @@ many_cpus = { workspace = true, optional = true }
 nonempty = { workspace = true, optional = true }
 observed = { workspace = true, optional = true }
 ohno = { workspace = true, optional = true }
-performables = { workspace = true, optional = true }
+performables = { workspace = true, features = ["seismograph"], optional = true }
 pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
 scopeguard = { workspace = true }
-seismograph = { workspace = true, optional = true }
+seismograph = { workspace = true, features = ["monitor"], optional = true }
 seismograph_runtime = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }

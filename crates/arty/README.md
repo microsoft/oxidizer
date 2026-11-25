@@ -61,17 +61,17 @@ that calls `spawn`. See [`task`][__link5] to learn how to schedule tasks.
 
 ## Features
 
-The default feature set enables `rt`, `macros`, and `monitor`.
+The default feature set enables `rt` and `macros`.
 
-* `rt`: Enables the runtime, task, and I/O APIs.
-* `macros`: Enables [`main`][__link13] and [`test`][__link14]. It also enables `rt`.
-* `monitor`: Connects runtime workers and tasks to Seismograph. The default
-  [`MonitorPolicy`][__link15] disables monitoring for
+* `rt`: Enables the runtime, task, and I/O APIs. It also connects runtime
+  workers and tasks to Seismograph and enables the `seismograph` feature of
+  `performables`. The default
+  [`MonitorPolicy`][__link13] disables monitoring for
   tests, doctests, documentation examples, and Miri. It enables monitoring
   in other environments. An enabled policy starts a local connection for the
   Seismograph CLI. Task collection runs on request. Event recording stays off
-  until an application or the CLI enables it. This feature also forwards
-  monitoring support for `performables` when `performables` is enabled.
+  until an application or the CLI enables it.
+* `macros`: Enables [`main`][__link14] and [`test`][__link15]. It also enables `rt`.
 * `test-util`: Enables testing utilities, including
   [`ClockControl`][__link16].
   Enable it in dev-dependencies, not production dependencies.
@@ -82,15 +82,15 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrXZSOrZZ5bkbvTzsKfOtLxsbgvkdGv_ZpkcbMPiYkjAmfxBhZIKCZGFydHllMC43LjCCa2FydHlfbWFjcm9zZTAuNy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLqlrBVMrpikbl0wO-LnhJw8bRLDKh4YIdNIbUdMBbmjzJaVhZIKCZGFydHllMC43LjCCa2FydHlfbWFjcm9zZTAuNy4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.7.0/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.7.0/arty/core/index.html
  [__link11]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=main
  [__link12]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=test
- [__link13]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=main
- [__link14]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=test
- [__link15]: https://docs.rs/arty/0.7.0/arty/?search=runtime::policy::MonitorPolicy
+ [__link13]: https://docs.rs/arty/0.7.0/arty/?search=runtime::policy::MonitorPolicy
+ [__link14]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=main
+ [__link15]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=test
  [__link16]: https://docs.rs/arty/0.7.0/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.7.0/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.7.0/arty/?search=task::JoinError

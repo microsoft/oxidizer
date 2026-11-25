@@ -66,17 +66,17 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt`, `macros`, and `monitor`.
+//! The default feature set enables `rt` and `macros`.
 //!
-//! - `rt`: Enables the runtime, task, and I/O APIs.
-//! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Connects runtime workers and tasks to Seismograph. The default
+//! - `rt`: Enables the runtime, task, and I/O APIs. It also connects runtime
+//!   workers and tasks to Seismograph and enables the `seismograph` feature of
+//!   `performables`. The default
 //!   [`MonitorPolicy`](crate::runtime::policy::MonitorPolicy) disables monitoring for
 //!   tests, doctests, documentation examples, and Miri. It enables monitoring
 //!   in other environments. An enabled policy starts a local connection for the
 //!   Seismograph CLI. Task collection runs on request. Event recording stays off
-//!   until an application or the CLI enables it. This feature also forwards
-//!   monitoring support for `performables` when `performables` is enabled.
+//!   until an application or the CLI enables it.
+//! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -110,7 +110,7 @@ use arty_io_core as _;
 ///   causes runtime construction to fail.
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
-///   starts a local Seismograph monitor when the `monitor` feature is present.
+///   starts a local Seismograph monitor.
 ///   The default uses [`MonitorPolicy::auto`](crate::runtime::policy::MonitorPolicy::auto).
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.

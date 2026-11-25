@@ -2,7 +2,7 @@
 
 ## [0.10.0] - 2026-11-24
 
-- Breaking: Use Performables 0.5 strategy types in the public merger API. The optional `seismograph` feature requires the matching Seismograph 0.6 recorder.
+- Breaking: Use Performables 0.5 strategy types in the public merger API. Remove the forwarding `seismograph` feature.
 - Make merger cancellation and follower regression tests deterministic.
 - Update shared synchronization requirements.
 - Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.

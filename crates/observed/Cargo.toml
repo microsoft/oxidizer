@@ -33,7 +33,6 @@ all-features = true
 
 [features]
 default = []
-seismograph = ["performables/seismograph"]
 test-util = []
 
 [dependencies]

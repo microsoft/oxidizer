@@ -4,6 +4,7 @@
 
 - Breaking: Update buffer recording to the new Seismograph contracts.
 - Expand buffer boundaries, memory lifetime, vectored access, and synchronization regression coverage.
+- Stop forwarding `seismograph` to Performables. The feature retains buffer I/O recording.
 - Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
 - Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
 - Update the local requirement for `seismograph_io` from `^0.5.0` to `^0.6.0`.
