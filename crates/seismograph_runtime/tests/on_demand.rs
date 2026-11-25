@@ -26,7 +26,7 @@ fn task_properties(
     parent: Option<seismograph::recorder::runtime::TaskId>,
     body_size: usize,
 ) -> TaskProperties {
-    let mut spawn = TaskProperties::new(descriptor);
+    let mut spawn = TaskProperties::new(allocate_task_id(), descriptor);
     spawn.parent = parent;
     spawn.body_size = body_size;
     spawn
@@ -888,7 +888,7 @@ fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();
     let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
-    let create = || TaskProperties::new(descriptor());
+    let create = || TaskProperties::new(allocate_task_id(), descriptor());
 
     let disabled = context.spawned(create);
     seismograph::recorder(Configuration {

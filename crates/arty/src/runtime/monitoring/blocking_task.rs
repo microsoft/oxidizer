@@ -43,14 +43,21 @@ pub(crate) enum BlockingTaskInfo {
 pub(crate) struct RecordedBlockingTask {
     task: TaskSpawn,
     runtime_events: EventContext,
-    worker: OnceLock<WorkerHandle>,
-    started_at: OnceLock<Option<EventTimestamp>>,
+    execution: OnceLock<ExecutionMetadata>,
 }
 
 impl RecordedBlockingTask {
     fn terminal_events(&self) -> EventContext {
-        self.worker.get().map_or(self.runtime_events, WorkerHandle::task_events)
+        self.execution
+            .get()
+            .map_or(self.runtime_events, |execution| execution.worker.task_events())
     }
+}
+
+#[derive(Debug)]
+struct ExecutionMetadata {
+    worker: WorkerHandle,
+    started_at: Option<EventTimestamp>,
 }
 
 impl BlockingTaskInfo {
@@ -62,8 +69,7 @@ impl BlockingTaskInfo {
                 Self::Recorded(Box::new(RecordedBlockingTask {
                     task: properties,
                     runtime_events: events,
-                    worker: OnceLock::new(),
-                    started_at: OnceLock::new(),
+                    execution: OnceLock::new(),
                 }))
             },
         )
@@ -77,6 +83,10 @@ impl BlockingTaskInfo {
     }
 
     pub(crate) fn describe(&self, state: TaskActivityState) -> Task {
+        let execution = match self {
+            Self::Recorded(info) => info.execution.get(),
+            Self::Unrecorded(_) => None,
+        };
         let mut task = match self {
             Self::Unrecorded(id) => unrecorded_task(*id.get_or_init(seismograph_runtime::allocate_task_id), state),
             Self::Recorded(task) => task.task.describe(state),
@@ -89,14 +99,12 @@ impl BlockingTaskInfo {
             activity.queued_since = Some(spawned_at);
         }
         if state == TaskActivityState::Running
-            && let Self::Recorded(info) = self
+            && let Some(execution) = execution
             && let Some(activity) = &mut task.activity
         {
-            let started_at = *info.started_at.get().expect("a running blocking task must have started");
-            let worker = info.worker.get().expect("a running blocking task must have started").id();
-            activity.poll_started_at = started_at;
-            activity.poll_worker_id = Some(worker);
-            task.last_worker_id = Some(worker);
+            activity.poll_started_at = execution.started_at;
+            activity.poll_worker_id = Some(execution.worker.id());
+            task.last_worker_id = Some(execution.worker.id());
         }
         task
     }
@@ -106,12 +114,12 @@ impl BlockingTaskInfo {
             Self::Unrecorded(_) if observed => Some(worker.task_poll_started(self.id())),
             Self::Unrecorded(_) => None,
             Self::Recorded(info) => {
-                info.worker
-                    .set(worker.clone())
-                    .expect("a blocking function starts on exactly one worker");
                 let poll = observed.then(|| worker.task_poll_started(info.task.id()));
-                info.started_at
-                    .set(poll.as_ref().and_then(TaskPoll::started_at))
+                info.execution
+                    .set(ExecutionMetadata {
+                        worker: worker.clone(),
+                        started_at: poll.as_ref().and_then(TaskPoll::started_at),
+                    })
                     .expect("a blocking function starts on exactly one worker");
                 poll
             }

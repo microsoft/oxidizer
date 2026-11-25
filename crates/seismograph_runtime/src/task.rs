@@ -54,15 +54,11 @@ pub struct TaskProperties {
 }
 
 impl TaskProperties {
-    /// Creates task metadata with a required type descriptor.
-    ///
-    /// # Panics
-    ///
-    /// Panics if process task identities are exhausted.
+    /// Creates task metadata with an explicit identity and type descriptor.
     #[must_use]
-    pub fn new(descriptor: TypeDescriptorId) -> Self {
+    pub fn new(id: TaskId, descriptor: TypeDescriptorId) -> Self {
         Self {
-            id: crate::allocate_task_id(),
+            id,
             descriptor,
             parent: None,
             body_size: 0,
@@ -110,13 +106,6 @@ impl EventContext {
             worker,
             backtrace,
         }
-    }
-
-    /// Returns this context without worker attribution.
-    #[must_use]
-    pub const fn without_worker(mut self) -> Self {
-        self.worker = None;
-        self
     }
 
     /// Returns the worker attributed to events from this context.

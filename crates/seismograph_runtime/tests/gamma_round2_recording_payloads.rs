@@ -20,7 +20,7 @@ use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, register_runtime};
 
 fn task_properties(descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> TaskProperties {
-    let mut spawn = TaskProperties::new(descriptor);
+    let mut spawn = TaskProperties::new(seismograph_runtime::allocate_task_id(), descriptor);
     spawn.parent = parent;
     spawn.body_size = body_size;
     spawn

@@ -27,10 +27,15 @@ impl RuntimeMonitoring {
         let workers = u32::try_from(workers).map_err(Error::new)?;
         let monitor_name = if name.as_str().is_empty() { "arty" } else { name.as_str() };
         let builder = Monitor::builder().name(monitor_name);
-        #[cfg(any(test, feature = "test-util"))]
+        #[cfg(test)]
         let builder = builder.io(TEST_IO
             .with_borrow(Clone::clone)
             .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
+        #[cfg(all(feature = "test-util", not(test)))]
+        let builder = match TEST_IO.with_borrow(Clone::clone) {
+            Some(io) => builder.io(io),
+            None => builder,
+        };
         let monitor = builder.start().map_err(Error::new)?;
         let registration = seismograph_runtime::register_runtime(RuntimeMetadata::new(name.as_str(), workers));
         Ok(Some(Self { monitor, registration }))

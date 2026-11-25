@@ -141,6 +141,36 @@ fn disabled_monitoring_registers_no_runtime_source() {
 }
 
 #[test]
+fn rejected_submission_records_cancellation_for_early_spawn() {
+    let _recording = RecorderGuard::new(true);
+    let name = "rejected-submission";
+    let runtime = runtime(name, 1);
+    let runtime_id = capture_runtime(name).id;
+    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
+    control.shutdown();
+
+    let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { pending::<()>().await });
+    assert!(futures::executor::block_on(task).unwrap_err().is_shutdown());
+
+    let snapshot = process_snapshot();
+    let spawned = snapshot
+        .events
+        .events
+        .iter()
+        .find(|event| event.kind == EventKind::TaskSpawned && event.runtime().is_some_and(|payload| payload.runtime_id == runtime_id))
+        .unwrap();
+    let task_id = spawned.runtime().unwrap().subject_id;
+    assert!(snapshot.events.events.iter().any(|event| {
+        event.kind == EventKind::TaskCanceled
+            && event
+                .runtime()
+                .is_some_and(|payload| payload.runtime_id == runtime_id && payload.subject_id == task_id)
+    }));
+
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn idle_monitoring_exposes_only_native_task_state() {
     let _recording = RecorderGuard::new(false);
     let name = "integration-idle-metadata";
