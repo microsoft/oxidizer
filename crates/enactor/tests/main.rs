@@ -1,0 +1,13 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Integration tests for the public actor runtime API.
+
+#![allow(clippy::renamed_function_params, reason = "test actors name the parameter after its message type")]
+
+mod basic;
+mod context;
+mod lifecycle;
+mod periodic;
+mod pinning;
+mod stream;

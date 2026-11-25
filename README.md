@@ -38,6 +38,7 @@ These are the primary crates built out of this repo:
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
 - [`compressors`](./crates/compressors/README.md) - Streaming compression and decompression over bytesbuf byte sequences.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
+- [`enactor`](./crates/enactor/README.md) - Typed actors with prioritized lifecycle control for the Arty thread-per-core runtime.
 - [`fetch`](./crates/fetch/README.md) - "Universal, composable and resilient HTTP client."
 - [`fetch_azure`](./crates/fetch_azure/README.md) - Azure SDK HTTP transport backed by the fetch HTTP client.
 - [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.

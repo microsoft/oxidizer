@@ -127,6 +127,7 @@ derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
 either-or-both = { version = "0.3", default-features = false }
+enactor = { path = "crates/enactor", default-features = false, version = "0.1.0" }
 events_once = { version = "0.5.32", default-features = false }
 fakeable = { path = "crates/fakeable", default-features = false, version = "0.2.4" }
 fakeable_impl = { path = "crates/fakeable_impl", default-features = false, version = "=0.2.4" }
@@ -140,6 +141,7 @@ fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, versi
 fetch_winhttp_impl = { path = "crates/fetch_winhttp_impl", default-features = false, version = "=0.6.0" }
 flate2 = { version = "1.1.10", default-features = false }
 fluent-uri = { version = "0.1.4", default-features = false }
+flume = { version = "0.11.1", default-features = false, features = ["async"] }
 foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.4.1" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "=0.4.1" }
@@ -216,6 +218,7 @@ ohno = { path = "crates/ohno", default-features = false, version = "0.5.4" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "=0.5.4" }
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.4" }
 once_cell = { version = "1.21.3", default-features = false }
+oneshot = { version = "0.1.13", default-features = false, features = ["std", "async"] }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
