@@ -60,7 +60,7 @@ custom runtimes and transports. A custom transport can use `reqwest` while the r
 |JSON support|Built in|Built in|
 |Testing tools|Built in|Requires custom or external tools|
 |Request logs and metrics|Built-in `observed` events|Requires custom middleware|
-|OpenTelemetry connection metrics|Built in|Requires custom integration|
+|Connection logs and metrics|Built-in `observed` events|Requires custom integration|
 |Advanced HTTP client features [^1]|Not supported yet [^2]|Available through optional features|
 |Request pipeline|Built in|Requires custom or external tools|
 |Zero-copy buffers|Built in|Partial support through `Bytes`|
@@ -722,7 +722,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKKspX0aa3B0bcVLp-QO_8RIbOJOgabRkjoIbSaHBFfLObTxhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb-9706Hno1rUbrKuc0Kz2Fh4b9yxu0dbt3PYbzgBmZz6oLvFhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient::post

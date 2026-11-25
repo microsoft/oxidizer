@@ -9,7 +9,6 @@ use std::time::Duration;
 use fetch::HttpClient;
 use fetch::options::ConnectionPoolOptions;
 use fetch::tokio::TokioDeps;
-use observed::Sink;
 use tokio::spawn;
 use tracing::info;
 
@@ -23,8 +22,8 @@ const URL: &str = "https://example.com";
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    // An application passes its own sink. `Sink::noop()` drops every event.
-    let deps = TokioDeps::new(Sink::noop());
+    // The sink prints the request events and the connection events.
+    let deps = TokioDeps::new(utils::print_sink());
     let clock = deps.clock.clone();
 
     let client = HttpClient::builder_tokio(deps)

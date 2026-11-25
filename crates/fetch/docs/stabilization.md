@@ -153,7 +153,8 @@ acceptable for version 1.
 ## 6. Telemetry sink as a `fetch` dependency
 
 A transport needs an `observed::Sink` for events and metrics. `fetch` takes a sink in its deps and
-emits its request telemetry through it. `CustomContext` does not hand the sink to transports yet, so
+emits its request telemetry through it. `CustomContext` does not hand the sink to transports yet.
+The Tokio transport takes the sink of `TokioDeps` for its connection events, and
 `WinHttpDeps::sink` still carries the sink of the WinHTTP transport.
 
 Telemetry is shared pipeline infrastructure. `fetch` can pass its sink through the custom-transport

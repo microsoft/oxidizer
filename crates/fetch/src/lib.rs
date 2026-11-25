@@ -61,7 +61,7 @@
 //! | JSON support | Built in | Built in |
 //! | Testing tools | Built in | Requires custom or external tools |
 //! | Request logs and metrics | Built-in `observed` events | Requires custom middleware |
-//! | OpenTelemetry connection metrics | Built in | Requires custom integration |
+//! | Connection logs and metrics | Built-in `observed` events | Requires custom integration |
 //! | Advanced HTTP client features [^1] | Not supported yet [^2] | Available through optional features |
 //! | Request pipeline | Built in | Requires custom or external tools |
 //! | Zero-copy buffers | Built in | Partial support through `Bytes` |

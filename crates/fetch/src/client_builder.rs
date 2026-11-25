@@ -284,8 +284,9 @@ impl HttpClientBuilder {
     /// Sets a custom OpenTelemetry meter provider for the client.
     ///
     /// The client uses the global meter provider by default. This method sets a provider for this
-    /// client. The provider records the connection metrics and the resilience metrics. Request
-    /// telemetry goes to the sink of the deps of the client.
+    /// client. The provider records the resilience metrics and the instruments of
+    /// [`CustomContext::meter`](crate::custom::CustomContext::meter). Request telemetry and
+    /// connection telemetry go to the sink of the deps of the client.
     ///
     /// The client creates the scoped meter when [`build`][Self::build] runs. A
     /// [`name`][Self::name] set before or after this call appears in the metrics.
@@ -297,7 +298,7 @@ impl HttpClientBuilder {
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
-        // Use the provider for both resilience and connection metrics.
+        // Use the provider for the resilience metrics and the `fetch` meter.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
         self.metering = self.metering.with_provider(meter_provider);
         self

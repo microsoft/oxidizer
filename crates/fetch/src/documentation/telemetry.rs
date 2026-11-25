@@ -3,16 +3,18 @@
 
 //! Telemetry emitted by the [`fetch`](crate) crate.
 //!
-//! `fetch` emits its [request telemetry](#request-telemetry) as `observed` events through the sink
-//! of its deps. Its [connection metrics](#connection-metrics) use the `fetch` OpenTelemetry
-//! [`Meter`](opentelemetry::metrics::Meter). The client gets the meter from the global
-//! [`MeterProvider`](opentelemetry::metrics::MeterProvider) or a custom provider set through
+//! `fetch` emits its [request telemetry](#request-telemetry), and the
+//! [connection telemetry](#connection-telemetry) of its Tokio transport, as `observed` events
+//! through the sink of its deps. The `fetch` OpenTelemetry [`Meter`](opentelemetry::metrics::Meter)
+//! serves the instruments of [`CustomContext::meter`](crate::custom::CustomContext::meter). The
+//! client gets the meter from the global [`MeterProvider`](opentelemetry::metrics::MeterProvider)
+//! or a custom provider set through
 //! [`HttpClientBuilder::meter_provider`](crate::HttpClientBuilder::meter_provider).
 //!
 //! # Client attributes
 //!
 //! Every client has three attributes: its runtime, its transport and its name. The instrumentation
-//! scope of its `fetch` meter has them, so the connection metrics and the instruments of
+//! scope of its `fetch` meter has them, so the instruments of
 //! [`CustomContext::meter`](crate::custom::CustomContext::meter) carry them. Every request event
 //! has them as fields:
 //!
@@ -39,12 +41,31 @@
 //! [`PipelineContext::client_telemetry`](crate::pipeline::PipelineContext::client_telemetry). A
 //! minimal pipeline emits no request events.
 //!
-//! # Connection metrics
+//! # Connection telemetry
 //!
-//! | Metric | Instrument | Unit | Emitted when |
-//! |--------|-----------|------|--------------|
-//! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | Name resolution and TCP setup finish, with a TLS handshake for HTTPS |
-//! | [`http.client.connection.duration`](#httpclientconnectionduration) | `Histogram<f64>` | `s` | A connection is closed (the underlying stream is dropped) |
+//! The Tokio transport emits these events for each connection. They are only available when the
+//! Hyper-based transport is in use (the default for the Tokio runtime).
+//!
+//! | Event | Severity | Emitted when | Metric |
+//! |-------|----------|--------------|--------|
+//! | `http.client.connection.start` | Debug | The transport starts to connect to a server | none |
+//! | `http.client.connection.success` | Info | The connection is set up before the connect timeout | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
+//! | `http.client.connection.error` | Warn | The connection fails, or the connect timeout passes | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
+//! | `http.client.connection.closed` | Debug | A connection is closed (the underlying stream is dropped) | [`http.client.connection.duration`](#httpclientconnectionduration) |
+//!
+//! The events have these fields:
+//!
+//! | Field | Events | Description | Sample value |
+//! |-------|--------|-------------|--------------|
+//! | `server.address` | all | Hostname of the target server | `"api.example.com"` |
+//! | `server.port` | all | Port number of the target server | `443` |
+//! | `url.scheme` | all | URI scheme | `"https"` |
+//! | `url.full` | start, success, error | Base URI of the connection | `"https://api.example.com/"` |
+//! | `network.protocol.version` | success, closed | Negotiated protocol version (`"2"` for HTTP/2, `"1"` for HTTP/1) | `"2"` |
+//! | `error.type` | error | Label classifying the failure | `"connect"` |
+//! | `exception.message` | error | Text of the error | `"server connection timeout, endpoint: https://api.example.com/, connection timeout(s): 30"` |
+//! | `http.client.connection.setup.duration` | success, error | Seconds from the start of the connection to its result | `0.012` |
+//! | `http.client.connection.duration` | closed | Seconds from the connection to the drop of its stream | `30.5` |
 //!
 //! ---
 //!
@@ -52,9 +73,6 @@
 //!
 //! Measures name resolution and TCP connection setup. For HTTPS, it also measures the TLS
 //! handshake. It records success and failure.
-//!
-//! This metric is only available when the Hyper-based transport is in use
-//! (the default for the Tokio runtime).
 //!
 //! Histogram boundaries in seconds: `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, 25.0, 50.0`.
 //!
@@ -66,7 +84,7 @@
 //! | `server.port` | always | Port number of the target server | `443` |
 //! | `url.scheme` | always | URI scheme | `"https"` |
 //! | `network.protocol.version` | on success | Negotiated protocol version (`"2"` for HTTP/2, `"1"` for HTTP/1) | `"2"` |
-//! | `error.type` | on failure | Label classifying the failure | `"timeout"` |
+//! | `error.type` | on failure | Label classifying the failure | `"connect"` |
 //!
 //! ---
 //!
@@ -74,8 +92,6 @@
 //!
 //! Measures a connection from successful establishment until the underlying stream is dropped.
 //! Use it to inspect connection reuse and pool behavior.
-//!
-//! This metric is only available when the Hyper-based transport is in use.
 //!
 //! Histogram boundaries in seconds: `0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0`.
 //!

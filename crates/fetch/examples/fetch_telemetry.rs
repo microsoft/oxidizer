@@ -13,22 +13,20 @@
 //! 5. Sends a request inside an enrichment scope. Its events have a custom dimension.
 //! 6. Uses a fake handler without network I/O.
 
-use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use data_privacy::simple_redactor::SimpleRedactor;
-use data_privacy::{DataClass, RedactionEngine, Sensitive};
+use data_privacy::{DataClass, Sensitive};
 use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::StatusCode;
+use observed::Enrichment;
 use observed::enrichment::EnrichFutureExt;
-use observed::metadata::{EventDescription, FieldDescriptor};
-use observed::processing::{EventProcessor, EventView, FieldValueFn};
-use observed::{Enrichment, FlushError, Sink};
 use templated_uri::{BaseUri, EscapedString, Uri, templated};
 use tick::ClockControl;
+
+#[path = "util/utils.rs"]
+mod utils;
 
 const UNKNOWN: DataClass = DataClass::new("unknown", "unknown");
 
@@ -48,40 +46,9 @@ struct Region {
     region: &'static str,
 }
 
-/// Prints the name, the severity, the message and every field of each event.
-struct PrintProcessor(RedactionEngine);
-
-impl EventProcessor for PrintProcessor {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
-    }
-
-    fn process(&self, event: &EventView<'_>) {
-        let severity = event.severity().map_or("-", |severity| severity.as_str());
-        println!("[{severity}] {}", event.name());
-        if let Some(message) = event.body() {
-            println!("  message: {message}");
-        }
-        let mut print = |descriptor: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            if let Some(log) = descriptor.log() {
-                println!("  {} = {}", log.key(), value(&self.0));
-            }
-            ControlFlow::Continue(())
-        };
-        let _ = event.visit_fields(&mut print);
-        let _ = event.visit_enrichments(&mut print);
-    }
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // The engine masks classified text, such as the secret part of a templated path.
-    let engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
-    let sink = Sink::builder("example").processors(vec![Arc::new(PrintProcessor(engine))]).build();
+    let sink = utils::print_sink();
 
     // The fake handler responds to the first call with 500 and to every later call with 200.
     let calls = AtomicUsize::new(0);
