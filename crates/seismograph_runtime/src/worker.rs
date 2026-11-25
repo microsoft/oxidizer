@@ -124,10 +124,16 @@ impl WorkerHandle {
         Self { runtime, worker }
     }
 
-    /// Copies task-event identities and policy without cloning shared handles.
+    /// Returns the process-monotonic identity of the runtime that owns this worker.
     #[must_use]
-    pub fn task_events(&self) -> crate::task::EventContext {
-        crate::task::EventContext::new(self.runtime.id(), Some(self.worker.id), self.runtime.control.lifecycle_backtraces)
+    pub fn runtime_id(&self) -> seismograph::recorder::runtime::RuntimeId {
+        self.runtime.id()
+    }
+
+    /// Creates an active task token without a recorded spawn event.
+    #[must_use]
+    pub fn unrecorded(&self, task: TaskId) -> crate::task::MonitoredTask {
+        crate::task::MonitoredTask::unrecorded(task, self.runtime_id())
     }
 
     /// Returns whether the next execution cycle needs diagnostic poll hooks.
@@ -201,7 +207,7 @@ impl WorkerHandle {
 
     /// Starts a task poll and associates the task with this worker.
     #[inline]
-    pub fn task_poll_started(&self, task_id: TaskId) -> TaskPoll {
+    pub(crate) fn task_poll_started(&self, task_id: TaskId) -> TaskPoll {
         self.poll_started_with(task_id, EventTimestamp::now)
     }
 
@@ -230,7 +236,7 @@ impl WorkerHandle {
     ///
     /// Panics if the token belongs to another worker.
     #[inline]
-    pub fn task_poll_finished(&self, poll: TaskPoll) {
+    pub(crate) fn task_poll_finished(&self, poll: TaskPoll) {
         self.poll_finished_with(poll, EventTimestamp::now);
     }
 

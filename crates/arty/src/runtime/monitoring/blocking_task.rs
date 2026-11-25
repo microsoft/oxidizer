@@ -5,10 +5,33 @@ use std::sync::OnceLock;
 
 use seismograph::recorder::event::EventTimestamp;
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-use seismograph_runtime::snapshot::{Task, TaskActivityState};
-use seismograph_runtime::task::{EventContext, TaskProperties};
+use seismograph_runtime::RuntimeHandle;
+use seismograph_runtime::snapshot::{Task, TaskActivity, TaskActivityState, TaskMetrics, TaskMetricsScope};
+use seismograph_runtime::task::{MonitoredTask, TaskPoll};
+use seismograph_runtime::worker::WorkerHandle;
 
 use super::capture_task_properties;
+
+fn unrecorded_task(id: TaskId, state: TaskActivityState) -> Task {
+    Task {
+        id,
+        parent: None,
+        type_descriptor: TypeDescriptorId::unknown(),
+        future_size_bytes: None,
+        spawned_at: None,
+        last_worker_id: None,
+        metrics: TaskMetrics::default(),
+        metrics_scope: TaskMetricsScope::Uncollected,
+        activity: Some(TaskActivity {
+            observed_at: EventTimestamp::now(),
+            state,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        }),
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum BlockingTaskInfo {
@@ -18,27 +41,20 @@ pub(crate) enum BlockingTaskInfo {
 
 #[derive(Debug)]
 pub(crate) struct RecordedBlockingTask {
-    properties: TaskProperties,
-    runtime_events: EventContext,
-    execution: OnceLock<ExecutionMetadata>,
-}
-
-impl RecordedBlockingTask {
-    fn terminal_events(&self) -> EventContext {
-        self.execution.get().map_or(self.runtime_events, |execution| execution.events)
-    }
+    task: MonitoredTask,
+    worker: OnceLock<WorkerHandle>,
+    started_at: OnceLock<Option<EventTimestamp>>,
 }
 
 impl BlockingTaskInfo {
-    pub(crate) fn capture<T: 'static>(events: EventContext) -> Self {
-        let events = events.without_worker();
-        events.spawned(|| capture_task_properties::<T>(size_of::<T>())).map_or_else(
+    pub(crate) fn capture<T: 'static>(runtime: &RuntimeHandle) -> Self {
+        runtime.spawned::<T>(capture_task_properties).map_or_else(
             || Self::Unrecorded(OnceLock::new()),
             |properties| {
                 Self::Recorded(Box::new(RecordedBlockingTask {
-                    properties,
-                    runtime_events: events,
-                    execution: OnceLock::new(),
+                    task: properties,
+                    worker: OnceLock::new(),
+                    started_at: OnceLock::new(),
                 }))
             },
         )
@@ -47,22 +63,14 @@ impl BlockingTaskInfo {
     pub(crate) fn id(&self) -> TaskId {
         match self {
             Self::Unrecorded(id) => *id.get_or_init(seismograph_runtime::allocate_task_id),
-            Self::Recorded(task) => task.properties.id(),
+            Self::Recorded(task) => task.task.id(),
         }
     }
 
     pub(crate) fn describe(&self, state: TaskActivityState) -> Task {
-        let execution = match self {
-            Self::Recorded(info) => info.execution.get().copied(),
-            Self::Unrecorded(_) => None,
-        };
         let mut task = match self {
-            Self::Unrecorded(id) => Task::new(
-                *id.get_or_init(seismograph_runtime::allocate_task_id),
-                TypeDescriptorId::unknown(),
-                state,
-            ),
-            Self::Recorded(task) => task.properties.describe(state),
+            Self::Unrecorded(id) => unrecorded_task(*id.get_or_init(seismograph_runtime::allocate_task_id), state),
+            Self::Recorded(task) => task.task.snapshot(state),
         };
         if state == TaskActivityState::Ready
             && let Some(spawned_at) = task.spawned_at
@@ -72,54 +80,66 @@ impl BlockingTaskInfo {
             activity.queued_since = Some(spawned_at);
         }
         if state == TaskActivityState::Running
-            && let Some(execution) = execution
+            && let Self::Recorded(info) = self
             && let Some(activity) = &mut task.activity
         {
-            activity.poll_started_at = execution.started_at;
-            activity.poll_worker_id = execution.events.worker_id();
-            task.last_worker_id = execution.events.worker_id();
+            let started_at = *info.started_at.get().expect("a running blocking task must have started");
+            let worker = info.worker.get().expect("a running blocking task must have started").id();
+            activity.poll_started_at = started_at;
+            activity.poll_worker_id = Some(worker);
+            task.last_worker_id = Some(worker);
         }
         task
     }
 
-    pub(crate) fn started_on(&self, events: EventContext, started_at: Option<EventTimestamp>) {
-        if let Self::Recorded(info) = self {
-            info.execution
-                .set(ExecutionMetadata { events, started_at })
-                .expect("a blocking function starts on exactly one worker");
+    pub(crate) fn started_on(&self, worker: &WorkerHandle, observed: bool) -> Option<TaskPoll> {
+        match self {
+            Self::Unrecorded(_) if observed => Some(worker.unrecorded(self.id()).poll_started(worker)),
+            Self::Unrecorded(_) => None,
+            Self::Recorded(info) => {
+                info.worker
+                    .set(worker.clone())
+                    .expect("a blocking function starts on exactly one worker");
+                let poll = observed.then(|| info.task.poll_started(worker));
+                info.started_at
+                    .set(poll.as_ref().and_then(TaskPoll::started_at))
+                    .expect("a blocking function starts on exactly one worker");
+                poll
+            }
+        }
+    }
+
+    pub(crate) fn poll_finished(&self, worker: &WorkerHandle, poll: TaskPoll) {
+        match self {
+            Self::Unrecorded(_) => worker.unrecorded(self.id()).poll_finished(worker, poll),
+            Self::Recorded(info) => info.task.poll_finished(worker, poll),
         }
     }
 
     pub(crate) fn completed(&self) {
-        self.record_outcome(EventContext::completed);
+        if let Self::Recorded(task) = self {
+            task.task
+                .completed(task.worker.get().expect("a completed blocking task must have started"));
+        }
     }
 
     pub(crate) fn panicked(&self) {
-        self.record_outcome(EventContext::panicked);
+        if let Self::Recorded(task) = self {
+            task.task
+                .panicked(task.worker.get().expect("a panicked blocking task must have started"));
+        }
     }
 
     pub(crate) fn canceled(&self) {
-        self.record_outcome(EventContext::canceled);
-    }
-
-    fn record_outcome(&self, outcome: impl FnOnce(&EventContext, TaskId)) {
         if let Self::Recorded(task) = self {
-            outcome(&task.terminal_events(), task.properties.id());
+            task.task.canceled();
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ExecutionMetadata {
-    events: EventContext,
-    started_at: Option<EventTimestamp>,
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use seismograph_runtime::task::TaskProperties;
-
     use super::BlockingTaskInfo;
 
     #[test]
@@ -138,11 +158,11 @@ mod tests {
         let execution = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
         let parent = seismograph_runtime::allocate_task_id();
         let info = {
-            let _task = arty_executor::enter_task(parent, origin.handle().task_events());
-            BlockingTaskInfo::capture::<()>(runtime.handle().task_events())
+            let _task = arty_executor::enter_task(parent, &origin.handle());
+            BlockingTaskInfo::capture::<()>(&runtime.handle())
         };
         let started_at = EventTimestamp::from_ticks(37);
-        info.started_on(execution.handle().task_events(), Some(started_at));
+        info.started_on(&execution.handle(), Some(started_at));
 
         let task = info.describe(TaskActivityState::Running);
         let activity = task.activity.unwrap();
@@ -185,9 +205,7 @@ mod tests {
         let future = async move { completed.set(true) };
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
-        let spawn = TaskProperties::new(seismograph_runtime::task::type_descriptor::<()>());
-
-        executor.tasks().task(future).monitor(spawn).register(sender);
+        executor.tasks().task(future).monitor(None).register(sender);
         let _ = executor.execute_cycle();
 
         assert!(ran.get());

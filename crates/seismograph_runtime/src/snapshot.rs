@@ -272,7 +272,7 @@ pub struct Task {
 impl Task {
     /// Describes native queue state without inventing task history.
     #[must_use]
-    pub fn new(id: TaskId, type_descriptor: TypeDescriptorId, state: TaskActivityState) -> Self {
+    pub(crate) fn new(id: TaskId, type_descriptor: TypeDescriptorId, state: TaskActivityState) -> Self {
         Self {
             id,
             parent: None,

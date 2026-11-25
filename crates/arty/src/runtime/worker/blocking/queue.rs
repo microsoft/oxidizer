@@ -49,7 +49,7 @@ impl Default for Queue {
 
 impl Queue {
     pub(super) fn new(runtime: Option<seismograph_runtime::RuntimeHandle>) -> Self {
-        let monitoring = BlockingPoolMonitoring::new(runtime.as_ref().map(seismograph_runtime::RuntimeHandle::task_events));
+        let monitoring = BlockingPoolMonitoring::new(runtime.clone());
         Self {
             state: Mutex::new(State {
                 runtime,
@@ -395,7 +395,7 @@ mod tests {
         }
         queue.retire(0);
         queue.retire(2);
-        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap());
+        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.runtime().unwrap());
         let id = info.id();
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(info))),
@@ -435,7 +435,7 @@ mod tests {
         let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
         queue.add_worker();
-        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap());
+        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.runtime().unwrap());
 
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
@@ -457,7 +457,7 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-slots", 1));
         let queue = Arc::new(Queue::new(Some(runtime.handle())));
         let index = queue.add_worker();
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(BlockingTaskInfo::capture::<()>(queue.monitoring.runtime().unwrap())));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -525,7 +525,7 @@ mod tests {
         queue.add_worker();
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(BlockingTaskInfo::capture::<()>(
-                queue.monitoring.events().unwrap()
+                queue.monitoring.runtime().unwrap(),
             )))),
             shutdown: None,
         }));
@@ -650,7 +650,7 @@ mod tests {
         for body in [
             BlockingJob::Plain(Box::new(|| {})),
             BlockingJob::Monitored(Arc::new(InspectedJob(
-                BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap()),
+                BlockingTaskInfo::capture::<()>(queue.monitoring.runtime().unwrap()),
                 Arc::clone(&inspections),
             ))),
         ] {

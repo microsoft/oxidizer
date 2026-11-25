@@ -28,8 +28,9 @@
 //! events emitted after recording starts. Missing creation times, wake ages,
 //! earlier polls, and completed task history are not reconstructed.
 //! Stopping event recording does not freeze the actual runtime's current state.
-//! [`worker::WorkerHandle::task_events`] supplies a [`Copy`] context for task
-//! creation and real outcomes, without per-task registration or shared ownership.
+//! [`RuntimeHandle::spawned`] calls its property callback only when task recording
+//! is active. Runtime and worker handles record real task outcomes without
+//! per-task registration.
 //!
 //! # Example
 //!
@@ -161,10 +162,20 @@ impl RuntimeHandle {
         self.control.id
     }
 
-    /// Copies runtime task-event identities without worker attribution.
+    /// Records one task spawn and returns its monitored task token.
+    ///
+    /// Calls `create` only when task recording is active. The callback must
+    /// capture properties that do not change during the task lifetime.
+    ///
+    /// # Panics
+    ///
+    /// Propagates a panic from `create`. Panics if the body size cannot be
+    /// encoded below `u64::MAX`.
     #[must_use]
-    pub fn task_events(&self) -> task::EventContext {
-        task::EventContext::new(self.id(), None, self.control.lifecycle_backtraces)
+    pub fn spawned<T: 'static>(&self, enrich: impl FnOnce(task::TaskProperties) -> task::TaskProperties) -> Option<task::MonitoredTask> {
+        task::spawned(self.id(), None, self.control.lifecycle_backtraces, || {
+            enrich(task::TaskProperties::for_type::<T>(size_of::<T>()))
+        })
     }
 
     /// Registers worker metadata without registering any tasks.

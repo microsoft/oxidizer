@@ -265,7 +265,7 @@ impl Pool {
             Arc::clone(&identity),
             monitoring,
         );
-        let monitoring = thread_pool.receiver.monitoring;
+        let monitoring = thread_pool.receiver.monitoring.clone();
 
         Self {
             inner: Arc::new(Mutex::new(Some(thread_pool))),

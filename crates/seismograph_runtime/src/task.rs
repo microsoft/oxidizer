@@ -14,22 +14,9 @@ use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescri
 use crate::snapshot::{Task, TaskCollection, TaskMetrics};
 use crate::{WorkerControl, collection, lock};
 
-/// Task-event identities and backtrace policy that implement [`Copy`].
-///
-/// Obtain this from [`WorkerHandle::task_events`](crate::worker::WorkerHandle::task_events).
-/// It owns no registration, counter, task state, or shared handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EventContext {
-    runtime: RuntimeId,
-    worker: Option<WorkerId>,
-    backtrace: BacktraceCapture,
-}
-
 static TYPE_DESCRIPTORS: OnceLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = OnceLock::new();
 
-/// Returns the process-wide descriptor for one concrete task type.
-#[must_use]
-pub fn type_descriptor<T: 'static>() -> TypeDescriptorId {
+fn type_descriptor<T: 'static>() -> TypeDescriptorId {
     let mut descriptors = lock(TYPE_DESCRIPTORS.get_or_init(|| Mutex::new(HashMap::new())));
     *descriptors
         .entry(TypeId::of::<T>())
@@ -41,166 +28,201 @@ pub fn type_descriptor<T: 'static>() -> TypeDescriptorId {
 #[non_exhaustive]
 pub struct TaskProperties {
     id: TaskId,
-    /// Concrete task type identity used by the event.
-    pub descriptor: TypeDescriptorId,
-    /// Parent task that was active at submission.
-    pub parent: Option<TaskId>,
-    /// Task body size before wrapping or type erasure.
-    pub body_size: usize,
-    /// Timestamp captured for the task creation event.
-    pub spawned_at: Option<EventTimestamp>,
-    /// Runtime and worker context captured at submission.
-    pub origin: Option<EventContext>,
+    descriptor: TypeDescriptorId,
+    parent: Option<TaskId>,
+    body_size: Option<usize>,
+    spawned_at: Option<EventTimestamp>,
+    origin: Option<(RuntimeId, WorkerId)>,
 }
 
 impl TaskProperties {
-    /// Creates task metadata with a required type descriptor.
-    ///
-    /// # Panics
-    ///
-    /// Panics if process task identities are exhausted.
+    /// Creates immutable task metadata with an explicit identity and descriptor.
     #[must_use]
-    pub fn new(descriptor: TypeDescriptorId) -> Self {
+    pub fn new(id: TaskId, descriptor: TypeDescriptorId) -> Self {
         Self {
-            id: crate::allocate_task_id(),
+            id,
             descriptor,
             parent: None,
-            body_size: 0,
+            body_size: None,
             spawned_at: None,
             origin: None,
+        }
+    }
+
+    /// Creates immutable metadata for one concrete task body.
+    #[must_use]
+    pub(crate) fn for_type<T: 'static>(body_size: usize) -> Self {
+        Self::new(crate::allocate_task_id(), type_descriptor::<T>()).body_size(body_size)
+    }
+
+    /// Sets the parent task that was active at submission.
+    #[must_use]
+    pub const fn parent(mut self, parent: Option<TaskId>) -> Self {
+        self.parent = parent;
+        self
+    }
+
+    /// Overrides the body size after wrapper or type erasure.
+    #[must_use]
+    pub const fn body_size(mut self, body_size: usize) -> Self {
+        self.body_size = Some(body_size);
+        self
+    }
+
+    /// Sets the runtime worker that submitted this task.
+    #[must_use]
+    pub const fn origin(mut self, runtime: RuntimeId, worker: WorkerId) -> Self {
+        self.origin = Some((runtime, worker));
+        self
+    }
+}
+
+/// A task whose creation event was accepted by the recorder.
+#[derive(Debug)]
+pub struct MonitoredTask {
+    properties: TaskProperties,
+    runtime: RuntimeId,
+    backtrace: BacktraceCapture,
+    recorded: bool,
+}
+
+impl MonitoredTask {
+    pub(crate) fn unrecorded(id: TaskId, runtime: RuntimeId) -> Self {
+        Self {
+            properties: TaskProperties::new(id, TypeDescriptorId::unknown()),
+            runtime,
+            backtrace: BacktraceCapture::Never,
+            recorded: false,
         }
     }
 
     /// Returns the process-wide task identity.
     #[must_use]
     pub const fn id(&self) -> TaskId {
-        self.id
+        self.properties.id
     }
 
-    /// Describes this task with its recorded creation properties.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the body size does not fit in `u64`. The spawn event builder
-    /// checks the same condition before it returns these properties.
-    #[must_use]
-    pub fn describe(&self, state: crate::snapshot::TaskActivityState) -> Task {
-        let mut task = Task::new(self.id, self.descriptor, state);
-        task.parent = self.parent;
-        task.spawned_at = self.spawned_at;
-        task.future_size_bytes =
-            Some(u64::try_from(self.body_size).expect("the spawn builder already checked that the body size fits in u64"));
-        task
-    }
-}
-
-impl EventContext {
-    pub(crate) const fn new(runtime: RuntimeId, worker: Option<WorkerId>, backtrace: BacktraceCapture) -> Self {
-        Self {
-            runtime,
-            worker,
-            backtrace,
-        }
-    }
-
-    /// Returns this context without worker attribution.
-    #[must_use]
-    pub const fn without_worker(mut self) -> Self {
-        self.worker = None;
-        self
-    }
-
-    /// Returns the worker attributed to events from this context.
-    #[must_use]
-    pub const fn worker_id(&self) -> Option<WorkerId> {
-        self.worker
-    }
-
-    /// Returns the runtime attributed to events from this context.
+    /// Returns the process-monotonic runtime identity.
     #[must_use]
     pub const fn runtime_id(&self) -> RuntimeId {
         self.runtime
     }
 
-    /// Builds and returns task creation metadata.
-    ///
-    /// Calls `create` only when the recorder runs the event builder.
-    /// Disabled or suppressed recording does not call it. Sampling and
-    /// concurrent recording changes can still omit the event after it runs.
-    /// The returned value contains the timestamp used by the event. Measure the
-    /// body size before wrapping or type erasure.
-    /// The worker identifies the submission origin, not the execution worker.
-    ///
-    /// # Panics
-    ///
-    /// Propagates a panic from `create`. Panics if the body size cannot be
-    /// encoded below `u64::MAX`.
+    /// Builds a snapshot row with this task's recorded creation properties.
     #[must_use]
-    pub fn spawned(&self, create: impl FnOnce() -> TaskProperties) -> Option<TaskProperties> {
-        let mut assigned = None;
-        seismograph::record(EventClass::RuntimeTask, || {
-            let mut properties = create();
-            let size = u64::try_from(properties.body_size)
-                .ok()
-                .and_then(|size| size.checked_add(1))
-                .expect("a concrete task body must be smaller than u64::MAX");
-            let timestamp = properties.spawned_at.unwrap_or_else(EventTimestamp::now);
-            properties.spawned_at = Some(timestamp);
-            let origin = properties.origin.filter(|origin| origin.runtime_id() == self.runtime_id());
-            let record = Record::runtime(
-                timestamp,
-                EventKind::TaskSpawned,
-                RuntimeEvent {
-                    runtime_id: self.runtime,
-                    worker_id: origin.and_then(|origin| origin.worker_id()).or(self.worker),
-                    subject_id: properties.id.get(),
-                    related_id: properties.parent.map_or(0, TaskId::get),
-                    value_0: properties.descriptor.get(),
-                    value_1: size,
-                },
-                self.backtrace,
-            );
-            assigned = Some(properties);
-            Some(record)
+    pub fn snapshot(&self, state: crate::snapshot::TaskActivityState) -> Task {
+        let mut task = Task::new(self.properties.id, self.properties.descriptor, state);
+        task.parent = self.properties.parent;
+        task.spawned_at = self.properties.spawned_at;
+        task.future_size_bytes = self
+            .properties
+            .body_size
+            .map(|size| u64::try_from(size).expect("the spawn builder already checked that the body size fits in u64"));
+        task
+    }
+
+    /// Starts one poll on the supplied worker.
+    #[must_use]
+    pub fn poll_started(&self, worker: &crate::worker::WorkerHandle) -> TaskPoll {
+        self.validate_worker(worker);
+        worker.task_poll_started(self.id())
+    }
+
+    /// Finishes one poll on the supplied worker.
+    pub fn poll_finished(&self, worker: &crate::worker::WorkerHandle, poll: TaskPoll) {
+        self.validate_worker(worker);
+        worker.task_poll_finished(poll);
+    }
+
+    /// Records successful task completion.
+    pub fn completed(&self, worker: &crate::worker::WorkerHandle) {
+        self.outcome(worker, EventKind::TaskCompleted, BacktraceCapture::Never);
+    }
+
+    /// Records a task panic.
+    pub fn panicked(&self, worker: &crate::worker::WorkerHandle) {
+        self.outcome(worker, EventKind::TaskPanicked, self.backtrace);
+    }
+
+    /// Records cancellation without worker attribution.
+    pub fn canceled(&self) {
+        if self.recorded {
+            outcome(self.runtime, None, BacktraceCapture::Never, self.id(), EventKind::TaskCanceled);
+        }
+    }
+
+    fn validate_worker(&self, worker: &crate::worker::WorkerHandle) {
+        assert_eq!(
+            worker.runtime_id(),
+            self.runtime,
+            "use a monitored task with a worker from the task runtime"
+        );
+    }
+
+    fn outcome(&self, worker: &crate::worker::WorkerHandle, kind: EventKind, backtrace: BacktraceCapture) {
+        self.validate_worker(worker);
+        if self.recorded {
+            outcome(self.runtime, Some(worker.id()), backtrace, self.id(), kind);
+        }
+    }
+}
+
+pub(crate) fn spawned(
+    runtime: RuntimeId,
+    worker: Option<WorkerId>,
+    backtrace: BacktraceCapture,
+    create: impl FnOnce() -> TaskProperties,
+) -> Option<MonitoredTask> {
+    let mut assigned = None;
+    seismograph::record(EventClass::RuntimeTask, || {
+        let mut properties = create();
+        let size = u64::try_from(properties.body_size.expect("recorded tasks have an inferred or explicit body size"))
+            .ok()
+            .and_then(|size| size.checked_add(1))
+            .expect("a concrete task body must be smaller than u64::MAX");
+        let timestamp = properties.spawned_at.unwrap_or_else(EventTimestamp::now);
+        properties.spawned_at = Some(timestamp);
+        let origin = properties.origin.filter(|(origin, _)| *origin == runtime);
+        let record = Record::runtime(
+            timestamp,
+            EventKind::TaskSpawned,
+            RuntimeEvent {
+                runtime_id: runtime,
+                worker_id: origin.map(|(_, worker)| worker).or(worker),
+                subject_id: properties.id.get(),
+                related_id: properties.parent.map_or(0, TaskId::get),
+                value_0: properties.descriptor.get(),
+                value_1: size,
+            },
+            backtrace,
+        );
+        assigned = Some(MonitoredTask {
+            properties,
+            runtime,
+            backtrace,
+            recorded: true,
         });
-        assigned
-    }
+        Some(record)
+    });
+    assigned
+}
 
-    /// Emits a real successful outcome without retaining task state.
-    #[inline]
-    pub fn completed(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskCompleted, BacktraceCapture::Never);
-    }
-
-    /// Emits a real task panic with the configured backtrace policy.
-    #[inline]
-    pub fn panicked(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskPanicked, self.backtrace);
-    }
-
-    /// Emits cancellation without retaining task state.
-    #[inline]
-    pub fn canceled(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskCanceled, BacktraceCapture::Never);
-    }
-
-    fn outcome(&self, task: TaskId, kind: EventKind, backtrace: BacktraceCapture) {
-        seismograph::record(EventClass::RuntimeTask, || {
-            Some(Record::runtime(
-                EventTimestamp::now(),
-                kind,
-                RuntimeEvent {
-                    runtime_id: self.runtime,
-                    worker_id: self.worker,
-                    subject_id: task.get(),
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                },
-                backtrace,
-            ))
-        });
-    }
+pub(crate) fn outcome(runtime: RuntimeId, worker: Option<WorkerId>, backtrace: BacktraceCapture, task: TaskId, kind: EventKind) {
+    seismograph::record(EventClass::RuntimeTask, || {
+        Some(Record::runtime(
+            EventTimestamp::now(),
+            kind,
+            RuntimeEvent {
+                runtime_id: runtime,
+                worker_id: worker,
+                subject_id: task.get(),
+                related_id: 0,
+                value_0: 0,
+                value_1: 0,
+            },
+            backtrace,
+        ))
+    });
 }
 
 /// An owned request that a provider moves to its worker and answers once.

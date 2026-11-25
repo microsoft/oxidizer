@@ -40,26 +40,28 @@ pub(crate) trait MonitoredBlockingJob: Send + Sync {
     fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome));
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct BlockingPoolMonitoring {
-    events: Option<seismograph_runtime::task::EventContext>,
+    runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
 impl BlockingPoolMonitoring {
-    pub(crate) fn new(events: Option<seismograph_runtime::task::EventContext>) -> Self {
-        Self { events }
+    pub(crate) fn new(runtime: Option<seismograph_runtime::RuntimeHandle>) -> Self {
+        Self { runtime }
     }
 
     pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown) -> BlockingTaskMonitoring {
-        let events = matches!(shutdown.state(), ShutdownState::Running).then_some(self.events).flatten();
+        let runtime = matches!(shutdown.state(), ShutdownState::Running)
+            .then_some(self.runtime.as_ref())
+            .flatten();
         BlockingTaskMonitoring {
-            task: events.map(BlockingTaskInfo::capture::<F>),
+            task: runtime.map(BlockingTaskInfo::capture::<F>),
         }
     }
 
     #[cfg(all(test, feature = "test-util"))]
-    pub(crate) fn events(&self) -> Option<seismograph_runtime::task::EventContext> {
-        self.events
+    pub(crate) fn runtime(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
+        self.runtime.as_ref()
     }
 }
 
@@ -147,32 +149,25 @@ impl BlockingWorkerMonitoring {
         let monitored = body.monitoring().cloned();
         let mut poll = None;
         let mut current = None;
-        if let Some(worker) = self.handle.as_ref().filter(|_| !canceled)
+        let worker = self.handle.as_ref().filter(|_| !canceled);
+        if let Some(worker) = worker
             && let Some(body) = &monitored
         {
             let info = body.info();
-            let events = worker.task_events();
             let observed = worker.is_observed();
-            let token = observed.then(|| {
-                let id = info.id();
-                (id, worker.task_poll_started(id))
-            });
-            info.started_on(
-                events,
-                token
-                    .as_ref()
-                    .and_then(|(_, poll)| seismograph_runtime::task::TaskPoll::started_at(poll)),
-            );
-            if let Some((id, token)) = token {
-                current = Some(arty_executor::enter_task(id, events));
-                poll = Some((worker, token));
+            poll = info.started_on(worker, observed);
+            if poll.is_some() {
+                current = Some(arty_executor::enter_task(info.id(), worker));
             }
         }
         let outcome = {
             let mut finish = |terminal| {
                 drop(current.take());
-                if let Some((worker, poll)) = poll.take() {
-                    worker.task_poll_finished(poll);
+                if let Some(poll) = poll.take()
+                    && let Some(worker) = worker
+                    && let Some(body) = &monitored
+                {
+                    body.info().poll_finished(worker, poll);
                 }
                 if let Some(body) = &monitored {
                     match terminal {
@@ -190,8 +185,11 @@ impl BlockingWorkerMonitoring {
             }))
         };
         drop(current.take());
-        if let Some((worker, poll)) = poll.take() {
-            worker.task_poll_finished(poll);
+        if let Some(poll) = poll.take()
+            && let Some(worker) = worker
+            && let Some(body) = &monitored
+        {
+            body.info().poll_finished(worker, poll);
         }
         outcome
     }
@@ -209,7 +207,7 @@ mod tests {
         let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
             seismograph_runtime::worker::WorkerRole::Blocking,
         ));
-        let monitoring = BlockingPoolMonitoring::new(Some(worker.handle().task_events()));
+        let monitoring = BlockingPoolMonitoring::new(Some(runtime.handle()));
         let shutdown = Shutdown::default();
         let pool = crate::task::handle::JoinHandlePool::new(shutdown.clone());
         let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown));
