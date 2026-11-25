@@ -40,6 +40,14 @@ identifier!(
     "Process-monotonic identity assigned to a task or instance type descriptor."
 );
 
+impl TypeDescriptorId {
+    /// Returns the reserved descriptor for an unidentified task or instance type.
+    #[must_use]
+    pub const fn unknown() -> Self {
+        Self(NonZeroU64::MIN)
+    }
+}
+
 /// Fixed numeric context carried by a runtime event.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeEvent {

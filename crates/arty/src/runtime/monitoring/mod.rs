@@ -4,9 +4,9 @@
 //! Private task monitoring and native task inspection.
 //!
 //! The runtime owns its monitor connection and registration until its workers stop.
-//! Each async worker owns a worker registration and its current poll state.
+//! Each async worker owns a worker registration. The executor owns async task metadata.
 //! Blocking queues own worker registrations and share an event context for submissions.
-//! Async completion targets own their task metadata. A blocking callback and its
+//! A blocking callback and its
 //! inspection metadata share one allocation so inspection can find queued and running tasks.
 //! Handles provide access to these registrations but do not own runtime shutdown.
 
@@ -29,6 +29,6 @@ pub(crate) use blocking::{
     BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob,
 };
 pub(crate) use runtime::RuntimeMonitoring;
-pub(crate) use task::{TaskInfo, current_task, descriptor, register_monitored};
+pub(crate) use task::{TaskInfo, current_events, current_task};
 #[cfg(test)]
 pub(crate) use task::{enter_current, set_events};

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{ExecutorShared, TaskCompletion, TaskInstrumentation};
+use crate::{ExecutorShared, TaskCompletion, TaskMetadata, TaskObserver};
 
 /// Configures a task before registering it with an executor.
 ///
@@ -15,7 +15,8 @@ pub struct TaskBuilder<'a, F, I = ()> {
     #[debug(skip)]
     future: F,
     #[debug(skip)]
-    instrumentation: I,
+    observer: I,
+    monitored: Option<TaskMetadata>,
 }
 
 impl<'a, F> TaskBuilder<'a, F> {
@@ -23,36 +24,30 @@ impl<'a, F> TaskBuilder<'a, F> {
         Self {
             shared,
             future,
-            instrumentation: (),
+            observer: (),
+            monitored: None,
         }
     }
 }
 
 impl<'a, F, I> TaskBuilder<'a, F, I> {
-    /// Adds a callback that describes the converted future during inspection.
-    pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl TaskInstrumentation + use<F, I, D, J>>
+    /// Sets the observer for this task's top-level polls.
+    pub fn observe<Q>(self, observer: Q) -> TaskBuilder<'a, F, Q>
     where
-        I: TaskInstrumentation,
-        D: 'static,
-        J: Fn(crate::TaskState) -> Option<D> + 'static,
+        Q: TaskObserver,
     {
         TaskBuilder {
             shared: self.shared,
             future: self.future,
-            instrumentation: crate::inspection::InspectWith::new(self.instrumentation, inspect),
+            observer,
+            monitored: self.monitored,
         }
     }
 
-    /// Sets the runtime-owned behavior attached to this task.
-    pub fn instrument<Q>(self, instrumentation: Q) -> TaskBuilder<'a, F, Q>
-    where
-        Q: TaskInstrumentation,
-    {
-        TaskBuilder {
-            shared: self.shared,
-            future: self.future,
-            instrumentation,
-        }
+    /// Adds concrete native monitoring metadata.
+    pub fn monitor(mut self, monitored: Option<TaskMetadata>) -> Self {
+        self.monitored = monitored;
+        self
     }
 }
 
@@ -60,7 +55,7 @@ impl<F, I> TaskBuilder<'_, F, I>
 where
     F: IntoFuture + 'static,
     F::Output: 'static,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
     /// Registers the task and its completion target.
     ///
@@ -71,6 +66,6 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(self.future, self.instrumentation, completion);
+        self.shared.add_task(self.future, self.observer, self.monitored, completion);
     }
 }

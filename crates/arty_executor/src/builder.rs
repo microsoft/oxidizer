@@ -3,6 +3,7 @@
 
 use std::task::Waker;
 
+use seismograph_runtime::worker::WorkerHandle;
 use thread_aware_core::Thread;
 
 use crate::{Executor, PanicPolicy};
@@ -14,6 +15,7 @@ pub struct ExecutorBuilder {
     owner_waker: Waker,
     thread: Option<Thread>,
     panic_policy: PanicPolicy,
+    monitoring: Option<WorkerHandle>,
 }
 
 impl ExecutorBuilder {
@@ -23,6 +25,7 @@ impl ExecutorBuilder {
             owner_waker: Waker::noop().clone(),
             thread: None,
             panic_policy: PanicPolicy::default(),
+            monitoring: None,
         }
     }
 
@@ -54,6 +57,15 @@ impl ExecutorBuilder {
         self
     }
 
+    /// Enables Seismograph monitoring for this executor worker.
+    ///
+    /// The executor checks observation demand once per cycle. Tasks without a
+    /// monitoring description keep the ordinary task representation.
+    pub fn monitor(mut self, worker: WorkerHandle) -> Self {
+        self.monitoring = Some(worker);
+        self
+    }
+
     /// Builds the executor with this configuration.
     ///
     /// # Panics
@@ -71,7 +83,7 @@ impl ExecutorBuilder {
             );
             thread.id()
         });
-        Executor::new(self.owner_waker, thread_id, self.panic_policy)
+        Executor::new(self.owner_waker, thread_id, self.panic_policy, self.monitoring)
     }
 }
 

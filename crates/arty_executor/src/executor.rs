@@ -1,20 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::task;
 use std::thread::ThreadId;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use seismograph_runtime::worker::WorkerHandle;
 use tick::{SimpleClock, Stopwatch};
 
 use crate::{
-    CycleOutcome, ExecutorBuilder, ExecutorShared, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskHandle,
-    TaskList, TaskPtr, TaskSet, TaskState, TypeErasedTask, discard_task_panic_payload, executor_context,
+    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskPtr, TaskSet, TaskState,
+    TypeErasedTask, executor_context,
 };
 
 /// An async task executor that runs on one thread.
@@ -73,6 +73,7 @@ pub struct Executor {
     active: VecDeque<TaskHandle>,
     pending: TaskList,
     stopwatch: Stopwatch,
+    monitoring: Option<WorkerHandle>,
 }
 
 /// Selects ordinary or observed polling at monomorphization, not inside the poll loop.
@@ -86,36 +87,12 @@ impl ObservePoll for () {
     }
 }
 
-impl ObservePoll for &dyn PollObserver {
+#[derive(Clone, Copy)]
+struct MonitorPoll<'a>(&'a WorkerHandle);
+
+impl ObservePoll for MonitorPoll<'_> {
     fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
-        let mut observed = 0_usize;
-        let mut in_callback = false;
-        let description = catch_unwind(AssertUnwindSafe(|| {
-            task.inspect(TaskState::Running, &mut |description| {
-                in_callback = true;
-                self.poll_started(description);
-                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                in_callback = false;
-                observed = observed.saturating_add(1);
-            });
-        }));
-        match description {
-            Ok(()) => {}
-            Err(panic) if in_callback => resume_unwind(panic),
-            Err(panic) => {
-                // Observer failures propagate; inspector and description-drop failures
-                // cancel the observation before the task itself is polled.
-                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                observed = 0;
-                discard_task_panic_payload(panic);
-                self.inspection_failed();
-            }
-        }
-        let outcome = task.poll(shared);
-        for _ in 0..observed {
-            self.poll_finished();
-        }
-        outcome
+        task.poll_monitored(shared, self.0)
     }
 }
 
@@ -126,8 +103,13 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
-        let shared = ExecutorShared::new(owner_waker, thread_id, panic_policy);
+    pub(crate) fn new(
+        owner_waker: task::Waker,
+        thread_id: ThreadId,
+        panic_policy: crate::PanicPolicy,
+        monitoring: Option<WorkerHandle>,
+    ) -> Self {
+        let shared = ExecutorShared::new(owner_waker, thread_id, panic_policy, monitoring.clone());
         let stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
         // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
@@ -136,6 +118,7 @@ impl Executor {
             active: VecDeque::new(),
             pending: TaskList::default(),
             stopwatch,
+            monitoring,
         }
     }
 
@@ -177,22 +160,16 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
-        self.execute_cycle_with(())
-    }
-
-    /// Executes one cycle with runtime-owned poll observation.
-    ///
-    /// Select this entry point only when diagnostics are requested. The ordinary
-    /// [`execute_cycle`](Self::execute_cycle) path does not check or call an observer.
-    ///
-    /// # Panics
-    ///
-    /// Observer panics propagate. An inspector panic is reported through
-    /// [`PollObserver::inspection_failed`](crate::PollObserver::inspection_failed)
-    /// and does not prevent the affected task from running.
-    #[must_use]
-    pub fn execute_cycle_observed(&mut self, observer: &dyn PollObserver) -> CycleOutcome {
-        self.execute_cycle_with(observer)
+        // Move the handle out temporarily so the cycle can borrow the executor
+        // mutably without cloning shared monitoring handles on every cycle.
+        let monitoring = self.monitoring.take();
+        let observed = monitoring.as_ref().is_some_and(WorkerHandle::is_observed);
+        let outcome = match monitoring.as_ref() {
+            Some(worker) if observed => self.execute_cycle_with(MonitorPoll(worker)),
+            Some(_) | None => self.execute_cycle_with(()),
+        };
+        self.monitoring = monitoring;
+        outcome
     }
 
     fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
@@ -207,72 +184,37 @@ impl Executor {
         outcome
     }
 
-    /// Visits at most `limit` native live tasks between execution cycles.
+    /// Visits at most `limit` native live task rows between execution cycles.
     ///
-    /// Tasks without a matching description still count toward the work limit.
-    /// Inspection does not consume wakes or move futures. The visitor must not
-    /// submit tasks or recursively enter this executor.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a zero limit, borrowed submission storage, or a panic
-    /// from a task inspector or the visitor.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "exclusive owner access prevents inspection from overlapping a poll"
-    )]
-    pub fn inspect<D: 'static>(&mut self, limit: usize, mut visitor: impl FnMut(&D)) -> Result<InspectionStatus, InspectionError> {
-        if limit == 0 {
-            return Err(InspectionError::InvalidLimit);
-        }
+    /// Returns `true` when more tasks existed after the limit.
+    #[must_use]
+    pub fn inspect_tasks(&self, limit: usize, mut inspect_task: impl FnMut(seismograph_runtime::snapshot::Task)) -> bool {
+        assert_ne!(limit, 0, "task inspection requires a nonzero limit");
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
-        let inspected = catch_unwind(AssertUnwindSafe(|| {
-            let mut count = 0;
-            let mut visited = HashSet::new();
-            let truncated = std::cell::Cell::new(false);
-            let mut inspect = |pointer: TaskPtr, state| {
-                // An unwinding observer can leave a runnable task linked in pending.
-                if !visited.insert(pointer) {
-                    return ControlFlow::Continue(());
-                }
-                if count == limit {
-                    truncated.set(true);
-                    return ControlFlow::Break(());
-                }
-                count += 1;
-                // SAFETY: Each queue retains the task throughout this owner-only visit.
-                let task = unsafe { pointer.as_task() };
-                let state = if task.is_notified() { TaskState::Ready } else { state };
-                task.inspect(state, &mut |description| {
-                    if let Some(description) = description.downcast_ref::<D>() {
-                        visitor(description);
-                    }
-                });
-                ControlFlow::Continue(())
-            };
-            // #[gamma::skip(try.propagate_to_unwrap, reason = "The owner-only submission queue has no mutable borrow at entry: all queue mutations release their borrows before callbacks, and inspection has not invoked a callback yet.")]
-            self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
-            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
-            if !truncated.get() {
-                let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
+        let mut count = 0;
+        let truncated = std::cell::Cell::new(false);
+        let mut inspect = |pointer: TaskPtr, state| {
+            if count == limit {
+                truncated.set(true);
+                return ControlFlow::Break(());
             }
-            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
-            if !truncated.get() {
-                self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
+            count += 1;
+            // SAFETY: Each queue retains the task throughout this owner-only visit.
+            let task = unsafe { pointer.as_task() };
+            let state = if task.is_notified() { TaskState::Ready } else { state };
+            if let Some(description) = seismograph::recorder::without_recording(|| task.monitoring_description(state)) {
+                inspect_task(description);
             }
-            Ok(if truncated.get() {
-                InspectionStatus::Truncated
-            } else {
-                InspectionStatus::Complete
-            })
-        }));
-        match inspected {
-            Ok(result) => result,
-            Err(panic) => {
-                discard_task_panic_payload(panic);
-                Err(InspectionError::Panicked)
-            }
+            ControlFlow::Continue(())
+        };
+        self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready));
+        if !truncated.get() {
+            let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
         }
+        if !truncated.get() {
+            self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
+        }
+        truncated.get()
     }
 
     fn start_cycle(&mut self) {
@@ -345,7 +287,7 @@ impl Executor {
             let linked = task.links().linked.get();
 
             if self.shared.shutdown().is_triggered() {
-                task.abort(self.shared.shutdown().cause());
+                task.abort(self.shared.shutdown().cause(), self.shared.monitoring());
                 self.shared.decrement_task_count(1);
                 // SAFETY: The active owner keeps `pointer` live. A linked active task belongs to
                 // this executor's pending list, and this code runs on the task owner thread.
@@ -417,7 +359,7 @@ impl Executor {
     fn abort_prepared_tasks(&mut self, aborted_count: usize, record_drop_metric: bool, cause: &ShutdownCause) {
         while let Some(task_handle) = self.active.pop_front() {
             // SAFETY: The cancellation batch owns each pinned task on its owner thread.
-            unsafe { task_handle.as_task() }.abort(cause.clone());
+            unsafe { task_handle.as_task() }.abort(cause.clone(), self.shared.monitoring());
         }
         if record_drop_metric && let Some(aborted_count) = NonZeroUsize::new(aborted_count) {
             TASKS_DROPPED.with(|event| event.observe(aborted_count.get()));

@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet};
+use arty_executor::{TaskCompletion, TaskMetadata, TaskObserver as ExecutorTaskObserver, TaskSet};
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct TaskSpawnOptions {
     parent: Option<seismograph::recorder::runtime::TaskId>,
-    describe_type: fn() -> seismograph::recorder::runtime::TypeDescriptorId,
+    capture: fn(seismograph_runtime::task::EventContext, Option<seismograph::recorder::runtime::TaskId>, usize) -> TaskMetadata,
     future_size: usize,
     observers: Option<TaskObservers>,
 }
@@ -21,7 +21,7 @@ impl TaskSpawnOptions {
     pub(crate) fn with_future_size<Body: 'static>(future_size: usize) -> Self {
         Self {
             parent: crate::runtime::monitoring::current_task(),
-            describe_type: crate::runtime::monitoring::descriptor::<Body>,
+            capture: TaskMetadata::capture::<Body>,
             future_size,
             observers: None,
         }
@@ -49,22 +49,15 @@ impl TaskSpawnOptions {
         }
     }
 
-    fn register_with<F, T, I>(self, tasks: &TaskSet, future: F, completion: T, instrumentation: I)
+    fn register_with<F, T, I>(self, tasks: &TaskSet, future: F, completion: T, observer: I)
     where
         F: IntoFuture + 'static,
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
-        I: TaskInstrumentation,
+        I: ExecutorTaskObserver,
     {
-        crate::runtime::monitoring::register_monitored(
-            tasks,
-            future,
-            completion,
-            instrumentation,
-            self.parent,
-            self.describe_type,
-            self.future_size,
-        );
+        let monitored = crate::runtime::monitoring::current_events().map(|events| (self.capture)(events, self.parent, self.future_size));
+        tasks.task(future).observe(observer).monitor(monitored).register(completion);
     }
 }
 
@@ -73,7 +66,7 @@ impl TaskSpawnOptions {
 mod tests {
     use std::pin::Pin;
 
-    use arty_executor::{Executor, InspectionStatus};
+    use arty_executor::Executor;
     use seismograph_runtime::RuntimeMetadata;
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
     use thread_aware::ThreadBuilder;
@@ -98,7 +91,7 @@ mod tests {
         let _other_parent = enter_current(seismograph_runtime::allocate_task_id());
         set_events(Some(worker.handle().task_events()));
         let _events = scopeguard::guard((), |()| set_events(None));
-        let mut executor = Executor::builder().build();
+        let executor = Executor::builder().monitor(worker.handle()).build();
         let results = JoinHandlePool::new(Shutdown::default());
         let (_handle, sender) = results.handle();
         let future: ErasedFuture = Box::pin(std::future::pending());
@@ -106,11 +99,9 @@ mod tests {
         options.register(&destination, &executor.tasks(), future, sender);
         let mut snapshots = Vec::new();
 
-        let status = executor
-            .inspect(1, |task: &seismograph_runtime::snapshot::Task| snapshots.push(task.clone()))
-            .unwrap();
+        let truncated = executor.inspect_tasks(1, |task| snapshots.push(task));
 
-        assert_eq!(status, InspectionStatus::Complete);
+        assert!(!truncated);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].parent, Some(parent));
         assert_eq!(snapshots[0].future_size_bytes, Some(37));

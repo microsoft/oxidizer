@@ -138,7 +138,7 @@ enum ObserverSlot<D, O> {
 // SAFETY: An ObserverSlot crosses threads only in the Pending state, which
 // contains D and a function pointer. D is Send through ThreadAware. activate()
 // creates O on the target worker, after which the private slot is held only by
-// non-Send PollObservers or by the target executor's task instrumentation.
+// non-Send PollObservers or by the target executor's task observer.
 unsafe impl<D, O> Send for ObserverSlot<D, O> where D: ThreadAware {}
 
 impl<D, O> ThreadAware for ObserverSlot<D, O>
@@ -249,7 +249,7 @@ impl PollObservers {
     }
 }
 
-impl arty_executor::TaskInstrumentation for SingleObserver {
+impl arty_executor::TaskObserver for SingleObserver {
     fn poll_start(&mut self) {
         self.observer.poll_start();
     }
@@ -259,7 +259,7 @@ impl arty_executor::TaskInstrumentation for SingleObserver {
     }
 }
 
-impl arty_executor::TaskInstrumentation for PollObservers {
+impl arty_executor::TaskObserver for PollObservers {
     fn poll_start(&mut self) {
         Self::poll_start(self);
     }
@@ -437,7 +437,7 @@ mod tests {
         event.observe_with(LocalPollData(Arc::clone(&calls)), LocalPoll::create);
 
         let mut observer = event.into_observers().unwrap().relocate_to(&target).into_single().unwrap();
-        arty_executor::TaskInstrumentation::poll_start(&mut observer);
+        arty_executor::TaskObserver::poll_start(&mut observer);
 
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }

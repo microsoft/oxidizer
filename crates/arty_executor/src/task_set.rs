@@ -20,7 +20,7 @@ impl TaskSet {
     /// Configures a future for registration as a new task.
     ///
     /// Call [`TaskBuilder::register`] to submit the task with its completion target.
-    /// The default configuration has no inspector or task observer.
+    /// The default configuration has no task observer or monitoring description.
     ///
     /// # Examples
     ///

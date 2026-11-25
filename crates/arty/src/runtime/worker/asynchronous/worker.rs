@@ -149,17 +149,20 @@ impl Worker {
         let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let cycle_clock = SimpleClock::new_system();
 
-        let executor = Executor::builder()
-            .owner_waker(worker_waker)
-            .thread(thread.clone())
-            .panic_policy(arty_executor::PanicPolicy::dynamic(resolve_task_panic))
-            .build();
-        let tasks = executor.tasks();
-        let executor_shutdown = executor.shutdown();
-
         let monitoring = monitor_options
             .runtime()
             .map(|runtime| WorkerMonitoring::new(runtime, &dispatcher, &thread));
+        let mut executor_builder = Executor::builder()
+            .owner_waker(worker_waker)
+            .thread(thread.clone())
+            .panic_policy(arty_executor::PanicPolicy::dynamic(resolve_task_panic));
+        if let Some(monitoring) = &monitoring {
+            executor_builder = executor_builder.monitor(monitoring.handle().clone());
+        }
+        let executor = executor_builder.build();
+        let tasks = executor.tasks();
+        let executor_shutdown = executor.shutdown();
+
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hook_registrations);
 
@@ -242,10 +245,7 @@ impl Worker {
             .expect("system command processing only succeeds while the worker is ready")
             .executor;
 
-        let cycle_outcome = match &self.monitoring {
-            Some(monitoring) if monitoring.is_observed() => executor.execute_cycle_observed(monitoring),
-            _ => executor.execute_cycle(),
-        };
+        let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -311,7 +311,7 @@ impl Worker {
                 }
                 SystemCommand::Inspect { request } => {
                     if let Some(monitoring) = &self.monitoring {
-                        monitoring.collect(&mut state.executor, request);
+                        monitoring.collect(&state.executor, request);
                     }
                 }
                 SystemCommand::RegisterHook { hook, source } => {

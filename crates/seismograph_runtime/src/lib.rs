@@ -69,7 +69,7 @@ static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
-static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(2);
 static REGISTRY: OnceLock<Mutex<Vec<Arc<RuntimeControl>>>> = OnceLock::new();
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     snapshot::source::ID,

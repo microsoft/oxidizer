@@ -416,7 +416,7 @@ mod tests {
         // SAFETY: the handle retains the task while this notification acquires its own owner.
         let remote = RemoteWake(unsafe { task.as_ptr().retain_remote() });
         // SAFETY: task is still owned by its original thread.
-        unsafe { task.as_task() }.abort(crate::ShutdownCause::default());
+        unsafe { task.as_task() }.abort(crate::ShutdownCause::default(), None);
         remote.schedule_local(owner);
         assert!(!executor_context::has_wakes(owner));
         drop(task);

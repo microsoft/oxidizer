@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
 use std::ops::ControlFlow;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Waker;
@@ -13,10 +13,12 @@ use std::thread::ThreadId;
 
 use performables::sync::channel;
 use plurality::{Arc as PoolArc, MultiPool};
+use seismograph_runtime::worker::WorkerHandle;
 
+use crate::monitoring::{RecordedTask, TaskMonitoring, UnrecordedTask};
 use crate::wake::RemoteWake;
 use crate::{
-    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskInstrumentation, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
+    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskObserver, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
     discard_task_panic_payload,
 };
 
@@ -36,20 +38,20 @@ struct ExecutorSharedInner {
     // Owner-only reception breaks the wake queue -> task -> shared wake state ownership cycle.
     remote_wakes: channel::Receiver<RemoteWake>,
     panic_policy: PanicPolicy,
+    monitoring: Option<WorkerHandle>,
 }
 
 impl ExecutorShared {
-    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
-        let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
+    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) {
+        let tasks = self.inner.new_tasks.borrow();
         for task in tasks.iter() {
             if visit(task).is_break() {
                 break;
             }
         }
-        Ok(())
     }
 
-    pub(crate) fn new(owner_waker: Waker, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
+    pub(crate) fn new(owner_waker: Waker, thread_id: ThreadId, panic_policy: PanicPolicy, monitoring: Option<WorkerHandle>) -> Self {
         let shutdown = Shutdown::new(owner_waker.clone());
         let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);
         Self {
@@ -61,8 +63,13 @@ impl ExecutorShared {
                 wake,
                 remote_wakes,
                 panic_policy,
+                monitoring,
             }),
         }
+    }
+
+    pub(crate) fn monitoring(&self) -> Option<&WorkerHandle> {
+        self.inner.monitoring.as_ref()
     }
 
     pub(crate) fn wake(&self) -> &WakeShared {
@@ -115,40 +122,68 @@ impl ExecutorShared {
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn add_task<F, T, I>(&self, future: F, instrumentation: I, completion: T)
+    pub(crate) fn add_task<F, T, I>(&self, future: F, observer: I, monitored: Option<crate::TaskMetadata>, completion: T)
     where
         F: IntoFuture + 'static,
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
-        I: TaskInstrumentation,
+        I: TaskObserver,
     {
+        let mut monitored = monitored;
+        macro_rules! reject {
+            ($monitoring:expr) => {{
+                Self::reject_task::<F::IntoFuture, _, _, _>(observer, $monitoring, completion, self.shutdown().cause(), self.monitoring());
+                return;
+            }};
+        }
         if self.shutdown().is_triggered() {
-            Self::reject_task::<F::IntoFuture, _, _>(instrumentation, completion, self.shutdown().cause());
-            return;
+            match (self.monitoring(), monitored.take()) {
+                (Some(_), Some(task)) => reject!(RecordedTask::new(task)),
+                _ => reject!(()),
+            }
         }
         let future = future.into_future();
         if self.shutdown().is_triggered() {
-            Self::reject_task::<F::IntoFuture, _, _>(instrumentation, completion, self.shutdown().cause());
-            return;
+            match (self.monitoring(), monitored.take()) {
+                (Some(_), Some(task)) => reject!(RecordedTask::new(task)),
+                _ => reject!(()),
+            }
         }
-        self.register_task(allocate_task(&self.inner.task_storage, future, instrumentation, completion));
+
+        macro_rules! register {
+            ($monitoring:expr) => {
+                self.register_task(allocate_task(
+                    &self.inner.task_storage,
+                    future,
+                    observer,
+                    $monitoring,
+                    completion,
+                ))
+            };
+        }
+        match (self.monitoring(), monitored) {
+            (None, _) => register!(()),
+            (Some(_), None) => register!(UnrecordedTask::new()),
+            (Some(_), Some(task)) => register!(RecordedTask::new(task)),
+        }
     }
 
-    fn reject_task<F, T, I>(mut instrumentation: I, completion: T, cause: crate::ShutdownCause)
+    fn reject_task<F, T, I, M>(observer: I, mut monitoring: M, completion: T, cause: crate::ShutdownCause, worker: Option<&WorkerHandle>)
     where
         F: Future + 'static,
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
-        I: TaskInstrumentation,
+        I: TaskObserver,
+        M: TaskMonitoring,
     {
-        let callback_panic = catch_unwind(AssertUnwindSafe(|| instrumentation.cancelled())).err();
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(instrumentation))) {
+        monitoring.cancelled(worker);
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(observer))) {
+            discard_task_panic_payload(panic);
+        }
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(monitoring))) {
             discard_task_panic_payload(panic);
         }
         completion.cancelled(cause);
-        if let Some(panic) = callback_panic {
-            resume_unwind(panic);
-        }
     }
 
     #[inline]
@@ -195,22 +230,6 @@ mod tests {
         }
     }
 
-    struct CountCancellation(Rc<Cell<usize>>);
-
-    impl crate::TaskInstrumentation for CountCancellation {
-        fn cancelled(&mut self) {
-            self.0.set(self.0.get() + 1);
-        }
-    }
-
-    struct PanickingCancellation;
-
-    impl crate::TaskInstrumentation for PanickingCancellation {
-        fn cancelled(&mut self) {
-            panic!("rejected instrumentation cancellation");
-        }
-    }
-
     struct StopOnConvert(Shutdown);
 
     impl IntoFuture for StopOnConvert {
@@ -224,56 +243,15 @@ mod tests {
     }
 
     #[test]
-    fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
-        let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), PanicPolicy::default());
-        let borrowed = shared.inner.new_tasks.borrow_mut();
-
-        let busy = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
-        drop(borrowed);
-        let released = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
-
-        assert_eq!((busy, released), (Err(crate::InspectionError::Busy), Ok(())));
-    }
-
-    #[test]
-    fn rejected_tasks_notify_instrumentation_before_and_during_conversion() {
+    fn rejected_tasks_cancel_completion_before_and_during_conversion() {
         for stop_before_conversion in [true, false] {
-            let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), PanicPolicy::default());
-            if stop_before_conversion {
-                shared.shutdown().trigger(crate::ShutdownCause::default());
-            }
-            let cancellations = Rc::new(Cell::new(0));
-            let cancelled = Rc::new(Cell::new(false));
-            shared.add_task(
-                StopOnConvert(shared.shutdown().clone()),
-                CountCancellation(Rc::clone(&cancellations)),
-                Cancelled(Rc::clone(&cancelled)),
-            );
-
-            assert_eq!(cancellations.get(), 1);
-            assert!(cancelled.get());
-        }
-    }
-
-    #[test]
-    fn rejected_instrumentation_panics_after_cancellation_delivery() {
-        for stop_before_conversion in [true, false] {
-            let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), PanicPolicy::default());
+            let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), PanicPolicy::default(), None);
             if stop_before_conversion {
                 shared.shutdown().trigger(crate::ShutdownCause::default());
             }
             let cancelled = Rc::new(Cell::new(false));
+            shared.add_task(StopOnConvert(shared.shutdown().clone()), (), None, Cancelled(Rc::clone(&cancelled)));
 
-            let panic = catch_unwind(AssertUnwindSafe(|| {
-                shared.add_task(
-                    StopOnConvert(shared.shutdown().clone()),
-                    PanickingCancellation,
-                    Cancelled(Rc::clone(&cancelled)),
-                );
-            }))
-            .unwrap_err();
-
-            assert_eq!(*panic.downcast::<&str>().unwrap(), "rejected instrumentation cancellation");
             assert!(cancelled.get());
         }
     }
