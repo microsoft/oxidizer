@@ -11,10 +11,9 @@ use thread_aware::ThreadAware;
 
 /// Configures Observed sink integration for an Arty runtime.
 ///
-/// This type is non-exhaustive so later releases can add configuration without
-/// changing [`ObservedExt::enable_observed`].
+/// Its private fields let later releases add configuration without changing
+/// [`ObservedExt::enable_observed`].
 #[derive(Clone, Debug, ThreadAware)]
-#[non_exhaustive]
 pub struct ObservedOptions {
     sink: Sink,
 }
@@ -49,21 +48,24 @@ impl From<&Sink> for ObservedOptions {
 ///
 /// The implementation for [`RuntimeBuilder`] registers the task-spawn hook
 /// before startup. The implementation for a [`RuntimeControl`] reference
-/// registers it on a live runtime. Builder registration covers every task.
-/// Live registration runs immediately on the calling worker and is queued on
-/// other workers, so tasks submitted there before the queue is processed are
-/// not covered. Use builder registration when every task must be covered.
+/// registers it on a live runtime. Builder registration covers every async
+/// task. Live registration runs immediately on the calling worker and is
+/// queued on other workers, so async tasks submitted there before the queue is
+/// processed are not covered. Use builder registration when every async task
+/// must be covered.
 ///
-/// The current integration transfers sink enrichment into each covered task.
+/// The current integration transfers sink enrichment into each covered async
+/// task. Blocking functions submitted through `spawn_blocking` are not covered.
 pub trait ObservedExt: private::Sealed {
     /// The result of enabling Observed sink integration.
     type Output;
 
     /// Enables the configured sink integration.
     ///
-    /// On [`RuntimeBuilder`], this covers every task. On live
+    /// On [`RuntimeBuilder`], this covers every async task. On live
     /// [`RuntimeControl`], registration is queued on other workers and does not
-    /// cover tasks that they submit before processing that queue.
+    /// cover async tasks that they submit before processing that queue.
+    /// Blocking functions submitted through `spawn_blocking` are not covered.
     fn enable_observed(self, options: impl Into<ObservedOptions>) -> Self::Output;
 }
 

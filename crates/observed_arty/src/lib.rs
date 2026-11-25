@@ -9,8 +9,9 @@
 //!
 //! Call [`ObservedExt::enable_observed`] with an [`observed::Sink`] before you
 //! submit a task. The first integration feature transfers enrichment into Arty
-//! tasks. It captures the enrichment at submission time, restores it for each
-//! task poll, and removes it after the poll.
+//! async tasks. It captures the enrichment at submission time, restores it for
+//! each task poll, and removes it after the poll. Blocking functions submitted
+//! through `spawn_blocking` are not covered.
 //!
 //! Enable the integration on a runtime builder:
 //!
@@ -42,13 +43,14 @@
 //! ```
 //!
 //! Live registration runs immediately on the calling worker and is queued on
-//! other workers. A task submitted on another worker before it processes that
-//! queue is not covered. Configure the runtime builder when every task must
-//! receive the integration.
+//! other workers. An async task submitted on another worker before it processes
+//! that queue is not covered. Configure the runtime builder when every async
+//! task must receive the integration.
 //!
 //! Arty runs the task-spawn callback on the submitting worker when one exists.
 //! Submissions from outside the runtime use Arty's worker-neutral callback.
-//! Arty then moves the poll observer to the required target worker.
+//! Arty moves the captured transfer to the target worker, creates the poll
+//! observer there, and keeps that observer on the target worker.
 //!
 //! Enrichment added inside the task stays above the transferred enrichment.
 //! The integration restores the previous worker enrichment after every poll.
