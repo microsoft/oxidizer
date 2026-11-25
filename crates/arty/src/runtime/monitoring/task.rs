@@ -96,6 +96,13 @@ impl TaskMetadata {
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
         task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
+        if state == TaskActivityState::Ready
+            && let Some(spawned_at) = self.spawned_at
+            && let Some(activity) = &mut task.activity
+        {
+            activity.ready_since = Some(spawned_at);
+            activity.queued_since = Some(spawned_at);
+        }
         task
     }
 }

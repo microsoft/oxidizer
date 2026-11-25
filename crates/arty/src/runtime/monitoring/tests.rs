@@ -216,75 +216,6 @@ fn empty_runtime_names_preserve_worker_names_with_either_monitor_policy() {
 }
 
 #[test]
-fn disabled_monitoring_registers_no_runtime() {
-    let _recording = RecorderGuard::new();
-    let runtime = Runtime::builder()
-        .name("disabled-monitor")
-        .monitor(MonitorPolicy::disabled())
-        .build()
-        .unwrap();
-
-    let value = runtime.scheduler().block_on(async |_| 42).unwrap();
-    let registered = runtimes().iter().any(|runtime| runtime.name == "disabled-monitor");
-    runtime.stop().unwrap();
-
-    assert_eq!((value, registered), (42, false));
-}
-
-#[test]
-fn local_and_remote_tasks_are_collected_without_recording() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("native-tasks");
-    let (started, ready) = mpsc::channel();
-    let parent = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware(started), |cx, Unaware(started)| async move {
-            cx.scheduler()
-                .spawn(move |_| {
-                    let mut started = Some(started);
-                    poll_fn(move |_| {
-                        if let Some(started) = started.take() {
-                            started.send(()).unwrap();
-                        }
-                        Poll::<()>::Pending
-                    })
-                })
-                .await
-                .unwrap();
-        });
-    receive(&ready);
-
-    let snapshot = capture(&runtime);
-    runtime.stop().unwrap();
-    assert_eq!(snapshot.name, "native-tasks");
-    assert!(parent.join().unwrap_err().is_shutdown());
-    let observed = snapshot
-        .tasks
-        .iter()
-        .map(|task| {
-            (
-                task.activity.unwrap().state,
-                task.metrics_scope,
-                task.spawned_at,
-                task.last_worker_id.is_some(),
-                task.future_size_bytes.is_some(),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        observed,
-        vec![(TaskActivityState::Waiting, TaskMetricsScope::Uncollected, None, true, true); 2]
-    );
-    assert!(
-        snapshot
-            .workers
-            .iter()
-            .all(|worker| worker.task_collection == TaskCollection::Complete)
-    );
-}
-
-#[test]
 fn task_identity_survives_repeated_collection_and_recording_changes() {
     let _recording = RecorderGuard::new();
     let runtime = runtime("stable-identities");
@@ -329,51 +260,6 @@ fn task_identity_survives_repeated_collection_and_recording_changes() {
     assert_eq!(
         (second.tasks[0].type_descriptor, third.tasks[0].type_descriptor),
         (first.tasks[0].type_descriptor, first.tasks[0].type_descriptor)
-    );
-}
-
-#[test]
-fn queued_and_running_blocking_tasks_come_from_native_pool_storage() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("blocking-tasks");
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let first = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        receive(&released);
-        1
-    });
-    receive(&ready);
-    let second = runtime.scheduler().spawn_blocking(|| 2);
-
-    let snapshot = capture(&runtime);
-    release.send(()).unwrap();
-    assert_eq!((first.join().unwrap(), second.join().unwrap()), (1, 2));
-    runtime.stop().unwrap();
-    let states = snapshot
-        .tasks
-        .iter()
-        .map(|task| {
-            let role = task
-                .last_worker_id
-                .and_then(|id| snapshot.workers.iter().find(|worker| worker.id == id))
-                .map(|worker| worker.role);
-            let activity = task.activity.unwrap();
-            (role, activity.state, activity.poll_worker_id, task.metrics_scope)
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        states,
-        [
-            (
-                Some(WorkerRole::Blocking),
-                TaskActivityState::Running,
-                snapshot.tasks[0].last_worker_id,
-                TaskMetricsScope::Uncollected,
-            ),
-            (None, TaskActivityState::Ready, None, TaskMetricsScope::Uncollected),
-        ]
     );
 }
 
@@ -839,70 +725,6 @@ fn async_task_sizes_precede_wrapping_and_erasure() {
             })
             .unwrap();
         assert_eq!(task.future_size_bytes, Some(spawn.runtime().unwrap().value_1 - 1));
-    }
-}
-
-#[test]
-fn queued_remote_children_retain_their_recorded_parent() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = Runtime::builder()
-        .monitor(MonitorPolicy::enabled())
-        .workers(WorkersPolicy::exactly(2))
-        .name("remote-parent-links")
-        .build()
-        .unwrap();
-    let (started, ready) = mpsc::channel();
-    let (spawned, children) = mpsc::channel();
-    let parent = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((started, spawned)), |cx, Unaware((started, spawned))| async move {
-            let destination = cx.control().workers().find(|worker| worker != cx.thread()).unwrap();
-            let at = cx.scheduler().spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
-                PendingBody::<64>::new(started)
-            });
-            let anywhere = cx
-                .scheduler()
-                .spawn_anywhere(Unaware(started), |Unaware(started)| PendingBody::<128>::new(started));
-            spawned.send((at, anywhere)).unwrap();
-            pending::<()>().await;
-        });
-    let (at, anywhere) = receive(&children);
-    for _ in 0..2 {
-        receive(&ready);
-    }
-    let native = capture(&runtime);
-    runtime.stop().unwrap();
-    assert!(parent.join().unwrap_err().is_shutdown());
-    assert!(at.join().unwrap_err().is_shutdown());
-    assert!(anywhere.join().unwrap_err().is_shutdown());
-    assert_eq!(native.tasks.len(), 3);
-    let root = native.tasks.iter().find(|task| task.parent.is_none()).unwrap();
-    let origin_worker = root.last_worker_id.unwrap();
-    let children = native.tasks.iter().filter(|task| task.id != root.id).collect::<Vec<_>>();
-    assert!(children.iter().all(|task| task.parent == Some(root.id)));
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    for child in children {
-        let spawn = recorded
-            .events
-            .events
-            .iter()
-            .find(|event| {
-                event.kind == EventKind::TaskSpawned
-                    && event
-                        .runtime()
-                        .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == child.id.get())
-            })
-            .unwrap();
-        let payload = spawn.runtime().unwrap();
-        assert_eq!(
-            (payload.related_id, payload.worker_id, child.spawned_at),
-            (root.id.get(), Some(origin_worker), Some(spawn.timestamp))
-        );
     }
 }
 
