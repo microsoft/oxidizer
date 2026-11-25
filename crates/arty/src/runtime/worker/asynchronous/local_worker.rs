@@ -284,7 +284,7 @@ impl SchedulerContext {
 
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        TaskSpawnOptions::new::<F>().register(&self.thread, &self.tasks, inner, result_tx);
+        TaskSpawnOptions::new::<F>(self.context.dispatcher().monitoring()).register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
 
@@ -298,7 +298,7 @@ impl SchedulerContext {
         let (handle, result_tx) = self.results.handle();
         let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        TaskSpawnOptions::new::<F>()
+        TaskSpawnOptions::new::<F>(self.context.dispatcher().monitoring())
             .observed_by(observers)
             .register(&self.thread, &self.tasks, inner, result_tx);
         handle

@@ -62,6 +62,10 @@ impl DispatcherClient {
         self.core.shutdown()
     }
 
+    pub(crate) fn monitoring(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
+        self.core.monitoring()
+    }
+
     /// Submits to a previously resolved worker without discarding destination affinity.
     pub(crate) fn spawn_on_worker<FF, F>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<F::Output>
     where

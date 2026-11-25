@@ -166,6 +166,8 @@ pub(crate) mod monitoring;
 pub mod policy;
 mod shutdown;
 mod shutdown_cause;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 #[cfg(test)]
 pub(crate) mod testing;
 pub(crate) mod worker;

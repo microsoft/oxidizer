@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use super::TaskInfo;
+use super::BlockingTaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::task::preparation::{BlockingTask, BlockingTaskOutcome};
 
@@ -36,7 +36,7 @@ impl BlockingJob {
 }
 
 pub(crate) trait MonitoredBlockingJob: Send + Sync {
-    fn info(&self) -> &TaskInfo;
+    fn info(&self) -> &BlockingTaskInfo;
     fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome));
 }
 
@@ -51,10 +51,9 @@ impl BlockingPoolMonitoring {
     }
 
     pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown) -> BlockingTaskMonitoring {
+        let events = matches!(shutdown.state(), ShutdownState::Running).then_some(self.events).flatten();
         BlockingTaskMonitoring {
-            info: matches!(shutdown.state(), ShutdownState::Running)
-                .then(|| self.events.map(TaskInfo::new::<F>))
-                .flatten(),
+            task: events.map(BlockingTaskInfo::capture::<F>),
         }
     }
 
@@ -66,7 +65,7 @@ impl BlockingPoolMonitoring {
 
 #[derive(Default)]
 pub(crate) struct BlockingTaskMonitoring {
-    info: Option<TaskInfo>,
+    task: Option<BlockingTaskInfo>,
 }
 
 impl BlockingTaskMonitoring {
@@ -75,31 +74,31 @@ impl BlockingTaskMonitoring {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if let Some(info) = self.info {
-            return BlockingJob::Monitored(std::sync::Arc::new(MonitoredTask {
+        match self.task {
+            None => BlockingJob::Plain(Box::new(move || {
+                task.run(|_| {});
+            })),
+            Some(info) => BlockingJob::Monitored(std::sync::Arc::new(MonitoredBlockingTask {
                 task: std::sync::Mutex::new(task),
                 info,
-            }));
+            })),
         }
-        BlockingJob::Plain(Box::new(move || {
-            task.run(|_| {});
-        }))
     }
 }
 
 // Inspection shares this allocation with execution. Only taking the callback
 // needs the mutex; neither the callback nor its destructor runs under the lock.
-struct MonitoredTask<F, R: Send + 'static> {
+struct MonitoredBlockingTask<F, R: Send + 'static> {
     task: std::sync::Mutex<BlockingTask<F, R>>,
-    info: TaskInfo,
+    info: BlockingTaskInfo,
 }
 
-impl<F, R> MonitoredBlockingJob for MonitoredTask<F, R>
+impl<F, R> MonitoredBlockingJob for MonitoredBlockingTask<F, R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    fn info(&self) -> &TaskInfo {
+    fn info(&self) -> &BlockingTaskInfo {
         &self.info
     }
 
@@ -112,7 +111,7 @@ where
     }
 }
 
-impl<F, R: Send + 'static> Drop for MonitoredTask<F, R> {
+impl<F, R: Send + 'static> Drop for MonitoredBlockingTask<F, R> {
     fn drop(&mut self) {
         if self
             .task
@@ -154,38 +153,47 @@ impl BlockingWorkerMonitoring {
             let info = body.info();
             let events = worker.task_events();
             let observed = worker.is_observed();
-            let token = observed.then(|| worker.task_poll_started(info.id()));
-            info.started_on(events, token.as_ref().and_then(seismograph_runtime::task::TaskPoll::started_at));
-            if let Some(token) = token {
-                current = Some(arty_executor::enter_task(info.id(), events));
+            let token = observed.then(|| {
+                let id = info.id();
+                (id, worker.task_poll_started(id))
+            });
+            info.started_on(
+                events,
+                token
+                    .as_ref()
+                    .and_then(|(_, poll)| seismograph_runtime::task::TaskPoll::started_at(poll)),
+            );
+            if let Some((id, token)) = token {
+                current = Some(arty_executor::enter_task(id, events));
                 poll = Some((worker, token));
             }
         }
-        let mut finish = |terminal| {
-            drop(current.take());
-            if let Some((worker, poll)) = poll.take() {
-                worker.task_poll_finished(poll);
-            }
-            if let Some(body) = &monitored {
-                match terminal {
-                    BlockingTaskOutcome::Completed => body.info().completed(),
-                    BlockingTaskOutcome::Panicked => body.info().panicked(),
+        let outcome = {
+            let mut finish = |terminal| {
+                drop(current.take());
+                if let Some((worker, poll)) = poll.take() {
+                    worker.task_poll_finished(poll);
                 }
-            }
+                if let Some(body) = &monitored {
+                    match terminal {
+                        BlockingTaskOutcome::Completed => body.info().completed(),
+                        BlockingTaskOutcome::Panicked => body.info().panicked(),
+                    }
+                }
+            };
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if canceled {
+                    drop(body);
+                } else {
+                    body.run_with(&mut finish);
+                }
+            }))
         };
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if canceled {
-                drop(body);
-            } else {
-                body.run_with(&mut finish);
-            }
-        }));
-        drop(finish);
         drop(current.take());
         if let Some((worker, poll)) = poll.take() {
             worker.task_poll_finished(poll);
         }
-        outcome.map(|_| ())
+        outcome
     }
 }
 

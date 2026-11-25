@@ -3,6 +3,8 @@
 
 //! Public monitoring integration contracts for the Arty runtime.
 
+#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
+
 use std::future::pending;
 use std::pin::Pin;
 use std::sync::{Mutex, MutexGuard, mpsc};
@@ -14,7 +16,7 @@ use arty::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::{DecodedSnapshot, SnapshotOptions};
-use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, TaskActivityState, TaskMetricsScope};
+use seismograph_runtime::snapshot::{Runtime as RuntimeSnapshot, TaskActivityState, TaskCollection, TaskMetricsScope};
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
@@ -46,14 +48,16 @@ impl Drop for RecorderGuard {
 }
 
 fn runtime(name: &str, workers: usize) -> Runtime {
-    Runtime::builder()
-        .name(name)
-        .workers(WorkersPolicy::exactly(workers))
-        .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .monitor(MonitorPolicy::enabled())
-        .on(TaskPanic::ignore())
-        .build()
-        .unwrap()
+    arty::runtime::test_util::with_mock_monitor_io(|| {
+        Runtime::builder()
+            .name(name)
+            .workers(WorkersPolicy::exactly(workers))
+            .blocking_pool(BlockingPoolPolicy::shared().max(1))
+            .monitor(MonitorPolicy::enabled())
+            .on(TaskPanic::ignore())
+            .build()
+            .unwrap()
+    })
 }
 
 fn process_snapshot() -> DecodedSnapshot {
@@ -72,10 +76,24 @@ fn runtime_snapshots(snapshot: &DecodedSnapshot) -> Vec<RuntimeSnapshot> {
 }
 
 fn capture_runtime(name: &str) -> RuntimeSnapshot {
-    runtime_snapshots(&process_snapshot())
-        .into_iter()
-        .find(|runtime| runtime.name == name)
-        .unwrap()
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(runtime) = runtime_snapshots(&process_snapshot())
+            .into_iter()
+            .find(|runtime| runtime.name == name)
+            && runtime
+                .workers
+                .iter()
+                .all(|worker| !matches!(worker.task_collection, TaskCollection::Busy | TaskCollection::TimedOut))
+        {
+            return runtime;
+        }
+        assert!(
+            is_mutation_testing() || started.elapsed() < TEST_TIMEOUT,
+            "runtime workers did not answer the monitoring capture"
+        );
+        std::thread::yield_now();
+    }
 }
 
 fn receive<T>(receiver: &mpsc::Receiver<T>) -> T {
@@ -123,7 +141,7 @@ fn disabled_monitoring_registers_no_runtime_source() {
 }
 
 #[test]
-fn idle_monitoring_preserves_stable_native_task_metadata() {
+fn idle_monitoring_exposes_only_native_task_state() {
     let _recording = RecorderGuard::new(false);
     let name = "integration-idle-metadata";
     let runtime = runtime(name, 1);
@@ -143,19 +161,14 @@ fn idle_monitoring_preserves_stable_native_task_metadata() {
     let second_task = &second.tasks[0];
     assert_eq!(
         (
+            first_task.parent,
             first_task.activity.unwrap().state,
             first_task.spawned_at,
             first_task.future_size_bytes,
             first_task.metrics_scope,
             first_task.last_worker_id.is_some(),
         ),
-        (
-            TaskActivityState::Waiting,
-            None,
-            Some(u64::try_from(size_of::<PendingBody<64>>()).unwrap()),
-            TaskMetricsScope::Uncollected,
-            true,
-        )
+        (None, TaskActivityState::Waiting, None, None, TaskMetricsScope::Uncollected, true,)
     );
     assert_eq!(
         (second_task.id, second_task.type_descriptor),

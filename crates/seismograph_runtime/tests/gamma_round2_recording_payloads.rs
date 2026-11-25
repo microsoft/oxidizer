@@ -19,8 +19,11 @@ use seismograph_runtime::task::TaskProperties;
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, register_runtime};
 
-fn task_properties(parent: Option<TaskId>, body_size: usize) -> TaskProperties {
-    TaskProperties::default().parent(parent).body_size(body_size)
+fn task_properties(descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> TaskProperties {
+    let mut spawn = TaskProperties::new(descriptor);
+    spawn.parent = parent;
+    spawn.body_size = body_size;
+    spawn
 }
 
 fn capture(disposition: EventBufferDisposition) -> DecodedSnapshot {
@@ -78,21 +81,21 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
     let second_id = second.id();
     let task_events = worker.task_events();
     let parent = task_events
-        .spawned(|| TypeDescriptorId::from_raw(11).unwrap(), &task_properties(None, 0))
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(11).unwrap(), None, 0))
         .unwrap()
-        .id;
+        .id();
     let child = task_events
-        .spawned(|| TypeDescriptorId::from_raw(13).unwrap(), &task_properties(Some(parent), 0))
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(13).unwrap(), Some(parent), 0))
         .unwrap()
-        .id;
+        .id();
     let legacy = task_events
-        .spawned(|| TypeDescriptorId::from_raw(17).unwrap(), &task_properties(Some(parent), 0))
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(17).unwrap(), Some(parent), 0))
         .unwrap()
-        .id;
+        .id();
     let sized = task_events
-        .spawned(|| TypeDescriptorId::from_raw(19).unwrap(), &task_properties(Some(parent), 321))
+        .spawned(|| task_properties(TypeDescriptorId::from_raw(19).unwrap(), Some(parent), 321))
         .unwrap()
-        .id;
+        .id();
     let tasks = Arc::new(Mutex::new(
         [(parent, 11, 0), (child, 13, 0), (legacy, 17, 0), (sized, 19, 321)]
             .map(|(id, descriptor, size)| Task {

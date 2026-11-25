@@ -242,7 +242,7 @@ mod tests {
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 
     use super::*;
-    use crate::runtime::monitoring::TaskInfo;
+    use crate::runtime::monitoring::BlockingTaskInfo;
     use crate::task::preparation::BlockingTaskOutcome;
 
     #[derive(Default)]
@@ -293,10 +293,10 @@ mod tests {
         }
     }
 
-    struct TestJob(TaskInfo);
+    struct TestJob(BlockingTaskInfo);
 
     impl MonitoredBlockingJob for TestJob {
-        fn info(&self) -> &TaskInfo {
+        fn info(&self) -> &BlockingTaskInfo {
             &self.0
         }
 
@@ -395,7 +395,7 @@ mod tests {
         }
         queue.retire(0);
         queue.retire(2);
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap());
         let id = info.id();
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(info))),
@@ -435,7 +435,7 @@ mod tests {
         let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
         queue.add_worker();
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap());
 
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
@@ -457,7 +457,7 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-slots", 1));
         let queue = Arc::new(Queue::new(Some(runtime.handle())));
         let index = queue.add_worker();
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap())));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -524,7 +524,9 @@ mod tests {
         queue.add_worker();
         queue.add_worker();
         assert!(queue.push(QueuedJob {
-            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())))),
+            body: BlockingJob::Monitored(Arc::new(TestJob(BlockingTaskInfo::capture::<()>(
+                queue.monitoring.events().unwrap()
+            )))),
             shutdown: None,
         }));
 
@@ -627,10 +629,10 @@ mod tests {
     fn blocking_collection_handles_missing_metadata_limits_and_canceled_requests() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        struct InspectedJob(TaskInfo, Arc<AtomicUsize>);
+        struct InspectedJob(BlockingTaskInfo, Arc<AtomicUsize>);
 
         impl MonitoredBlockingJob for InspectedJob {
-            fn info(&self) -> &TaskInfo {
+            fn info(&self) -> &BlockingTaskInfo {
                 self.1.fetch_add(1, Ordering::SeqCst);
                 &self.0
             }
@@ -648,7 +650,7 @@ mod tests {
         for body in [
             BlockingJob::Plain(Box::new(|| {})),
             BlockingJob::Monitored(Arc::new(InspectedJob(
-                TaskInfo::new::<()>(queue.monitoring.events().unwrap()),
+                BlockingTaskInfo::capture::<()>(queue.monitoring.events().unwrap()),
                 Arc::clone(&inspections),
             ))),
         ] {

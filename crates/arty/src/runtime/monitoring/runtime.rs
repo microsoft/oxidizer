@@ -8,7 +8,7 @@ use crate::runtime::Error;
 use crate::runtime::config::RuntimeName;
 use crate::runtime::policy::MonitorPolicy;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     static TEST_IO: std::cell::RefCell<Option<seismograph_protocol::io::MonitorIo>> = const { std::cell::RefCell::new(None) };
 }
@@ -27,7 +27,7 @@ impl RuntimeMonitoring {
         let workers = u32::try_from(workers).map_err(Error::new)?;
         let monitor_name = if name.as_str().is_empty() { "arty" } else { name.as_str() };
         let builder = Monitor::builder().name(monitor_name);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         let builder = builder.io(TEST_IO
             .with_borrow(Clone::clone)
             .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
@@ -48,7 +48,7 @@ impl RuntimeMonitoring {
         error.map_or(Ok(()), |message| Err(Error::new(MonitorFailure::new(message))))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn with_test_io<T>(io: seismograph_protocol::io::MonitorIo, run: impl FnOnce() -> T) -> T {
         struct Restore(Option<seismograph_protocol::io::MonitorIo>);
         impl Drop for Restore {

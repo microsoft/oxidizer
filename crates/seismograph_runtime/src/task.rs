@@ -18,7 +18,7 @@ use crate::{WorkerControl, collection, lock};
 ///
 /// Obtain this from [`WorkerHandle::task_events`](crate::worker::WorkerHandle::task_events).
 /// It owns no registration, counter, task state, or shared handle.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventContext {
     runtime: RuntimeId,
     worker: Option<WorkerId>,
@@ -36,56 +36,62 @@ pub fn type_descriptor<T: 'static>() -> TypeDescriptorId {
         .or_insert_with(crate::allocate_type_descriptor_id)
 }
 
-/// Metadata used to create and describe one task.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Creation metadata and identity for one task submission.
+#[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct TaskProperties {
-    parent: Option<TaskId>,
-    body_size: usize,
-    spawned_at: Option<EventTimestamp>,
+    id: TaskId,
+    /// Concrete task type identity used by the event.
+    pub descriptor: TypeDescriptorId,
+    /// Parent task that was active at submission.
+    pub parent: Option<TaskId>,
+    /// Task body size before wrapping or type erasure.
+    pub body_size: usize,
+    /// Timestamp captured for the task creation event.
+    pub spawned_at: Option<EventTimestamp>,
+    /// Runtime and worker context captured at submission.
+    pub origin: Option<EventContext>,
 }
 
 impl TaskProperties {
-    /// Sets the parent task that was active at submission.
+    /// Creates task metadata with a required type descriptor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if process task identities are exhausted.
     #[must_use]
-    pub const fn parent(mut self, parent: Option<TaskId>) -> Self {
-        self.parent = parent;
-        self
+    pub fn new(descriptor: TypeDescriptorId) -> Self {
+        Self {
+            id: crate::allocate_task_id(),
+            descriptor,
+            parent: None,
+            body_size: 0,
+            spawned_at: None,
+            origin: None,
+        }
     }
 
-    /// Sets the task body size before wrapping or type erasure.
+    /// Returns the process-wide task identity.
     #[must_use]
-    pub const fn body_size(mut self, body_size: usize) -> Self {
-        self.body_size = body_size;
-        self
+    pub const fn id(&self) -> TaskId {
+        self.id
     }
 
-    /// Sets or clears the task spawn timestamp.
+    /// Describes this task with its recorded creation properties.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the body size does not fit in `u64`. The spawn event builder
+    /// checks the same condition before it returns these properties.
     #[must_use]
-    pub const fn spawned_at(mut self, spawned_at: Option<EventTimestamp>) -> Self {
-        self.spawned_at = spawned_at;
-        self
-    }
-
-    /// Applies these properties to a native task description.
-    pub fn apply_to(&self, task: &mut Task) {
+    pub fn describe(&self, state: crate::snapshot::TaskActivityState) -> Task {
+        let mut task = Task::new(self.id, self.descriptor, state);
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
-        task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
+        task.future_size_bytes =
+            Some(u64::try_from(self.body_size).expect("the spawn builder already checked that the body size fits in u64"));
+        task
     }
-}
-
-/// Identity and timestamp assigned while building a task creation event.
-///
-/// Sampling or a concurrent recording change can omit the event after this
-/// metadata is assigned. Keep the identity for inspection and later outcomes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TaskSpawn {
-    /// Process-wide task identity.
-    pub id: TaskId,
-    /// Concrete task type identity used by the event.
-    pub descriptor: TypeDescriptorId,
-    /// Timestamp used by the task creation event.
-    pub timestamp: EventTimestamp,
 }
 
 impl EventContext {
@@ -116,44 +122,46 @@ impl EventContext {
         self.runtime
     }
 
-    /// Builds a task creation event and returns its identity and timestamp.
+    /// Builds and returns task creation metadata.
     ///
-    /// Calls `descriptor` only when the recorder runs the event builder.
+    /// Calls `create` only when the recorder runs the event builder.
     /// Disabled or suppressed recording does not call it. Sampling and
     /// concurrent recording changes can still omit the event after it runs.
-    /// Reuse the returned timestamp in native task metadata to avoid another
-    /// clock read. Measure `body_size` before wrapping or type erasure.
+    /// The returned value contains the timestamp used by the event. Measure the
+    /// body size before wrapping or type erasure.
     /// The worker identifies the submission origin, not the execution worker.
     ///
     /// # Panics
     ///
-    /// Propagates a panic from `descriptor`. Panics if process task identities
-    /// are exhausted or `body_size` cannot be encoded below `u64::MAX`.
+    /// Propagates a panic from `create`. Panics if the body size cannot be
+    /// encoded below `u64::MAX`.
     #[must_use]
-    pub fn spawned(&self, descriptor: impl FnOnce() -> TypeDescriptorId, properties: &TaskProperties) -> Option<TaskSpawn> {
+    pub fn spawned(&self, create: impl FnOnce() -> TaskProperties) -> Option<TaskProperties> {
         let mut assigned = None;
         seismograph::record(EventClass::RuntimeTask, || {
+            let mut properties = create();
             let size = u64::try_from(properties.body_size)
                 .ok()
                 .and_then(|size| size.checked_add(1))
                 .expect("a concrete task body must be smaller than u64::MAX");
-            let id = crate::allocate_task_id();
-            let descriptor = descriptor();
             let timestamp = properties.spawned_at.unwrap_or_else(EventTimestamp::now);
-            assigned = Some(TaskSpawn { id, descriptor, timestamp });
-            Some(Record::runtime(
+            properties.spawned_at = Some(timestamp);
+            let origin = properties.origin.filter(|origin| origin.runtime_id() == self.runtime_id());
+            let record = Record::runtime(
                 timestamp,
                 EventKind::TaskSpawned,
                 RuntimeEvent {
                     runtime_id: self.runtime,
-                    worker_id: self.worker,
-                    subject_id: id.get(),
+                    worker_id: origin.and_then(|origin| origin.worker_id()).or(self.worker),
+                    subject_id: properties.id.get(),
                     related_id: properties.parent.map_or(0, TaskId::get),
-                    value_0: descriptor.get(),
+                    value_0: properties.descriptor.get(),
                     value_1: size,
                 },
                 self.backtrace,
-            ))
+            );
+            assigned = Some(properties);
+            Some(record)
         });
         assigned
     }

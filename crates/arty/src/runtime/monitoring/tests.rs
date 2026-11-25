@@ -350,7 +350,7 @@ fn stopped_runtime_does_not_record_new_blocking_tasks() {
 }
 
 #[test]
-fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
+fn recording_enabled_during_blocking_execution_does_not_backfill_outcomes() {
     let _recording = RecorderGuard::new();
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
@@ -386,41 +386,22 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
         runtime.stop().unwrap();
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-        let tasks = snapshot
-            .events
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    EventKind::TaskSpawned
-                        | EventKind::TaskPollStarted
-                        | EventKind::TaskPollFinished
-                        | EventKind::TaskCompleted
-                        | EventKind::TaskPanicked
-                        | EventKind::TaskCanceled
-                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
-            })
-            .collect::<Vec<_>>();
-        let outcomes = tasks.iter().map(|event| event.kind).collect::<Vec<_>>();
-        let expected = if panics {
-            vec![EventKind::TaskPanicked]
-        } else if stops {
-            vec![EventKind::TaskCompleted, EventKind::TaskCanceled]
-        } else {
-            vec![EventKind::TaskCompleted]
-        };
-        assert_eq!(outcomes, expected);
-        let identities = tasks.iter().map(|event| event.runtime().unwrap().subject_id).collect::<Vec<_>>();
-        assert!(identities.iter().all(|id| *id != 0));
-        if stops {
-            assert_ne!(identities[0], identities[1]);
-        }
+        assert!(!snapshot.events.events.iter().any(|event| {
+            matches!(
+                event.kind,
+                EventKind::TaskSpawned
+                    | EventKind::TaskPollStarted
+                    | EventKind::TaskPollFinished
+                    | EventKind::TaskCompleted
+                    | EventKind::TaskPanicked
+                    | EventKind::TaskCanceled
+            ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
+        }));
     }
 }
 
 #[test]
-fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
+fn recording_enabled_during_an_async_poll_does_not_backfill_outcomes() {
     let _recording = RecorderGuard::new();
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
@@ -450,37 +431,27 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
         }
         release.send(()).unwrap();
         let outcome = running.join();
-        let expected = if panics {
+        if panics {
             assert!(outcome.unwrap_err().is_panic());
-            EventKind::TaskPanicked
         } else if stops {
             assert!(outcome.unwrap_err().is_shutdown());
-            EventKind::TaskCanceled
         } else {
             outcome.unwrap();
-            EventKind::TaskCompleted
-        };
+        }
         runtime.stop().unwrap();
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-        let tasks = snapshot
-            .events
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    EventKind::TaskSpawned
-                        | EventKind::TaskPollStarted
-                        | EventKind::TaskPollFinished
-                        | EventKind::TaskCompleted
-                        | EventKind::TaskPanicked
-                        | EventKind::TaskCanceled
-                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(tasks.iter().map(|event| event.kind).collect::<Vec<_>>(), [expected]);
-        assert_ne!(tasks[0].runtime().unwrap().subject_id, 0);
+        assert!(!snapshot.events.events.iter().any(|event| {
+            matches!(
+                event.kind,
+                EventKind::TaskSpawned
+                    | EventKind::TaskPollStarted
+                    | EventKind::TaskPollFinished
+                    | EventKind::TaskCompleted
+                    | EventKind::TaskPanicked
+                    | EventKind::TaskCanceled
+            ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
+        }));
     }
 }
 
@@ -782,6 +753,10 @@ fn blocking_children_retain_their_recorded_parent() {
 #[test]
 fn collection_reports_the_native_task_limit_instead_of_claiming_completeness() {
     let _recording = RecorderGuard::new();
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
     let runtime = runtime("bounded-tasks");
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     for _ in 0..260 {
@@ -939,6 +914,10 @@ fn task_sizes_describe_user_futures_before_runtime_wrapping() {
     }
 
     let _recording = RecorderGuard::new();
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
     let runtime = runtime("user-bodies");
     let (started, ready) = mpsc::channel();
     drop(
