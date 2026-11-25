@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Poll, Wake, Waker};
 
 use arty_executor::{Executor, PanicPolicy, ShutdownCause, TaskCompletion, TaskMetadata, TaskObserver, TaskPanicPayload};
+use seismograph::recorder::event::EventKind;
 use seismograph::recorder::runtime::TypeDescriptorId;
 use seismograph_runtime::snapshot::{CaptureOptions, TaskActivityState, TaskCollection};
 use seismograph_runtime::worker::WorkerHandle;
@@ -149,6 +150,71 @@ fn terminal_callbacks_run_outside_the_finished_task_context() {
     let _ = executor.execute_cycle();
 
     assert_eq!(&*observed.borrow(), &[None, None]);
+}
+
+#[test]
+fn unrecorded_tasks_emit_terminal_events() {
+    let _monitoring = MONITORING.lock().unwrap();
+    let _reset = ResetRecorder;
+    seismograph::recorder(seismograph::recorder::Configuration {
+        runtime_tasks: seismograph::recorder::Policy::all(false),
+        ..seismograph::recorder::Configuration::default()
+    });
+    let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("unrecorded-terminal", 1));
+    let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+        seismograph_runtime::worker::WorkerRole::Core,
+    ));
+    let completed = Rc::new(Cell::new(None));
+    let completed_id = Rc::clone(&completed);
+    let panicked = Rc::new(Cell::new(None));
+    let panicked_id = Rc::clone(&panicked);
+    let canceled = Rc::new(Cell::new(None));
+    let canceled_id = Rc::clone(&canceled);
+    let mut executor = Executor::builder()
+        .panic_policy(PanicPolicy::IGNORE)
+        .monitor(worker.handle())
+        .build();
+    executor
+        .tasks()
+        .task(async move {
+            completed_id.set(arty_executor::current_task());
+        })
+        .register(Completion);
+    executor
+        .tasks()
+        .task(async move {
+            panicked_id.set(arty_executor::current_task());
+            panic!("task panic");
+        })
+        .register(Completion);
+    executor
+        .tasks()
+        .task(std::future::poll_fn(move |_| {
+            canceled_id.set(arty_executor::current_task());
+            Poll::<()>::Pending
+        }))
+        .register(Completion);
+
+    let _ = executor.execute_cycle();
+    executor.shutdown().trigger(ShutdownCause::default());
+    let _ = executor.execute_cycle();
+
+    let terminal_events = [
+        (completed.get().unwrap(), EventKind::TaskCompleted),
+        (panicked.get().unwrap(), EventKind::TaskPanicked),
+        (canceled.get().unwrap(), EventKind::TaskCanceled),
+    ];
+    let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+    for (task, kind) in terminal_events {
+        assert!(
+            snapshot
+                .events
+                .events
+                .iter()
+                .any(|event| event.kind == kind && event.runtime().is_some_and(|payload| payload.subject_id == task.get()))
+        );
+    }
 }
 
 #[test]

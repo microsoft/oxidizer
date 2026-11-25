@@ -123,7 +123,7 @@ impl TaskMetadata {
 pub(crate) struct UnrecordedTask(TaskId);
 
 #[derive(Debug)]
-pub(crate) struct RecordedTask(Box<TaskMetadata>);
+pub(crate) struct RecordedTask(TaskMetadata);
 
 impl UnrecordedTask {
     pub(crate) fn new() -> Self {
@@ -133,7 +133,7 @@ impl UnrecordedTask {
 
 impl RecordedTask {
     pub(crate) fn new(task: TaskMetadata) -> Self {
-        Self(Box::new(task))
+        Self(task)
     }
 
     fn task_id(&self) -> TaskId {
@@ -160,6 +160,27 @@ impl TaskMonitoring for UnrecordedTask {
 
     fn poll_finished(&self, worker: &WorkerHandle, poll: TaskPoll) {
         worker.task_poll_finished(poll);
+    }
+
+    fn completed(&mut self, worker: Option<&WorkerHandle>) {
+        worker
+            .expect("monitored tasks belong to an executor with a monitoring worker")
+            .task_events()
+            .completed(self.0);
+    }
+
+    fn panicked(&mut self, worker: Option<&WorkerHandle>) {
+        worker
+            .expect("monitored tasks belong to an executor with a monitoring worker")
+            .task_events()
+            .panicked(self.0);
+    }
+
+    fn cancelled(&mut self, worker: Option<&WorkerHandle>) {
+        worker
+            .expect("monitored tasks belong to an executor with a monitoring worker")
+            .task_events()
+            .canceled(self.0);
     }
 }
 
