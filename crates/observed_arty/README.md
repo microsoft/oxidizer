@@ -67,6 +67,6 @@ The integration restores the previous worker enrichment after every poll.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYHtCfW0WwjsbM5SzdSb3T3AbAZDJNbA5sSgbwJ1wfKM0eL5hZIKCaG9ic2VydmVkZjAuMzAuMYJtb2JzZXJ2ZWRfYXJ0eWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYHtCfW0WwjsbM5SzdSb3T3AbAZDJNbA5sSgbwJ1wfKM0eL5hZIKCaG9ic2VydmVkZjAuMzEuMIJtb2JzZXJ2ZWRfYXJ0eWUwLjEuMA
  [__link0]: https://docs.rs/observed_arty/0.1.0/observed_arty/?search=ObservedExt::enable_observed
- [__link1]: https://docs.rs/observed/0.30.1/observed/?search=Sink
+ [__link1]: https://docs.rs/observed/0.31.0/observed/?search=Sink
