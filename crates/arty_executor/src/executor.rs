@@ -201,9 +201,7 @@ impl Executor {
             // SAFETY: Each queue retains the task throughout this owner-only visit.
             let task = unsafe { pointer.as_task() };
             let state = if task.is_notified() { TaskState::Ready } else { state };
-            if let Some(description) = seismograph::recorder::without_recording(|| task.monitoring_description(state)) {
-                inspect_task(description);
-            }
+            _ = task.monitoring_description(state).map(&mut inspect_task);
             ControlFlow::Continue(())
         };
         self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready));

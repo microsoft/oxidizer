@@ -389,7 +389,7 @@ where
     /// The runtime-owned value that observes each top-level task poll.
     observer: I,
 
-    /// Seismograph metadata that is absent from unmonitored task types.
+    /// Seismograph metadata that is absent from task types without monitoring.
     monitoring: M,
 }
 
