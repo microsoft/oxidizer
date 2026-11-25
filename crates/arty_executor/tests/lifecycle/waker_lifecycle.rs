@@ -156,6 +156,7 @@ fn a_panicked_tasks_retained_waker_does_not_notify_the_live_executor() {
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert!(!executor.has_tasks());
+    // The test joins the waking thread before reading again. The count publishes no other state.
     let notifications = owner.0.load(Ordering::Relaxed);
 
     let waker = retained.take().unwrap();

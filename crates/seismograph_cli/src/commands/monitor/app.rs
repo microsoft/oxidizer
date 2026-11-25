@@ -2346,6 +2346,7 @@ mod tests {
         assert_eq!(view.activity_scroll, 0);
 
         view.focus = RuntimeFocus::Activity;
+        // Check the page distance in both directions and clamp at both ends.
         for (key, expected) in [
             (KeyCode::PageDown, 5),
             (KeyCode::PageDown, 10),

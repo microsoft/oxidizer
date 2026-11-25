@@ -236,6 +236,8 @@ impl<T> Sender<T> {
         })
     }
 
+    // Records contention before waiting on a full channel. The callback must not
+    // record that same event again if it retries the send asynchronously.
     fn send_with(&self, value: T, wait: impl FnOnce(T) -> Result<(), Error<T>>) -> Result<(), Error<T>> {
         match self.shared.try_send(value) {
             Ok(()) => Ok(()),
@@ -1344,6 +1346,7 @@ mod tests {
     #[test]
     fn queue_waits_wake_when_capacity_or_a_value_becomes_available() {
         let (sender, receiver) = bounded(1);
+        // The send and receive calls invoke this waker inline.
         let counter = Arc::new(WakeCounter::default());
         let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
@@ -1366,17 +1369,17 @@ mod tests {
     #[test]
     #[cfg(feature = "seismograph")]
     fn blocking_send_records_contention_before_waiting() {
-        use seismograph::recorder::event::EventKind;
+        use seismograph::recorder::event::EventKind as RecordedEventKind;
 
         crate::gamma_round2_telemetry::enable_recording();
         let (sender, receiver) = bounded(1);
         sender.try_send(7).unwrap();
-        let before = crate::gamma_round2_telemetry::recorded_test_events(EventKind::ChannelSendContention);
+        let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedEventKind::ChannelSendContention);
 
         sender
             .send_with(11, |value| {
                 assert_eq!(
-                    crate::gamma_round2_telemetry::recorded_test_events(EventKind::ChannelSendContention),
+                    crate::gamma_round2_telemetry::recorded_test_events(RecordedEventKind::ChannelSendContention),
                     before + 1
                 );
                 assert_eq!(receiver.try_recv().unwrap(), 7);
@@ -1389,6 +1392,7 @@ mod tests {
     #[test]
     fn watch_wait_registers_until_update_and_reports_close_without_waiting() {
         let (sender, receiver) = watch(7);
+        // send_replace invokes this waker before it returns.
         let counter = Arc::new(WakeCounter::default());
         let waker = Waker::from(Arc::clone(&counter));
         let mut context = Context::from_waker(&waker);
@@ -1714,6 +1718,7 @@ mod tests {
         WatchChange, WatchChanged, bounded, oneshot, watch,
     };
 
+    // This counter tracks wake calls without publishing any other state.
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
 

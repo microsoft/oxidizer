@@ -121,7 +121,7 @@ enum CustomVariant {
     Named { left: u64, right: u64 },
     #[serde(deserialize_with = "deserialize_opaque_variant")]
     Opaque(NoDeserializeIn),
-    #[multitude(deserialize_with = "deserialize_adjusted_variant")]
+    #[multitude(deserialize_with = "deserialize_adjusted")]
     Adjusted(u64),
 }
 
@@ -163,7 +163,7 @@ where
     u64::deserialize(deserializer).map(NoDeserializeIn)
 }
 
-fn deserialize_adjusted_variant<'de, A, D>(arena: &Arena<A>, deserializer: D) -> Result<u64, D::Error>
+fn deserialize_adjusted<'de, A, D>(arena: &Arena<A>, deserializer: D) -> Result<u64, D::Error>
 where
     A: allocator_api2::alloc::Allocator + Clone,
     D: Deserializer<'de>,
@@ -493,17 +493,20 @@ fn custom_field_deserializer_uses_its_own_map_binding() {
         before: u64,
         #[serde(deserialize_with = "decode_hex")]
         value: u64,
+        #[multitude(deserialize_with = "deserialize_adjusted")]
+        adjusted: u64,
         after: bool,
     }
 
     let arena = Arena::new();
-    let mut input = serde_json::Deserializer::from_str(r#"{"after":true,"value":"2a","before":7}"#);
+    let mut input = serde_json::Deserializer::from_str(r#"{"after":true,"adjusted":8,"value":"2a","before":7}"#);
     let record: Record = arena.deserialize(&mut input).unwrap();
     assert_eq!(
         record,
         Record {
             before: 7,
             value: 42,
+            adjusted: 18,
             after: true,
         }
     );

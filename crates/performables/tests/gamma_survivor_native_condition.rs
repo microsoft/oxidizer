@@ -5,7 +5,7 @@
 
 #![cfg(feature = "seismograph")]
 
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use performables::sync::Sync;
 use performables::sync::condition::Condvar;
@@ -29,7 +29,7 @@ fn count(kind: EventKind) -> usize {
 }
 
 fn enable_recording() {
-    static RECORDING: std::sync::Once = std::sync::Once::new();
+    static RECORDING: Once = Once::new();
     RECORDING.call_once(|| {
         seismograph::recorder(seismograph::recorder::Configuration {
             general_events: seismograph::recorder::Policy::all(false),
@@ -67,7 +67,7 @@ fn gamma_survivor_native_condition_records_contention_before_release_and_access_
 }
 
 #[test]
-fn wait_while_releases_the_mutex_before_rechecking_the_predicate() {
+fn wait_while_records_contention_when_the_predicate_requests_one_wait() {
     enable_recording();
     let mutex = Mutex::<(), Sync>::new(());
     let condition = Condvar::<Sync>::new();
@@ -79,7 +79,7 @@ fn wait_while_releases_the_mutex_before_rechecking_the_predicate() {
         let worker = scope.spawn(move || {
             let before = count(EventKind::CondvarContention);
             let mut first_check = true;
-            // Return after one wait even if the notification was spurious or the wait was skipped.
+            // Request one wait, then stop on the next predicate check.
             let guard = worker_condition.wait_while(worker_mutex.lock(), |()| {
                 if std::mem::take(&mut first_check) {
                     ready.send(()).unwrap();

@@ -202,21 +202,23 @@ mod tests {
             let ready = AtomicBool::new(false);
             let (started_tx, started_rx) = mpsc::channel();
             std::thread::scope(|scope| {
-                let workers = (0..waiters)
-                    .map(|_| {
-                        let (mutex, condition, ready) = (&mutex, &condition, &ready);
-                        let started_tx = started_tx.clone();
-                        scope.spawn(move || {
-                            let mut guard = mutex.lock();
-                            started_tx.send(()).unwrap();
-                            while !ready.load(Ordering::Relaxed) {
-                                let (next, timed_out) = condition.wait(mutex, guard, Some(timeout));
-                                assert!(!timed_out, "notification must wake a timed waiter");
-                                guard = next;
+                for _ in 0..waiters {
+                    let (mutex, condition, ready) = (&mutex, &condition, &ready);
+                    let started_tx = started_tx.clone();
+                    scope.spawn(move || {
+                        let mut guard = mutex.lock();
+                        started_tx.send(()).unwrap();
+                        // The mutex protects the readiness check and update.
+                        while !ready.load(Ordering::Relaxed) {
+                            let (next, timed_out) = condition.wait(mutex, guard, Some(timeout));
+                            if timed_out {
+                                mutex.unlock(next);
+                                panic!("notification must wake a timed waiter");
                             }
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                            guard = next;
+                        }
+                    });
+                }
                 for _ in 0..waiters {
                     started_rx.recv().unwrap();
                 }
@@ -224,9 +226,6 @@ mod tests {
                 ready.store(true, Ordering::Relaxed);
                 notify(&condition);
                 mutex.unlock(guard);
-                for worker in workers {
-                    worker.join().unwrap();
-                }
             });
         }
     }

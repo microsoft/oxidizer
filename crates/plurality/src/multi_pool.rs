@@ -96,6 +96,8 @@ mod gamma_round2_tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "reservation retried without an intervening install")]
     fn directory_reservation_rejects_repeated_retries_without_progress() {
+        // The repeated count violates the progress check. The last row lets the
+        // attempt finish if that check is missing.
         let mut snapshots = [(1, true, false), (1, true, false), (2, true, true)].into_iter();
         let _result = MultiPool::<Global>::try_reserve_one_with(|| Ok(()), || Ok(()), || snapshots.next().unwrap());
     }

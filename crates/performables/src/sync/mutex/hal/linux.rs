@@ -4,6 +4,9 @@
 use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 
+#[cfg(test)]
+use crate::sync::effects::record_wake_dispatch;
+
 pub(super) type AtomicLockWord = AtomicU32;
 pub(super) type LockWord = u32;
 
@@ -17,7 +20,7 @@ pub(super) fn wait_lock(state: &AtomicLockWord, expected: LockWord) {
 
 pub(super) fn wake_lock(state: &AtomicLockWord) {
     #[cfg(test)]
-    crate::sync::effects::record_wake_dispatch();
+    record_wake_dispatch();
     wake(state, 1);
 }
 
@@ -59,7 +62,7 @@ pub(super) fn wake_condition_one(state: &AtomicU32) {
 
 pub(super) fn wake_condition_all(state: &AtomicU32) {
     #[cfg(test)]
-    crate::sync::effects::record_wake_dispatch();
+    record_wake_dispatch();
     wake(state, libc::c_int::MAX);
 }
 

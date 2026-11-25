@@ -220,17 +220,15 @@ fn qualified_owner_end(qualified: &str) -> usize {
 }
 
 fn angle_end(text: &str, start: usize) -> Option<usize> {
-    let mut depth = 0_usize;
-    for (offset, byte) in text.as_bytes()[start..].iter().enumerate() {
-        let position = start + offset;
+    let mut depth = 1_usize;
+    for (offset, [previous, byte]) in text.as_bytes()[start..].array_windows::<2>().enumerate() {
         match byte {
             b'<' => depth += 1,
-            b'>' if text.as_bytes()[position - 1] != b'-' => {
-                // #[gamma::skip(try.propagate_to_unwrap, reason = "The opening bracket makes depth positive and the scan stops at the first return to zero")]
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(position);
+            b'>' if *previous != b'-' => {
+                if depth == 1 {
+                    return Some(start + offset + 1);
                 }
+                depth -= 1;
             }
             _ => {}
         }
@@ -260,10 +258,11 @@ mod tests {
 
     #[test]
     fn angle_scan_starts_at_the_requested_generic_list() {
-        let symbol = "app::First<T>::Second<Outer<U>>::run";
+        let symbol = "app::First<T>::Second<Outer<fn() -> U>>::run";
         let start = symbol.find("<Outer").unwrap();
         let end = angle_end(symbol, start).unwrap();
-        assert_eq!(&symbol[start..=end], "<Outer<U>>");
+        assert_eq!(&symbol[start..=end], "<Outer<fn() -> U>>");
+        assert_eq!(angle_end("app::Second<Outer<U>", "app::Second".len()), None);
     }
 
     #[test]

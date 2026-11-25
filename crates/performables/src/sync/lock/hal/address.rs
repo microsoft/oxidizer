@@ -229,6 +229,7 @@ mod tests {
     fn last_reader_wakes_waiters_after_clearing_registration() {
         let lock = RwLock::new();
         let mut reader = lock.try_read().unwrap();
+        // The test sets and clears this flag on one thread. It publishes no other state.
         lock.state.fetch_or(WAITERS, Ordering::Relaxed);
         crate::sync::effects::take();
         lock.read_unlock(&mut reader);

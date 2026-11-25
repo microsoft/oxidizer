@@ -102,6 +102,7 @@ fn uninterested_sink_does_not_inspect_the_request_body() {
         }
 
         fn is_end_stream(&self) -> bool {
+            // The test executes the request inline. The counter publishes no other state.
             self.0.fetch_add(1, Ordering::Relaxed);
             false
         }

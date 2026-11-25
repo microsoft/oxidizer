@@ -566,7 +566,7 @@ mod tests {
     use super::*;
 
     std::thread_local! {
-        pub(super) static UNHANDLED_TASK_PANICS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static UNHANDLED_TASK_PANICS: Cell<usize> = const { Cell::new(0) };
     }
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
@@ -688,7 +688,8 @@ mod tests {
 
         let drops = Arc::new(AtomicUsize::new(0));
         let before = UNHANDLED_TASK_PANICS.get();
-        let panic = std::panic::catch_unwind(|| drop(FutureStorage::new(PanickingDropFuture(Arc::clone(&drops))))).unwrap_err();
+        // The destructor runs inline before catch_unwind returns. The count publishes no other state.
+        let panic = catch_unwind(|| drop(FutureStorage::new(PanickingDropFuture(Arc::clone(&drops))))).unwrap_err();
         assert_eq!(panic.downcast_ref::<&str>(), Some(&"future destructor panic"));
         assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert_eq!(UNHANDLED_TASK_PANICS.get(), before + 1);

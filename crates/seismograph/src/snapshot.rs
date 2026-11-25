@@ -418,16 +418,15 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
         }
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
-        let data_len = reader.u64()?;
-        // #[gamma::skip(expr.decrement, expr.increment, literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, reason = "Valid snapshots have at least four trailing bytes for the symbol count. Malformed extents still fail the checked source or symbol reads with the same error.")]
-        let data_len = snapshot_usize(data_len, reader.remaining().len().saturating_sub(4 + name_len))?;
+        let Ok(data_len) = usize::try_from(reader.u64()?) else {
+            return Err(Error::invalid_format());
+        };
         if reader.u32()? != 0 {
             return Err(Error::invalid_format());
         }
         let name = std::str::from_utf8(reader.read(name_len)?)
             .map_err(|_error| Error::invalid_format())?
             .to_owned();
-        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_usize bounded data_len by the remainder after the reserved field and name; those preceding reads succeeded, so the data extent is available")]
         let data = reader.read(data_len)?.to_vec();
         sources.push(SourceSnapshot {
             id,
@@ -1953,12 +1952,23 @@ mod tests {
         .unwrap();
         assert!(decode(duplicate_sources.as_bytes()).is_err());
 
+        let mut truncated_source = duplicate_sources.as_bytes().to_vec();
+        let second_source = HEADER_LEN + SOURCE_HEADER_LEN + "first".len() + 1;
+        truncated_source[second_source..second_source + 8].copy_from_slice(&2_u64.to_le_bytes());
+        // Both minimum headers fit in total, but the second source length is cut short.
+        truncated_source.truncate(HEADER_LEN + 2 * SOURCE_HEADER_LEN);
+        assert!(decode(&truncated_source).is_err());
+
         let mut invalid_source = valid.as_bytes().to_vec();
         invalid_source[28..32].copy_from_slice(&1_u32.to_le_bytes());
         invalid_source.splice(HEADER_LEN..HEADER_LEN, [0; SOURCE_HEADER_LEN]);
         assert!(decode(&invalid_source).is_err());
         invalid_source[HEADER_LEN..HEADER_LEN + 8].copy_from_slice(&1_u64.to_le_bytes());
         invalid_source[HEADER_LEN + 20] = 1;
+        assert!(decode(&invalid_source).is_err());
+        invalid_source[HEADER_LEN + 20] = 0;
+        // The source header fits, but the advertised data extends past the input.
+        invalid_source[HEADER_LEN + 12..HEADER_LEN + 20].copy_from_slice(&u64::MAX.to_le_bytes());
         assert!(decode(&invalid_source).is_err());
 
         for (total_events, lost_events) in [(u64::MAX, 0), (0, u64::MAX)] {

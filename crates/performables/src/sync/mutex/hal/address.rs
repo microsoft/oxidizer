@@ -229,6 +229,7 @@ mod tests {
         assert_eq!(crate::sync::effects::take().wake_dispatches, 0);
 
         let guard = mutex.try_lock().unwrap();
+        // The test marks contention and releases the mutex on the same thread.
         mutex.state.store(CONTENDED, Ordering::Relaxed);
         mutex.unlock(guard);
         assert_eq!(crate::sync::effects::take().wake_dispatches, 1);

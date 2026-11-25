@@ -24,7 +24,7 @@ pub struct DescriptorOptions {
 impl DescriptorOptions {
     /// Creates default options: all annotated services and no type overrides.
     #[must_use]
-    // #[gamma::skip(fn_value.default, reason = "The return type infers the same DescriptorOptions default")]
+    // #[gamma::skip(fn_value.default, reason = "Both the original and the mutation call DescriptorOptions::default()")]
     pub fn new() -> Self {
         Self::default()
     }

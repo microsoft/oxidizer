@@ -1220,7 +1220,7 @@ mod tests {
         runtime.workers.clear();
         runtime.tasks.clear();
         snapshot.addresses.clear();
-        let mut output = vec![0; encoded_len(&snapshot).unwrap()];
+        let mut output = [0; HEADER_LEN + RUNTIME_FIXED_LEN];
 
         encode(&snapshot, &mut output).unwrap();
 

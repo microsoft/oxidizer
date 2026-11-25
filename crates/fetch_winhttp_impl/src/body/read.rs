@@ -11,7 +11,7 @@ use bytesbuf::mem::OpaqueMemory;
 use fetch::HttpError;
 use http::HeaderMap;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
-use http_body::{Body, Frame, SizeHint};
+use http_body::{Body, Frame};
 use plurality::{MultiPool, coerce};
 
 use crate::bindings::{Bindings as _, BindingsFacade};
@@ -354,11 +354,6 @@ impl Body for WinHttpResponseBody {
 
     fn is_end_stream(&self) -> bool {
         matches!(self.state, BodyState::Done)
-    }
-
-    // #[gamma::skip(fn_value.default, reason = "The return type infers the same SizeHint default")]
-    fn size_hint(&self) -> SizeHint {
-        SizeHint::default()
     }
 }
 

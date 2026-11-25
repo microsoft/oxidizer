@@ -41,6 +41,8 @@ struct ExecutorSharedInner {
 impl ExecutorShared {
     pub(crate) fn inspect_new_tasks(&self, visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
         let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
+        // The result only reports whether the borrow succeeded. The visitor records
+        // truncation if it stops the traversal at its work limit.
         let _traversal = tasks.iter().try_for_each(visit);
         Ok(())
     }

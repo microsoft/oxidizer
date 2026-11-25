@@ -7,6 +7,7 @@
 
 #[cfg(feature = "futures-stream")]
 use std::future::pending;
+use std::io::Error as StdIoError;
 use std::num::NonZero;
 use std::pin::pin;
 #[cfg(feature = "futures-stream")]
@@ -21,7 +22,7 @@ use bytesbuf_io::{Read, ReadExt, ReadInspectDecision, Write};
 use futures::executor::block_on;
 
 #[derive(Debug)]
-struct SingleRead(Option<std::io::Result<()>>);
+struct SingleRead(Option<Result<(), StdIoError>>);
 
 impl Memory for SingleRead {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -36,12 +37,12 @@ impl HasMemory for SingleRead {
 }
 
 impl Read for SingleRead {
-    type Error = std::io::Error;
+    type Error = StdIoError;
 
     async fn read_at_most_into(&mut self, _: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
         self.0
             .take()
-            .unwrap_or_else(|| Err(std::io::Error::other("unexpected read after EOF or an error")))
+            .unwrap_or_else(|| Err(StdIoError::other("unexpected read after EOF or an error")))
             .map(|()| (0, into))
     }
 
@@ -57,15 +58,16 @@ impl Read for SingleRead {
 #[test]
 fn gamma_survivor_exact_and_conditional_errors_preserve_cause() {
     block_on(async {
-        let mut source = SingleRead(Some(Err(std::io::Error::other("gamma survivor scripted failure"))));
+        let mut source = SingleRead(Some(Err(StdIoError::other("gamma survivor scripted failure"))));
         let error = source.read_exactly(2).await.unwrap_err();
         assert!(format!("{error:?}").contains("gamma survivor scripted failure"));
-        let mut source = SingleRead(Some(Err(std::io::Error::other("gamma survivor scripted failure"))));
+        let mut source = SingleRead(Some(Err(StdIoError::other("gamma survivor scripted failure"))));
         let error = source
             .read_at_most_while(2, |_| ReadInspectDecision::Complete(1))
             .await
             .unwrap_err();
         assert!(format!("{error:?}").contains("gamma survivor scripted failure"));
+        // Reuse the source to check that the zero-length read leaves its only response intact.
         let mut source = SingleRead(Some(Ok(())));
         assert!(source.read_exactly(0).await.unwrap().is_empty());
         let error = source.read_exactly(1).await.unwrap_err();

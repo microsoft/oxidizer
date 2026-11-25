@@ -409,7 +409,10 @@ fn synchronous_condition_notify_all_releases_timed_waiters() {
                     started_tx.send(()).unwrap();
                     while !*guard {
                         let (next, outcome) = condition.wait_timeout(guard, DEADLINE);
-                        assert!(!outcome.timed_out(), "notify_all must wake every timed waiter");
+                        if outcome.timed_out() {
+                            drop(next);
+                            panic!("notify_all must wake every timed waiter");
+                        }
                         guard = next;
                     }
                 })

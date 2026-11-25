@@ -8,6 +8,7 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::time::Duration;
 
 use common::{
@@ -259,7 +260,7 @@ fn interest_is_checked_for_each_request() {
 #[test]
 fn completion_interest_skips_error_and_abandonment_probes() {
     std::thread_local! {
-        static OTHER_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static OTHER_PROBES: Cell<usize> = const { Cell::new(0) };
     }
 
     let capture = Capture::new(|name| {

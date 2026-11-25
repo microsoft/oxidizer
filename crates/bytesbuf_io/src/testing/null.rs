@@ -76,7 +76,7 @@ impl Null {
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
-    // #[gamma::skip(fn_value.ok_default, reason = "The result type infers the same BytesBuf default")]
+    // #[gamma::skip(fn_value.ok_default, reason = "Both the original and the mutation return Ok(BytesBuf::default())")]
     pub async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         Ok(BytesBuf::default())
     }

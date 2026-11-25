@@ -473,9 +473,9 @@ fn gamma_survivor_wildcard_rejection_does_not_match_unknown_or_empty_tokens() {
 #[cfg_attr(miri, ignore = "native tests cover gzip compression; zlib-rs teardown violates Stacked Borrows")]
 fn buffered_compression_sets_content_length_through_the_direct_limit() {
     block_on(async {
+        // Check MAX_DIRECT_COMPRESSION_INPUT_LEN and one byte above it.
         for (size, buffered) in [(64 * 1024, true), (64 * 1024 + 1, false)] {
-            let payload = vec![b'x'; size];
-            let body = BytesView::from(payload.clone());
+            let body = BytesView::from(vec![b'x'; size]);
             let handler = Compression::server()
                 .compress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(move |_| {
@@ -486,7 +486,8 @@ fn buffered_compression_sets_content_length_through_the_direct_limit() {
             let compressed = response.into_body().into_bytes().await.unwrap();
             assert_eq!(content_length, buffered.then(|| HeaderValue::from(compressed.len())));
             let plain = compressors::format::decompress(Format::Gzip, compressed, Resources::global()).unwrap();
-            assert_eq!(plain.to_vec(), payload);
+            assert_eq!(plain.len(), size);
+            assert!(plain.slices().all(|(slice, _)| slice.iter().all(|&byte| byte == b'x')));
         }
     });
 }

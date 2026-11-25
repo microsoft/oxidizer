@@ -160,7 +160,7 @@ fn assert_capacity_within_bounds(len: usize, available: usize) {
 impl BytesBuf {
     /// Creates an instance without any memory capacity.
     #[must_use]
-    // #[gamma::skip(fn_value.default, reason = "The return type infers the same BytesBuf default")]
+    // #[gamma::skip(fn_value.default, reason = "Both the original and the mutation call BytesBuf::default()")]
     pub fn new() -> Self {
         Self::default()
     }

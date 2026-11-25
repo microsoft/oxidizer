@@ -304,6 +304,8 @@ impl Worker {
         ControlFlow::Break(())
     }
 
+    // Break means the worker stopped or is unavailable. Drained means a receive found
+    // the queue empty. LimitReached means poll again even if the queue is now empty.
     fn process_system_commands(&mut self) -> ControlFlow<(), BatchProgress> {
         let Some(state) = &mut self.state else {
             return ControlFlow::Break(());
@@ -1252,6 +1254,7 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
+        // prepare_cycle runs these callbacks inline. The count publishes no other state.
         let processed = Arc::new(AtomicUsize::new(0));
         for _ in 0..=COMMANDS_PER_CYCLE {
             let processed = Arc::clone(&processed);

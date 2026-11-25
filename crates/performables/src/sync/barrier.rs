@@ -319,7 +319,10 @@ mod tests {
                         ready.send(()).unwrap();
                     }
                     let (guard, outcome) = barrier.raw.changed.wait_timeout(phase, timeout).unwrap();
-                    assert!(!outcome.timed_out(), "the last arrival must notify the waiting participant");
+                    if outcome.timed_out() {
+                        drop(guard);
+                        panic!("the last arrival must notify the waiting participant");
+                    }
                     guard
                 })
             });

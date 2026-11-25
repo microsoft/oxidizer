@@ -518,15 +518,17 @@ mod tests {
     #[test]
     fn blocking_wait_parks_only_when_no_notification_is_stored() {
         let notify = Arc::new(Notify::<Sync>::new());
-        let parks = std::rc::Rc::new(Cell::new(0));
-        let observe = std::rc::Rc::clone(&parks);
-        let producer = Arc::clone(&notify);
+        let parks = Rc::new(Cell::new(0));
 
-        crate::sync::effects::with_park(
-            move || {
-                observe.set(observe.get() + 1);
-                assert_eq!(observe.get(), 1);
-                producer.notify_one();
+        with_park(
+            {
+                let parks = Rc::clone(&parks);
+                let notify = Arc::clone(&notify);
+                move || {
+                    parks.set(parks.get() + 1);
+                    assert_eq!(parks.get(), 1);
+                    notify.notify_one();
+                }
             },
             || {
                 notify.notify_one();
@@ -601,9 +603,11 @@ mod tests {
     }
 
     use std::cell::Cell;
+    use std::rc::Rc;
     use std::time::Instant;
 
     use super::*;
+    use crate::sync::effects::with_park;
 
     #[test]
     fn gamma_survivor_notify_stale_cached_states_reload_after_cancel_and_failed_compare_exchange() {

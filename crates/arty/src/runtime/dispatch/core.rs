@@ -418,25 +418,25 @@ mod tests {
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
     use crate::runtime::worker::blocking::Pool;
 
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     #[test]
     fn gamma_survivor_private_dispatch_starts_at_worker_zero_and_wakes_io_destination() {
-        use std::sync::atomic::AtomicUsize;
-        use std::task::{Wake, Waker};
-
-        #[derive(Default)]
-        struct Counter(AtomicUsize);
-        impl Wake for Counter {
-            fn wake(self: std::sync::Arc<Self>) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-            fn wake_by_ref(self: &std::sync::Arc<Self>) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
         let threads = test_threads(3);
-        let counter = std::sync::Arc::new(Counter::default());
+        let counter = StdArc::new(WakeCounter::default());
         let (mut first, rx) = endpoint(&threads[0]);
-        first.waker = Waker::from(std::sync::Arc::clone(&counter));
+        first.waker = Waker::from(StdArc::clone(&counter));
         let (second, _second_rx) = endpoint(&threads[1]);
         let (third, _third_rx) = endpoint(&threads[2]);
         let core = DispatcherCore::new(
@@ -581,6 +581,8 @@ mod tests {
         let threads = test_threads(1);
         let (worker, worker_rx) = endpoint(&threads[0]);
         let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        // TaskPanic hooks are not retained, and their cloned data is inert. Only dropping
+        // the original can stop the dispatcher, so the command order tests registration.
         let hook = HookFn::<TaskPanic, _>::new(StopOnOriginalDrop(Some(dispatcher.clone())), |_event, _data| {});
 
         dispatcher.register_hook(registration(hook));
@@ -756,21 +758,13 @@ mod tests {
 
     #[test]
     fn dispatcher_stop_sends_one_stop_command_and_wakes_each_worker_once() {
-        struct WakeWorker(std::sync::mpsc::Sender<()>);
-
-        impl std::task::Wake for WakeWorker {
-            fn wake(self: std::sync::Arc<Self>) {
-                self.0.send(()).unwrap();
-            }
-        }
-
         let threads = test_threads(2);
         let (mut worker1, worker1_rx) = endpoint(&threads[0]);
         let (mut worker2, worker2_rx) = endpoint(&threads[1]);
-        let (wake1, woken1) = std::sync::mpsc::channel();
-        let (wake2, woken2) = std::sync::mpsc::channel();
-        worker1.waker = Waker::from(std::sync::Arc::new(WakeWorker(wake1)));
-        worker2.waker = Waker::from(std::sync::Arc::new(WakeWorker(wake2)));
+        let wake1 = StdArc::new(WakeCounter::default());
+        let wake2 = StdArc::new(WakeCounter::default());
+        worker1.waker = Waker::from(StdArc::clone(&wake1));
+        worker2.waker = Waker::from(StdArc::clone(&wake2));
 
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default(), Vec::new());
 
@@ -781,16 +775,17 @@ mod tests {
 
         assert_eq!(drain_system(&worker1_rx).len(), 1);
         assert_eq!(drain_system(&worker2_rx).len(), 1);
-        woken1.try_recv().unwrap();
-        woken2.try_recv().unwrap();
+        // The dispatcher invokes these wakers inline. The counters publish no other state.
+        assert_eq!(wake1.0.load(Ordering::Relaxed), 1);
+        assert_eq!(wake2.0.load(Ordering::Relaxed), 1);
 
         // A second stop call neither sends commands nor wakes workers.
         dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_system(&worker1_rx).len(), 0);
         assert_eq!(drain_system(&worker2_rx).len(), 0);
-        assert!(woken1.try_recv().is_err());
-        assert!(woken2.try_recv().is_err());
+        assert_eq!(wake1.0.load(Ordering::Relaxed), 1);
+        assert_eq!(wake2.0.load(Ordering::Relaxed), 1);
     }
 
     #[cfg(any(test, feature = "monitor"))]

@@ -60,6 +60,7 @@ fn recording_enabled_while_held_preserves_release_and_poison_events() {
     *recovered += 1;
     write_lock.clear_poison();
     drop(recovered);
+    // Clearing an unlocked, already clean lock must not record a second event.
     write_lock.clear_poison();
     let write_events = finish_recording(write_id);
     assert_eq!(

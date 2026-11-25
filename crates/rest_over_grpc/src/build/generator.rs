@@ -66,7 +66,7 @@ impl Generator {
     /// `tonic` bridge emitted, and no OpenAPI document. Use
     /// [`builder`](Self::builder) to change either of those.
     #[must_use]
-    // #[gamma::skip(fn_value.default, reason = "The return type infers the same Generator default")]
+    // #[gamma::skip(fn_value.default, reason = "Both the original and the mutation call Generator::default()")]
     pub fn new() -> Self {
         Self::default()
     }
@@ -75,7 +75,7 @@ impl Generator {
     /// bridge and OpenAPI output) can be configured before
     /// [`GeneratorBuilder::build`] produces the [`Generator`].
     #[must_use]
-    // #[gamma::skip(fn_value.default, reason = "The return type infers the same GeneratorBuilder default")]
+    // #[gamma::skip(fn_value.default, reason = "Both the original and the mutation call GeneratorBuilder::default()")]
     pub fn builder() -> GeneratorBuilder {
         GeneratorBuilder::default()
     }
