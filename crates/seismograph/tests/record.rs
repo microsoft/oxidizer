@@ -72,17 +72,28 @@ fn event_capacity_accepts_bounded_powers_of_two_including_constants() {
     const MINIMUM: EventBufferCapacity = EventBufferCapacity::new(64);
     const MAXIMUM: EventBufferCapacity = EventBufferCapacity::new(1_048_576);
 
-    assert_eq!(
-        (
-            MINIMUM.get(),
-            EventBufferCapacity::new(128).get(),
-            EventBufferCapacity::new(65_536).get(),
-            MAXIMUM.get(),
-            EventBufferCapacity::try_from(64).unwrap(),
-            EventBufferCapacity::try_from(1_048_576).unwrap(),
-        ),
-        (64, 128, 65_536, 1_048_576, MINIMUM, MAXIMUM)
-    );
+    assert_eq!(EventBufferCapacity::try_from(64).unwrap(), MINIMUM);
+    assert_eq!(EventBufferCapacity::try_from(1_048_576).unwrap(), MAXIMUM);
+    for exponent in 6..=20 {
+        let capacity = 1 << exponent;
+        let constructed = EventBufferCapacity::new(capacity);
+        assert_eq!(EventBufferCapacity::try_from(capacity).unwrap(), constructed);
+        assert_eq!(constructed.get(), capacity);
+    }
+}
+
+#[test]
+fn memory_per_thread_has_fixed_overhead_and_constant_cost_per_event() {
+    let capacities: Vec<_> = (6..=20).map(|exponent| EventBufferCapacity::new(1 << exponent)).collect();
+    let minimum = capacities[0];
+    let minimum_bytes = minimum.memory_bytes_per_thread();
+    let per_event = (capacities[1].memory_bytes_per_thread() - minimum_bytes) / minimum.get();
+    assert!(per_event > 0);
+    for capacity in capacities {
+        let bytes = capacity.memory_bytes_per_thread();
+        assert!(bytes > capacity.get() * per_event);
+        assert_eq!(bytes - capacity.get() * per_event, minimum_bytes - minimum.get() * per_event);
+    }
 }
 
 #[test]

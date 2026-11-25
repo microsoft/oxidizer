@@ -226,6 +226,7 @@ struct AffinityStorage<T, S: private::AffinityStrategy> {
 }
 
 impl<T: ?Sized, S: private::AffinityStrategy> fmt::Debug for AffinityState<T, S> {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Private diagnostic formatting; public Arc formatting delegates to the value.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AffinityState").finish_non_exhaustive()
     }

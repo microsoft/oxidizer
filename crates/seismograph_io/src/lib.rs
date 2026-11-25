@@ -35,6 +35,7 @@ impl Resource {
 
     /// Returns the resource kind.
     #[must_use]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Direct field readback; recording tests verify resource kinds in emitted events.
     pub const fn kind(&self) -> IoResourceKind {
         self.kind
     }

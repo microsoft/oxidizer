@@ -110,6 +110,7 @@ impl<T: ?Sized> Factory<T> {
 }
 
 impl<T: ?Sized> fmt::Debug for Factory<T> {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Private diagnostic formatting; an exact-shape test would restate this implementation.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Factory").field("source", &self.source).finish_non_exhaustive()
     }

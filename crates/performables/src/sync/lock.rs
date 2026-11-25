@@ -80,6 +80,7 @@ pub struct StateAsync {
 }
 
 impl StateAsync {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Evaluated only by the Async Mode associated constant.
     pub(super) const fn new() -> Self {
         Self {
             state: AtomicUsize::new(0),

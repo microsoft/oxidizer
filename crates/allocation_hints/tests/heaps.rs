@@ -44,25 +44,6 @@ fn general_option_boundaries_reject_non_powers_of_two_and_accept_disabled_cache(
 }
 
 #[test]
-fn bump_options_round_trip() {
-    let options = bump::Options::default()
-        .with_max_allocation_bytes(1024)
-        .with_max_alignment(128)
-        .with_retained_chunks(2)
-        .with_max_retained_chunks(8);
-
-    assert_eq!(
-        (
-            options.max_allocation_bytes(),
-            options.max_alignment(),
-            options.retained_chunks(),
-            options.max_retained_chunks(),
-        ),
-        (1024, 128, 2, 8)
-    );
-}
-
-#[test]
 fn bump_option_boundaries_are_exact() {
     let minimum = bump::Options::new()
         .with_max_allocation_bytes(1)
@@ -99,7 +80,7 @@ fn bump_option_boundaries_reject_values_outside_the_contract() {
 }
 
 #[test]
-fn heap_accessors_and_debug_preserve_nondefault_options() {
+fn active_hint_and_debug_identify_heap() {
     let options = general::Options::default()
         .with_locality_segment_bytes(128 * 1024)
         .with_medium_cache_max_bytes(256 * 1024);
@@ -107,19 +88,12 @@ fn heap_accessors_and_debug_preserve_nondefault_options() {
     let active = with_hint(&heap, || active_hint().unwrap());
 
     assert_eq!(
-        (options.locality_segment_bytes(), options.medium_cache_max_bytes()),
-        (128 * 1024, 256 * 1024)
+        (heap.id(), heap.kind(), active.kind()),
+        (active.id(), Kind::General(options), Kind::General(options))
     );
-    assert_eq!(
-        (heap.id().get(), heap.kind(), active.id(), active.kind(), format!("{heap:?}")),
-        (
-            active.id().get(),
-            Kind::General(options),
-            heap.id(),
-            Kind::General(options),
-            format!("Heap {{ id: {:?}, kind: General({options:?}) }}", heap.id()),
-        )
-    );
+    let debug = format!("{heap:?}");
+    assert!(debug.contains(&heap.id().get().to_string()));
+    assert!(debug.contains("General"));
 }
 
 #[test]

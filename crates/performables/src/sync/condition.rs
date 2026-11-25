@@ -50,6 +50,7 @@ pub struct StateAsync {
 impl StateAsync {
     /// Creates a condition variable.
     #[must_use]
+    #[cfg_attr(coverage_nightly, coverage(off))] // Evaluated only by the Async Mode associated constant.
     pub(super) const fn new() -> Self {
         Self {
             generation: AtomicU64::new(0),

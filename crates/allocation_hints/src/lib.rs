@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![warn(missing_docs)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Passive scoped allocation hints.
 //!

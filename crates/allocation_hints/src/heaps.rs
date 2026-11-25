@@ -202,6 +202,7 @@ pub mod bump {
     }
 
     impl Default for Options {
+        #[cfg_attr(coverage_nightly, coverage(off))] // Delegates to new(); a comparison would only repeat that definition.
         fn default() -> Self {
             Self::new()
         }

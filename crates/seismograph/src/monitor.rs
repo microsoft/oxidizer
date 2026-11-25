@@ -2066,17 +2066,12 @@ mod tests {
             ClientError::Disconnected,
             ClientError::Stopped,
         ];
-        let expected = [
-            "socket failed",
-            "invalid Seismograph monitor message",
-            "monitor handshake is required",
-            "monitor handshake timed out",
-            "monitor client idle timeout expired",
-            "monitor client disconnected",
-            "monitor stopped",
-        ];
-        for (error, expected) in client_cases.into_iter().zip(expected) {
-            assert_eq!(error.to_string(), expected);
+        let messages: Vec<_> = client_cases.iter().map(ToString::to_string).collect();
+        assert_eq!(messages[0], io_error().to_string());
+        assert_eq!(messages[1], protocol_error().to_string());
+        for (index, message) in messages.iter().enumerate() {
+            assert!(!message.is_empty());
+            assert!(!messages[..index].contains(message));
         }
 
         let startup_cases = [

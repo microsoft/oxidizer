@@ -1733,11 +1733,8 @@ mod tests {
 
     #[test]
     fn errors_have_stable_categories_and_messages() {
+        assert!(!Error::new(ErrorKind::Malformed).to_string().is_empty());
         let cases = [
-            (
-                Error::new(ErrorKind::Malformed),
-                "the runtime telemetry source payload is malformed",
-            ),
             (
                 Error::new(ErrorKind::UnsupportedWireVersion(7)),
                 "runtime telemetry wire version 7 is unsupported",

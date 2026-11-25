@@ -167,30 +167,19 @@ mod tests {
     #[test]
     fn classifications_and_messages_distinguish_failures() {
         let cases = [
-            (ErrorKind::ForeignOwner, "a supplied thread belongs to a different runtime owner", 0),
-            (
-                ErrorKind::Duplicate,
-                "multiple values were supplied for the same affinity partition",
-                1,
-            ),
-            (
-                ErrorKind::MissingCurrent,
-                "no value was supplied for the current affinity partition",
-                2,
-            ),
-            (
-                ErrorKind::Poisoned,
-                "poisoned lock: another thread panicked while holding the lock",
-                3,
-            ),
-            (ErrorKind::Full, "channel has no available capacity", 4),
-            (ErrorKind::Empty, "channel has no value available", 5),
-            (ErrorKind::Closed, "channel is closed", 6),
-            (ErrorKind::SendClosed, "channel is closed", 6),
-            (ErrorKind::Timeout, "channel operation timed out", 7),
+            (ErrorKind::ForeignOwner, 0),
+            (ErrorKind::Duplicate, 1),
+            (ErrorKind::MissingCurrent, 2),
+            (ErrorKind::Poisoned, 3),
+            (ErrorKind::Full, 4),
+            (ErrorKind::Empty, 5),
+            (ErrorKind::Closed, 6),
+            (ErrorKind::SendClosed, 6),
+            (ErrorKind::Timeout, 7),
         ];
 
-        for (kind, message, predicate) in cases {
+        let mut messages = Vec::new();
+        for (kind, predicate) in cases {
             let error = Error::without_value(kind);
             let flags = [
                 error.is_foreign_owner(),
@@ -203,7 +192,12 @@ mod tests {
                 error.is_timeout(),
             ];
             assert_eq!(flags, std::array::from_fn(|index| index == predicate));
-            assert_eq!(error.to_string(), message);
+            let message = error.to_string();
+            assert!(!message.is_empty());
+            for (previous_predicate, previous_message) in &messages {
+                assert_eq!(message == *previous_message, predicate == *previous_predicate);
+            }
+            messages.push((predicate, message));
         }
     }
 

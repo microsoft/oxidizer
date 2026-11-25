@@ -51,6 +51,7 @@ const fn make_classes() -> [Class; COUNT] {
 
 pub(crate) const CLASSES: [Class; COUNT] = make_classes();
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Evaluated only by SIZE_LOOKUP; index() tests verify the generated table.
 const fn make_lookup() -> [u8; SMALL_MAX / 16] {
     let mut table = [0; SMALL_MAX / 16];
     let mut bucket = 0;

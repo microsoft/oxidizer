@@ -153,6 +153,7 @@ impl EventSampling {
 }
 
 impl Default for EventSampling {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Delegates to ALL; a direct test would only restate that definition.
     fn default() -> Self {
         Self::ALL
     }

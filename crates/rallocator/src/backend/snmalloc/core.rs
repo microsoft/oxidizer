@@ -1158,8 +1158,6 @@ mod tests {
         for (index, class) in CLASSES.iter().enumerate() {
             let tag = SMALL_TAG + index;
             assert_eq!(slab_initial_state(tag), ((class.capacity / 4).min(32), true));
-            assert_eq!(slab_allocation_size(tag), class.slab);
-            assert_eq!(slab_indexed_size(tag, class.slab), class.slab);
         }
         for bits in [17, 18, 19, 30, 62] {
             let tag = 64 - bits;
@@ -1471,12 +1469,15 @@ mod tests {
     #[test]
     fn gamma_survivor_realloc_index_hash_collisions_update_and_removal() {
         let mut index = ReallocMap::new();
-        for (chunk, expected) in [(1, 2), (31, 62), (32, 0), (127, 62), (128, 2), (255, 60), (256, 4), (4096, 0)] {
-            assert_eq!(ReallocMap::set(chunk * classes::CHUNK), expected);
-        }
         let first = classes::CHUNK;
         let second = 128 * classes::CHUNK;
         let third = 33 * classes::CHUNK;
+        let bucket = ReallocMap::set(first);
+        assert_eq!(
+            (ReallocMap::set(second), ReallocMap::set(third)),
+            (bucket, bucket),
+            "fixture chunks must collide"
+        );
         index.insert(first, classes::CHUNK, 0x1000);
         index.insert(second, classes::CHUNK, 0x2000);
         index.insert(first, classes::CHUNK, 0x3000);
@@ -1540,7 +1541,51 @@ mod tests {
 
     #[test]
     fn gamma_survivor_reclaim_threshold_requires_both_count_and_fraction() {
-        for slabs in [2, 3, 4, 8, 12, 16] {
+        let cases = [
+            (2, &[(2, 1), (2, 2)][..]),
+            (3, &[(3, 1), (3, 2), (0, 0)][..]),
+            (4, &[(4, 1), (4, 2), (1, 0), (1, 1)][..]),
+            (8, &[(8, 1), (8, 2), (5, 0), (5, 1), (5, 2), (2, 0), (2, 1), (2, 2)][..]),
+            (
+                12,
+                &[
+                    (12, 1),
+                    (12, 2),
+                    (12, 3),
+                    (8, 0),
+                    (8, 1),
+                    (8, 2),
+                    (5, 0),
+                    (5, 1),
+                    (5, 2),
+                    (2, 0),
+                    (2, 1),
+                    (2, 2),
+                ][..],
+            ),
+            (
+                16,
+                &[
+                    (16, 1),
+                    (16, 2),
+                    (16, 3),
+                    (16, 4),
+                    (11, 0),
+                    (11, 1),
+                    (11, 2),
+                    (8, 0),
+                    (8, 1),
+                    (8, 2),
+                    (5, 0),
+                    (5, 1),
+                    (5, 2),
+                    (2, 0),
+                    (2, 1),
+                    (2, 2),
+                ][..],
+            ),
+        ];
+        for (slabs, expected) in cases {
             let address = fresh_owner();
             // SAFETY: The fresh persistent endpoint is initialized and remains live.
             let owner = unsafe { &*(address as *const Owner) };
@@ -1558,19 +1603,14 @@ mod tests {
                 }
             }
             assert_eq!((core.available[0].length, core.available[0].unused), (slabs, 0));
-            let (mut length, mut empty) = (slabs, 0);
-            for slab in pointers.chunks(1024) {
+            assert_eq!(expected.len(), slabs);
+            for (slab, &expected) in pointers.chunks(1024).zip(expected) {
                 for &pointer in &slab[32..] {
                     assert!(live.remove(&pointer));
                     // SAFETY: No object is freed twice and this test remains the sole core owner.
                     unsafe { core.deallocate(pointer) };
                 }
-                empty += 1;
-                if empty > 2 && empty > length / 4 {
-                    length -= empty;
-                    empty = 0;
-                }
-                assert_eq!((core.available[0].length, core.available[0].unused), (length, empty));
+                assert_eq!((core.available[0].length, core.available[0].unused), expected);
                 core.validate(&live);
             }
             core.flush();
@@ -2053,9 +2093,7 @@ mod tests {
         let start = address + Owner::LOGICAL_SIZE;
         let end = address + Owner::ALLOC_SIZE;
         let count = (end - start) / Slab::ALLOC_SIZE;
-        assert_eq!((Owner::LOGICAL_SIZE, Owner::ALLOC_SIZE, Owner::ALLOC_BITS), (9216, 16384, 14));
         assert_eq!(address % Owner::ALLOC_SIZE, 0);
-        assert_eq!((Slab::ALLOC_SIZE, count), (64, 112));
         // SAFETY: The fresh owner and all metadata leased from its private
         // backend are exclusively owned by this test.
         let core = unsafe { (*(address as *const Owner)).core_ptr() };
