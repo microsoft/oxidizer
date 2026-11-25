@@ -9,8 +9,8 @@ use thread_aware::{Thread, ThreadAware};
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::runtime::worker::asynchronous;
 use crate::runtime::worker::blocking::Worker;
-use crate::task::Context;
 use crate::task::handle::JoinHandle;
+use crate::task::{Context, TaskIdentity};
 
 /// Submits async tasks and blocking functions for one worker.
 ///
@@ -143,15 +143,15 @@ impl Scheduler {
         if let Some(join_handle) = JoinHandle::try_from_shutdown(self.dispatcher.shutdown()) {
             return join_handle;
         }
-        let location = Location::caller();
-        let future_factory = match self.spawn_on_current_worker(future_factory, location) {
+        let identity = TaskIdentity::from_location(Location::caller());
+        let future_factory = match self.spawn_on_current_worker(future_factory, identity) {
             Ok(join_handle) => return join_handle,
             Err(future_factory) => future_factory,
         };
-        self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory, location)
+        self.dispatcher.spawn_on_worker(self.binding.worker_index, future_factory, identity)
     }
 
-    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF, location: &'static Location<'static>) -> Result<JoinHandle<F::Output>, FF>
+    fn spawn_on_current_worker<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> Result<JoinHandle<F::Output>, FF>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
@@ -164,7 +164,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let handle = current.spawn(future_factory, location);
+            let handle = current.spawn(future_factory, identity);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -229,7 +229,7 @@ impl Scheduler {
                 data.relocate(Some(&source), cx.thread());
                 f(data)
             },
-            Location::caller(),
+            TaskIdentity::from_location(Location::caller()),
         )
     }
 
@@ -312,7 +312,7 @@ impl Scheduler {
                 data.relocate(Some(&source), cx.thread());
                 f(data)
             },
-            Location::caller(),
+            TaskIdentity::from_location(Location::caller()),
         )
     }
 
@@ -359,12 +359,15 @@ impl Scheduler {
     /// ```
     ///
     /// The first `?` handles task failure. The second handles the file I/O error.
+    #[track_caller]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.binding.blocking_worker.spawn_blocking(body)
+        self.binding
+            .blocking_worker
+            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
     }
 
     #[cfg(test)]

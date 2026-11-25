@@ -403,7 +403,10 @@ mod tests {
         queue.enable_monitoring(&runtime.handle());
         queue.retire(0);
         queue.retire(2);
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         let id = info.id();
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(info))),
@@ -432,7 +435,10 @@ mod tests {
         let mut worker = BlockingWorkerMonitoring::default();
         let running = queue.pop(index, &mut worker).unwrap();
         queue.enable_monitoring(&runtime.handle());
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+        )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -478,7 +484,10 @@ mod tests {
         queue.add_worker();
         queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         let owner = runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].id;
 
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
@@ -503,7 +512,10 @@ mod tests {
         let index = queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
         queue.enable_monitoring(&runtime.handle());
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+        )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -572,7 +584,10 @@ mod tests {
         queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
         assert!(queue.push(QueuedJob {
-            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())))),
+            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(
+                queue.monitoring.events().unwrap(),
+                crate::task::TaskIdentity::from_location(std::panic::Location::caller())
+            )))),
             shutdown: None,
         }));
 
@@ -609,10 +624,14 @@ mod tests {
             let (dropped, received) = std::sync::mpsc::channel();
             let capture = Capture(Arc::clone(&queue), dropped);
             let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+            let identity = crate::task::TaskIdentity::from_location(std::panic::Location::caller());
             let (body, handle) = crate::task::preparation::prepare_blocking(
                 &pool,
                 move || drop(capture),
-                queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
+                queue
+                    .monitoring
+                    .task::<()>(&crate::runtime::shutdown::Shutdown::default(), identity),
+                identity,
             );
             assert!(queue.push(QueuedJob { body, shutdown: None }));
             let mut worker = BlockingWorkerMonitoring::default();
@@ -655,10 +674,14 @@ mod tests {
         let (dropped, received) = std::sync::mpsc::channel();
         let capture = Capture(Arc::clone(&queue), dropped);
         let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let identity = crate::task::TaskIdentity::from_location(std::panic::Location::caller());
         let (body, handle) = crate::task::preparation::prepare_blocking(
             &pool,
             move || drop(capture),
-            queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
+            queue
+                .monitoring
+                .task::<()>(&crate::runtime::shutdown::Shutdown::default(), identity),
+            identity,
         );
         assert!(queue.push(QueuedJob { body, shutdown: None }));
         let mut worker = BlockingWorkerMonitoring::default();
@@ -697,7 +720,10 @@ mod tests {
         for body in [
             BlockingJob::Plain(Box::new(|| {})),
             BlockingJob::Monitored(Arc::new(InspectedJob(
-                TaskInfo::new::<()>(queue.monitoring.events().unwrap()),
+                TaskInfo::new::<()>(
+                    queue.monitoring.events().unwrap(),
+                    crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                ),
                 Arc::clone(&inspections),
             ))),
         ] {

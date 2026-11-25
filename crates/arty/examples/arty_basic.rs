@@ -15,7 +15,7 @@ async fn main(cx: Context) {
     let scheduler = cx.scheduler().clone();
 
     cx.control().on(HookFn::new((), |s: &mut TaskSpawn, _| {
-        println!("Task spawn hook triggered, location: {}", s.location());
+        println!("Task spawn hook triggered: {s:?}");
     }));
 
     cx.control().on(HookFn::new(scheduler, |_d: &mut WorkerSpawn, scheduler| {

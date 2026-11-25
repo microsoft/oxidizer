@@ -18,6 +18,7 @@ use crate::runtime::monitoring::{BlockingPoolMonitoring, BlockingWorkerMonitorin
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::blocking::queue::{Queue, QueuedJob};
 use crate::runtime::worker::blocking::{LocalWorker, PoolIdentity};
+use crate::task::TaskIdentity;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_blocking;
 
@@ -180,14 +181,14 @@ impl Worker {
     /// Submits a blocking task to the worker.
     ///
     /// If the worker is shutting down, the worker ignores the task.
-    pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
+    pub(crate) fn spawn_blocking<F, R>(&self, body: F, identity: TaskIdentity) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         let runtime_shutdown = self.remote_results.shutdown().clone();
-        let monitoring = self.pool.monitoring.task::<F>(&runtime_shutdown);
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring);
+        let monitoring = self.pool.monitoring.task::<F>(&runtime_shutdown, identity);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring, identity);
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -362,6 +363,7 @@ mod tests {
     use super::{JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};
     use crate::runtime::config::RuntimeName;
     use crate::runtime::shutdown::Shutdown;
+    use crate::task::TaskIdentity;
 
     #[test]
     fn gamma_round2_late_shutdown_rejects_submission_and_drops_the_job_before_entering_the_pool() {
@@ -626,10 +628,13 @@ mod tests {
         pool.join();
 
         let invoked = Arc::new(AtomicBool::new(false));
-        let join = worker.spawn_blocking({
-            let invoked = Arc::clone(&invoked);
-            move || invoked.store(true, Ordering::Relaxed)
-        });
+        let join = worker.spawn_blocking(
+            {
+                let invoked = Arc::clone(&invoked);
+                move || invoked.store(true, Ordering::Relaxed)
+            },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
 
         assert!(join.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Relaxed));
@@ -842,14 +847,17 @@ mod tests {
             move || {
                 let worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
 
-                drop(worker.spawn_blocking({
-                    let events = Arc::clone(&events);
-                    move || {
-                        events.lock_result().unwrap().push("task started");
-                        task_start_tx.send(()).unwrap();
-                        events.lock_result().unwrap().push("task finished");
-                    }
-                }));
+                drop(worker.spawn_blocking(
+                    {
+                        let events = Arc::clone(&events);
+                        move || {
+                            events.lock_result().unwrap().push("task started");
+                            task_start_tx.send(()).unwrap();
+                            events.lock_result().unwrap().push("task finished");
+                        }
+                    },
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                ));
 
                 // The sender exists only in the blocking task. If the worker
                 // drops the task, `recv` returns a disconnect instead of waiting.
@@ -903,9 +911,12 @@ mod tests {
             work_done: Arc::clone(&work_done),
         };
 
-        let task = worker.spawn_blocking(move || {
-            work_item.do_work();
-        });
+        let task = worker.spawn_blocking(
+            move || {
+                work_item.do_work();
+            },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
 
         assert!(dropped.load(Ordering::Acquire));
         assert!(!work_done.load(Ordering::Acquire));
@@ -919,17 +930,23 @@ mod tests {
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
-        let running = worker.spawn_blocking(move || {
-            started_tx.send(()).unwrap();
-            futures::executor::block_on(release_rx).unwrap();
-        });
+        let running = worker.spawn_blocking(
+            move || {
+                started_tx.send(()).unwrap();
+                futures::executor::block_on(release_rx).unwrap();
+            },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         started_rx.recv().unwrap();
 
         let invoked = Arc::new(AtomicBool::new(false));
-        let queued = worker.spawn_blocking({
-            let invoked = Arc::clone(&invoked);
-            move || invoked.store(true, Ordering::Release)
-        });
+        let queued = worker.spawn_blocking(
+            {
+                let invoked = Arc::clone(&invoked);
+                move || invoked.store(true, Ordering::Release)
+            },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         runtime_shutdown.begin(ShutdownCause::default());
         release_tx.send(());
 
@@ -947,10 +964,13 @@ mod tests {
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), runtime_shutdown);
         let invoked = Arc::new(AtomicBool::new(false));
 
-        let rejected = worker.spawn_blocking({
-            let invoked = Arc::clone(&invoked);
-            move || invoked.store(true, Ordering::Release)
-        });
+        let rejected = worker.spawn_blocking(
+            {
+                let invoked = Arc::clone(&invoked);
+                move || invoked.store(true, Ordering::Release)
+            },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
 
         assert!(rejected.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Acquire));
@@ -964,7 +984,10 @@ mod tests {
         attach_thread(Arc::clone(&worker.pool.identity));
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
-        let rejected = worker.spawn_blocking(|| 7).join().unwrap_err();
+        let rejected = worker
+            .spawn_blocking(|| 7, TaskIdentity::from_location(std::panic::Location::caller()))
+            .join()
+            .unwrap_err();
 
         assert!(rejected.is_shutdown());
         worker.join();

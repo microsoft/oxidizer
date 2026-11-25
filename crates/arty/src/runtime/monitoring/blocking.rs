@@ -3,6 +3,7 @@
 
 use super::TaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
+use crate::task::TaskIdentity;
 use crate::task::preparation::BlockingTask;
 
 pub(crate) enum BlockingJob {
@@ -37,10 +38,10 @@ pub(crate) struct BlockingPoolMonitoring {
 }
 
 impl BlockingPoolMonitoring {
-    pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown) -> BlockingTaskMonitoring {
+    pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown, identity: TaskIdentity) -> BlockingTaskMonitoring {
         BlockingTaskMonitoring {
             info: matches!(shutdown.state(), ShutdownState::Running)
-                .then(|| self.events().map(TaskInfo::new::<F>))
+                .then(|| self.events().map(|events| TaskInfo::new::<F>(events, identity)))
                 .flatten(),
         }
     }
@@ -113,7 +114,15 @@ where
     fn run(&self) {
         let task = std::mem::replace(
             &mut *self.task.lock().expect("taking a blocking callback does not execute user code"),
-            BlockingTask { pending: None },
+            BlockingTask {
+                pending: None,
+                identity: self.info.identity(),
+            },
+        );
+        debug_assert_eq!(
+            task.identity,
+            self.info.identity(),
+            "blocking metadata must retain the submitted task identity"
         );
         task.run(BlockingTaskEvents { info: Some(&self.info) });
     }
@@ -195,7 +204,8 @@ mod tests {
         monitoring.enable(worker.handle().task_events());
         let shutdown = Shutdown::default();
         let pool = crate::task::handle::JoinHandlePool::new(shutdown.clone());
-        let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown));
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
+        let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown, identity), identity);
 
         body.run();
 

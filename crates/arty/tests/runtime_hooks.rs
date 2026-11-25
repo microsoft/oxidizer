@@ -155,22 +155,22 @@ impl ThreadAware for SharedLog {
 }
 
 #[derive(Clone)]
-struct SpawnLocationLog(Arc<Mutex<Vec<(String, u32)>>>);
+struct SpawnDebugLog(Arc<Mutex<Vec<String>>>);
 
-impl SpawnLocationLog {
-    fn push(&self, location: &'static std::panic::Location<'static>) {
+impl SpawnDebugLog {
+    fn push(&self, event: &TaskSpawn) {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((location.file().to_string(), location.line()));
+            .push(format!("{event:?}"));
     }
 
-    fn take(&self) -> Vec<(String, u32)> {
+    fn take(&self) -> Vec<String> {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }
 
-impl ThreadAware for SpawnLocationLog {
+impl ThreadAware for SpawnDebugLog {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -271,19 +271,22 @@ impl TaskObserver for PollRecorder {
 }
 
 #[test]
-fn task_spawn_reports_the_public_spawn_location() {
-    let locations = SpawnLocationLog(Arc::new(Mutex::new(Vec::new())));
+fn task_spawn_debug_includes_the_public_spawn_location() {
+    let locations = SpawnDebugLog(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<TaskSpawn, _>::new(locations.clone(), |event, locations| {
-            locations.push(event.location());
+            locations.push(event);
         }))
         .build()
         .unwrap();
 
     let spawn_line = line!() + 1;
     runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap();
-    assert_eq!(locations.take(), [(file!().to_string(), spawn_line)]);
+    let observed = locations.take();
+    assert_eq!(observed.len(), 1);
+    assert!(observed[0].contains("identity: TaskIdentity"));
+    assert!(observed[0].contains(&format!("file: {:?}, line: {spawn_line}", file!())));
 
     let (result, local_spawn_line) = runtime
         .scheduler()
@@ -296,8 +299,8 @@ fn task_spawn_reports_the_public_spawn_location() {
     assert_eq!(result.unwrap(), 42);
     let observed = locations.take();
     assert_eq!(observed.len(), 2);
-    assert_eq!(observed[0].0, file!());
-    assert_eq!(observed[1], (file!().to_string(), local_spawn_line));
+    assert!(observed[0].contains(file!()));
+    assert!(observed[1].contains(&format!("file: {:?}, line: {local_spawn_line}", file!())));
 
     runtime.stop().unwrap();
 }

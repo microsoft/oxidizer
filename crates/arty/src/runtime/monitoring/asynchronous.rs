@@ -11,7 +11,8 @@ use seismograph_runtime::task::{TaskPoll, TaskRequest};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
 
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::monitoring::task::{PollTask, set_current, set_events};
+use crate::runtime::monitoring::task::{set_current, set_events};
+use crate::task::TaskIdentity;
 
 #[derive(Debug)]
 pub(crate) struct WorkerMonitoring {
@@ -67,9 +68,9 @@ impl WorkerMonitoring {
 
 impl PollObserver for WorkerMonitoring {
     fn poll_started(&self, description: &dyn Any) {
-        if let Some(PollTask(id)) = description.downcast_ref::<PollTask>() {
-            set_current(Some(*id));
-            *self.poll.borrow_mut() = Some(self.handle.task_poll_started(*id));
+        if let Some(identity) = description.downcast_ref::<TaskIdentity>() {
+            set_current(Some(identity.id()));
+            *self.poll.borrow_mut() = Some(self.handle.task_poll_started(identity.id()));
         } else {
             self.failed.set(true);
         }
@@ -186,7 +187,7 @@ mod tests {
         let parent = seismograph_runtime::allocate_task_id();
         {
             let _parent = crate::runtime::monitoring::task::enter_current(parent);
-            crate::task::preparation::TaskSpawnOptions::new::<()>(std::panic::Location::caller()).register(
+            crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), 0).register(
                 &thread,
                 &executor.tasks(),
                 std::future::pending::<()>(),
@@ -217,16 +218,16 @@ mod tests {
         executor
             .tasks()
             .task(std::future::pending::<()>())
-            .inspect(|_| Some(PollTask(seismograph_runtime::allocate_task_id())))
+            .inspect(|_| Some(TaskIdentity::from_location(std::panic::Location::caller())))
             .register(sender);
         assert_eq!(capture(&mut executor).tasks.len(), 1);
 
-        let task = seismograph_runtime::allocate_task_id();
-        monitoring.poll_started(&PollTask(task));
-        assert_eq!(current_task(), Some(task));
+        let task = TaskIdentity::from_location(std::panic::Location::caller());
+        monitoring.poll_started(&task);
+        assert_eq!(current_task(), Some(task.id()));
         monitoring.poll_finished();
         assert_eq!(current_task(), None);
-        monitoring.poll_started(&PollTask(task));
+        monitoring.poll_started(&task);
         drop(monitoring);
         assert_eq!(current_task(), None);
         assert!(current_events().is_none());

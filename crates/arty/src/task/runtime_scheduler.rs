@@ -12,7 +12,7 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::{Context, JoinHandle};
+use crate::task::{Context, JoinHandle, TaskIdentity};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
 
@@ -137,8 +137,7 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let options =
-            crate::task::preparation::TaskSpawnOptions::with_future_size::<LocalBoxFuture<'static, R>>(size_of::<F>(), Location::caller());
+        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>());
         let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
@@ -196,13 +195,14 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>());
         self.dispatcher.spawn(
             move |cx| {
                 let mut data = data;
                 data.relocate(None, cx.thread());
                 future_factory(cx, data)
             },
-            crate::task::preparation::TaskSpawnOptions::new::<F>(Location::caller()),
+            options,
         )
     }
 
@@ -232,12 +232,15 @@ impl RuntimeScheduler {
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.next_blocking_worker().spawn_blocking(body)
+        self.dispatcher
+            .next_blocking_worker()
+            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
     }
 }
 

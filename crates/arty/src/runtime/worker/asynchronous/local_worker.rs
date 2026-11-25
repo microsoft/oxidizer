@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::cell::{Cell, RefCell};
-use std::panic::Location;
 use std::sync::Arc;
 
 use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
@@ -14,9 +13,9 @@ use crate::runtime::hook::{
     HookRegistration, LocalHook, LocalHookGuard, LocalHookStorage, TaskObservers, TaskPanic, TaskSpawn, WorkerSpawn,
 };
 use crate::runtime::worker::{self, WorkerMarker};
-use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTaskFactory, TaskSpawnOptions};
+use crate::task::preparation::{DeferredTaskFactory, SpawnOptions};
+use crate::task::{Context, TaskIdentity};
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
@@ -107,18 +106,18 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_spawn(target: &Thread, location: &'static Location<'static>) -> Option<TaskObservers> {
+    pub(crate) fn on_spawn(target: &Thread, identity: TaskIdentity) -> Option<TaskObservers> {
         let origin = Self::with_scheduler(|current| {
             let current = current?;
             current.has_spawn_hooks.get().then(|| current.thread.clone())
         })?;
-        Self::execute_spawn_hooks(&origin, target, location)
+        Self::execute_spawn_hooks(&origin, target, identity)
     }
 
-    fn execute_spawn_hooks(origin: &Thread, target: &Thread, location: &'static Location<'static>) -> Option<TaskObservers> {
+    fn execute_spawn_hooks(origin: &Thread, target: &Thread, identity: TaskIdentity) -> Option<TaskObservers> {
         let hooks = SPAWN_HOOKS.with_borrow(|hooks| Arc::clone(hooks.as_ref().expect("a running worker retains its installed hooks")));
         debug_assert!(!hooks.is_empty(), "the scheduler flag tracks installed spawn hooks");
-        let mut event = TaskSpawn::new(Some(origin.clone()), target.clone(), location);
+        let mut event = TaskSpawn::new(Some(origin.clone()), target.clone(), identity);
         for hook in hooks.iter() {
             hook.execute(&mut event);
         }
@@ -273,32 +272,33 @@ impl SchedulerContext {
         &self.tasks
     }
 
-    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, location: &'static Location<'static>) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         if self.has_spawn_hooks.get() {
-            return self.spawn_observed(future_factory, location);
+            return self.spawn_observed(future_factory, identity);
         }
 
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        TaskSpawnOptions::new::<F>(location).register(&self.thread, &self.tasks, inner, result_tx);
+        let options = SpawnOptions::new(identity, size_of::<F>());
+        options.register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
 
     #[cold]
-    fn spawn_observed<FF, F>(&self, future_factory: FF, location: &'static Location<'static>) -> JoinHandle<F::Output>
+    fn spawn_observed<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let options = TaskSpawnOptions::new::<F>(location);
-        let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread, options.location());
+        let options = SpawnOptions::new(identity, size_of::<F>());
+        let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread, identity);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         options.observed_by(observers).register(&self.thread, &self.tasks, inner, result_tx);
         handle
@@ -350,7 +350,7 @@ mod tests {
     impl ThreadAware for ReentrantSpawnProbe {
         fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
             self.relocation_saw_no_observers.store(
-                LocalWorker::on_spawn(destination, std::panic::Location::caller()).is_none(),
+                LocalWorker::on_spawn(destination, TaskIdentity::from_location(std::panic::Location::caller())).is_none(),
                 Ordering::Release,
             );
         }
@@ -373,7 +373,7 @@ mod tests {
         let _guard = LOCAL_SPAWN_HOOK.initialize();
         let target = ThreadBuilder::default().build(std::thread::current().id());
 
-        assert!(LocalWorker::on_spawn(&target, std::panic::Location::caller()).is_none());
+        assert!(LocalWorker::on_spawn(&target, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
     }
 
     #[derive(Clone)]
@@ -419,7 +419,11 @@ mod tests {
                 vec![hook.clone()],
                 None,
             );
-            let _prime = core.spawn_relocating(&destination, |_| async {}, std::panic::Location::caller());
+            let _prime = core.spawn_relocating(
+                &destination,
+                |_| async {},
+                TaskIdentity::from_location(std::panic::Location::caller()),
+            );
             sources.lock().unwrap().clear();
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
@@ -433,7 +437,7 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
-            let _task = core.spawn_relocating(&source, |_| async {}, std::panic::Location::caller());
+            let _task = core.spawn_relocating(&source, |_| async {}, TaskIdentity::from_location(std::panic::Location::caller()));
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
@@ -496,7 +500,7 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            assert!(LocalWorker::on_spawn(&thread, std::panic::Location::caller()).is_none());
+            assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
             LocalWorker::install_hook(
                 registration(HookFn::<TaskSpawn, _>::new(
                     ReentrantSpawnProbe {
@@ -509,7 +513,7 @@ mod tests {
                 )),
                 None,
             );
-            assert!(LocalWorker::on_spawn(&thread, std::panic::Location::caller()).is_none());
+            assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
 
             LocalWorker::clear_scheduler();
             (
@@ -552,7 +556,11 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }, std::panic::Location::caller()));
+            let mut join = std::pin::pin!(core.spawn_relocating(
+                &thread,
+                |_| async { 42 },
+                TaskIdentity::from_location(std::panic::Location::caller())
+            ));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
             let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
             _ = executor.execute_cycle();
@@ -568,11 +576,15 @@ mod tests {
                 &thread,
                 move |_| async move {
                     let before = nested_wakes.0.load(Ordering::Relaxed);
-                    let child = nested_core.spawn_relocating(&source, |_| async { 7 }, std::panic::Location::caller());
+                    let child = nested_core.spawn_relocating(
+                        &source,
+                        |_| async { 7 },
+                        TaskIdentity::from_location(std::panic::Location::caller()),
+                    );
                     let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
                     (child.await.unwrap(), executing_worker_not_woken)
                 },
-                std::panic::Location::caller()
+                TaskIdentity::from_location(std::panic::Location::caller())
             ));
             _ = executor.execute_cycle();
             _ = executor.execute_cycle();
@@ -593,12 +605,20 @@ mod tests {
                 )),
                 Shutdown::default(),
             );
-            let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 }, std::panic::Location::caller());
+            let _remote = other_core.spawn_relocating(
+                &other_thread,
+                |_| async { 9 },
+                TaskIdentity::from_location(std::panic::Location::caller()),
+            );
             let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
             let other_owner_not_registered = !executor.has_tasks();
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
-            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }, std::panic::Location::caller()));
+            let mut rejected = std::pin::pin!(core.spawn_relocating(
+                &thread,
+                |_| async { 11 },
+                TaskIdentity::from_location(std::panic::Location::caller())
+            ));
             let rejected_after_shutdown = matches!(
                 rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Err(error)) if error.is_shutdown()

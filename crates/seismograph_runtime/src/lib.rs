@@ -297,7 +297,7 @@ impl RuntimeHandle {
     }
 }
 
-/// Allocates an identity when native task storage is first inspected.
+/// Allocates a process-wide identity for a runtime task.
 ///
 /// # Panics
 ///

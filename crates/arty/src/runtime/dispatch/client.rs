@@ -5,7 +5,6 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::panic::Location;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -17,8 +16,8 @@ use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
-use crate::task::Context;
 use crate::task::handle::JoinHandle;
+use crate::task::{Context, TaskIdentity};
 
 /// Cheap shared access to one runtime's routing and shutdown state.
 #[derive(Clone)]
@@ -68,17 +67,17 @@ impl DispatcherClient {
         &self,
         worker_index: WorkerIndex,
         future_factory: FF,
-        location: &'static Location<'static>,
+        identity: TaskIdentity,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        self.core.spawn_on_worker(worker_index, future_factory, location)
+        self.core.spawn_on_worker(worker_index, future_factory, identity)
     }
 
-    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, options: crate::task::preparation::TaskSpawnOptions) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, options: crate::task::preparation::SpawnOptions) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
@@ -91,28 +90,28 @@ impl DispatcherClient {
         &self,
         source: &thread_aware::Thread,
         future_factory: FF,
-        location: &'static Location<'static>,
+        identity: TaskIdentity,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        self.core.spawn_relocating(source, future_factory, location)
+        self.core.spawn_relocating(source, future_factory, identity)
     }
 
     pub(crate) fn spawn_at_worker_relocating<FF, F>(
         &self,
         worker_index: WorkerIndex,
         future_factory: FF,
-        location: &'static Location<'static>,
+        identity: TaskIdentity,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        self.core.spawn_at_worker_relocating(worker_index, future_factory, location)
+        self.core.spawn_at_worker_relocating(worker_index, future_factory, identity)
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Context) + Send>) -> Result<(), Error> {
