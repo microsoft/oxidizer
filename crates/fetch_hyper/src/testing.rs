@@ -313,15 +313,6 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
     HttpBodyBuilder::new_fake()
 }
 
-/// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted
-/// by key, suitable for deterministic snapshot assertions.
-#[must_use]
-pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = attrs.iter().map(|kv| (kv.key.to_string(), kv.value.to_string())).collect();
-    pairs.sort();
-    pairs
-}
-
 /// Returns a real [`hyper::Error`] driven by an in-memory stream.
 ///
 /// Drives a [`hyper`] handshake against a stream that fails every read and
@@ -377,6 +368,7 @@ mod tests {
     use http_body_util::BodyExt;
     use layered::Service as _;
     use native_tls::TlsConnector;
+    use observed::Sink;
     use seatbelt::RecoveryInfo;
 
     use crate::HyperTransportBuilder;
@@ -401,6 +393,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             options,
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());
@@ -427,6 +420,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             options,
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());
@@ -453,6 +447,7 @@ mod tests {
             clock,
             // default RequestFilter is Https only
             fetch_options::TransportOptions::default(),
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());

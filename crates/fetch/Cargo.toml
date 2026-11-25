@@ -300,7 +300,7 @@ name = "requests"
 required-features = ["tokio", "rustls", "test-util"]
 
 [[test]]
-name = "telemetry_scope"
+name = "connection_telemetry"
 required-features = ["tokio", "rustls", "test-util"]
 
 [[test]]

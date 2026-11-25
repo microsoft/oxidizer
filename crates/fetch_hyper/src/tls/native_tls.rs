@@ -351,6 +351,7 @@ mod tests {
     use http::{Method, StatusCode, Version};
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
     use layered::Service as _;
+    use observed::Sink;
     use rcgen::{CertificateParams, KeyPair, PKCS_RSA_SHA256};
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use seatbelt::{Recovery, RecoveryKind};
@@ -838,9 +839,15 @@ mod tests {
         };
         let mut transport_options = TransportOptions::default();
         transport_options.supported_http_versions = vec![Version::HTTP_11];
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), Clock::new_tokio(), transport_options)
-            .body_builder(HttpBodyBuilder::new_fake())
-            .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
+        let handler = HyperTransportBuilder::new(
+            connector,
+            Spawner::new_tokio(None),
+            Clock::new_tokio(),
+            transport_options,
+            Sink::noop(),
+        )
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
         let body_builder = HttpBodyBuilder::new_fake();
         let request = HttpRequestBuilder::new(&body_builder)
             .method(Method::GET)

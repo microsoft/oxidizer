@@ -3,8 +3,6 @@
 
 //! TLS identity configuration without opening a connection.
 
-testing_aids::init_tracing!();
-
 #[cfg(all(feature = "native-tls", any(not(target_vendor = "apple"), target_os = "macos")))]
 #[test]
 #[cfg_attr(miri, ignore = "native tests cover platform TLS FFI")]

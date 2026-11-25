@@ -15,7 +15,7 @@ use http::Version;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, Result};
 use hyper_util::client::legacy;
 use layered::{DynamicService, DynamicServiceExt, Service};
-use opentelemetry::metrics::Meter;
+use observed::Sink;
 use tick::Clock;
 
 use crate::HyperIo;
@@ -71,8 +71,7 @@ where
 /// Transport-level knobs (request filter, supported HTTP versions, connect
 /// timeout, connection pool, keep-alive, HTTP/2 tuning) come from the
 /// [`fetch_options::TransportOptions`] passed to [`new`](Self::new). The
-/// remaining knobs (body builder, pool index, OpenTelemetry meter) have
-/// dedicated setters.
+/// remaining knobs (body builder, pool index) have dedicated setters.
 ///
 /// # Examples
 ///
@@ -82,6 +81,7 @@ where
 /// use fetch_options::TransportOptions;
 /// use hyper_util::rt::TokioIo;
 /// use layered::Execute;
+/// use observed::Sink;
 /// use templated_uri::BaseUri;
 /// use tokio::net::TcpStream;
 ///
@@ -104,6 +104,7 @@ where
 ///         .auto_advance_timers(true)
 ///         .to_clock(),
 ///     TransportOptions::default(),
+///     Sink::noop(),
 /// )
 /// .build(tls);
 /// # let _ = transport;
@@ -119,7 +120,7 @@ where
     pub(crate) body_builder: Option<HttpBodyBuilder>,
     pub(crate) options: TransportOptions,
     pub(crate) pool_index: PoolIndex,
-    pub(crate) meter: Option<Meter>,
+    pub(crate) sink: Sink,
     pub(crate) hyper_builder: legacy::Builder,
     pub(crate) _marker: PhantomData<fn() -> S>,
 }
@@ -146,15 +147,16 @@ where
     ///
     /// `connector` is any [`Connect`] service. `spawner` drives `hyper`'s
     /// background tasks. `clock` drives connect-timeout and connection-age
-    /// accounting and acts as `hyper`'s timer.
+    /// accounting and acts as `hyper`'s timer. `sink` receives the connection
+    /// events of the transport.
     ///
     /// `options` drives every transport-level knob; pass
-    /// [`TransportOptions::default`] to accept the defaults. The body builder,
-    /// pool index, and OpenTelemetry meter have dedicated setters instead.
+    /// [`TransportOptions::default`] to accept the defaults. The body builder
+    /// and the pool index have dedicated setters instead.
     ///
     /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
-    pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions) -> Self {
+    pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions, sink: Sink) -> Self {
         // #[gamma::skip(call_result.default, tag = "equivalent", reason = "coerce_options returns unit; default_after still executes its option updates and replaces only () with ()")]
         coerce_options(&mut options);
 
@@ -166,7 +168,7 @@ where
             body_builder: None,
             options,
             pool_index: PoolIndex::new(0),
-            meter: None,
+            sink,
             hyper_builder,
             _marker: PhantomData,
         }
@@ -189,26 +191,18 @@ where
         self
     }
 
-    /// Sets the OpenTelemetry [`Meter`] used to record connection metrics.
-    #[must_use]
-    pub fn meter(mut self, meter: Meter) -> Self {
-        self.meter = Some(meter);
-        self
-    }
-
     /// Builds the configured [`HyperTransport`] using the supplied `TLS` backend.
     ///
     /// Requires at least one `TLS` feature (`rustls` or `native-tls`);
     /// otherwise [`TlsBackend`] cannot be constructed.
     #[must_use]
     pub fn build(self, tls: TlsBackend) -> HyperTransport {
-        let meter = transport_meter(self.meter.clone(), opentelemetry::global::meter);
         let body_builder = self
             .body_builder
             .clone()
             .unwrap_or_else(|| HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &self.clock));
 
-        HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
+        HyperTransport::new(build_hyper_handler(self, tls, body_builder).into_dynamic())
     }
 }
 
@@ -237,10 +231,6 @@ fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportO
     apply_http_version_preference(&mut hyper_builder, &options.supported_http_versions);
 
     hyper_builder
-}
-
-fn transport_meter(meter: Option<Meter>, global: impl FnOnce(&'static str) -> Meter) -> Meter {
-    meter.unwrap_or_else(|| global("fetch_hyper"))
 }
 
 fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
@@ -315,25 +305,10 @@ mod tests {
 
     use bytes::Bytes;
     use fetch_options::{ConnectionLifetime, RequestFilter};
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use observed_testing::{TEST_ID, test_emitter};
 
     use super::*;
     use crate::testing::FakeConnector;
-
-    #[test]
-    fn gamma_round2_default_meter_scope_and_explicit_meter_short_circuit_are_exact() {
-        let provider = SdkMeterProvider::builder().build();
-        let expected = provider.meter("controlled-meter");
-        let rendered = format!("{expected:?}");
-        let actual = transport_meter(None, |scope| {
-            assert_eq!(scope, "fetch_hyper");
-            expected.clone()
-        });
-        assert_eq!(format!("{actual:?}"), rendered);
-        let actual = transport_meter(Some(expected), |_| panic!("explicit meter must bypass the global provider"));
-        assert_eq!(format!("{actual:?}"), rendered);
-    }
 
     fn gamma_round2_raw_builder() -> legacy::Builder {
         legacy::Client::builder(SpawnerExecutor(Spawner::new_tokio(None)))
@@ -701,6 +676,7 @@ mod tests {
             Spawner::new_tokio(None),
             tick::ClockControl::new().auto_advance_timers(true).to_clock(),
             options,
+            Sink::noop(),
         )
     }
 
@@ -709,14 +685,11 @@ mod tests {
     }
 
     #[test]
-    fn gamma_survivor_builder_coerces_empty_versions_and_retains_meter() {
+    fn gamma_survivor_builder_coerces_empty_versions() {
         let mut options = TransportOptions::default();
         options.supported_http_versions.clear();
         let builder = make_builder_with(options);
         assert_eq!(builder.options.supported_http_versions, [Version::HTTP_11, Version::HTTP_2]);
-        let provider = SdkMeterProvider::builder().build();
-        let builder = builder.meter(provider.meter("gamma-builder"));
-        assert!(builder.meter.is_some());
     }
 
     fn http_and_https_options() -> TransportOptions {
@@ -729,7 +702,6 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn builder_defaults_and_setters() {
         let defaults = make_builder();
-        assert!(defaults.meter.is_none(), "meter is not part of Debug output");
         insta::assert_debug_snapshot!("defaults", defaults);
 
         let mut options = TransportOptions::default();
@@ -759,15 +731,6 @@ mod tests {
 
         http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE + 1);
         assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn meter_setter_stores_meter() {
-        let provider = SdkMeterProvider::builder().build();
-        let m = provider.meter("test");
-        let b = make_builder().meter(m);
-        assert!(b.meter.is_some());
     }
 
     #[test]
@@ -818,21 +781,23 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn build_with_explicit_meter_yields_working_transport() {
-        let provider = SdkMeterProvider::builder().build();
+    async fn built_transport_emits_connection_events_to_the_sink() {
+        let (sink, processor) = test_emitter(TEST_ID);
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
-            FakeConnector::new_success(response_bytes, clock.clone()),
+            FakeConnector::new_pending_response(response_bytes, clock.clone()),
             Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
+            sink,
         )
         .body_builder(HttpBodyBuilder::new_fake())
-        .meter(provider.meter("test"))
         .build(tls());
         let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
+        let events: Vec<_> = processor.events().iter().map(|event| event.name().to_owned()).collect();
+        assert_eq!(events, ["http.client.connection.start", "http.client.connection.success"]);
     }
 
     #[test]
@@ -849,6 +814,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             options,
+            Sink::noop(),
         )
         .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
@@ -864,6 +830,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
+            Sink::noop(),
         )
         .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
@@ -883,6 +850,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
+            Sink::noop(),
         )
         .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
@@ -905,6 +873,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
+            Sink::noop(),
         )
         .build(tls());
         let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();

@@ -2,20 +2,16 @@
 // Licensed under the MIT License.
 
 //! Integration tests for the instrumentation-scope attributes of the `fetch` meter, which the
-//! connection metrics and the instruments of `CustomContext::meter` carry.
+//! instruments of `CustomContext::meter` carry.
 
-use bytes::Bytes;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
-use fetch::tokio::TokioDeps;
-use fetch::{HttpClient, HttpClientBuilder, HttpRequest, HttpResponse, HttpResponseBuilder};
+use fetch::{HttpClientBuilder, HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::StatusCode;
 use layered::Service;
 use observed::Sink;
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use tick::Clock;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 const TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
@@ -52,18 +48,6 @@ fn exporter_and_provider() -> (InMemoryMetricExporter, SdkMeterProvider) {
     let exporter = InMemoryMetricExporter::default();
     let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
     (exporter, provider)
-}
-
-async fn serve(body: impl Into<Bytes>) -> MockServer {
-    let mock_server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/hello-world"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(body.into().to_vec()))
-        .mount(&mock_server)
-        .await;
-
-    mock_server
 }
 
 #[cfg_attr(miri, ignore)]
@@ -103,27 +87,6 @@ async fn custom_transport_instrument_inherits_scope() {
         runtime_and_transport_for_metric(&exporter, "custom.transport.requests"),
         (Some("instrumented-runtime".to_owned()), Some("instrumented".to_owned())),
         "an instrument recorded on cx.meter must inherit the runtime/transport scope"
-    );
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn tokio_transport_connection_metric_scope_attribute() {
-    let (exporter, provider) = exporter_and_provider();
-
-    let client = HttpClient::builder_tokio(TokioDeps::new(Sink::noop()))
-        .insecure_allow_http()
-        .meter_provider(provider.clone())
-        .build();
-
-    let server = serve(Bytes::from_static(b"hello")).await;
-    client.get(server.uri() + "/hello-world").fetch().await.unwrap();
-    provider.force_flush().unwrap();
-
-    assert_eq!(
-        runtime_and_transport_for_metric(&exporter, "http.client.connection.setup.duration"),
-        (Some("tokio".to_owned()), Some("hyper".to_owned())),
-        "the hyper connection metric must carry the tokio runtime and hyper transport scope"
     );
 }
 
