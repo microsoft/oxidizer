@@ -86,12 +86,15 @@ impl Aggregator {
     /// Waits until the aggregate state or report data may have changed.
     ///
     /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
-    /// [`reports`](Self::reports) afterwards to observe the current state.
+    /// [`reports`](Self::reports) afterwards. If the worker stops, each handle subscribed
+    /// before it stopped observes one final change. Later waits on that handle stay pending.
     pub async fn changed(&mut self) {
         self.changes.wait(&self.shared.worker).await;
     }
 
     /// Returns the latest process state. It can briefly lag component registration, removal, or publication.
+    ///
+    /// Returns [`Health::Unhealthy`] if the worker has stopped.
     #[must_use]
     pub fn state(&self) -> Health {
         self.shared.state()
@@ -99,7 +102,8 @@ impl Aggregator {
 
     /// Returns consistent snapshots of the registered components.
     ///
-    /// Iteration order is unspecified.
+    /// If the worker has stopped, each report describes the component's last snapshot.
+    /// Use [`state`](Self::state) for current readiness. Iteration order is unspecified.
     #[expect(
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owners"
@@ -165,8 +169,7 @@ pub struct Monitor {
 impl Monitor {
     /// Waits until the aggregate state or report data may have changed.
     ///
-    /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
-    /// [`reports`](Self::reports) afterwards to observe the current state.
+    /// Follows the same notification and worker-exit rules as [`Aggregator::changed`].
     pub async fn changed(&mut self) {
         self.changes.wait(&self.shared.worker).await;
     }
@@ -179,7 +182,7 @@ impl Monitor {
 
     /// Returns consistent snapshots of the registered components.
     ///
-    /// Iteration order is unspecified.
+    /// See [`Aggregator::reports`] for ordering and behavior after the worker stops.
     #[expect(
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owners"

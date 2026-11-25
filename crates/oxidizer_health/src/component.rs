@@ -75,12 +75,15 @@ impl Component {
     /// Waits until the component state or report data may have changed.
     ///
     /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
-    /// [`report`](Self::report) afterwards to observe the current state.
+    /// [`report`](Self::report) afterwards. If the worker stops, a handle that was subscribed
+    /// before it stopped observes one final change. Later waits on that handle stay pending.
     pub async fn changed(&mut self) {
         self.changes.wait(&self.owner.worker).await;
     }
 
     /// Returns the current aggregate component state.
+    ///
+    /// Returns [`Health::Unhealthy`] if the worker has stopped.
     #[must_use]
     pub fn state(&self) -> Health {
         if self.owner.worker.is_running() {
@@ -91,6 +94,9 @@ impl Component {
     }
 
     /// Returns a consistent snapshot of the component's publisher signals.
+    ///
+    /// If the worker has stopped, this returns its last snapshot. The report can still show
+    /// `Healthy` even though [`state`](Self::state) returns `Unhealthy`.
     #[expect(
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owner"
