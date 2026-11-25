@@ -459,11 +459,12 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
     }
 
     let aggregator = Aggregator::new();
-    let mut component = aggregator.component("database");
+    let component = aggregator.component("database");
     let mut publisher = component.publisher();
-    // The component notification follows publication to the root. Observing the state alone
-    // could leave the startup notification in flight when the panic waker subscribes.
-    block_on(component.changed());
+    // A turn for a different component runs only after the database startup broadcast returns.
+    let mut probe = aggregator.component("probe");
+    let _probe_publisher = probe.publisher();
+    block_on(probe.changed());
     assert_eq!(aggregator.state(), Health::Healthy);
     let mut monitor = aggregator.monitor();
     let mut changed = pin!(monitor.changed());
@@ -473,7 +474,7 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
 
     let (woke, states) = mpsc::channel();
     let observer = Waker::from(Arc::new(Observe(aggregator.clone(), woke)));
-    let mut cursor = component.clone();
+    let mut cursor = aggregator.component("database");
     let mut pending = Box::pin(cursor.changed());
     assert!(pending.as_mut().poll(&mut Context::from_waker(&observer)).is_pending());
 
