@@ -160,16 +160,11 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
-        // Move the handle out temporarily so the cycle can borrow the executor
-        // mutably without cloning shared monitoring handles on every cycle.
-        let monitoring = self.monitoring.take();
-        let observed = monitoring.as_ref().is_some_and(WorkerHandle::is_observed);
-        let outcome = match monitoring.as_ref() {
-            Some(worker) if observed => self.execute_cycle_with(MonitorPoll(worker)),
-            Some(_) | None => self.execute_cycle_with(()),
-        };
-        self.monitoring = monitoring;
-        outcome
+        let monitoring = self.monitoring.as_ref().filter(|worker| worker.is_observed()).cloned();
+        match monitoring.as_ref() {
+            Some(worker) => self.execute_cycle_with(MonitorPoll(worker)),
+            None => self.execute_cycle_with(()),
+        }
     }
 
     fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
