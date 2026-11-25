@@ -109,7 +109,7 @@ fn runtimes() -> Vec<RuntimeSnapshot> {
 
 fn capture(runtime: &Runtime) -> RuntimeSnapshot {
     runtime
-        .diagnostics()
+        .monitoring()
         .unwrap()
         .capture(CaptureOptions {
             timeout: Duration::from_secs(5),
@@ -122,11 +122,11 @@ fn capture(runtime: &Runtime) -> RuntimeSnapshot {
 fn enabled_monitor_policy_starts_monitoring() {
     let _recording = RecorderGuard::new();
     let runtime = Runtime::builder().monitor(MonitorPolicy::enabled()).build().unwrap();
-    let diagnostics = runtime.diagnostics().unwrap();
+    let monitoring = runtime.monitoring().unwrap();
     let workers = runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap();
-    let active = diagnostics.capture(CaptureOptions::default()).unwrap();
+    let active = monitoring.capture(CaptureOptions::default()).unwrap();
     runtime.stop().unwrap();
-    let stopped = runtimes().into_iter().find(|runtime| runtime.id == diagnostics.id()).unwrap().state;
+    let stopped = runtimes().into_iter().find(|runtime| runtime.id == monitoring.id()).unwrap().state;
 
     assert_eq!(
         (workers, active.configured_workers, active.name.as_str(), active.state, stopped),
@@ -207,8 +207,8 @@ fn empty_runtime_names_preserve_worker_names_with_either_monitor_policy() {
                 (asynchronous, blocking)
             })
             .unwrap();
-        if let Some(diagnostics) = runtime.diagnostics() {
-            assert_eq!(diagnostics.capture(CaptureOptions::default()).unwrap().name, "");
+        if let Some(monitoring) = runtime.monitoring() {
+            assert_eq!(monitoring.capture(CaptureOptions::default()).unwrap().name, "");
         }
         runtime.stop().unwrap();
         assert_eq!(names, ("-async-0".to_owned(), "-blocking-0".to_owned()));
@@ -438,7 +438,7 @@ fn draining_queued_blocking_tasks_does_not_report_worker_resumes() {
 fn stopped_runtime_does_not_record_new_blocking_tasks() {
     let _recording = RecorderGuard::new();
     let runtime = runtime("stopped-blocking-submission");
-    let id = runtime.diagnostics().unwrap().id();
+    let id = runtime.monitoring().unwrap().id();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     runtime.stop().unwrap();
     seismograph::recorder(Configuration {
@@ -464,7 +464,7 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
         let runtime = runtime("late-blocking-recording");
-        let id = runtime.diagnostics().unwrap().id();
+        let id = runtime.monitoring().unwrap().id();
         let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let (started, ready) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -534,7 +534,7 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
         let runtime = runtime("late-async-recording");
-        let id = runtime.diagnostics().unwrap().id();
+        let id = runtime.monitoring().unwrap().id();
         let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let (started, ready) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -601,7 +601,7 @@ fn recording_reports_real_async_and_blocking_outcomes() {
         ..Configuration::default()
     });
     let runtime = runtime("recorded-outcomes");
-    let id = runtime.diagnostics().unwrap().id();
+    let id = runtime.monitoring().unwrap().id();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let completed = scheduler.spawn(async |_| 42);
     assert_eq!(completed.join().unwrap(), 42);
@@ -833,9 +833,10 @@ fn queued_remote_children_retain_their_recorded_parent() {
         .build()
         .unwrap();
     let (started, ready) = mpsc::channel();
+    let (spawned, children) = mpsc::channel();
     let parent = runtime
         .scheduler()
-        .spawn_anywhere(Unaware(started), |cx, Unaware(started)| async move {
+        .spawn_anywhere(Unaware((started, spawned)), |cx, Unaware((started, spawned))| async move {
             let destination = cx.control().workers().find(|worker| worker != cx.thread()).unwrap();
             let at = cx.scheduler().spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
                 PendingBody::<64>::new(started)
@@ -843,15 +844,18 @@ fn queued_remote_children_retain_their_recorded_parent() {
             let anywhere = cx
                 .scheduler()
                 .spawn_anywhere(Unaware(started), |Unaware(started)| PendingBody::<128>::new(started));
-            at.await.unwrap();
-            anywhere.await.unwrap();
+            spawned.send((at, anywhere)).unwrap();
+            pending::<()>().await;
         });
+    let (at, anywhere) = receive(&children);
     for _ in 0..2 {
         receive(&ready);
     }
     let native = capture(&runtime);
     runtime.stop().unwrap();
     assert!(parent.join().unwrap_err().is_shutdown());
+    assert!(at.join().unwrap_err().is_shutdown());
+    assert!(anywhere.join().unwrap_err().is_shutdown());
     assert_eq!(native.tasks.len(), 3);
     let root = native.tasks.iter().find(|task| task.parent.is_none()).unwrap();
     let children = native.tasks.iter().filter(|task| task.id != root.id).collect::<Vec<_>>();
@@ -962,7 +966,7 @@ fn a_blocked_async_worker_times_out_and_can_answer_a_later_request() {
     receive(&ready);
 
     let blocked = runtime
-        .diagnostics()
+        .monitoring()
         .unwrap()
         .capture_with_timeout(CaptureOptions::default())
         .unwrap();

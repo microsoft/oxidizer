@@ -7,11 +7,8 @@ use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct TaskSpawnOptions {
-    #[cfg(any(test, feature = "monitor"))]
     parent: Option<seismograph::recorder::runtime::TaskId>,
-    #[cfg(any(test, feature = "monitor"))]
     describe_type: fn() -> seismograph::recorder::runtime::TypeDescriptorId,
-    #[cfg(any(test, feature = "monitor"))]
     future_size: usize,
     observers: Option<TaskObservers>,
 }
@@ -22,14 +19,9 @@ impl TaskSpawnOptions {
     }
 
     pub(crate) fn with_future_size<Body: 'static>(future_size: usize) -> Self {
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = future_size;
         Self {
-            #[cfg(any(test, feature = "monitor"))]
             parent: crate::runtime::monitoring::current_task(),
-            #[cfg(any(test, feature = "monitor"))]
             describe_type: crate::runtime::monitoring::descriptor::<Body>,
-            #[cfg(any(test, feature = "monitor"))]
             future_size,
             observers: None,
         }
@@ -57,10 +49,6 @@ impl TaskSpawnOptions {
         }
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(clippy::unused_self, reason = "Submission metadata is empty when monitoring is compiled out.")
-    )]
     fn register_with<F, T, I>(self, tasks: &TaskSet, future: F, completion: T, instrumentation: I)
     where
         F: IntoFuture + 'static,
@@ -68,7 +56,6 @@ impl TaskSpawnOptions {
         T: TaskCompletion<F::Output>,
         I: TaskInstrumentation,
     {
-        #[cfg(any(test, feature = "monitor"))]
         crate::runtime::monitoring::register_monitored(
             tasks,
             future,
@@ -78,9 +65,6 @@ impl TaskSpawnOptions {
             self.describe_type,
             self.future_size,
         );
-        // #[gamma::skip(stmt.delete_call, reason = "This branch is absent from Gamma's all-features builds; runtime-only integration tests exercise it.")]
-        #[cfg(not(any(test, feature = "monitor")))]
-        tasks.task(future).instrument(instrumentation).register(completion);
     }
 }
 

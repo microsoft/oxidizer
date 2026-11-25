@@ -29,7 +29,6 @@ allowed_external_types = [
 
 [features]
 default = []
-seismograph = ["performables/seismograph"]
 
 [dependencies]
 cachet_tier = { workspace = true }

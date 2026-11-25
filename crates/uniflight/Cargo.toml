@@ -28,7 +28,6 @@ allowed_external_types = [
 
 [features]
 default = []
-seismograph = ["performables/seismograph"]
 
 [dependencies]
 ahash = { workspace = true, default-features = false, features = ["std"] }
