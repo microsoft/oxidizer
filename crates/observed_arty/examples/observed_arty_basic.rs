@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let sink = Sink::builder("example").processors(vec![Arc::new(PrintingProcessor)]).build();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
-        .enable_observed(sink.clone())
+        .enable_observed(&sink)
         .build()?;
 
     runtime.scheduler().block_on(async move |cx| {

@@ -138,9 +138,11 @@ fn restoration_probe(factory: RestorationProbeFactory) -> HookFn<TaskSpawn, Rest
 #[test]
 fn options_convert_from_sink() {
     let sink = sink();
-    let options = ObservedOptions::from(sink.clone());
+    let owned = ObservedOptions::from(sink.clone());
+    let borrowed = ObservedOptions::from(&sink);
 
-    assert_eq!(options.sink().id(), sink.id());
+    assert_eq!(owned.sink().id(), sink.id());
+    assert_eq!(borrowed.sink().id(), sink.id());
 }
 
 #[test]

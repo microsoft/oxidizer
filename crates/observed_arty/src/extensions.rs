@@ -39,6 +39,12 @@ impl From<Sink> for ObservedOptions {
     }
 }
 
+impl From<&Sink> for ObservedOptions {
+    fn from(sink: &Sink) -> Self {
+        Self::new(sink.clone())
+    }
+}
+
 /// Adds Observed sink integration to an Arty runtime.
 ///
 /// The implementation for [`RuntimeBuilder`] registers the task-spawn hook

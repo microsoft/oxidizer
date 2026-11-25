@@ -126,8 +126,7 @@ impl Transfer {
 /// thread.
 #[must_use = "the enrichment is removed as soon as the guard is dropped"]
 pub struct TransferGuard {
-    _guard: Guard,
-    _not_send: PhantomData<Rc<()>>,
+    _inner: ThreadBoundGuard<Guard>,
 }
 
 impl std::fmt::Debug for TransferGuard {
@@ -139,8 +138,7 @@ impl std::fmt::Debug for TransferGuard {
 impl TransferGuard {
     fn new(guard: Guard) -> Self {
         Self {
-            _guard: guard,
-            _not_send: PhantomData,
+            _inner: ThreadBoundGuard::new(guard),
         }
     }
 }
