@@ -5,14 +5,19 @@
 
 use std::sync::{Arc, Mutex};
 
-use seismograph::recorder::event::EventKind;
+use seismograph::recorder::event::{EventKind, EventTimestamp};
 use seismograph::recorder::{Configuration, Policy, without_recording};
 use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 use seismograph_runtime::snapshot::{CaptureOptions, CountersScope, Task, TaskActivityState, TaskCollection, TaskMetricsScope};
+use seismograph_runtime::task::TaskProperties;
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
 
 static RECORDING: Mutex<()> = Mutex::new(());
+
+fn task_properties(parent: Option<seismograph::recorder::runtime::TaskId>, body_size: usize) -> TaskProperties {
+    TaskProperties::default().parent(parent).body_size(body_size)
+}
 
 #[expect(
     clippy::unwrap_used,
@@ -184,7 +189,7 @@ fn metadata_backtrace_override_controls_lifecycle_and_spawn_events() {
     worker
         .handle()
         .task_events()
-        .spawned(allocate_type_descriptor_id(), None, 0)
+        .spawned(allocate_type_descriptor_id(), &task_properties(None, 0))
         .unwrap();
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let captured = seismograph::snapshot::decode(captured.as_bytes()).unwrap();
@@ -720,11 +725,11 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
         ..Configuration::default()
     });
 
-    let completed = events.spawned(descriptor, None, 0).unwrap();
+    let completed = events.spawned(descriptor, &task_properties(None, 0)).unwrap();
     events.completed(completed);
-    let panicked = events.spawned(descriptor, Some(completed), 64).unwrap();
+    let panicked = events.spawned(descriptor, &task_properties(Some(completed), 64)).unwrap();
     events.panicked(panicked);
-    let canceled = events.spawned(descriptor, None, 4096).unwrap();
+    let canceled = events.spawned(descriptor, &task_properties(None, 4096)).unwrap();
     events.canceled(canceled);
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
@@ -774,7 +779,7 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
     previous_worker
         .handle()
         .task_events()
-        .spawned(allocate_type_descriptor_id(), None, 0)
+        .spawned(allocate_type_descriptor_id(), &task_properties(None, 0))
         .unwrap();
     seismograph::recorder(Configuration::default());
     seismograph::recorder::clear_buffers().unwrap();
@@ -785,7 +790,7 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
         let id = allocate_task_id();
         let descriptor = allocate_type_descriptor_id();
 
-        let created = context.spawned(descriptor, None, 64);
+        let created = context.spawned(descriptor, &task_properties(None, 64));
         context.completed(id);
         context.panicked(id);
         context.canceled(id);
@@ -808,6 +813,7 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
     let context = worker.handle().task_events();
     let descriptor = allocate_type_descriptor_id();
     let parent = allocate_task_id();
+    let properties = task_properties(Some(parent), 64).spawned_at(Some(EventTimestamp::from_ticks(42)));
     let calls = std::cell::Cell::new(0);
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
@@ -820,8 +826,7 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
                 calls.set(calls.get() + 1);
                 descriptor
             },
-            Some(parent),
-            64,
+            &properties,
         )
         .unwrap();
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
@@ -840,6 +845,7 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
         .unwrap();
     let payload = event.runtime().unwrap();
 
+    assert_eq!(spawned.timestamp, EventTimestamp::from_ticks(42));
     assert_eq!(
         (
             calls.get(),
@@ -861,13 +867,14 @@ fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();
     let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
+    let properties = TaskProperties::default();
 
-    let disabled = context.spawned_with(descriptor, None, 0);
+    let disabled = context.spawned_with(descriptor, &properties);
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let suppressed = without_recording(|| context.spawned_with(descriptor, None, 0));
+    let suppressed = without_recording(|| context.spawned_with(descriptor, &properties));
     seismograph::recorder(Configuration::default());
 
     assert_eq!((disabled, suppressed), (None, None));

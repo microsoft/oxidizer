@@ -15,8 +15,13 @@ use seismograph_runtime::snapshot::{
     Counters, CountersScope, RuntimeState, Task, TaskActivity, TaskActivityState, TaskCollection, TaskMetrics, TaskMetricsScope,
     WorkerState,
 };
+use seismograph_runtime::task::TaskProperties;
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 use seismograph_runtime::{RuntimeMetadata, register_runtime};
+
+fn task_properties(parent: Option<TaskId>, body_size: usize) -> TaskProperties {
+    TaskProperties::default().parent(parent).body_size(body_size)
+}
 
 fn capture(disposition: EventBufferDisposition) -> DecodedSnapshot {
     let bytes = seismograph::snapshot(SnapshotOptions {
@@ -72,15 +77,17 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
     let first_id = first.id();
     let second_id = second.id();
     let task_events = worker.task_events();
-    let parent = task_events.spawned(TypeDescriptorId::from_raw(11).unwrap(), None, 0).unwrap();
+    let parent = task_events
+        .spawned(TypeDescriptorId::from_raw(11).unwrap(), &task_properties(None, 0))
+        .unwrap();
     let child = task_events
-        .spawned(TypeDescriptorId::from_raw(13).unwrap(), Some(parent), 0)
+        .spawned(TypeDescriptorId::from_raw(13).unwrap(), &task_properties(Some(parent), 0))
         .unwrap();
     let legacy = task_events
-        .spawned(TypeDescriptorId::from_raw(17).unwrap(), Some(parent), 0)
+        .spawned(TypeDescriptorId::from_raw(17).unwrap(), &task_properties(Some(parent), 0))
         .unwrap();
     let sized = task_events
-        .spawned(TypeDescriptorId::from_raw(19).unwrap(), Some(parent), 321)
+        .spawned(TypeDescriptorId::from_raw(19).unwrap(), &task_properties(Some(parent), 321))
         .unwrap();
     let tasks = Arc::new(Mutex::new(
         [(parent, 11, 0), (child, 13, 0), (legacy, 17, 0), (sized, 19, 321)]

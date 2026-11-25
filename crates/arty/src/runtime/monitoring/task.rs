@@ -1,87 +1,48 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::TypeId;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
-use seismograph_runtime::task::EventContext;
-
-thread_local! {
-    static EVENTS: Cell<Option<EventContext>> = const { Cell::new(None) };
-    static CURRENT: Cell<Option<TaskId>> = const { Cell::new(None) };
-    // This cache contains types, not live tasks. It is touched only during observation.
-    static TYPES: RefCell<HashMap<TypeId, TypeDescriptorId>> = RefCell::new(HashMap::new());
-}
-
-pub(crate) fn current_events() -> Option<EventContext> {
-    EVENTS.with(Cell::get)
-}
-
-pub(crate) fn set_events(events: Option<EventContext>) {
-    EVENTS.with(|slot| slot.set(events));
-}
-
-pub(crate) fn current_task() -> Option<TaskId> {
-    arty_executor::current_task().or_else(|| CURRENT.with(Cell::get))
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct CurrentTask(Option<TaskId>);
-
-impl Drop for CurrentTask {
-    fn drop(&mut self) {
-        CURRENT.with(|slot| slot.set(self.0));
-    }
-}
-
-pub(crate) fn enter_current(task: TaskId) -> CurrentTask {
-    CurrentTask(CURRENT.with(|slot| slot.replace(Some(task))))
-}
+use seismograph_runtime::task::{EventContext, TaskProperties};
 
 pub(crate) fn descriptor<T: 'static>() -> TypeDescriptorId {
-    TYPES.with_borrow_mut(|types| {
-        *types
-            .entry(TypeId::of::<T>())
-            .or_insert_with(seismograph_runtime::allocate_type_descriptor_id)
-    })
+    seismograph_runtime::task::type_descriptor::<T>()
 }
 
 #[derive(Debug)]
 struct TaskMetadata {
     describe_type: fn() -> TypeDescriptorId,
-    body_size: usize,
-    events: EventContext,
-    parent: Option<TaskId>,
-    spawned_at: Option<EventTimestamp>,
+    properties: TaskProperties,
+    spawn_events: EventContext,
+    runtime_events: EventContext,
 }
 
 impl TaskMetadata {
     fn new<T: 'static>(events: EventContext) -> Self {
+        let runtime_events = events.without_worker();
+        let spawn_events = arty_executor::current_events()
+            .filter(|current| current.runtime_id() == events.runtime_id())
+            .unwrap_or(runtime_events);
         Self {
             describe_type: descriptor::<T>,
-            body_size: size_of::<T>(),
-            events,
-            parent: current_task(),
-            spawned_at: None,
+            properties: TaskProperties::default()
+                .parent(arty_executor::current_task())
+                .body_size(size_of::<T>()),
+            spawn_events,
+            runtime_events,
         }
     }
 
     fn record_spawn(&mut self) -> Option<TaskIdentity> {
-        self.events
-            .spawned_with(self.describe_type, self.parent, self.body_size)
-            .map(|spawn| {
-                self.spawned_at = Some(spawn.timestamp);
-                TaskIdentity {
-                    id: spawn.id,
-                    descriptor: spawn.descriptor,
-                }
-            })
+        let spawn = self.spawn_events.spawned_with(self.describe_type, &self.properties)?;
+        self.properties = self.properties.clone().spawned_at(Some(spawn.timestamp));
+        Some(TaskIdentity {
+            id: spawn.id,
+            descriptor: spawn.descriptor,
+        })
     }
 
     fn identity(&self) -> TaskIdentity {
@@ -93,11 +54,9 @@ impl TaskMetadata {
 
     fn describe(&self, identity: &TaskIdentity, state: TaskActivityState) -> Task {
         let mut task = Task::new(identity.id, identity.descriptor, state);
-        task.parent = self.parent;
-        task.spawned_at = self.spawned_at;
-        task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
+        self.properties.apply_to(&mut task);
         if state == TaskActivityState::Ready
-            && let Some(spawned_at) = self.spawned_at
+            && let Some(spawned_at) = task.spawned_at
             && let Some(activity) = &mut task.activity
         {
             activity.ready_since = Some(spawned_at);
@@ -117,7 +76,7 @@ struct TaskIdentity {
 pub(crate) struct TaskInfo {
     metadata: TaskMetadata,
     identity: OnceLock<TaskIdentity>,
-    execution_events: OnceLock<EventContext>,
+    execution: OnceLock<ExecutionMetadata>,
 }
 
 impl TaskInfo {
@@ -127,7 +86,7 @@ impl TaskInfo {
         Self {
             metadata,
             identity,
-            execution_events: OnceLock::new(),
+            execution: OnceLock::new(),
         }
     }
 
@@ -136,31 +95,50 @@ impl TaskInfo {
     }
 
     pub(crate) fn describe(&self, state: TaskActivityState) -> Task {
-        self.metadata
-            .describe(self.identity.get_or_init(|| self.metadata.identity()), state)
+        let mut task = self
+            .metadata
+            .describe(self.identity.get_or_init(|| self.metadata.identity()), state);
+        if state == TaskActivityState::Running
+            && let Some(execution) = self.execution.get()
+            && let Some(activity) = &mut task.activity
+        {
+            activity.poll_started_at = execution.started_at;
+            activity.poll_worker_id = execution.events.worker_id();
+            task.last_worker_id = execution.events.worker_id();
+        }
+        task
     }
 
-    pub(crate) fn started_on(&self, events: EventContext) {
-        self.execution_events
-            .set(events)
+    pub(crate) fn started_on(&self, events: EventContext, started_at: Option<EventTimestamp>) {
+        self.execution
+            .set(ExecutionMetadata { events, started_at })
             .expect("a blocking function starts on exactly one worker");
     }
 
     pub(crate) fn completed(&self) {
         if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).completed(id);
+            self.execution
+                .get()
+                .map_or(&self.metadata.runtime_events, |execution| &execution.events)
+                .completed(id);
         }
     }
 
     pub(crate) fn panicked(&self) {
         if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).panicked(id);
+            self.execution
+                .get()
+                .map_or(&self.metadata.runtime_events, |execution| &execution.events)
+                .panicked(id);
         }
     }
 
     pub(crate) fn canceled(&self) {
         if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).canceled(id);
+            self.execution
+                .get()
+                .map_or(&self.metadata.runtime_events, |execution| &execution.events)
+                .canceled(id);
         }
     }
 
@@ -172,42 +150,24 @@ impl TaskInfo {
     }
 }
 
+#[derive(Debug)]
+struct ExecutionMetadata {
+    events: EventContext,
+    started_at: Option<EventTimestamp>,
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use seismograph_runtime::RuntimeMetadata;
-    use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
-
-    use super::{TaskInfo, current_task, enter_current};
-
-    #[test]
-    fn current_task_scope_restores_its_parent_after_return_and_panic() {
-        let parent = seismograph_runtime::allocate_task_id();
-        let child = seismograph_runtime::allocate_task_id();
-        assert_eq!(current_task(), None);
-        {
-            let _parent = enter_current(parent);
-            {
-                let _child = enter_current(child);
-                assert_eq!(current_task(), Some(child));
-            }
-            assert_eq!(current_task(), Some(parent));
-            let result = std::panic::catch_unwind(|| {
-                let _child = enter_current(child);
-                assert_eq!(current_task(), Some(child));
-                panic!("scope restores the parent during unwinding");
-            });
-            assert!(result.is_err());
-            assert_eq!(current_task(), Some(parent));
-        }
-        assert_eq!(current_task(), None);
-    }
+    use super::TaskInfo;
 
     #[test]
     fn unobserved_blocking_outcomes_do_not_allocate_task_identities() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("idle-outcomes", 1));
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("idle-outcomes", 1));
+        let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+            seismograph_runtime::worker::WorkerRole::Blocking,
+        ));
         seismograph::recorder::without_recording(|| {
             let info = TaskInfo::new::<()>(worker.handle().task_events());
             info.completed();
@@ -215,5 +175,24 @@ mod tests {
             info.canceled();
             assert!(info.identity.get().is_none());
         });
+    }
+
+    #[test]
+    fn absent_worker_events_preserve_plain_task_execution() {
+        let mut executor = arty_executor::Executor::builder().build();
+        let ran = std::rc::Rc::new(std::cell::Cell::new(false));
+        let completed = std::rc::Rc::clone(&ran);
+        let future = async move { completed.set(true) };
+        let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let (_handle, sender) = completion.handle();
+
+        executor
+            .tasks()
+            .task(future)
+            .monitor(arty_executor::TaskDescription::new::<()>(None))
+            .register(sender);
+        let _ = executor.execute_cycle();
+
+        assert!(ran.get());
     }
 }

@@ -3,8 +3,10 @@
 
 //! Native-storage requests, task lifecycle events, and observed poll tokens.
 
+use std::any::TypeId;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
@@ -21,6 +23,55 @@ pub struct EventContext {
     runtime: RuntimeId,
     worker: Option<WorkerId>,
     backtrace: BacktraceCapture,
+}
+
+static TYPE_DESCRIPTORS: OnceLock<Mutex<HashMap<TypeId, TypeDescriptorId>>> = OnceLock::new();
+
+/// Returns the process-wide descriptor for one concrete task type.
+#[must_use]
+pub fn type_descriptor<T: 'static>() -> TypeDescriptorId {
+    let mut descriptors = lock(TYPE_DESCRIPTORS.get_or_init(|| Mutex::new(HashMap::new())));
+    *descriptors
+        .entry(TypeId::of::<T>())
+        .or_insert_with(crate::allocate_type_descriptor_id)
+}
+
+/// Metadata used to create and describe one task.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TaskProperties {
+    parent: Option<TaskId>,
+    body_size: usize,
+    spawned_at: Option<EventTimestamp>,
+}
+
+impl TaskProperties {
+    /// Sets the parent task that was active at submission.
+    #[must_use]
+    pub const fn parent(mut self, parent: Option<TaskId>) -> Self {
+        self.parent = parent;
+        self
+    }
+
+    /// Sets the task body size before wrapping or type erasure.
+    #[must_use]
+    pub const fn body_size(mut self, body_size: usize) -> Self {
+        self.body_size = body_size;
+        self
+    }
+
+    /// Sets or clears the task spawn timestamp.
+    #[must_use]
+    pub const fn spawned_at(mut self, spawned_at: Option<EventTimestamp>) -> Self {
+        self.spawned_at = spawned_at;
+        self
+    }
+
+    /// Applies these properties to a native task description.
+    pub fn apply_to(&self, task: &mut Task) {
+        task.parent = self.parent;
+        task.spawned_at = self.spawned_at;
+        task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
+    }
 }
 
 /// Identity and timestamp assigned while building a task creation event.
@@ -46,12 +97,32 @@ impl EventContext {
         }
     }
 
+    /// Returns this context without worker attribution.
+    #[must_use]
+    pub const fn without_worker(mut self) -> Self {
+        self.worker = None;
+        self
+    }
+
+    /// Returns the worker attributed to events from this context.
+    #[must_use]
+    pub const fn worker_id(&self) -> Option<WorkerId> {
+        self.worker
+    }
+
+    /// Returns the runtime attributed to events from this context.
+    #[must_use]
+    pub const fn runtime_id(&self) -> RuntimeId {
+        self.runtime
+    }
+
     /// Assigns an identity and emits task creation only when recording is enabled.
     ///
     /// Returns `None` when the recorder does not run the event builder. Sampling
     /// or a concurrent policy change can still omit the event after assigning
     /// an identity. Keep that identity for native inspection and later outcomes.
     /// Measure `body_size` before runtime wrapping or type erasure.
+    /// The worker identifies the submission origin, not the execution worker.
     ///
     /// # Panics
     ///
@@ -59,8 +130,8 @@ impl EventContext {
     /// encoded as a value smaller than `u64::MAX`.
     #[must_use]
     #[inline]
-    pub fn spawned(&self, descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> Option<TaskId> {
-        self.spawned_with(|| descriptor, parent, body_size).map(|spawn| spawn.id)
+    pub fn spawned(&self, descriptor: TypeDescriptorId, properties: &TaskProperties) -> Option<TaskId> {
+        self.spawned_with(|| descriptor, properties).map(|spawn| spawn.id)
     }
 
     /// Builds a task creation event and returns its identity and timestamp.
@@ -70,27 +141,23 @@ impl EventContext {
     /// concurrent recording changes can still omit the event after it runs.
     /// Reuse the returned timestamp in native task metadata to avoid another
     /// clock read. Measure `body_size` before wrapping or type erasure.
+    /// The worker identifies the submission origin, not the execution worker.
     ///
     /// # Panics
     ///
     /// Propagates a panic from `descriptor`. Panics if process task identities
     /// are exhausted or `body_size` cannot be encoded below `u64::MAX`.
     #[must_use]
-    pub fn spawned_with(
-        &self,
-        descriptor: impl FnOnce() -> TypeDescriptorId,
-        parent: Option<TaskId>,
-        body_size: usize,
-    ) -> Option<TaskSpawn> {
+    pub fn spawned_with(&self, descriptor: impl FnOnce() -> TypeDescriptorId, properties: &TaskProperties) -> Option<TaskSpawn> {
         let mut assigned = None;
         seismograph::record(EventClass::RuntimeTask, || {
-            let size = u64::try_from(body_size)
+            let size = u64::try_from(properties.body_size)
                 .ok()
                 .and_then(|size| size.checked_add(1))
                 .expect("a concrete task body must be smaller than u64::MAX");
             let id = crate::allocate_task_id();
             let descriptor = descriptor();
-            let timestamp = EventTimestamp::now();
+            let timestamp = properties.spawned_at.unwrap_or_else(EventTimestamp::now);
             assigned = Some(TaskSpawn { id, descriptor, timestamp });
             Some(Record::runtime(
                 timestamp,
@@ -99,7 +166,7 @@ impl EventContext {
                     runtime_id: self.runtime,
                     worker_id: self.worker,
                     subject_id: id.get(),
-                    related_id: parent.map_or(0, TaskId::get),
+                    related_id: properties.parent.map_or(0, TaskId::get),
                     value_0: descriptor.get(),
                     value_1: size,
                 },
@@ -168,6 +235,12 @@ impl TaskRequest {
         self.limit
     }
 
+    /// Returns the worker that owns this request.
+    #[must_use]
+    pub fn worker_id(&self) -> WorkerId {
+        self.worker.id
+    }
+
     /// Whether the diagnostic caller stopped waiting for this request.
     #[must_use]
     pub fn is_canceled(&self) -> bool {
@@ -178,8 +251,9 @@ impl TaskRequest {
     /// Sends owned descriptions without waiting for the diagnostic caller.
     ///
     /// Excess descriptions are truncated and marked incomplete. A canceled
-    /// request discards its response. Measurement data comes from observed polls,
-    /// not from values supplied by the provider.
+    /// request discards its response. Providers set `last_worker_id` to any
+    /// worker when a task belongs to this provider; the response normalizes it
+    /// to the responding worker. Measurement data comes from observed polls.
     pub fn respond(mut self, mut tasks: Vec<Task>, mut collection: TaskCollection) {
         if self.is_canceled() {
             return;
@@ -190,7 +264,7 @@ impl TaskRequest {
         }
         let measurements = lock(&self.worker.measurements);
         for task in &mut tasks {
-            task.last_worker_id = Some(self.worker.id);
+            task.last_worker_id = task.last_worker_id.map(|_| self.worker.id);
             task.metrics = TaskMetrics::default();
             task.metrics_scope = crate::snapshot::TaskMetricsScope::Uncollected;
             if self.window != 0
@@ -246,6 +320,14 @@ pub struct TaskPoll {
     pub(crate) active: bool,
 }
 
+impl TaskPoll {
+    /// Returns the timestamp used by the poll-start event.
+    #[must_use]
+    pub const fn started_at(&self) -> Option<EventTimestamp> {
+        self.started_at
+    }
+}
+
 impl Drop for TaskPoll {
     fn drop(&mut self) {
         if self.active {
@@ -254,5 +336,19 @@ impl Drop for TaskPoll {
                 .current_task
                 .compare_exchange(self.task.get(), 0, Ordering::AcqRel, Ordering::Acquire);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_descriptors_are_process_wide_across_threads() {
+        let local = type_descriptor::<u32>();
+        let remote = std::thread::spawn(type_descriptor::<u32>).join().unwrap();
+
+        assert_eq!(remote, local);
+        assert_ne!(type_descriptor::<u64>(), local);
     }
 }
