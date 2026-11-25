@@ -349,6 +349,10 @@ struct Slot {
 ///
 /// # Examples
 ///
+/// To keep readiness false during startup, register the required component on a new
+/// [`Aggregator`](crate::Aggregator) before serving probes. Keep it empty until initialization
+/// succeeds. Creating a publisher and immediately marking it `Unhealthy` is not atomic.
+///
 /// ```
 /// # testing_aids::init_tracing!();
 /// use oxidizer_health::{Aggregator, Health};
@@ -356,11 +360,10 @@ struct Slot {
 /// # futures::executor::block_on(async {
 /// let aggregator = Aggregator::new();
 /// let mut startup = aggregator.component("startup");
+/// assert_eq!(aggregator.state(), Health::Unhealthy);
+///
+/// // Initialization succeeded. Keep this publisher to report later changes.
 /// let mut publisher = startup.publisher();
-///
-/// publisher.publish(Health::Unhealthy, [("phase", "starting")]);
-/// assert_eq!(publisher.signal().state(), Health::Unhealthy);
-///
 /// publisher.publish(Health::Healthy, [("phase", "running")]);
 /// while startup.state() != Health::Healthy {
 ///     startup.changed().await;
