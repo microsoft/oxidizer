@@ -1,0 +1,184 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: Windows coverage replay
+
+on:
+  push:
+    branches: [ci/windows-coverage-replay-20261125]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  OXIDIZER_REVISION: 129ba250f934fd72c19d4799ebfe4604fa73f988
+  COLLECTOR_REVISION: 21f14d457e197a19cced4930cb7c75b0523f0890
+  REPLAY_NIGHTLY: nightly-2026-10-31
+
+jobs:
+  build-collector:
+    name: Build patched collector
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/ox-tools
+          ref: ${{ env.COLLECTOR_REVISION }}
+          persist-credentials: false
+      - name: Build the pinned collector
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $revision = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $revision -ne $env:COLLECTOR_REVISION) {
+            throw 'The collector checkout does not match the replay revision.'
+          }
+          rustup toolchain install $env:REPLAY_NIGHTLY --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo "+$env:REPLAY_NIGHTLY" build --release --locked --package cargo-coverage-gate --bin cargo-coverage-gate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash -LiteralPath 'target\release\cargo-coverage-gate.exe'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: patched-coverage-gate
+          path: target/release/cargo-coverage-gate.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  replay:
+    name: Replay Windows tests and coverage (${{ matrix.collector }})
+    needs: build-collector
+    runs-on: windows-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        collector: [released, patched]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.OXIDIZER_REVISION }}
+          lfs: true
+          persist-credentials: false
+      - name: Download the original Windows package selection
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: anvil-impact-Windows
+          path: target/anvil/impact
+          github-token: ${{ github.token }}
+          run-id: 45133149092
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: pr-test
+          free-disk-space: true
+      - name: Download the patched collector
+        if: matrix.collector == 'patched'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: patched-coverage-gate
+          path: ${{ runner.temp }}/patched-coverage-gate
+      - name: Select the collector for this job
+        shell: pwsh
+        env:
+          COLLECTOR: ${{ matrix.collector }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $revision = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $revision -ne $env:OXIDIZER_REVISION) {
+            throw 'The Oxidizer checkout does not match the replay revision.'
+          }
+          $selection = Get-Content -LiteralPath 'target\anvil\impact\include_affected.txt' -Raw
+          $packages = [regex]::Matches($selection, '(?:^|\s)--package\s').Count
+          if ($packages -ne 94) { throw "Expected 94 selected packages. Found $packages." }
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
+          $installed = Join-Path $cargoHome 'bin\cargo-coverage-gate.exe'
+          if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
+            throw "Anvil did not install the coverage collector at $installed."
+          }
+          if ($env:COLLECTOR -eq 'patched') {
+            $patched = Join-Path $env:RUNNER_TEMP 'patched-coverage-gate\cargo-coverage-gate.exe'
+            Copy-Item -LiteralPath $patched -Destination $installed -Force
+          }
+          Write-Host "Replay input: $revision ($packages packages)"
+          Write-Host "Collector: $env:COLLECTOR"
+          Get-FileHash -LiteralPath $installed
+          cargo "+$env:REPLAY_NIGHTLY" coverage-gate --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run Anvil and measure workspace disk space
+        shell: pwsh
+        env:
+          ANVIL_IMPACT: consume
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $scratch = Join-Path $env:GITHUB_WORKSPACE 'target\coverage-gate'
+          $driveRoot = [IO.Path]::GetPathRoot($scratch)
+          $stop = [Threading.ManualResetEventSlim]::new()
+          $sampler = Start-ThreadJob -ArgumentList $driveRoot, $scratch, $stop -ScriptBlock {
+            param($DriveRoot, $Scratch, $Stop)
+            $ErrorActionPreference = 'Stop'
+            $drive = [IO.DriveInfo]::new($DriveRoot)
+            do {
+              $run = if (Test-Path -LiteralPath $Scratch -PathType Container) {
+                Get-ChildItem -LiteralPath $Scratch -Filter 'run-*' -Directory | Select-Object -First 1
+              }
+              [pscustomobject]@{
+                Time = [DateTime]::UtcNow.ToString('o')
+                FreeBytes = $drive.AvailableFreeSpace
+                AllFeatures = $run -and (Test-Path -LiteralPath (Join-Path $run.FullName 'cargo-target\all-features') -PathType Container)
+                AllFeaturesReport = $run -and (Test-Path -LiteralPath (Join-Path $run.FullName 'raw-lcov-all-features.info') -PathType Leaf)
+                NoDefault = $run -and (Test-Path -LiteralPath (Join-Path $run.FullName 'cargo-target\no-default') -PathType Container)
+              }
+            } until ($Stop.Wait(1000))
+          }
+
+          Write-Host "Workspace drive: $driveRoot"
+          $drive = [IO.DriveInfo]::new($driveRoot)
+          Write-Host "Free before Anvil: $($drive.AvailableFreeSpace) bytes"
+          try {
+            just anvil-pr-test
+            $testExitCode = $LASTEXITCODE
+          } finally {
+            $stop.Set()
+            $samples = @(Receive-Job -Job $sampler -Wait -AutoRemoveJob)
+            $stop.Dispose()
+          }
+          if ($samples.Count -eq 0) { throw 'The disk sampler returned no measurements.' }
+
+          function Write-DiskSample($label, $sample) {
+            if ($null -eq $sample) {
+              Write-Host "${label}: not observed"
+            } else {
+              Write-Host "${label}: $($sample.FreeBytes) bytes free at $($sample.Time)"
+            }
+          }
+          Write-DiskSample 'Last sample with only the first build directory' (
+            $samples | Where-Object { $_.AllFeatures -and -not $_.NoDefault } | Select-Object -Last 1
+          )
+          Write-DiskSample 'First sample after removal of the first build directory' (
+            $samples | Where-Object { $_.AllFeaturesReport -and -not $_.AllFeatures } | Select-Object -First 1
+          )
+          Write-DiskSample 'First sample with the second build directory' (
+            $samples | Where-Object NoDefault | Select-Object -First 1
+          )
+          Write-DiskSample 'Lowest sampled free space' ($samples | Sort-Object FreeBytes | Select-Object -First 1)
+          $overlap = @($samples | Where-Object { $_.AllFeatures -and $_.NoDefault }).Count
+          Write-Host "Samples with both build directories: $overlap"
+
+          if ($testExitCode -ne 0) { exit $testExitCode }
+          foreach ($report in 'lcov-all-features.info', 'lcov-no-default.info') {
+            $file = Get-Item -LiteralPath (Join-Path 'target\coverage' $report)
+            if ($file.Length -eq 0) { throw "Coverage report $report is empty." }
+          }
+      - name: Save both coverage reports
+        if: always() && hashFiles('target/coverage/lcov-all-features.info') != '' && hashFiles('target/coverage/lcov-no-default.info') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-coverage-${{ matrix.collector }}
+          path: |
+            target/coverage/lcov-all-features.info
+            target/coverage/lcov-no-default.info
+          if-no-files-found: error
+          retention-days: 7
