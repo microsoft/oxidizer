@@ -63,11 +63,11 @@ worker.handle().register_task_provider(|request| {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbd-Jt3Up-brQbiLCAdsiNEtEbZ47AiVrE3lMbLKLlDS1kJGNhZIKCa3NlaXNtb2dyYXBoZTAuNS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNS4w
- [__link0]: https://crates.io/crates/seismograph/0.5.0
- [__link1]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=worker::WorkerHandle::is_observed
- [__link2]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=RuntimeHandle::capture
- [__link3]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
- [__link4]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=snapshot::decode
- [__link5]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbd-Jt3Up-brQbiLCAdsiNEtEbZ47AiVrE3lMbLKLlDS1kJGNhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
+ [__link0]: https://crates.io/crates/seismograph/0.6.0
+ [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::is_observed
+ [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeHandle::capture
+ [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
+ [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::decode
+ [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
  [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Remove the snapshot html export command.
+- Read snapshot container format 10, allocator source schema 5, and runtime source schema 9.
+- Add execute for callers that supply explicit process arguments.
+- Add backend-aware allocator views, runtime timelines, event attribution, and offline symbols.
+- Update the installed binary's resolved dependencies.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `seismograph_protocol` from `^0.3.0` to `^0.4.0`.
+- Update the local requirement for `seismograph_rallocator` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `seismograph_runtime` from `^0.5.0` to `^0.6.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Breaking: Show bounded native task state instead of source-derived task lifetimes and

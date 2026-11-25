@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Breaking: Update event formatting utilities for the new Observed field-visitation and timing contracts.
+- Update the local requirement for `data_privacy` from `^0.13.2` to `^0.13.3`.
+- Update the local requirement for `observed` from `^0.30.1` to `^0.31.0`.
+
 ## [0.6.1] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

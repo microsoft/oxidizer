@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Update I/O recording to the new Seismograph contracts.
+- Expand buffer metadata and recording regression coverage.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Breaking: Allow I/O completion events after recording restarts, even when their start

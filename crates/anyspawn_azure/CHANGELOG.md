@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0] - 2026-11-24
+
+- Breaking: Update Azure task adapters to the new Anyspawn runtime and event contracts.
+- Update the local requirement for `anyspawn` from `^0.11.0` to `^0.12.0`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+
 ## [0.7.0] - 2026-11-06
 
 - Return task panic and cancellation as a boxed Anyspawn `JoinError` instead of restarting

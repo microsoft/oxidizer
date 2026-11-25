@@ -126,36 +126,36 @@ Without `std`, the crate needs `alloc` and pointer-width atomics.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrnOdj5SUkXAb8NyCbnmNwPwbGIl3BbkoElwbABFoXGU-0wxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4z
- [__link0]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
- [__link1]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link10]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
- [__link11]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
- [__link12]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrnOdj5SUkXAb8NyCbnmNwPwbGIl3BbkoElwbABFoXGU-0wxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS40
+ [__link0]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
+ [__link1]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link10]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
+ [__link11]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware::relocate
+ [__link12]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
  [__link13]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
- [__link14]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link15]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
+ [__link14]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link15]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware::relocate
  [__link16]: https://doc.rust-lang.org/stable/std/?search=ops::Drop::drop
  [__link17]: https://docs.rs/thread_aware
  [__link18]: https://docs.rs/thread_aware
- [__link19]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link2]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link20]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
- [__link21]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=NumaNode
- [__link22]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Owner
- [__link23]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link24]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link19]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link2]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link20]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware::relocate
+ [__link21]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=NumaNode
+ [__link22]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Owner
+ [__link23]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link24]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
  [__link25]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link26]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link27]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link27]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
  [__link28]: https://docs.rs/thread_aware
  [__link29]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
  [__link3]: https://doc.rust-lang.org/stable/std/?search=thread::Thread
- [__link30]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread::id
- [__link31]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link30]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread::id
+ [__link31]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=ThreadAware
  [__link4]: https://docs.rs/thread_aware
  [__link5]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
  [__link6]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
- [__link7]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
- [__link8]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Owner
- [__link9]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=NumaNode
+ [__link7]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Thread
+ [__link8]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=Owner
+ [__link9]: https://docs.rs/thread_aware_core/0.1.4/thread_aware_core/?search=NumaNode

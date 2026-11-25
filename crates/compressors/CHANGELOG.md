@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Update compressor buffers and recording integrations to the new contracts.
+- Expand flush, output-limit, codec-error, and resource-pool regression coverage.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.5.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

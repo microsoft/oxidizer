@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Breaking: Update the private I/O host for the new context constructor, event traits, and clock contracts.
+- Update the local requirement for `arty_io_core` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `data_privacy` from `^0.13.2` to `^0.13.3`.
+- Update the local requirement for `observed` from `^0.30.1` to `^0.31.0`.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+
 ## [0.6.1] - 2026-11-06
 
 - Simplify driver-hosting documentation and the package description.

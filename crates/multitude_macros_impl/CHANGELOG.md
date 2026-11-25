@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.15.0] - 2026-11-24
+
+- Expand deserialization attributes, generic bounds, defaults, and generated visitor regression coverage.
+- Align the version with the `multitude` package group at `0.15.0`.
+
 ## [0.14.0] - 2026-11-06
 
 - Align the version with the `multitude` package group. No independent source
