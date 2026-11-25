@@ -39,6 +39,7 @@ Please see each crate's change log below:
 - [`observed_destination_memory`](./crates/observed_destination_memory/CHANGELOG.md)
 - [`observed_destination_stdout`](./crates/observed_destination_stdout/CHANGELOG.md)
 - [`observed_macros_impl`](./crates/observed_macros_impl/CHANGELOG.md)
+- [`observed_otel`](./crates/observed_otel/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
 - [`ohno_macros_impl`](./crates/ohno_macros_impl/CHANGELOG.md)

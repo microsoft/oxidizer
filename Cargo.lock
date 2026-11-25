@@ -3783,6 +3783,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "observed_otel"
+version = "0.1.0"
+dependencies = [
+ "data_privacy",
+ "log",
+ "observed",
+ "observed_destination_core",
+ "observed_destination_memory",
+ "observed_destination_stdout",
+ "observed_testing",
+ "observed_utils",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "performables",
+ "rustc-hash",
+ "smallvec",
+ "thread_local",
+ "tick",
+]
+
+[[package]]
 name = "observed_testing"
 version = "0.0.0"
 dependencies = [

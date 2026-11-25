@@ -1,0 +1,66 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_otel"
+description = "Open Telemetry integration layer for Observed."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_otel"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "data_privacy::redaction_engine::RedactionEngine",
+    "data_privacy_core::data_class::IntoDataClass",
+    "data_privacy_core::redactor::Redactor",
+    "observed::processing::processor::EventProcessor",
+    "observed::sampling::sampler::EventSampler",
+    "observed::sink::core::Sink",
+    "observed::sink::id::SinkId",
+    "observed_destination_core::DestinationResult",
+    "observed_destination_core::IntoLogDestination",
+    "observed_destination_core::IntoMetricDestination",
+    "observed_destination_core::meter_provider::FlushableMetricsProvider",
+    "opentelemetry::common::InstrumentationScope",
+    "opentelemetry::context::Context",
+    "opentelemetry_sdk::logs::record::SdkLogRecord",
+    "opentelemetry_sdk::resource::Resource",
+    "performables::arc::Arc",
+    "tick::simple_clock::SimpleClock",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+data_privacy.workspace = true
+observed.workspace = true
+observed_destination_core.workspace = true
+observed_utils.workspace = true
+opentelemetry = { workspace = true, features = ["logs", "metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics"] }
+performables.workspace = true
+rustc-hash = { workspace = true, features = ["std"] }
+smallvec = { workspace = true, features = ["union"] }
+thread_local.workspace = true
+tick.workspace = true
+
+[dev-dependencies]
+log.workspace = true
+observed_destination_memory = { path = "../observed_destination_memory", default-features = false }
+observed_destination_stdout = { path = "../observed_destination_stdout", default-features = false }
+observed_testing = { path = "../observed_testing", default-features = false }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
+
+[lints]
+workspace = true

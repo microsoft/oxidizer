@@ -56,6 +56,7 @@ These are the primary crates built out of this repo:
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`observed_destination_memory`](./crates/observed_destination_memory/README.md) - In-memory destination for Observed pipeline.
 - [`observed_destination_stdout`](./crates/observed_destination_stdout/README.md) - stdout destination for Observed pipeline.
+- [`observed_otel`](./crates/observed_otel/README.md) - Open Telemetry integration layer for Observed.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
