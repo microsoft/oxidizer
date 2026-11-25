@@ -34,7 +34,6 @@ all-features = true
 default = []
 arty = ["dep:arty"]
 observed = ["dep:observed"]
-seismograph = ["observed?/seismograph"]
 tokio = ["dep:tokio"]
 
 [dependencies]

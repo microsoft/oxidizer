@@ -14,7 +14,6 @@ impl RuntimeName {
         Self(Arc::from(name.as_ref()))
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }

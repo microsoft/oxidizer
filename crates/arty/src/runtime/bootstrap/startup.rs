@@ -11,6 +11,7 @@ use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::monitoring::RuntimeMonitoring;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::{WorkerJoiner, asynchronous};
 
@@ -40,36 +41,22 @@ fn build_with_processors(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         prepared.shutdown,
         prepared.hook_registrations,
+        prepared.monitoring.as_ref().map(RuntimeMonitoring::handle),
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
-    #[cfg(any(test, feature = "monitor"))]
-    dispatcher_client.set_diagnostics(
-        prepared
-            .diagnostics
-            .as_ref()
-            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle),
-    );
     let mut join_handles = Vec::with_capacity(workers.len());
     for worker in workers {
         join_handles.push(worker.activate(dispatcher_client.clone()));
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
-    let runtime = Runtime::with_dispatcher(dispatcher_client, worker_joiner);
-    #[cfg(any(test, feature = "monitor"))]
-    let runtime = {
-        let mut runtime = runtime;
-        runtime.set_diagnostics(prepared.diagnostics);
-        runtime
-    };
-    Ok(runtime)
+    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner, prepared.monitoring))
 }
 
 struct PreparedWorkers<W> {
     workers: Vec<W>,
     shutdown: Shutdown,
     hook_registrations: Vec<crate::runtime::hook::HookRegistration>,
-    #[cfg(any(test, feature = "monitor"))]
-    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
+    monitoring: Option<RuntimeMonitoring>,
 }
 
 fn prepare_workers<W>(
@@ -89,7 +76,7 @@ fn prepare_workers<W>(
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
     let stack_size = select_stack_size(processor_config.stack_size, environment);
-    let monitor_options = processor_config.monitor_options;
+    let mut monitor_options = processor_config.monitor_options;
     let hook_registrations = processor_config
         .hook_registrations
         .into_inner()
@@ -97,13 +84,8 @@ fn prepare_workers<W>(
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
-    #[cfg(any(test, feature = "monitor"))]
-    let (diagnostics, monitor_options) = {
-        let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), &name, worker_count)?;
-        let mut monitor_options = monitor_options;
-        monitor_options.set_runtime(diagnostics.as_ref().map(crate::runtime::monitoring::RuntimeDiagnostics::handle));
-        (diagnostics, monitor_options)
-    };
+    let monitoring = RuntimeMonitoring::start(monitor_options.policy(), &name, worker_count)?;
+    monitor_options.set_runtime(monitoring.as_ref().map(RuntimeMonitoring::handle));
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(start(asynchronous::StartOptions {
@@ -125,8 +107,7 @@ fn prepare_workers<W>(
         workers,
         shutdown,
         hook_registrations,
-        #[cfg(any(test, feature = "monitor"))]
-        diagnostics,
+        monitoring,
     })
 }
 
@@ -176,7 +157,7 @@ mod tests {
         );
         let started = std::cell::Cell::new(false);
         let hardware = fake_hardware(1);
-        let result = crate::runtime::monitoring::RuntimeDiagnostics::with_test_io(io, || {
+        let result = crate::runtime::monitoring::RuntimeMonitoring::with_test_io(io, || {
             prepare_workers(
                 RuntimeConfig {
                     name: crate::runtime::config::RuntimeName::default(),

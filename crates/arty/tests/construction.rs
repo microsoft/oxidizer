@@ -225,8 +225,6 @@ fn null_in_runtime_name_is_rejected_when_built() {
 #[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
-        #[cfg(not(feature = "monitor"))]
-        Runtime::new().unwrap(),
         Runtime::builder().build().unwrap(),
         Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
     ] {

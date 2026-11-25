@@ -355,7 +355,7 @@ mod tests {
     }
 
     fn test_dispatcher(endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<DispatcherCore> {
-        DispatcherCore::new(endpoints, shutdown, Vec::new())
+        DispatcherCore::new(endpoints, shutdown, Vec::new(), None)
     }
 
     #[test]
@@ -415,6 +415,7 @@ mod tests {
                 .unwrap(),
                 shutdown,
                 vec![hook.clone()],
+                None,
             );
             let _prime = core.spawn_relocating(&destination, |_| async {});
             sources.lock().unwrap().clear();
