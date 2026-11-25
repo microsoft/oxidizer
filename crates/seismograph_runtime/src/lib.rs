@@ -167,6 +167,16 @@ impl RuntimeHandle {
         task::EventContext::new(self.id(), None, self.control.lifecycle_backtraces)
     }
 
+    /// Keeps untimed task observation active until the returned guard is dropped.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn observe_tasks_for_test(&self) -> TaskObservation {
+        self.control.requests.fetch_add(1, Ordering::Relaxed);
+        TaskObservation {
+            control: Arc::clone(&self.control),
+        }
+    }
+
     /// Registers worker metadata without registering any tasks.
     ///
     /// # Panics
@@ -195,6 +205,7 @@ impl RuntimeHandle {
                 drop(workers);
                 panic!("register workers before stopping their runtime");
             }
+
             workers.push(Arc::clone(&worker));
             worker
         });
@@ -300,6 +311,21 @@ impl RuntimeHandle {
         }
         self.control.state.store(RuntimeState::Stopped.wire_value(), Ordering::Release);
         true
+    }
+}
+
+/// Test-only guard for deterministic task observation.
+#[cfg(feature = "test-util")]
+#[derive(Debug)]
+#[must_use]
+pub struct TaskObservation {
+    control: Arc<RuntimeControl>,
+}
+
+#[cfg(feature = "test-util")]
+impl Drop for TaskObservation {
+    fn drop(&mut self) {
+        self.control.requests.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
