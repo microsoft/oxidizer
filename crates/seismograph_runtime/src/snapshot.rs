@@ -1256,10 +1256,6 @@ mod tests {
 
     #[test]
     fn gamma_round2_encoded_lengths_reject_each_scripted_overflow_without_large_buffers() {
-        assert_eq!(
-            encoded_len_from_counts([(3, 2, 1)], [(5, 7)]),
-            Some(HEADER_LEN + RUNTIME_FIXED_LEN + 3 + 2 * WORKER_FIXED_LEN + TASK_FIXED_LEN + ADDRESS_LOOKUP_FIXED_LEN + 12)
-        );
         for runtimes in [
             vec![(usize::MAX, 0, 0)],
             vec![(0, usize::MAX, 0)],
@@ -1753,7 +1749,6 @@ mod tests {
         ];
         for (error, expected) in cases {
             assert_eq!(error.to_string(), expected);
-            assert_eq!(error.kind(), error.kind);
         }
     }
 

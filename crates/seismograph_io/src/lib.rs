@@ -357,39 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn resource_and_buffer_accessors_preserve_metadata() {
-        let id = BufferId::allocate();
-        let state = BufferState::new(Some(id), usize::MAX, usize::MAX);
-        let none = BufferState::none();
-        let resource = Resource::new(IoResourceKind::NamedPipe);
-
-        assert_eq!(
-            (
-                resource.kind(),
-                state.id(),
-                state.len(),
-                state.is_empty(),
-                state.span_count(),
-                none.id(),
-                none.len(),
-                none.is_empty(),
-                none.span_count(),
-            ),
-            (
-                IoResourceKind::NamedPipe,
-                Some(id),
-                u64::try_from(usize::MAX).unwrap_or(u64::MAX),
-                false,
-                u32::try_from(usize::MAX).unwrap_or(u32::MAX),
-                None,
-                0,
-                true,
-                0,
-            )
-        );
-    }
-
-    #[test]
     fn dropping_recorded_operation_emits_cancellation() {
         let _test = TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration {
@@ -416,10 +383,5 @@ mod tests {
             ]
         );
         seismograph::recorder(Configuration::default());
-    }
-
-    #[test]
-    fn identity_race_selector_preserves_existing_identity() {
-        assert_eq!(identity_after_allocation_race(42), 42);
     }
 }

@@ -248,11 +248,24 @@ mod tests {
     #[test]
     fn gamma_nov4_registration_dispatches_exact_pages_before_initializing_and_short_circuits_failures() {
         let map = Map(0x0010_0000);
-        for address in [255 * CHUNK, 256 * CHUNK, (1usize << ADDRESS_BITS) - CHUNK] {
+        let last = (1usize << ADDRESS_BITS) - CHUNK;
+        // Entry for chunk n is 0x10_0000 + 16 * n; the commit spans its whole page.
+        let cases = match hal::PAGE {
+            4096 => [
+                (255 * CHUNK, 0x0010_0000, 0x0010_1000),
+                (256 * CHUNK, 0x0010_1000, 0x0010_2000),
+                (last, 0x40_000F_F000, 0x40_0010_0000),
+            ],
+            16384 => [
+                (255 * CHUNK, 0x0010_0000, 0x0010_4000),
+                (256 * CHUNK, 0x0010_0000, 0x0010_4000),
+                (last, 0x40_000F_C000, 0x40_0010_0000),
+            ],
+            page => panic!("no worked pagemap example for {page}-byte pages"),
+        };
+        for (address, first, end) in cases {
             for committed in [false, true] {
                 let events = std::cell::RefCell::new(Vec::new());
-                let first = (0x0010_0000 + (address / CHUNK) * 16) / hal::PAGE * hal::PAGE;
-                let end = (0x0010_0000 + (address.div_ceil(CHUNK) + 1) * 16).div_ceil(hal::PAGE) * hal::PAGE;
                 let result = map.register_with(
                     address,
                     CHUNK,

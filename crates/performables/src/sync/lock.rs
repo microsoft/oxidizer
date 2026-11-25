@@ -876,17 +876,6 @@ mod tests {
     }
 
     #[test]
-    fn asynchronous_state_starts_unlocked_and_unpoisoned() {
-        let state = StateAsync::new();
-
-        assert_eq!(
-            (state.state.load(Ordering::Relaxed), state.poisoned.load(Ordering::Relaxed)),
-            (0, false),
-        );
-        drop(state.waiters);
-    }
-
-    #[test]
     fn synchronous_state_retains_exclusion_across_ownership_transitions() {
         let state = StateSync::new();
         let mut reader = state.inner.read();

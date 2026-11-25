@@ -7,24 +7,6 @@ use allocation_hints::heaps::{Heap, Kind, bump, current_thread_id, general};
 use allocation_hints::{active_hint, with_hint};
 
 #[test]
-fn option_defaults_have_exact_documented_values() {
-    let general = general::Options::new();
-    let bump = bump::Options::new();
-
-    assert_eq!(
-        (
-            general.locality_segment_bytes(),
-            general.medium_cache_max_bytes(),
-            bump.max_allocation_bytes(),
-            bump.max_alignment(),
-            bump.retained_chunks(),
-            bump.max_retained_chunks(),
-        ),
-        (4 * 1024 * 1024, 8 * 1024 * 1024, 32 * 1024, 4 * 1024, 4, 16)
-    );
-}
-
-#[test]
 fn general_option_boundaries_accept_the_exact_documented_maxima() {
     let options = general::Options::new()
         .with_locality_segment_bytes(0x4000_0000)

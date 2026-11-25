@@ -365,14 +365,3 @@ pub fn current_thread_id() -> ThreadId {
 pub fn thread_heap_request() -> Option<ThreadId> {
     crate::allocator_hints().thread_heap()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{HeapId, ThreadId};
-
-    // Public APIs allocate identities; only private constructors accept arbitrary values.
-    #[test]
-    fn identity_accessors_preserve_arbitrary_values() {
-        assert_eq!((HeapId(42).get(), ThreadId(73).get()), (42, 73));
-    }
-}

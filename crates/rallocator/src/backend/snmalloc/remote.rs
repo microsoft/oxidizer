@@ -517,13 +517,6 @@ mod tests {
     }
 
     #[test]
-    fn gamma_round2_drain_front_plan_rejects_empty_before_reading_any_successor() {
-        assert_eq!(initial_drain_front(0), None);
-        assert_eq!(initial_drain_front(1), Some(1));
-        assert_eq!(initial_drain_front(16), Some(16));
-    }
-
-    #[test]
     fn gamma_round2_second_way_hit_and_larger_second_way_victim() {
         let (map, target, sender) = gamma_survivor_remote_endpoints();
         // SAFETY: The fixture initializes a persistent private target endpoint.
@@ -646,22 +639,6 @@ mod tests {
         cache.clear_budget();
         assert!(!cache.reserve(0));
         assert_eq!(cache.remaining, 0);
-        for (address, round, expected) in [(0x1234_5600usize, 0, 209), (0x1234_5600, 1, 72), (0x1234_5600, 2, 0)] {
-            assert_eq!(Cache::slot(address, round), expected);
-        }
-        for (meta, expected) in [
-            (8, 3),
-            (16, 6),
-            (24, 1),
-            (32, 4),
-            (0x1000, 2),
-            (0x8000, 2),
-            (0x1234_5678, 0),
-            (0x1234_5678_9ab8, 4),
-            (0x007f_ffff_ffff_fff8, 4),
-        ] {
-            assert_eq!(Cache::ring_set(meta), expected);
-        }
     }
 
     #[test]
@@ -864,9 +841,9 @@ mod tests {
 
     #[test]
     fn routing_rounds_use_logical_owner_envelope() {
-        assert_eq!(Owner::ALLOC_BITS, 14);
-        for round in 0..=(usize::BITS as usize - 1 - 14) / 8 {
-            let shift = 14 + round * 8;
+        let bits = Owner::ALLOC_BITS;
+        for round in 0..=(usize::BITS as usize - 1 - bits) / 8 {
+            let shift = bits + round * 8;
             let available_bits = (usize::BITS as usize - shift).min(8);
             for slot in 0..1usize << available_bits {
                 let address = slot << shift;

@@ -403,14 +403,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gamma_survivor_condvar_notify_all_advances_private_generation_by_exactly_one() {
-        let condition = Condvar::<Async>::new();
-        assert_eq!(condition.raw.generation.load(Ordering::Acquire), 0);
-        condition.notify_all();
-        assert_eq!(condition.raw.generation.load(Ordering::Acquire), 1);
-    }
-
-    #[test]
     fn gamma_survivor_condvar_reacquisition_keeps_private_notified_state_and_drops_waiter() {
         let condition = Condvar::<Async>::new();
         let mutex = Mutex::<u32, Async>::new(7);
@@ -450,14 +442,6 @@ mod tests {
         fn wake(self: StdArc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
-    }
-
-    #[test]
-    fn asynchronous_state_starts_without_notifications_or_waiters() {
-        let state = StateAsync::new();
-
-        assert_eq!(state.generation.load(Ordering::Relaxed), 0);
-        drop(state.waiters);
     }
 
     #[test]

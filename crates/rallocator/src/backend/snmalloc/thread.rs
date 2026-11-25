@@ -461,10 +461,10 @@ mod tests {
 
     #[test]
     fn gamma_round2_owner_address_guard_does_not_dispatch_null_and_forwards_exact_identity() {
-        for address in [0, 1, 16_384] {
+        for (address, expected) in [(0, None), (1, Some(1)), (16_384, Some(16_384))] {
             let mut observed = None;
             with_nonzero_owner(address, |value| observed = Some(value));
-            assert_eq!(observed, (address != 0).then_some(address));
+            assert_eq!(observed, expected);
         }
     }
 

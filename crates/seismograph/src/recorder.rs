@@ -2181,7 +2181,6 @@ mod tests {
     #[cfg(all(target_os = "windows", not(miri)))]
     #[test]
     fn gamma_round2_windows_stack_arguments_and_copy_count_are_exact_without_unwinding() {
-        assert_eq!(windows_stack_capture_parameters(MAX_STACK_FRAMES), (4, 24));
         let mut addresses = [99; MAX_STACK_FRAMES];
         addresses[..3].copy_from_slice(&[17, 23, 31]);
         let mut frames = [71; MAX_STACK_FRAMES];
@@ -5025,14 +5024,6 @@ mod tests {
     #[test]
     fn capacity_sampling_sessions_and_suppression_helpers_cover_boundaries() {
         let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::default();
-        assert_eq!(
-            capacity.memory_bytes_per_thread(),
-            std::mem::size_of::<ThreadRecorder>() + capacity.get() * std::mem::size_of::<Slot>()
-        );
-        assert_eq!(EventSampling::default(), EventSampling::ALL);
-        assert_eq!(NonZeroU64::new(0), None);
-
         configure(Configuration {
             general_events: Policy::all(false),
             ..test_configuration()

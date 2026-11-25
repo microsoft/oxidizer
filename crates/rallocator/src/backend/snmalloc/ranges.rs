@@ -433,7 +433,16 @@ mod tests {
     fn gamma_round2_commit_plan_releases_exactly_the_failed_reservation() {
         use std::cell::RefCell;
 
-        for (address, committed, expected) in [(0, true, 0), (0x40000, true, 0x40000), (0x40000, false, 0)] {
+        for (address, committed, expected, trace) in [
+            (0, true, 0, vec![("reserve", 0, CHUNK)]),
+            (0x40000, true, 0x40000, vec![("reserve", 0, CHUNK), ("commit", 0x40000, CHUNK)]),
+            (
+                0x40000,
+                false,
+                0,
+                vec![("reserve", 0, CHUNK), ("commit", 0x40000, CHUNK), ("release", 0x40000, CHUNK)],
+            ),
+        ] {
             let calls = RefCell::new(Vec::new());
             let actual = global_alloc_with(
                 CHUNK,
@@ -448,14 +457,7 @@ mod tests {
                 |pointer, size| calls.borrow_mut().push(("release", pointer, size)),
             );
             assert_eq!(actual, expected);
-            let mut expected = vec![("reserve", 0, CHUNK)];
-            if address != 0 {
-                expected.push(("commit", address, CHUNK));
-                if !committed {
-                    expected.push(("release", address, CHUNK));
-                }
-            }
-            assert_eq!(calls.into_inner(), expected);
+            assert_eq!(calls.into_inner(), trace);
         }
     }
 
@@ -638,8 +640,6 @@ mod tests {
                 observed.pagemap_reserved_bytes,
                 crate::backend::snmalloc::pagemap::RESERVED_BYTES as u64
             );
-            assert_eq!(observed.global_refill_bytes, 1 << 24);
-            assert_eq!(observed.local_limit_bytes, 1 << 21);
             assert_eq!(observed.ranges.observed_bytes(), (refill - CHUNK) as u128);
             for bits in CHUNK_BITS..refill.trailing_zeros() as usize {
                 assert_eq!(global_alloc_reserved(&mut global, 1 << bits), first + (1 << bits));

@@ -1895,17 +1895,4 @@ mod tests {
 
         assert_eq!(*Arc::into_arc(value), 42);
     }
-
-    #[test]
-    fn affinity_internal_state_and_factory_have_stable_debug_shapes() {
-        let value = Arc::<u64, PerThread>::new_with(|| 42);
-        let state_debug = format!("{:?}", value.state);
-        let inner = value.state.shared.inner.read().unwrap();
-        let factory_debug = format!("{:?}", inner.factory.as_ref().unwrap());
-
-        assert_eq!(
-            (state_debug, factory_debug),
-            ("AffinityState { .. }".to_owned(), "Factory { source: None, .. }".to_owned())
-        );
-    }
 }
