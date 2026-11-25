@@ -420,7 +420,7 @@ mod tests {
         let destination = thread::spawn(move || builder.build(thread::current().id())).join().unwrap();
         let shutdown = Shutdown::default();
         let blocking = blocking::Worker::new(
-            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None, None),
             shutdown.clone(),
         );
         let endpoint = |thread| worker_endpoint(command_channel().0, Waker::noop().clone(), thread, Arc::clone(&blocking));
@@ -780,7 +780,7 @@ mod tests {
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+            blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
             shutdown,
         )
     }

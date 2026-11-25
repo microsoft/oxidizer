@@ -292,7 +292,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(thread::current().id()),
             Worker::new(
-                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None, None),
                 shutdown.clone(),
             ),
         );
@@ -330,7 +330,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
+                Pool::new(RuntimeName::default(), None, None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );
@@ -353,7 +353,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
+                Pool::new(RuntimeName::default(), None, None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );

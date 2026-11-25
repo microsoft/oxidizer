@@ -23,7 +23,7 @@ impl DispatcherClient {
             commands,
             Waker::noop().clone(),
             thread.clone(),
-            Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+            Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
         );
         Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new(), None))
     }

@@ -40,26 +40,27 @@ pub(crate) trait MonitoredBlockingJob: Send + Sync {
     fn run(&self, finish: &mut dyn FnMut(BlockingTaskOutcome));
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct BlockingPoolMonitoring {
-    events: std::sync::Arc<std::sync::OnceLock<seismograph_runtime::task::EventContext>>,
+    events: Option<seismograph_runtime::task::EventContext>,
 }
 
 impl BlockingPoolMonitoring {
+    pub(crate) fn new(events: Option<seismograph_runtime::task::EventContext>) -> Self {
+        Self { events }
+    }
+
     pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown) -> BlockingTaskMonitoring {
         BlockingTaskMonitoring {
             info: matches!(shutdown.state(), ShutdownState::Running)
-                .then(|| self.events().map(TaskInfo::new::<F>))
+                .then(|| self.events.map(TaskInfo::new::<F>))
                 .flatten(),
         }
     }
 
-    pub(crate) fn enable(&self, events: seismograph_runtime::task::EventContext) {
-        self.events.set(events).expect("monitoring is enabled once under the queue lock");
-    }
-
+    #[cfg(all(test, feature = "test-util"))]
     pub(crate) fn events(&self) -> Option<seismograph_runtime::task::EventContext> {
-        self.events.get().copied()
+        self.events
     }
 }
 
@@ -200,8 +201,7 @@ mod tests {
         let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
             seismograph_runtime::worker::WorkerRole::Blocking,
         ));
-        let monitoring = BlockingPoolMonitoring::default();
-        monitoring.enable(worker.handle().task_events());
+        let monitoring = BlockingPoolMonitoring::new(Some(worker.handle().task_events()));
         let shutdown = Shutdown::default();
         let pool = crate::task::handle::JoinHandlePool::new(shutdown.clone());
         let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown));

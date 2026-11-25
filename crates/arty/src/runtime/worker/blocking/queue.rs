@@ -35,14 +35,31 @@ struct State {
     runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
-#[derive(Default)]
 pub(super) struct Queue {
     state: Mutex<State>,
     ready: Condvar,
     pub(super) monitoring: BlockingPoolMonitoring,
 }
 
+impl Default for Queue {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
 impl Queue {
+    pub(super) fn new(runtime: Option<seismograph_runtime::RuntimeHandle>) -> Self {
+        let monitoring = BlockingPoolMonitoring::new(runtime.as_ref().map(seismograph_runtime::RuntimeHandle::task_events));
+        Self {
+            state: Mutex::new(State {
+                runtime,
+                ..State::default()
+            }),
+            ready: Condvar::default(),
+            monitoring,
+        }
+    }
+
     pub(super) fn push(&self, job: QueuedJob) -> bool {
         let mut state = self
             .state
@@ -140,23 +157,6 @@ impl Queue {
         let registration = state.workers[index].registration.take();
         drop(state);
         drop(registration);
-    }
-
-    pub(super) fn enable_monitoring(self: &Arc<Self>, runtime: &seismograph_runtime::RuntimeHandle) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("a blocking queue operation must not panic while holding its lock");
-        if state.runtime.is_some() {
-            return;
-        }
-        for (index, slot) in state.workers.iter_mut().enumerate() {
-            slot.registration = Some(self.register_worker(runtime, index));
-        }
-        self.monitoring.enable(runtime.task_events());
-        state.runtime = Some(runtime.clone());
-        drop(state);
-        self.ready.notify_all();
     }
 
     fn register_worker(
@@ -334,20 +334,6 @@ mod tests {
     }
 
     #[test]
-    fn enabling_monitoring_wakes_every_waiting_worker() {
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("wake-monitoring-workers", 2));
-        let queue = Arc::new(Queue::default());
-        queue.add_worker();
-        queue.add_worker();
-        queue.ready.waiting.store(2, Ordering::SeqCst);
-
-        queue.enable_monitoring(&runtime.handle());
-
-        assert_eq!(queue.ready.waiting.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
     #[cfg(not(miri))]
     fn an_empty_queue_records_parking_and_resumes_for_new_work() {
         use seismograph::recorder::event::EventKind;
@@ -367,9 +353,8 @@ mod tests {
             ..Configuration::default()
         });
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-park-wakeup", 1));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         let index = queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         let (sent, received) = std::sync::mpsc::channel();
         let mut callback = Some(BlockingJob::Plain(Box::new(move || sent.send(42).unwrap())));
         queue.ready.script(2, move |state| {
@@ -404,11 +389,10 @@ mod tests {
     fn a_nonfirst_worker_collects_its_own_running_task() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("middle-blocking-worker", 3));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         for _ in 0..3 {
             queue.add_worker();
         }
-        queue.enable_monitoring(&runtime.handle());
         queue.retire(0);
         queue.retire(2);
         let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
@@ -428,42 +412,8 @@ mod tests {
     }
 
     #[test]
-    fn enabling_monitoring_during_an_unmonitored_job_preserves_the_collection_limit() {
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("late-blocking-monitoring", 1));
-        let queue = Arc::new(Queue::default());
-        let index = queue.add_worker();
-        assert!(queue.push(QueuedJob {
-            body: BlockingJob::Plain(Box::new(|| {})),
-            shutdown: None,
-        }));
-        let mut worker = BlockingWorkerMonitoring::default();
-        let running = queue.pop(index, &mut worker).unwrap();
-        queue.enable_monitoring(&runtime.handle());
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
-        assert!(queue.push(QueuedJob {
-            body: BlockingJob::Monitored(Arc::clone(&body)),
-            shutdown: None,
-        }));
-
-        let snapshot = runtime
-            .handle()
-            .capture(CaptureOptions {
-                limit_per_worker: 1,
-                ..CaptureOptions::default()
-            })
-            .unwrap();
-
-        assert_eq!(snapshot.tasks.len(), 1);
-        assert_eq!(snapshot.tasks[0].id, body.info().id());
-        assert_eq!(snapshot.tasks[0].activity.unwrap().state, TaskActivityState::Ready);
-        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Complete);
-        drop(running);
-    }
-
-    #[test]
     #[cfg(not(miri))]
-    fn shared_submission_events_belong_to_the_worker_that_collects_the_queue() {
+    fn submissions_outside_runtime_workers_have_no_worker_attribution() {
         use seismograph::recorder::event::EventKind;
         use seismograph::recorder::{Configuration, Policy};
         use seismograph::snapshot::SnapshotOptions;
@@ -482,12 +432,10 @@ mod tests {
             ..Configuration::default()
         });
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-submission-owner", 2));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
         queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
-        let owner = runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].id;
 
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
         let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
@@ -500,17 +448,15 @@ mod tests {
             .find(|event| event.runtime_id == runtime.handle().id() && event.subject_id == info.id().get())
             .unwrap();
 
-        assert_eq!(spawn.worker_id, Some(owner));
+        assert_eq!(spawn.worker_id, None);
     }
 
     #[test]
     fn blocking_slots_advance_and_retire_without_retaining_a_running_task() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-slots", 1));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         let index = queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
-        queue.enable_monitoring(&runtime.handle());
         let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
@@ -547,10 +493,9 @@ mod tests {
     fn blocking_worker_transitions_and_retirement_target_the_selected_slot() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-worker-transitions", 2));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
         let index = queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Plain(Box::new(|| {})),
             shutdown: None,
@@ -575,10 +520,9 @@ mod tests {
     fn only_the_first_blocking_worker_collects_shared_queued_tasks() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-queue-owner", 2));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
         queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())))),
             shutdown: None,
@@ -611,9 +555,8 @@ mod tests {
         for stopped in [false, true] {
             let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
             let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-capture-drop", 1));
-            let queue = Arc::new(Queue::default());
+            let queue = Arc::new(Queue::new(Some(runtime.handle())));
             let index = queue.add_worker();
-            queue.enable_monitoring(&runtime.handle());
             let (dropped, received) = std::sync::mpsc::channel();
             let capture = Capture(Arc::clone(&queue), dropped);
             let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
@@ -657,9 +600,8 @@ mod tests {
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("idle-blocking-drop", 1));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         let index = queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         let (dropped, received) = std::sync::mpsc::channel();
         let capture = Capture(Arc::clone(&queue), dropped);
         let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
@@ -700,9 +642,8 @@ mod tests {
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-limits", 1));
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(Queue::new(Some(runtime.handle())));
         queue.add_worker();
-        queue.enable_monitoring(&runtime.handle());
         let inspections = Arc::new(AtomicUsize::new(0));
         for body in [
             BlockingJob::Plain(Box::new(|| {})),

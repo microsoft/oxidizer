@@ -105,15 +105,15 @@ impl BlockingPoolPolicy {
 
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(crate) fn into_pools(self, name: RuntimeName) -> Result<Pools, Error> {
+    pub(crate) fn into_pools(self, name: RuntimeName, monitoring: Option<seismograph_runtime::RuntimeHandle>) -> Result<Pools, Error> {
         match self.mode {
             Mode::PerWorker => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(Pools::per_worker(name, max_workers))
+                Ok(Pools::per_worker(name, max_workers, monitoring))
             }
             Mode::Shared => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(Pools::shared(name, max_workers))
+                Ok(Pools::shared(name, max_workers, monitoring))
             }
         }
     }
@@ -141,7 +141,7 @@ mod tests {
     fn per_worker_into_pools_is_per_worker() {
         assert!(
             matches!(
-                BlockingPoolPolicy::per_worker().into_pools(RuntimeName::default()).unwrap(),
+                BlockingPoolPolicy::per_worker().into_pools(RuntimeName::default(), None).unwrap(),
                 Pools::PerWorker { max_workers: None, .. }
             ),
             "expected PerWorker variant"
@@ -152,7 +152,7 @@ mod tests {
     fn shared_into_pools_is_shared() {
         assert!(
             matches!(
-                BlockingPoolPolicy::shared().into_pools(RuntimeName::default()).unwrap(),
+                BlockingPoolPolicy::shared().into_pools(RuntimeName::default(), None).unwrap(),
                 Pools::Shared(_)
             ),
             "expected Shared variant"
@@ -164,14 +164,14 @@ mod tests {
         assert!(matches!(
             BlockingPoolPolicy::per_worker()
                 .max(3)
-                .into_pools(RuntimeName::default())
+                .into_pools(RuntimeName::default(), None)
                 .unwrap(),
             Pools::PerWorker { max_workers: Some(max), .. } if max.get() == 3
         ));
         assert!(matches!(
             BlockingPoolPolicy::shared()
                 .max(4)
-                .into_pools(RuntimeName::default())
+                .into_pools(RuntimeName::default(), None)
                 .unwrap(),
             Pools::Shared(pool) if pool.max_thread_count() == 4
         ));

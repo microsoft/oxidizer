@@ -83,9 +83,11 @@ fn prepare_workers<W>(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
     let monitoring = RuntimeMonitoring::start(monitor_options.policy(), &name, worker_count)?;
     monitor_options.set_runtime(monitoring.as_ref().map(RuntimeMonitoring::handle));
+    let blocking_pools = processor_config
+        .blocking_pool_policy
+        .into_pools(name.clone(), monitor_options.runtime().cloned())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(start(asynchronous::StartOptions {

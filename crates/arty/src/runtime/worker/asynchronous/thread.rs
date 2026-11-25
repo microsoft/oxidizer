@@ -149,9 +149,6 @@ impl ThreadEntry {
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
         let blocking_pool = blocking_pools.pool_for_worker(worker_index);
-        if let Some(runtime) = monitor_options.runtime() {
-            blocking_pool.enable_monitoring(runtime);
-        }
         let blocking_worker = blocking::Worker::new(blocking_pool, shutdown);
 
         endpoint_tx
@@ -303,7 +300,7 @@ mod tests {
             commands: asynchronous::command_channel().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(thread::current().id()),
-            blocking_worker: blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            blocking_worker: blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
         }
     }
 
@@ -483,7 +480,7 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
@@ -497,7 +494,7 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 

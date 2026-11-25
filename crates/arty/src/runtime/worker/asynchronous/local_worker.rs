@@ -403,13 +403,13 @@ mod tests {
                         source_commands,
                         Waker::noop().clone(),
                         source.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                     ),
                     worker_endpoint(
                         destination_commands,
                         Waker::noop().clone(),
                         destination.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                     ),
                 ])
                 .unwrap(),
@@ -476,7 +476,7 @@ mod tests {
                     commands,
                     Waker::noop().clone(),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                 )),
                 shutdown,
             );
@@ -534,7 +534,7 @@ mod tests {
                     commands,
                     Waker::from(std::sync::Arc::clone(&wakes)),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                 )),
                 shutdown.clone(),
             );
@@ -583,7 +583,7 @@ mod tests {
                     other_tx,
                     Waker::noop().clone(),
                     other_thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
                 )),
                 Shutdown::default(),
             );

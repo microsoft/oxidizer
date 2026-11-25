@@ -449,7 +449,7 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
             },
             command_rx,
         )
