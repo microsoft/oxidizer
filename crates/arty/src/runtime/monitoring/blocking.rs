@@ -156,7 +156,7 @@ impl BlockingWorkerMonitoring {
             let token = observed.then(|| worker.task_poll_started(info.id()));
             info.started_on(events, token.as_ref().and_then(seismograph_runtime::task::TaskPoll::started_at));
             if let Some(token) = token {
-                current = Some(seismograph_runtime::task::enter_task(info.id(), events));
+                current = Some(arty_executor::enter_task(info.id(), events));
                 poll = Some((worker, token));
             }
         }

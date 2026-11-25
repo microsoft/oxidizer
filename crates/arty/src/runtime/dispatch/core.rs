@@ -359,9 +359,7 @@ impl DispatcherCore {
             return join_handle;
         }
         let target = &self.worker_endpoints[usize::from(worker_index)].thread;
-        let options = options
-            .record_spawn(self.monitoring.as_ref().map(seismograph_runtime::RuntimeHandle::task_events))
-            .observed_by(self.submission_observers(target));
+        let options = options.observed_by(self.submission_observers(target));
         let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, options);
         self.send_prepared(worker_index, future_factory);
         join_handle

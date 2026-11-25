@@ -238,6 +238,54 @@ fn remote_spawn_uses_origin_metadata_and_destination_execution() {
 }
 
 #[test]
+fn cross_runtime_spawn_records_only_in_the_destination_runtime() {
+    let _recording = RecorderGuard::new(true);
+    let first_name = "integration-cross-runtime-origin";
+    let second_name = "integration-cross-runtime-destination";
+    let first = runtime(first_name, 1);
+    let second = runtime(second_name, 1);
+    let second_scheduler = second.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let (started, ready) = mpsc::channel();
+    let (spawned, child_handle) = mpsc::channel();
+    let parent = first.scheduler().spawn_anywhere(
+        Unaware((second_scheduler, started, spawned)),
+        |_, Unaware((second_scheduler, started, spawned))| async move {
+            let child = second_scheduler.spawn_anywhere(Unaware(started), |Unaware(started)| PendingBody::<32>::new(started));
+            spawned.send(child).unwrap();
+            pending::<()>().await;
+        },
+    );
+    let child = receive(&child_handle);
+    receive(&ready);
+
+    let first_native = capture_runtime(first_name);
+    let second_native = capture_runtime(second_name);
+    let child_task = &second_native.tasks[0];
+    let parent_task = &first_native.tasks[0];
+    assert_eq!(child_task.parent, Some(parent_task.id));
+
+    first.stop().unwrap();
+    second.stop().unwrap();
+    assert!(futures::executor::block_on(parent).unwrap_err().is_shutdown());
+    assert!(futures::executor::block_on(child).unwrap_err().is_shutdown());
+
+    let snapshot = process_snapshot();
+    let spawns = snapshot
+        .events
+        .events
+        .iter()
+        .filter(|event| {
+            event.kind == EventKind::TaskSpawned && event.runtime().is_some_and(|payload| payload.subject_id == child_task.id.get())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(spawns.len(), 1);
+    assert_eq!(
+        (spawns[0].runtime().unwrap().runtime_id, spawns[0].runtime().unwrap().worker_id),
+        (second_native.id, None)
+    );
+}
+
+#[test]
 fn blocking_monitoring_distinguishes_submission_execution_and_queue_state() {
     let _recording = RecorderGuard::new(true);
     let name = "integration-blocking-state";
