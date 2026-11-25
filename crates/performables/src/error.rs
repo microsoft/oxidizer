@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifications_and_messages_distinguish_failures() {
+    fn classifications_distinguish_failures() {
         let cases = [
             (ErrorKind::ForeignOwner, 0),
             (ErrorKind::Duplicate, 1),
@@ -178,7 +178,6 @@ mod tests {
             (ErrorKind::Timeout, 7),
         ];
 
-        let mut messages = Vec::new();
         for (kind, predicate) in cases {
             let error = Error::without_value(kind);
             let flags = [
@@ -192,13 +191,34 @@ mod tests {
                 error.is_timeout(),
             ];
             assert_eq!(flags, std::array::from_fn(|index| index == predicate));
-            let message = error.to_string();
-            assert!(!message.is_empty());
-            for (previous_predicate, previous_message) in &messages {
-                assert_eq!(message == *previous_message, predicate == *previous_predicate);
-            }
-            messages.push((predicate, message));
         }
+    }
+
+    #[test]
+    fn messages_distinguish_failure_categories() {
+        let kinds = [
+            ErrorKind::ForeignOwner,
+            ErrorKind::Duplicate,
+            ErrorKind::MissingCurrent,
+            ErrorKind::Poisoned,
+            ErrorKind::Full,
+            ErrorKind::Empty,
+            ErrorKind::Closed,
+            ErrorKind::Timeout,
+        ];
+
+        let mut messages = std::collections::HashSet::new();
+        for kind in kinds {
+            let error = Error::without_value(kind);
+            let message = error.to_string();
+            assert!(!message.is_empty(), "{kind:?} must have a diagnostic");
+            assert!(messages.insert(message), "{kind:?} must have a distinct diagnostic");
+        }
+
+        assert_eq!(
+            Error::without_value(ErrorKind::Closed).to_string(),
+            Error::with_value(ErrorKind::Closed, ()).to_string()
+        );
     }
 
     #[test]
