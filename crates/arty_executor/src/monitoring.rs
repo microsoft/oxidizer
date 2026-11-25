@@ -4,7 +4,7 @@
 use seismograph::recorder::event::EventTimestamp;
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivity, TaskActivityState, TaskMetrics, TaskMetricsScope};
-use seismograph_runtime::task::{EventContext, TaskPoll, TaskSpawn};
+use seismograph_runtime::task::{EventContext, TaskPoll, TaskProperties, TaskSpawn};
 use seismograph_runtime::worker::WorkerHandle;
 
 use crate::TaskState;
@@ -85,7 +85,13 @@ impl TaskMetadata {
     pub fn capture<T: 'static>(events: EventContext, parent: Option<TaskId>, body_size: usize) -> Self {
         Self {
             events,
-            spawn: events.spawned_with(type_descriptor::<T>, parent, body_size),
+            spawn: events.spawned(|| {
+                let mut properties = TaskProperties::new(seismograph_runtime::allocate_task_id(), type_descriptor::<T>());
+                properties.parent = parent;
+                properties.body_size = body_size;
+                properties.origin = Some(events);
+                properties
+            }),
             parent,
             body_size,
             describe_type: type_descriptor::<T>,
@@ -94,27 +100,25 @@ impl TaskMetadata {
     }
 
     fn id(&self) -> TaskId {
-        self.spawn.map_or_else(
-            || *self.identity.get_or_init(seismograph_runtime::allocate_task_id),
-            |spawn| spawn.id,
-        )
+        self.spawn
+            .as_ref()
+            .map_or_else(|| *self.identity.get_or_init(seismograph_runtime::allocate_task_id), TaskSpawn::id)
     }
 
     fn describe(&self, state: TaskActivityState) -> Task {
-        let mut task = Task::new(
-            self.id(),
-            self.spawn.map_or_else(|| (self.describe_type)(), |spawn| spawn.descriptor),
-            state,
-        );
+        if let Some(spawn) = &self.spawn {
+            return spawn.describe(state);
+        }
+        let mut task = Task::new(self.id(), (self.describe_type)(), state);
         task.parent = self.parent;
-        task.spawned_at = self.spawn.map(|spawn| spawn.timestamp);
         task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
         task
     }
 
     fn terminal_id(&self) -> Option<TaskId> {
         self.spawn
-            .map(|spawn| spawn.id)
+            .as_ref()
+            .map(TaskSpawn::id)
             .or_else(|| seismograph::recorder::is_enabled(seismograph::recorder::event::EventClass::RuntimeTask).then(|| self.id()))
     }
 }

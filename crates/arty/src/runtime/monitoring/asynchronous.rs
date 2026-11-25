@@ -38,7 +38,10 @@ impl WorkerMonitoring {
             return;
         }
         let mut tasks = Vec::new();
-        let truncated = executor.inspect_tasks(request.limit(), |task| tasks.push(task));
+        let truncated = executor.inspect_tasks(request.limit(), |mut task| {
+            task.last_worker_id = Some(self.handle.id());
+            tasks.push(task);
+        });
         request.respond(
             tasks,
             if truncated {

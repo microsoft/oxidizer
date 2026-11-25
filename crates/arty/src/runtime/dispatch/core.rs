@@ -305,10 +305,6 @@ impl DispatcherCore {
         self.remote_results.shutdown()
     }
 
-    pub(crate) const fn monitoring(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
-        self.monitoring.as_ref()
-    }
-
     pub(crate) fn next_blocking_worker(&self) -> Arc<Worker> {
         self.blocking_worker(self.next_worker_index())
     }
@@ -337,7 +333,7 @@ impl DispatcherCore {
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        self.enqueue(worker_index, future_factory, TaskSpawnOptions::new::<F>(self.monitoring()))
+        self.enqueue(worker_index, future_factory, TaskSpawnOptions::new::<F>())
     }
 
     /// Records the execution worker so a successful result can relocate when its join is polled.
@@ -348,7 +344,7 @@ impl DispatcherCore {
         F::Output: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        self.enqueue(worker_index, future_factory, TaskSpawnOptions::new::<F>(self.monitoring()))
+        self.enqueue(worker_index, future_factory, TaskSpawnOptions::new::<F>())
             .relocate_result_from(source)
     }
 
@@ -465,7 +461,7 @@ mod tests {
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        dispatcher.spawn(future_factory, TaskSpawnOptions::new::<F>(dispatcher.monitoring()))
+        dispatcher.spawn(future_factory, TaskSpawnOptions::new::<F>())
     }
 
     #[test]

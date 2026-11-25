@@ -1371,7 +1371,7 @@ mod tests {
         }
         let join = worker_context(&worker).dispatcher().spawn(
             |_| std::future::ready(()),
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(worker_context(&worker).dispatcher().monitoring()),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
         );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
@@ -2151,7 +2151,7 @@ mod tests {
                     std::future::ready(())
                 }
             },
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(worker_context(&worker).dispatcher().monitoring()),
+            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
         );
 
         assert!(worker.execute_step().is_break());
