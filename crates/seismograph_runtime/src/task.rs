@@ -116,24 +116,6 @@ impl EventContext {
         self.runtime
     }
 
-    /// Assigns an identity and emits task creation only when recording is enabled.
-    ///
-    /// Returns `None` when the recorder does not run the event builder. Sampling
-    /// or a concurrent policy change can still omit the event after assigning
-    /// an identity. Keep that identity for native inspection and later outcomes.
-    /// Measure `body_size` before runtime wrapping or type erasure.
-    /// The worker identifies the submission origin, not the execution worker.
-    ///
-    /// # Panics
-    ///
-    /// Panics if process task identities are exhausted or `body_size` cannot be
-    /// encoded as a value smaller than `u64::MAX`.
-    #[must_use]
-    #[inline]
-    pub fn spawned(&self, descriptor: TypeDescriptorId, properties: &TaskProperties) -> Option<TaskId> {
-        self.spawned_with(|| descriptor, properties).map(|spawn| spawn.id)
-    }
-
     /// Builds a task creation event and returns its identity and timestamp.
     ///
     /// Calls `descriptor` only when the recorder runs the event builder.
@@ -148,7 +130,7 @@ impl EventContext {
     /// Propagates a panic from `descriptor`. Panics if process task identities
     /// are exhausted or `body_size` cannot be encoded below `u64::MAX`.
     #[must_use]
-    pub fn spawned_with(&self, descriptor: impl FnOnce() -> TypeDescriptorId, properties: &TaskProperties) -> Option<TaskSpawn> {
+    pub fn spawned(&self, descriptor: impl FnOnce() -> TypeDescriptorId, properties: &TaskProperties) -> Option<TaskSpawn> {
         let mut assigned = None;
         seismograph::record(EventClass::RuntimeTask, || {
             let size = u64::try_from(properties.body_size)

@@ -8,10 +8,6 @@ use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
 use seismograph_runtime::task::{EventContext, TaskProperties};
 
-pub(crate) fn descriptor<T: 'static>() -> TypeDescriptorId {
-    seismograph_runtime::task::type_descriptor::<T>()
-}
-
 #[derive(Debug)]
 struct TaskMetadata {
     describe_type: fn() -> TypeDescriptorId,
@@ -27,7 +23,7 @@ impl TaskMetadata {
             .filter(|current| current.runtime_id() == events.runtime_id())
             .unwrap_or(runtime_events);
         Self {
-            describe_type: descriptor::<T>,
+            describe_type: seismograph_runtime::task::type_descriptor::<T>,
             properties: TaskProperties::default()
                 .parent(arty_executor::current_task())
                 .body_size(size_of::<T>()),
@@ -37,8 +33,8 @@ impl TaskMetadata {
     }
 
     fn record_spawn(&mut self) -> Option<TaskIdentity> {
-        let spawn = self.spawn_events.spawned_with(self.describe_type, &self.properties)?;
-        self.properties = self.properties.clone().spawned_at(Some(spawn.timestamp));
+        let spawn = self.spawn_events.spawned(self.describe_type, &self.properties)?;
+        self.properties = std::mem::take(&mut self.properties).spawned_at(Some(spawn.timestamp));
         Some(TaskIdentity {
             id: spawn.id,
             descriptor: spawn.descriptor,

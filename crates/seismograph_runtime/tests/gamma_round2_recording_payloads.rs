@@ -78,17 +78,21 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
     let second_id = second.id();
     let task_events = worker.task_events();
     let parent = task_events
-        .spawned(TypeDescriptorId::from_raw(11).unwrap(), &task_properties(None, 0))
-        .unwrap();
+        .spawned(|| TypeDescriptorId::from_raw(11).unwrap(), &task_properties(None, 0))
+        .unwrap()
+        .id;
     let child = task_events
-        .spawned(TypeDescriptorId::from_raw(13).unwrap(), &task_properties(Some(parent), 0))
-        .unwrap();
+        .spawned(|| TypeDescriptorId::from_raw(13).unwrap(), &task_properties(Some(parent), 0))
+        .unwrap()
+        .id;
     let legacy = task_events
-        .spawned(TypeDescriptorId::from_raw(17).unwrap(), &task_properties(Some(parent), 0))
-        .unwrap();
+        .spawned(|| TypeDescriptorId::from_raw(17).unwrap(), &task_properties(Some(parent), 0))
+        .unwrap()
+        .id;
     let sized = task_events
-        .spawned(TypeDescriptorId::from_raw(19).unwrap(), &task_properties(Some(parent), 321))
-        .unwrap();
+        .spawned(|| TypeDescriptorId::from_raw(19).unwrap(), &task_properties(Some(parent), 321))
+        .unwrap()
+        .id;
     let tasks = Arc::new(Mutex::new(
         [(parent, 11, 0), (child, 13, 0), (legacy, 17, 0), (sized, 19, 321)]
             .map(|(id, descriptor, size)| Task {
