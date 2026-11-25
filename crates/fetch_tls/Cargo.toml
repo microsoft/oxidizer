@@ -4,7 +4,7 @@
 [package]
 name = "fetch_tls"
 description = "TLS configuration for the fetch crate."
-version = "0.5.1"
+version = "0.5.2"
 readme = "README.md"
 keywords = ["oxidizer", "tls", "fetch", "http", "client"]
 categories = ["network-programming"]

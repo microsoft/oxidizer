@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.3] - 2026-11-24
+
+- Expand scalar, SIMD, portable-dispatch, and URI validation regression coverage.
+- Update the local development requirement for `metabench` from `^0.3.0` to `^0.3.1`.
+
 ## [0.1.2] - 2026-11-02
 
 - Update the published Metabench requirement for development. Header parsing behavior does not

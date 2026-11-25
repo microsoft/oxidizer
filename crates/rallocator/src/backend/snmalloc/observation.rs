@@ -378,7 +378,7 @@ mod tests {
     use super::*;
 
     // SAFETY: These tests keep every block within this linked snmalloc instance.
-    const ALLOCATOR: crate::Rallocator = unsafe { crate::Rallocator::new(crate::backend::Snmalloc) };
+    const ALLOCATOR: crate::Rallocator<crate::backend::Snmalloc> = unsafe { crate::Rallocator::new(crate::backend::Snmalloc) };
 
     #[test]
     fn an_unleased_owner_can_be_returned_before_its_first_lease() {

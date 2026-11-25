@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.2] - 2026-11-24
+
+- Update Chumsky and expand template, optional-field, and URI parameter regression coverage.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.7.1] - 2026-11-02
 
 - Update the error dependency. Use version 0.7.1 to match the Templated URI packages. The code

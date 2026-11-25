@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2] - 2026-11-24
+
+- Expose matched route templates and named parameters through RouteTable and RouteHit.
+- Generate route-table support for static and dynamic resolvers.
+- Update the local requirement for `http_path_template` from `^0.2.3` to `^0.2.4`.
+- Update the local requirement for `routerama_build` from `=0.3.1` to `=0.3.2`.
+- Update the local requirement for `routerama_macros` from `=0.3.1` to `=0.3.2`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update path-template, macro, and benchmark requirements. Use version 0.3.1 for all Routerama

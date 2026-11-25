@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Breaking: Adapt private WinHTTP body and runtime handoffs to the new public contracts.
+- Expand deterministic native-call, receiver cleanup, and test-server coverage.
+- Update the local requirement for `bytesbuf` for `cfg(windows)` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `bytesbuf_io` for `cfg(windows)` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `fetch` for `cfg(windows)` from `^0.21.0` to `^0.22.0`.
+- Update the local requirement for `http_extensions` for `cfg(windows)` from `^0.15.0` to `^0.16.0`.
+- Update the local requirement for `layered` for `cfg(windows)` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `observed` for `cfg(windows)` from `^0.30.1` to `^0.31.0`.
+- Update the local requirement for `ohno` for `cfg(windows)` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `plurality` for `cfg(windows)` from `^0.2.4` to `^0.2.5`.
+- Update the local requirement for `thread_aware` for `cfg(windows)` from `^0.12.2` to `^0.12.3`.
+- Update the local requirement for `tick` for `cfg(windows)` from `^0.9.1` to `^0.10.0`.
+
 ## [0.6.0] - 2026-11-06
 
 - Accept `impl Into<OpaqueMemory>` in `WinHttpDeps::builder`. This also updates the builder

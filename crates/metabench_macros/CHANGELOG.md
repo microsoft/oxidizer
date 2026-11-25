@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.1] - 2026-11-24
+
+- Update the private benchmark macro shim and portable compile-test Cargo lookup.
+- Update the local requirement for `metabench_macros_impl` from `=0.3.0` to `=0.3.1`.
+
 ## [0.3.0] - 2026-11-02
 
 - Breaking: Replace temporary borrows with owned native inputs. The macros generate adapters for

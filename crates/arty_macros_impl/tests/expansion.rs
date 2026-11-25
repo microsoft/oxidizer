@@ -316,7 +316,7 @@ fn main_panic_settings_are_forwarded_exactly() {
         let expected = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#policy())
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -346,7 +346,7 @@ fn test_panic_settings_are_forwarded_exactly() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#policy())
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2026-11-24
+
+- Update the private Serde macro shim and implementation requirement.
+- Update the local requirement for `internity_macros_impl` from `=0.3.1` to `=0.3.2`.
+
 ## [0.3.1] - 2026-11-02
 
 - Use version 0.3.1 to match the Internity packages. Macro behavior does not change.

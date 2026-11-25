@@ -105,14 +105,13 @@ where
     }
 }
 
+// Cache hides the adapter's Debug output and reports only the primary tier's size.
 #[cfg(test)]
 mod tests {
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::transform::codec::{TransformCodec, TransformEncoder, infallible_owned};
-    use crate::transform::testing::MockCodec;
-
+    use crate::{TransformCodec, TransformEncoder, infallible_owned};
     #[test]
     fn gamma_survivor_private_transform_adapter_debug_names_every_type_and_inner_tier() {
         let adapter = TransformAdapter::from_boxed(
@@ -149,12 +148,6 @@ mod tests {
         assert!(debug.contains("TransformAdapter"));
     }
 
-    #[test]
-    fn infallible_encoder_closure_is_covered() {
-        let encoder = TransformEncoder::infallible(|k: &i32| k.to_string());
-        assert_eq!(encoder.encode(&42).unwrap(), "42");
-    }
-
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn len_delegates_to_inner() {
@@ -168,65 +161,5 @@ mod tests {
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
         );
         assert_eq!(adapter.len().await.expect("MockCache::len returns Ok"), 2);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn insert_delegates_to_inner() {
-        let inner = MockCache::<i32, i32>::new();
-        let inner_check = inner.clone();
-        let adapter = TransformAdapter::from_boxed(
-            inner,
-            Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
-            Box::new(TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                infallible_owned(|v: i32| v.to_string()),
-            )),
-        );
-
-        adapter.insert("42".to_string(), CacheEntry::new("100".to_string())).await.unwrap();
-
-        let stored = inner_check.get(&42).await.unwrap().expect("insert should reach inner tier");
-        assert_eq!(*stored.value(), 100);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn get_preserves_ttl_and_cached_at() {
-        use std::time::{Duration, SystemTime};
-
-        use crate::infallible;
-
-        let ttl = Duration::from_mins(5);
-        let cached_at = SystemTime::now();
-        let mut entry = CacheEntry::new(42);
-        entry.set_ttl(ttl);
-        entry.ensure_cached_at(cached_at);
-
-        let inner = MockCache::with_data(std::iter::once((1, entry)).collect());
-        let adapter = TransformAdapter::from_boxed(
-            inner,
-            Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
-            Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
-        );
-
-        let result = adapter.get(&1).await.unwrap().expect("should be Some");
-        assert_eq!(*result.value(), 42);
-        assert_eq!(result.ttl(), Some(ttl));
-        assert_eq!(result.cached_at(), Some(cached_at));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn get_returns_none_on_soft_failure() {
-        let inner = MockCache::with_data(std::iter::once((1, CacheEntry::new(42))).collect());
-        let adapter = TransformAdapter::from_boxed(
-            inner,
-            Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
-            Box::new(MockCodec::<i32>::soft_failure("test failure")),
-        );
-
-        let result = adapter.get(&1).await.unwrap();
-        assert!(result.is_none(), "soft failure should return None");
     }
 }

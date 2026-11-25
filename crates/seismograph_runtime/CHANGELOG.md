@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Read only wire version 1 and runtime source schema 9.
+- Add task-size availability, running-worker attribution, and deterministic capture timeout controls.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Breaking: Replace per-task diagnostic registration and lifetime counters with bounded

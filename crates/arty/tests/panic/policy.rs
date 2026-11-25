@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context as PollContext, Wake, Waker};
 
-use arty::runtime::hook::{HookFn, Panic};
+use arty::runtime::hook::{HookFn, TaskPanic};
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::runtime::{Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause};
 use arty::task::Context;
@@ -34,8 +34,8 @@ fn runtime_builder(workers: usize, response: PanicResponse) -> RuntimeBuilder {
         // callbacks whose completion or cancellation the test observes.
         .blocking_pool(BlockingPoolPolicy::shared().max(2));
     match response {
-        PanicResponse::Shutdown => builder.on(Panic::shutdown()),
-        PanicResponse::Ignore => builder.on(Panic::ignore()),
+        PanicResponse::Shutdown => builder.on(TaskPanic::shutdown()),
+        PanicResponse::Ignore => builder.on(TaskPanic::ignore()),
     }
 }
 
@@ -242,7 +242,7 @@ fn blocking_panics_do_not_run_hooks_or_start_shutdown() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<Panic, _>::new(Unaware(Arc::clone(&calls)), |event, data| {
+        .on(HookFn::<TaskPanic, _>::new(Unaware(Arc::clone(&calls)), |event, data| {
             data.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             event.set_shutdown();
         }))
@@ -283,7 +283,7 @@ fn ignore_policy_keeps_running_after_each_governed_panic_boundary() {
 #[test]
 fn ignore_policy_remains_operational_across_workers_and_cloned_schedulers() {
     let runtime = runtime_builder(2, PanicResponse::Ignore).build().unwrap();
-    let destination = support::runtime_control(&runtime).workers().into_iter().nth(1).unwrap().clone();
+    let destination = support::runtime_control(&runtime).workers().nth(1).unwrap();
     let scheduler = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
@@ -316,10 +316,9 @@ fn concurrent_panics_start_one_coordinated_shutdown() {
     let barrier = Arc::new(Barrier::new(3));
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
         .map(|worker| {
             let barrier = Arc::clone(&barrier);
-            scheduler.spawn_at(worker, Unaware(barrier), concurrent_panic)
+            scheduler.spawn_at(&worker, Unaware(barrier), concurrent_panic)
         })
         .collect();
 
@@ -386,9 +385,8 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
     let (started_tx, started_rx) = mpsc::channel();
     let pending: Vec<_> = control
         .workers()
-        .into_iter()
         .map(|worker| {
-            scheduler.spawn_at(worker, Unaware(started_tx.clone()), |Unaware(started)| async move {
+            scheduler.spawn_at(&worker, Unaware(started_tx.clone()), |Unaware(started)| async move {
                 started.send(()).unwrap();
                 pending::<()>().await;
             })
@@ -398,7 +396,7 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
         started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
     }
 
-    drop(scheduler.spawn_at(control.workers().into_iter().next().unwrap(), Unaware(()), relocated_panic));
+    drop(scheduler.spawn_at(&control.workers().next().unwrap(), Unaware(()), relocated_panic));
 
     let cancellations: Vec<_> = pending.into_iter().map(|task| task.join().unwrap_err()).collect();
     let stop = runtime.stop().unwrap_err();
@@ -434,11 +432,10 @@ fn detached_blocking_panic_keeps_runtime_running() {
     let (started_tx, started_rx) = mpsc::channel();
     let pending: Vec<_> = control
         .workers()
-        .into_iter()
         .map(|worker| {
             let (release, released) = events_once::Event::<()>::boxed();
             let task = scheduler.spawn_at(
-                worker,
+                &worker,
                 Unaware((started_tx.clone(), released)),
                 |Unaware((started, released))| async move {
                     started.send(()).unwrap();

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-11-24
+
+- Breaking: Rename the required I/O context constructor from context to new.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+
 ## [0.4.0] - 2026-11-02
 
 - Breaking: Give each driver a waker that differs from its owner's waker. A waker is a callback that

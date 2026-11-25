@@ -20,18 +20,14 @@ impl TaskSet {
     /// Configures a future for registration as a new task.
     ///
     /// Call [`TaskBuilder::register`] to submit the task with its completion target.
-    /// The default configuration has no observed context or inspector and uses
-    /// [`TaskPlacement::Any`](crate::TaskPlacement::Any).
+    /// The default configuration has no inspector or task observer.
     ///
     /// # Examples
     ///
     /// ```
     /// # fn submit<F>(tasks: &arty_executor::TaskSet, future: F, completion: impl arty_executor::TaskCompletion<F::Output>)
     /// # where F: IntoFuture + 'static, F::Output: 'static {
-    /// tasks
-    ///     .task(future)
-    ///     .placement(arty_executor::TaskPlacement::SameThread)
-    ///     .register(completion);
+    /// tasks.task(future).register(completion);
     /// # }
     /// ```
     pub fn task<F>(&self, future: F) -> TaskBuilder<'_, F>

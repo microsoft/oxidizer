@@ -11,17 +11,17 @@ use seismograph_runtime::task::{TaskPoll, TaskRequest};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
 
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::monitoring::task::{Description, set_current, set_events};
+use crate::runtime::monitoring::task::{PollTask, set_current, set_events};
 
 #[derive(Debug)]
-pub(crate) struct WorkerDiagnostics {
+pub(crate) struct WorkerMonitoring {
     _registration: WorkerRegistration,
     handle: WorkerHandle,
     poll: RefCell<Option<TaskPoll>>,
     failed: Cell<bool>,
 }
 
-impl WorkerDiagnostics {
+impl WorkerMonitoring {
     pub(crate) fn new(runtime: &RuntimeHandle, dispatcher: &DispatcherClient, thread: &thread_aware::Thread) -> Self {
         let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = registration.handle();
@@ -45,10 +45,8 @@ impl WorkerDiagnostics {
             return;
         }
         let mut tasks = Vec::new();
-        let status = collection_status(executor.inspect(request.limit(), |description: &Description| {
-            if let Description::Snapshot(task) = description {
-                tasks.push(task.clone());
-            }
+        let status = collection_status(executor.inspect(request.limit(), |task: &seismograph_runtime::snapshot::Task| {
+            tasks.push(task.clone());
         }));
         let status = if self.failed.replace(false) {
             TaskCollection::Failed
@@ -67,9 +65,9 @@ impl WorkerDiagnostics {
     }
 }
 
-impl PollObserver for WorkerDiagnostics {
+impl PollObserver for WorkerMonitoring {
     fn poll_started(&self, description: &dyn Any) {
-        if let Some(Description::Poll(id)) = description.downcast_ref::<Description>() {
+        if let Some(PollTask(id)) = description.downcast_ref::<PollTask>() {
             set_current(Some(*id));
             *self.poll.borrow_mut() = Some(self.handle.task_poll_started(*id));
         } else {
@@ -78,19 +76,19 @@ impl PollObserver for WorkerDiagnostics {
     }
 
     // #[gamma::skip(parameter.default_shadow, reason = "The observer deliberately ignores completion; the completion target records the outcome.")]
-    fn poll_finished(&self, _completed: bool) {
+    fn poll_finished(&self) {
         set_current(None);
         if let Some(poll) = self.poll.borrow_mut().take() {
             self.handle.task_poll_finished(poll);
         }
     }
 
-    fn inspection_failed(&self, _error: InspectionError) {
+    fn inspection_failed(&self) {
         self.failed.set(true);
     }
 }
 
-impl Drop for WorkerDiagnostics {
+impl Drop for WorkerMonitoring {
     fn drop(&mut self) {
         set_current(None);
         set_events(None);
@@ -148,9 +146,9 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("worker-bridge", 1));
         let thread = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
         let dispatcher = DispatcherClient::for_test(&thread);
-        let diagnostics = WorkerDiagnostics::new(&runtime.handle(), &dispatcher, &thread);
+        let monitoring = WorkerMonitoring::new(&runtime.handle(), &dispatcher, &thread);
         let (sender, receiver) = mpsc::channel();
-        diagnostics
+        monitoring
             .handle
             .register_task_provider(move |request| sender.send(request).unwrap())
             .unwrap();
@@ -171,8 +169,8 @@ mod tests {
                 } else {
                     receiver.recv_timeout(TEST_TIMEOUT).unwrap()
                 };
-                assert!(diagnostics.is_observed());
-                diagnostics.collect(executor, request);
+                assert!(monitoring.is_observed());
+                monitoring.collect(executor, request);
                 captured.join().unwrap()
             })
         };
@@ -182,16 +180,16 @@ mod tests {
             capture(&mut executor).workers[0].thread_id,
             Some(seismograph::recorder::thread_id())
         );
-        assert!(!seismograph::recorder::without_recording(|| diagnostics.is_observed()));
+        assert!(!seismograph::recorder::without_recording(|| monitoring.is_observed()));
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
         let parent = seismograph_runtime::allocate_task_id();
         {
             let _parent = crate::runtime::monitoring::task::enter_current(parent);
-            crate::runtime::monitoring::add_task::<(), _, _, _>(
+            crate::task::preparation::TaskSpawnOptions::new::<()>().register(
+                &thread,
                 &executor.tasks(),
                 std::future::pending::<()>(),
-                arty_executor::TaskPlacement::Any,
                 sender,
             );
         }
@@ -201,35 +199,35 @@ mod tests {
             snapshot.tasks[0].activity.unwrap().state,
             seismograph_runtime::snapshot::TaskActivityState::Ready
         );
-        diagnostics.parked();
+        monitoring.parked();
         assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Parked);
-        diagnostics.unparked();
+        monitoring.unparked();
         assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Running);
 
-        diagnostics.inspection_failed(InspectionError::Panicked);
+        monitoring.inspection_failed();
         runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap();
-        diagnostics.collect(&mut executor, receiver.try_recv().unwrap());
+        monitoring.collect(&mut executor, receiver.try_recv().unwrap());
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Complete);
-        diagnostics.poll_started(&());
-        diagnostics.poll_finished(false);
+        monitoring.poll_started(&());
+        monitoring.poll_finished();
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
 
         let (_handle, sender) = completion.handle();
         executor
             .tasks()
             .task(std::future::pending::<()>())
-            .inspect(|_, _| Some(Description::Poll(seismograph_runtime::allocate_task_id())))
+            .inspect(|_| Some(PollTask(seismograph_runtime::allocate_task_id())))
             .register(sender);
         assert_eq!(capture(&mut executor).tasks.len(), 1);
 
         let task = seismograph_runtime::allocate_task_id();
-        diagnostics.poll_started(&Description::Poll(task));
+        monitoring.poll_started(&PollTask(task));
         assert_eq!(current_task(), Some(task));
-        diagnostics.poll_finished(false);
+        monitoring.poll_finished();
         assert_eq!(current_task(), None);
-        diagnostics.poll_started(&Description::Poll(task));
-        drop(diagnostics);
+        monitoring.poll_started(&PollTask(task));
+        drop(monitoring);
         assert_eq!(current_task(), None);
         assert!(current_events().is_none());
         assert_eq!(

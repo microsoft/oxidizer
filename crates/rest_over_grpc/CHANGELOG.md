@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-24
+
+- Update routing generator and http-body-util requirements.
+- Expand descriptor, HTTP rule, streaming, OpenAPI, and transcoding regression coverage.
+- Update the local requirement for `http_path_template` from `^0.2.3` to `^0.2.4`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `routerama` from `^0.3.1` to `^0.3.2`.
+- Update the local requirement for `routerama_build` from `=0.3.1` to `=0.3.2`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update routing, build-tool, and test dependencies. Use version 0.3.1 to match the Routerama
