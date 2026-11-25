@@ -1957,7 +1957,10 @@ mod tests {
         truncated_source[second_source..second_source + 8].copy_from_slice(&2_u64.to_le_bytes());
         // Both minimum headers fit in total, but the second source length is cut short.
         truncated_source.truncate(HEADER_LEN + 2 * SOURCE_HEADER_LEN);
-        assert!(decode(&truncated_source).is_err());
+        assert!(matches!(
+            decode(&truncated_source).unwrap_err().kind,
+            crate::ErrorKind::InvalidFormat
+        ));
 
         let mut invalid_source = valid.as_bytes().to_vec();
         invalid_source[28..32].copy_from_slice(&1_u32.to_le_bytes());
@@ -1969,7 +1972,7 @@ mod tests {
         invalid_source[HEADER_LEN + 20] = 0;
         // The source header fits, but the advertised data extends past the input.
         invalid_source[HEADER_LEN + 12..HEADER_LEN + 20].copy_from_slice(&u64::MAX.to_le_bytes());
-        assert!(decode(&invalid_source).is_err());
+        assert!(matches!(decode(&invalid_source).unwrap_err().kind, crate::ErrorKind::InvalidFormat));
 
         for (total_events, lost_events) in [(u64::MAX, 0), (0, u64::MAX)] {
             let overflowing = encode_snapshot(&DecodedSnapshot {
