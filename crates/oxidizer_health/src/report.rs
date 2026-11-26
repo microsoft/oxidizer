@@ -74,7 +74,9 @@ impl Snapshot {
 ///
 /// let report = loop {
 ///     let report = database.report().await;
-///     if report.publisher_count(Health::Healthy) == 1 && report.publisher_count(Health::Degraded) == 1 {
+///     if report.publisher_count(Health::Healthy) == 1
+///         && report.publisher_count(Health::Degraded) == 1
+///     {
 ///         break report;
 ///     }
 ///     database.changed().await;
