@@ -8,6 +8,5 @@ mod lifecycle {
     mod configuration;
     mod shutdown;
     mod support;
-    mod telemetry;
     mod waker_lifecycle;
 }

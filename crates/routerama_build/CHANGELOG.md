@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2026-11-24
+
+- Generate matched route templates and named parameters for static and dynamic resolver consumers.
+- Update the local requirement for `http_path_template` from `^0.2.3` to `^0.2.4`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update the path-template requirement. Use version 0.3.1 to match the Routerama packages. Code

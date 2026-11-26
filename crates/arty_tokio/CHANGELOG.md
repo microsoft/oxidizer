@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-11-24
+
+- Breaking: Replace async init with Tokio compatibility configuration on runtime builders or controls.
+- Tie Tokio support to runtime worker and shutdown lifecycles.
+- Update the local requirement for `arty` from `^0.6.1` to `^0.7.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.2.1] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

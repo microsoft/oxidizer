@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.2] - 2026-11-24
+
+- Update the private bundle macro shim and aligned implementation requirement.
+- Update the local requirement for `fundle_macros_impl` from `=0.4.1` to `=0.4.2`.
+
 ## [0.4.1] - 2026-10-20
 
 - Refresh published macro documentation and private implementation metadata.

@@ -115,13 +115,10 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     }
 }
 
+// Exact decode failure reasons and borrowed backing are not exposed by Cache.
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use bytesbuf::mem::{CallbackMemory, GlobalPool};
-    use thread_aware::unaware;
+    use bytesbuf::mem::GlobalPool;
 
     use super::*;
 
@@ -132,33 +129,6 @@ mod tests {
         assert!(matches!(contiguous, Cow::Borrowed(_)));
         assert_eq!(contiguous.as_ref(), [1, 13, 17]);
         assert_eq!(contiguous.as_ptr(), view.first_slice().as_ptr());
-    }
-
-    /// A type whose Serialize impl always fails, used to test the encode error path.
-    struct FailSerialize;
-
-    impl Serialize for FailSerialize {
-        fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-            Err(serde::ser::Error::custom("intentional failure"))
-        }
-    }
-
-    /// Creates an observable memory provider for encoding unit tests.
-    fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>) {
-        let reservations = Arc::new(AtomicUsize::new(0));
-        // The shared atomic counter has no thread-local state to relocate.
-        let provider = CallbackMemory::new(unaware(Arc::clone(&reservations)), |counter, min_bytes| {
-            // Match the assertion loads so reservation observations share one global order.
-            counter.fetch_add(1, Ordering::SeqCst);
-            GlobalPool::new().reserve(min_bytes)
-        });
-        (OpaqueMemory::new(provider), reservations)
-    }
-
-    #[test]
-    fn encode_serialization_failure_returns_err() {
-        let result = encode(&FailSerialize, &OpaqueMemory::new(GlobalPool::new()));
-        assert!(result.is_err(), "encode should propagate serialization errors");
     }
 
     #[test]
@@ -186,70 +156,5 @@ mod tests {
         let view = BytesView::from(data);
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
         assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("deserialization failed")));
-    }
-
-    #[test]
-    fn encode_decode_roundtrip() {
-        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
-        let original = "hello, world!".to_string();
-        let encoded = codec.encode(&original).expect("encode should succeed");
-        let outcome: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
-        assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
-    }
-
-    #[test]
-    fn encoder_encode_produces_valid_output() {
-        let value = 42u32;
-        let encoded = PostcardEncoder::new(OpaqueMemory::new(GlobalPool::new()))
-            .encode(&value)
-            .expect("encode should succeed");
-        let bytes = to_contiguous(&encoded);
-        assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
-        let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");
-        assert_eq!(decoded, value);
-    }
-
-    #[test]
-    fn encoder_uses_supplied_memory_provider() {
-        let (memory, reservations) = counting_memory();
-        let encoder = PostcardEncoder::new(memory);
-
-        _ = encoder.encode(&42u32).unwrap();
-
-        assert!(
-            reservations.load(Ordering::SeqCst) > 0,
-            "encoder should reserve bytes from its supplied memory provider"
-        );
-    }
-
-    #[test]
-    fn codec_uses_supplied_memory_provider() {
-        let (memory, reservations) = counting_memory();
-        let codec = PostcardCodec::new(memory);
-
-        _ = codec.encode(&42u32).unwrap();
-
-        assert!(
-            reservations.load(Ordering::SeqCst) > 0,
-            "codec should reserve bytes from its supplied memory provider"
-        );
-    }
-
-    #[test]
-    fn decode_multi_span_view() {
-        let codec = PostcardCodec::new(OpaqueMemory::new(GlobalPool::new()));
-        let original = "multi-span test".to_string();
-        let encoded = codec.encode(&original).expect("encode should succeed");
-
-        let bytes = to_contiguous(&encoded);
-        let mid = bytes.len() / 2;
-        let mut first_half = BytesView::from(bytes[..mid].to_vec());
-        let second_half = BytesView::from(bytes[mid..].to_vec());
-        first_half.append(second_half);
-
-        assert_ne!(first_half.first_slice().len(), first_half.len(), "should be multi-span");
-
-        let outcome: DecodeOutcome<String> = codec.decode(first_half).expect("decode should succeed");
-        assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
     }
 }

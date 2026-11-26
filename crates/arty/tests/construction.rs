@@ -6,11 +6,13 @@
 #![cfg(feature = "rt")]
 // Under Miri, `test-util` supplies a processor model for the same selection logic.
 
+use std::collections::HashSet;
 use std::error::Error as StdError;
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 
-use arty::runtime::hook::Panic;
+use arty::core::Thread;
+use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
 use arty::runtime::{Error, Runtime, RuntimeBuilder};
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
@@ -25,9 +27,9 @@ fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> 
     let names = runtime
         .scheduler()
         .block_on(async |cx| {
-            let worker = cx.control().workers().into_iter().nth(2).unwrap();
+            let worker = cx.control().workers().nth(2).unwrap();
             cx.scheduler()
-                .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
+                .spawn_at(&worker, cx.scheduler().clone(), |scheduler| async move {
                     let async_name = thread::current().name().unwrap().to_owned();
                     let gate = Arc::new((Mutex::new(false), Condvar::new()));
                     let release = scopeguard::guard(Arc::clone(&gate), |gate| {
@@ -111,7 +113,7 @@ fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
             for worker in cx.control().workers() {
                 let pair = cx
                     .scheduler()
-                    .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
+                    .spawn_at(&worker, cx.scheduler().clone(), |scheduler| async move {
                         let async_name = thread::current()
                             .name()
                             .expect("Arty async worker threads always have names")
@@ -216,16 +218,15 @@ fn null_in_runtime_name_is_rejected_when_built() {
 #[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
-        #[cfg(not(feature = "monitor"))]
-        Runtime::new().unwrap(),
         Runtime::builder().build().unwrap(),
         Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
     ] {
         runtime
             .scheduler()
             .block_on(async |cx| {
-                let workers: Vec<_> = cx.control().workers().into_iter().collect();
-                assert_eq!(workers, vec![cx.thread()]);
+                assert_eq!(cx.control().workers().len(), 1);
+                let workers: Vec<_> = cx.control().workers().collect();
+                assert_eq!(workers, vec![cx.thread().clone()]);
             })
             .unwrap();
         runtime.stop().unwrap();
@@ -233,10 +234,67 @@ fn default_runtime_construction_uses_one_worker() {
 }
 
 #[test]
+fn worker_iteration_returns_owned_worker_identities() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let workers: [Thread; 2] = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let mut workers = cx.control().workers();
+            assert_eq!(workers.len(), 2);
+            assert_eq!(workers.size_hint(), (2, Some(2)));
+            let first = workers.next().unwrap();
+            assert_eq!(workers.len(), 1);
+            assert_eq!(workers.size_hint(), (1, Some(1)));
+            assert_eq!(cx.control().workers().len(), 2);
+            let last = workers.next().unwrap();
+            assert_eq!(workers.len(), 0);
+            assert_eq!(workers.size_hint(), (0, Some(0)));
+            assert!(workers.next().is_none());
+            assert_ne!(first.id(), last.id());
+            let repeated: HashSet<_> = cx.control().workers().collect();
+            assert_eq!(repeated, [first.clone(), last.clone()].into_iter().collect());
+            [first, last]
+        })
+        .unwrap();
+
+    for worker in &workers {
+        let actual = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                cx.scheduler()
+                    .spawn_at(worker, (), |()| async { thread::current().id() })
+                    .await
+                    .unwrap()
+            })
+            .unwrap();
+        assert_eq!(actual, worker.id());
+    }
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn worker_snapshot_outlives_control_and_runtime() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let (control, expected) = runtime
+        .scheduler()
+        .block_on(async |cx| (cx.control().clone(), cx.thread().clone()))
+        .unwrap();
+    let mut workers = control.workers();
+    drop(control);
+    runtime.stop().unwrap();
+
+    assert_eq!(workers.len(), 1);
+    assert_eq!(workers.next(), Some(expected));
+    assert_eq!(workers.len(), 0);
+    assert!(workers.next().is_none());
+    assert_eq!(workers.size_hint(), (0, Some(0)));
+}
+
+#[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
     for builder in [
-        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::shutdown()),
-        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::ignore()),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(TaskPanic::shutdown()),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(TaskPanic::ignore()),
     ] {
         let runtime = builder.build().unwrap();
 

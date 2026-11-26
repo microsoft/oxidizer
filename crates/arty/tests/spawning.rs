@@ -388,15 +388,14 @@ impl ThreadAware for DestinationProbe {
 async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Context) {
     let expected_workers = 2;
     let home = cx.thread().id();
-    let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();
+    let destinations: Vec<_> = cx.control().workers().map(|worker| worker.id()).collect();
     let tasks: Vec<_> = cx
         .control()
         .workers()
-        .into_iter()
         .map(|worker| {
             drop(cx.scheduler().spawn_anywhere((), |()| async {}));
             cx.scheduler().spawn_at(
-                worker,
+                &worker,
                 DestinationProbe {
                     source: None,
                     destination: None,
@@ -445,8 +444,7 @@ fn spawn_at_returns_shutdown_joins_without_invoking_factories() {
     control.shutdown();
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at::<(), _, ()>(worker, (), |()| async { panic!("rejected factories must not run") }))
+        .map(|worker| scheduler.spawn_at::<(), _, ()>(&worker, (), |()| async { panic!("rejected factories must not run") }))
         .collect();
     assert!(!tasks.is_empty());
     for task in tasks {
@@ -482,7 +480,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
         .unwrap();
     let destination = other
         .scheduler()
-        .block_on(async |cx| cx.control().workers().into_iter().next().unwrap().clone())
+        .block_on(async |cx| cx.control().workers().next().unwrap())
         .unwrap();
     let relocations = Arc::new(AtomicUsize::new(0));
     let invocations = Arc::new(AtomicUsize::new(0));
@@ -507,7 +505,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));
-    assert_eq!(control.workers().into_iter().len(), 1);
+    assert_eq!(control.workers().len(), 1);
     runtime.stop().unwrap();
     other.stop().unwrap();
 }

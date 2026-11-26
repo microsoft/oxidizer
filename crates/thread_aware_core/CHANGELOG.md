@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] - 2026-11-24
+
+- Clarify coordinate, relocation, reference, and no_std support boundaries.
+- Expand owner-identity exhaustion regression coverage.
+
 ## [0.1.3] - 2026-11-02
 
 - Implement `ThreadAware` for `SocketAddr`, `SocketAddrV4`, and `SocketAddrV6` when `std` is

@@ -72,7 +72,6 @@ pub(crate) enum SystemCommand {
     AccessIo { access: QueuedIoAccess },
 
     /// Copies task descriptions from native executor storage between cycles.
-    #[cfg(any(test, feature = "monitor"))]
     #[debug("Inspect")]
     Inspect { request: seismograph_runtime::task::TaskRequest },
 
@@ -144,7 +143,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
-    use arty_executor::{Executor, TaskPlacement};
+    use arty_executor::Executor;
 
     use super::*;
 
@@ -215,7 +214,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        let _registered = QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
+        QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -226,9 +225,12 @@ mod tests {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (factory, join) = prepare_remote(
             &result_pool,
-            |_| async { 42 },
-            TaskPlacement::Any,
-            crate::runtime::monitoring::TaskMonitoring::capture(),
+            |_| std::future::ready(42),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<i32>>(),
+                None,
+            ),
         );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));

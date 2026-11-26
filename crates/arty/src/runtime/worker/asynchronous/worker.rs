@@ -18,6 +18,7 @@ use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::hook::HookRegistration;
+use crate::runtime::monitoring::WorkerMonitoring;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandReceiver, LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
@@ -95,8 +96,7 @@ pub(crate) struct Worker {
     // Cycle-local timestamps and wait budgets use precise system time.
     cycle_clock: SimpleClock,
     signal: Arc<Signal>,
-    #[cfg(any(test, feature = "monitor"))]
-    diagnostics: Option<crate::runtime::monitoring::WorkerDiagnostics>,
+    monitoring: Option<WorkerMonitoring>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -144,12 +144,9 @@ impl Worker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
-        #[cfg(any(test, feature = "monitor"))]
-        let diagnostics = monitor_options
+        let monitoring = monitor_options
             .runtime()
-            .map(|runtime| crate::runtime::monitoring::WorkerDiagnostics::new(runtime, &dispatcher, &thread));
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = monitor_options;
+            .map(|runtime| WorkerMonitoring::new(runtime, &dispatcher, &thread));
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hook_registrations);
 
@@ -164,8 +161,7 @@ impl Worker {
             clock_driver,
             cycle_clock,
             signal,
-            #[cfg(any(test, feature = "monitor"))]
-            diagnostics,
+            monitoring,
             _single_threaded: PhantomData,
         }
     }
@@ -189,11 +185,10 @@ impl Worker {
             CycleAction::Poll | CycleAction::WaitForSignal(_) => Duration::ZERO,
         };
 
-        #[cfg(any(test, feature = "monitor"))]
         if !matches!(action, CycleAction::Poll)
-            && let Some(diagnostics) = &self.diagnostics
+            && let Some(monitoring) = &self.monitoring
         {
-            diagnostics.parked();
+            monitoring.parked();
         }
 
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
@@ -207,11 +202,10 @@ impl Worker {
             }
         }
 
-        #[cfg(any(test, feature = "monitor"))]
         if !matches!(action, CycleAction::Poll)
-            && let Some(diagnostics) = &self.diagnostics
+            && let Some(monitoring) = &self.monitoring
         {
-            diagnostics.unparked();
+            monitoring.unparked();
         }
 
         ControlFlow::Continue(())
@@ -235,13 +229,10 @@ impl Worker {
             .expect("system command processing only succeeds while the worker is ready")
             .executor;
 
-        #[cfg(any(test, feature = "monitor"))]
-        let cycle_outcome = match &self.diagnostics {
-            Some(diagnostics) if diagnostics.is_observed() => executor.execute_cycle_observed(diagnostics),
+        let cycle_outcome = match &self.monitoring {
+            Some(monitoring) if monitoring.is_observed() => executor.execute_cycle_observed(monitoring),
             _ => executor.execute_cycle(),
         };
-        #[cfg(not(any(test, feature = "monitor")))]
-        let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -305,10 +296,9 @@ impl Worker {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(&state.context);
                 }
-                #[cfg(any(test, feature = "monitor"))]
                 SystemCommand::Inspect { request } => {
-                    if let Some(diagnostics) = &self.diagnostics {
-                        diagnostics.collect(&mut state.executor, request);
+                    if let Some(monitoring) = &self.monitoring {
+                        monitoring.collect(&mut state.executor, request);
                     }
                 }
                 SystemCommand::RegisterHook { hook, source } => {
@@ -332,8 +322,11 @@ impl Worker {
         // this batch, prepare_cycle stops before polling the registered tasks.
         let mut processed = 0_usize;
         for SpawnCommand { future_factory } in std::iter::from_fn(|| commands.spawn_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
-            let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
+            future_factory.into_inner().register(context.clone(), &self.tasks);
             processed = processed.saturating_add(1);
+            if !commands.system_receiver().is_empty() {
+                return BatchProgress::LimitReached;
+            }
         }
         if processed == COMMANDS_PER_CYCLE {
             BatchProgress::LimitReached
@@ -364,8 +357,7 @@ impl Worker {
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
         drop(executor);
-        #[cfg(any(test, feature = "monitor"))]
-        drop(self.diagnostics.take());
+        drop(self.monitoring.take());
         let driver_host = RuntimeDriverHost::uninstall();
         drop(driver_host);
     }
@@ -426,6 +418,7 @@ mod tests {
             },
             shutdown,
             Vec::new(),
+            None,
         ));
         let wakes = StdArc::new(DriverWake::default());
         let (clock, driver) = InactiveClock::new_isolated().activate(Waker::from(StdArc::clone(&wakes)));
@@ -456,6 +449,7 @@ mod tests {
             )),
             Shutdown::default(),
             Vec::new(),
+            None,
         ));
         let worker = test_worker(
             (commands, receiver),
@@ -779,19 +773,23 @@ mod tests {
     }
 
     trait TestTaskSetExt {
-        fn add_test<F, R>(&self, future: F)
+        fn add_test<F>(&self, future: F)
         where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static;
+            F: IntoFuture + 'static,
+            F::Output: 'static;
     }
 
     impl TestTaskSetExt for TaskSet {
-        fn add_test<F, R>(&self, future: F)
+        fn add_test<F>(&self, future: F)
         where
-            F: IntoFuture<Output = R> + 'static,
-            R: 'static,
+            F: IntoFuture + 'static,
+            F::Output: 'static,
         {
-            self.task(future).register(DiscardCompletion);
+            self.task(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                future,
+            )
+            .register(DiscardCompletion);
         }
     }
 
@@ -845,6 +843,10 @@ mod tests {
         SpawnCommand {
             future_factory: QueuedFactory::new(factory),
         }
+    }
+
+    fn test_factory(factory: impl FnOnce(Context, &TaskSet) + Send + 'static) -> RemoteFutureFactory {
+        RemoteFutureFactory::new(factory)
     }
 
     #[derive(Clone)]
@@ -905,7 +907,7 @@ mod tests {
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint =
             crate::runtime::testing::worker_endpoint(command_tx, Signal::waker(&signal), thread.clone(), Arc::clone(&blocking_worker));
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new(), None));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {
@@ -927,7 +929,7 @@ mod tests {
     }
 
     fn replenishing_command(sender: CommandSender, processed: Arc<AtomicUsize>) -> SpawnCommand {
-        enqueue(RemoteFutureFactory::new(move |_, _| {
+        enqueue(test_factory(move |_, _| {
             processed.fetch_add(1, Ordering::Relaxed);
             sender
                 .spawn_sender()
@@ -1043,7 +1045,7 @@ mod tests {
                 if self
                     .commands
                     .spawn_sender()
-                    .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                    .send(enqueue(test_factory(move |_, _| {
                         invocations.fetch_add(1, Ordering::Relaxed);
                         if forbidden_after_queued_shutdown {
                             forbidden.fetch_add(1, Ordering::Relaxed);
@@ -1152,7 +1154,7 @@ mod tests {
             let order = Arc::clone(&order);
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .send(enqueue(test_factory(move |_, _| {
                     order.lock().unwrap().push(index);
                 })))
                 .unwrap();
@@ -1199,7 +1201,7 @@ mod tests {
         }
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new({
+            .send(enqueue(test_factory({
                 let processed = Arc::clone(&processed);
                 let spawned_after = Arc::clone(&spawned_after);
                 move |_, _| {
@@ -1225,9 +1227,38 @@ mod tests {
         assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     #[test]
-    fn inspection_without_worker_diagnostics_reports_failure() {
+    fn pending_system_command_interrupts_spawn_registration() {
+        let (commands, command_rx) = command_channel();
+        let worker = test_worker(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let registered = Arc::new(AtomicUsize::new(0));
+        for _ in 0..2 {
+            let registered = Arc::clone(&registered);
+            commands
+                .spawn_sender()
+                .send(enqueue(test_factory(move |_, _| {
+                    registered.fetch_add(1, Ordering::Relaxed);
+                })))
+                .unwrap();
+        }
+        commands
+            .system_sender()
+            .send(SystemCommand::AccessIo {
+                access: QueuedIoAccess::new(Box::new(|_| {})),
+            })
+            .unwrap();
+
+        assert_eq!(worker.process_spawn_commands(), BatchProgress::LimitReached);
+        assert_eq!(registered.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn inspection_without_worker_monitoring_reports_failure() {
         use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
         use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 
@@ -1239,7 +1270,7 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("missing-worker-diagnostics", 1));
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("missing-worker-monitoring", 1));
         let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let (sender, receiver) = std::sync::mpsc::channel();
         registration
@@ -1324,14 +1355,19 @@ mod tests {
             let invocations = Arc::clone(&invocations);
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .send(enqueue(test_factory(move |_, _| {
                     invocations.fetch_add(1, Ordering::Relaxed);
                 })))
                 .unwrap();
         }
-        let join = worker_context(&worker)
-            .dispatcher()
-            .spawn(|_| async {}, crate::runtime::monitoring::TaskMonitoring::capture());
+        let join = worker_context(&worker).dispatcher().spawn(
+            |_| std::future::ready(()),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<()>>(),
+                None,
+            ),
+        );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         assert!(worker.execute_step().is_break());
@@ -1343,7 +1379,7 @@ mod tests {
         };
         assert!(error.is_shutdown());
         assert!(commands.system_sender().send(SystemCommand::Shutdown).is_err());
-        assert!(commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).is_err());
+        assert!(commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).is_err());
     }
 
     #[test]
@@ -1368,7 +1404,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_monitoring_creates_no_worker_diagnostics() {
+    fn disabled_monitoring_creates_no_worker_monitoring() {
         let (commands, command_rx) = command_channel();
         let signal = Arc::new(Signal::default());
         let worker = test_worker_with_monitor_options(
@@ -1379,8 +1415,7 @@ mod tests {
             &MonitorPolicy::disabled().into(),
         );
 
-        #[cfg(any(test, feature = "monitor"))]
-        assert!(worker.diagnostics.is_none());
+        assert!(worker.monitoring.is_none());
     }
 
     #[cfg(all(feature = "test-util", not(miri)))]
@@ -1439,13 +1474,15 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        crate::runtime::monitoring::add_task::<(), _, _, _>(
+        let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
+        let tasks = worker.tasks.clone();
+        crate::task::preparation::SpawnOptions::new(identity, 0, None).register(
+            worker_context(&worker).thread(),
             &worker.tasks,
             async move {
-                assert_eq!(crate::runtime::monitoring::current_task(), None);
+                assert_eq!(tasks.current(), Some(identity));
                 completed.set(true);
             },
-            arty_executor::TaskPlacement::Any,
             DiscardCompletion,
         );
         seismograph::recorder::without_recording(|| {
@@ -1463,7 +1500,7 @@ mod tests {
             WorkerState::Running
         );
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         assert!(worker.execute_step().is_continue());
 
@@ -1707,7 +1744,7 @@ mod tests {
         assert!(!signal.is_notified());
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1731,7 +1768,7 @@ mod tests {
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _context = worker_context(&worker).io().context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1791,7 +1828,7 @@ mod tests {
         let (inner_completed_tx, inner_completed_rx) = Event::boxed();
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_: Context, tasks: &TaskSet| {
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     inner_completed_tx.send(());
                 });
@@ -1850,7 +1887,7 @@ mod tests {
 
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new({
+                .send(enqueue(test_factory({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             inner_completed_tx.send(());
@@ -1891,7 +1928,7 @@ mod tests {
         worker.tasks.add_test(async move { initial_completed_tx.send(()) });
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_: Context, tasks: &TaskSet| {
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     spawned_completed_tx.send(());
                 });
@@ -1937,13 +1974,13 @@ mod tests {
         let (completed_tx, completed_rx) = Event::boxed();
 
         // The channel can already be closed because the worker is shutting down.
-        let _ = commands.spawn_sender().send(enqueue(RemoteFutureFactory::new({
-            move |_: Context, tasks: &TaskSet| {
+        let _ = commands
+            .spawn_sender()
+            .send(enqueue(test_factory(move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     completed_tx.send(14);
                 });
-            }
-        })));
+            })));
 
         // This waits for the worker to shut down.
         async_worker_thread.join().unwrap();
@@ -2070,7 +2107,7 @@ mod tests {
             let shutdown = shutdown.clone();
             commands
                 .spawn_sender()
-                .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
+                .send(enqueue(test_factory(move |_, tasks| {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown.begin(ShutdownCause::default());
                     }
@@ -2098,7 +2135,7 @@ mod tests {
         let shutdown = worker.shutdown.clone();
         commands
             .spawn_sender()
-            .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+            .send(enqueue(test_factory(move |_, _| {
                 shutdown.begin(ShutdownCause::default());
             })))
             .unwrap();
@@ -2111,7 +2148,11 @@ mod tests {
                     std::future::ready(())
                 }
             },
-            crate::runtime::monitoring::TaskMonitoring::capture(),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<()>>(),
+                None,
+            ),
         );
 
         assert!(worker.execute_step().is_break());

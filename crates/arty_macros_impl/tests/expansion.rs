@@ -10,6 +10,35 @@ use quote::quote;
 use testing_aids::render_expansion;
 
 #[test]
+fn argumentless_entrypoints_preserve_async_body_and_return_type() {
+    for (expand, attrs) in [main, test].into_iter().zip([quote!(), quote!(#[::core::prelude::v1::test])]) {
+        let expansion = expand(
+            TokenStream::new(),
+            quote! {
+                pub async fn run() -> Result<(), Error> {
+                    run_async().await
+                }
+            },
+        );
+        let expected = quote! {
+            #attrs
+            pub fn run() -> Result<(), Error> {
+                let __arty_runtime = ::arty::runtime::Runtime::new()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |_| { run_async().await });
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string());
+    }
+}
+
+#[test]
 fn main_preserves_visibility_and_return_type() {
     let expansion = main(
         TokenStream::new(),
@@ -316,7 +345,7 @@ fn main_panic_settings_are_forwarded_exactly() {
         let expected = quote! {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#policy())
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -346,7 +375,7 @@ fn test_panic_settings_are_forwarded_exactly() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .on(::arty::runtime::hook::Panic::#policy())
+                    .on(::arty::runtime::hook::TaskPanic::#policy())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -691,9 +720,9 @@ fn invalid_signatures_preserve_input_and_report_errors() {
         ),
         (
             quote!(
-                async fn run() {}
+                async fn run(self) {}
             ),
-            "function must take an Arty task context argument, such as cx: arty::task::Context",
+            "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
         ),
         (
             quote!(

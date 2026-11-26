@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Remove the body-builder argument from client and server compression constructors.
+- Compress small buffered bodies directly and update Content-Length without retaining Transfer-Encoding.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `compressors` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `http_extensions` from `^0.15.0` to `^0.16.0`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `seatbelt` from `^0.12.1` to `^0.13.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

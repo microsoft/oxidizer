@@ -1,16 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::Location;
 use std::pin::Pin;
 use std::task::{Context as PollContext, Poll};
 
 use futures::future::{FutureExt, LocalBoxFuture};
 use performables::sync::channel;
 use pin_project::pin_project;
+use seismograph_runtime::TaskIdentity;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::worker::asynchronous::LocalWorker;
 use crate::task::{Context, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -32,10 +35,10 @@ struct ScopedStorage<T> {
 }
 
 impl<FF> ScopedStorage<FF> {
-    fn into_future<F, R>(self, cx: Context) -> ScopedStorage<impl Future<Output = R>>
+    fn into_future<F>(self, cx: Context) -> ScopedStorage<impl Future<Output = F::Output>>
     where
         FF: FnOnce(Context) -> F,
-        F: Future<Output = R>,
+        F: Future,
     {
         let Self { inner, completion } = self;
         ScopedStorage {
@@ -113,6 +116,7 @@ impl RuntimeScheduler {
     /// assert_eq!(message, "Hello, Arty");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, Error>
     where
         FF: FnOnce(Context) -> F + Send + 'a,
@@ -135,9 +139,8 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let task = self
-            .dispatcher
-            .spawn(factory, crate::runtime::monitoring::TaskMonitoring::with_body_size(size_of::<F>()));
+        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>(), None);
+        let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
 
@@ -187,19 +190,25 @@ impl RuntimeScheduler {
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Context, D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        let options = crate::task::preparation::SpawnOptions::new(
+            TaskIdentity::from_location(Location::caller()),
+            size_of::<F>(),
+            LocalWorker::current_task(),
+        );
         self.dispatcher.spawn(
             move |cx| {
                 let mut data = data;
                 data.relocate(None, cx.thread());
                 future_factory(cx, data)
             },
-            crate::runtime::monitoring::TaskMonitoring::capture(),
+            options,
         )
     }
 
@@ -208,7 +217,7 @@ impl RuntimeScheduler {
     /// Uses a pool chosen by the runtime for synchronous I/O or other calls
     /// that can stop an async worker from running other tasks.
     /// A panic in this function returns an error through [`JoinHandle`].
-    /// It does not invoke the configured [`Panic`](crate::runtime::hook::Panic)
+    /// It does not invoke the configured [`TaskPanic`](crate::runtime::hook::TaskPanic)
     /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
@@ -229,12 +238,15 @@ impl RuntimeScheduler {
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.next_blocking_worker().spawn_blocking(body)
+        self.dispatcher
+            .next_blocking_worker()
+            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
     }
 }
 
@@ -424,7 +436,7 @@ mod tests {
     fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::policy::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::Panic::ignore())
+            .on(crate::runtime::hook::TaskPanic::ignore())
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

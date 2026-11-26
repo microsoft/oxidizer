@@ -4,7 +4,7 @@
 [package]
 name = "arty_executor"
 description = "Single-threaded async task executor for the Arty runtime."
-version = "0.6.1"
+version = "0.7.0"
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
@@ -21,23 +21,18 @@ private-api = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "observed::context::transfer::Transfer",
-    "observed::sink::core::Sink",
     "thread_aware_core::thread::Thread",
+    "seismograph_runtime::task_identity::TaskIdentity",
 ]
 
-[features]
-inspection = []
-
 [dependencies]
-data_privacy = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 nm = { workspace = true }
-observed = { workspace = true }
 ohno = { workspace = true }
 performables = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
+seismograph_runtime = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, features = ["coarse-time"] }
 
@@ -46,13 +41,9 @@ alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
-observed_testing = { path = "../observed_testing" }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }
-
-[[test]]
-name = "inspection"
-required-features = ["inspection"]
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

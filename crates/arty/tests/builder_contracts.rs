@@ -7,12 +7,11 @@
 
 mod support;
 
-use std::error::Error as _;
 use std::time::Duration;
 
-use arty::runtime::hook::Panic;
+use arty::runtime::Runtime;
+use arty::runtime::hook::TaskPanic;
 use arty::runtime::policy::WorkersPolicy;
-use arty::runtime::{Runtime, ShutdownCause};
 use support::JoinHandleExt as _;
 use tick::ClockControl;
 
@@ -46,13 +45,7 @@ fn maximum_worker_count_replaces_exact_count() {
         .build()
         .unwrap();
 
-    assert_eq!(
-        runtime
-            .scheduler()
-            .block_on(async |cx| cx.control().workers().into_iter().count())
-            .unwrap(),
-        1
-    );
+    assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
     runtime.stop().unwrap();
 }
 
@@ -65,13 +58,7 @@ fn zero_worker_policies_can_be_replaced_before_building() {
             .build()
             .unwrap();
 
-        assert_eq!(
-            runtime
-                .scheduler()
-                .block_on(async |cx| cx.control().workers().into_iter().count())
-                .unwrap(),
-            1
-        );
+        assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
         runtime.stop().unwrap();
     }
 }
@@ -84,13 +71,7 @@ fn automatic_worker_selection_replaces_exact_count() {
         .build()
         .unwrap();
 
-    assert_eq!(
-        runtime
-            .scheduler()
-            .block_on(async |cx| cx.control().workers().into_iter().count())
-            .unwrap(),
-        1
-    );
+    assert_eq!(runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap(), 1);
     runtime.stop().unwrap();
 }
 
@@ -106,7 +87,7 @@ fn default_policy_starts_shutdown() {
 
 #[test]
 fn ignore_policy_keeps_the_runtime_running() {
-    let runtime = Runtime::builder().on(Panic::ignore()).build().unwrap();
+    let runtime = Runtime::builder().on(TaskPanic::ignore()).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
 
     assert!(scheduler.spawn(async |_| panic!("ignore policy")).join().unwrap_err().is_panic());
@@ -115,28 +96,21 @@ fn ignore_policy_keeps_the_runtime_running() {
 }
 
 #[test]
-fn last_panic_hook_to_set_a_response_wins() {
-    for (first, last, shuts_down) in [
-        (Panic::shutdown(), Panic::ignore(), false),
-        (Panic::ignore(), Panic::shutdown(), true),
-    ] {
-        let runtime = Runtime::builder().on(first).on(last).build().unwrap();
-        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+fn panic_hook_replaces_the_default() {
+    let runtime = Runtime::builder()
+        .on(TaskPanic::shutdown())
+        .on(TaskPanic::ignore())
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
 
-        assert!(scheduler.spawn(async |_| panic!("task panic")).join().unwrap_err().is_panic());
-        let next = scheduler.spawn(async |_| 42).join();
-        if shuts_down {
-            let rejected = next.unwrap_err();
-            assert!(rejected.is_shutdown());
-            assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
-            let stop = runtime.stop().unwrap_err();
-            assert_eq!(
-                stop.source().unwrap().source().unwrap().to_string(),
-                "runtime shutdown was caused by a task panic: task panic"
-            );
-        } else {
-            assert_eq!(next.unwrap(), 42);
-            runtime.stop().unwrap();
-        }
-    }
+    assert!(
+        scheduler
+            .spawn(async |_| panic!("replacement policy"))
+            .join()
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(scheduler.spawn(async |_| 42).join().unwrap(), 42);
+    runtime.stop().unwrap();
 }

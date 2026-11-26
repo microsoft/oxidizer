@@ -12,6 +12,8 @@ use std::thread::ThreadId;
 
 use performables::sync::channel;
 
+#[cfg(test)]
+use crate::TaskIdentity;
 use crate::{RemoteTaskHandle, TaskPtr, executor_context};
 
 const TASK_ACTIVE: u8 = 0b001;
@@ -132,7 +134,6 @@ impl WakeSignal {
         }
     }
 
-    #[cfg(feature = "inspection")]
     pub(crate) fn has_queued_notification(&self) -> bool {
         // Acquire observes the scheduler's released state transitions.
         // This is a racing readiness hint, not access to queued task storage.
@@ -348,10 +349,13 @@ mod tests {
         let mut executor = crate::Executor::builder().build();
         executor
             .tasks()
-            .task(std::future::poll_fn(move |cx| {
-                *saved.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending::<()>
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::poll_fn(move |cx| {
+                    *saved.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending::<()>
+                }),
+            )
             .register(Completion(Rc::clone(&cancellations)));
         let _ = executor.execute_cycle();
         let waker = captured.borrow_mut().take().unwrap();

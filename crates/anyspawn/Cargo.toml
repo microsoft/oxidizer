@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn"
 description = "A task spawner for Arty and Tokio."
-version = "0.11.0"
+version = "0.12.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]
@@ -34,7 +34,6 @@ all-features = true
 default = []
 arty = ["dep:arty"]
 observed = ["dep:observed"]
-seismograph = ["observed?/seismograph"]
 tokio = ["dep:tokio"]
 
 [dependencies]

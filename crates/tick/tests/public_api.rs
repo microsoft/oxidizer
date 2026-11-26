@@ -34,7 +34,7 @@ fn public_types_have_their_threading_and_clone_contracts() {
     static_assertions::assert_impl_all!(TimerTick: Send, Sync, UnwindSafe, RefUnwindSafe);
     static_assertions::assert_not_impl_any!(TimerTick: Clone, Copy);
     static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
-    static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
+    static_assertions::assert_impl_all!(Stopwatch: Send, Sync, thread_aware::ThreadAware);
     static_assertions::assert_impl_all!(ClockDriver: Send, Sync);
     static_assertions::assert_not_impl_all!(ClockDriver: Clone);
     static_assertions::assert_impl_all!(Isolated: Send, Sync, Clone, Copy);

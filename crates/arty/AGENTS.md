@@ -8,10 +8,10 @@
   task factories, and blocking callbacks.
 - A contained task or callback panic becomes `JoinError` without replacing
   the original panic.
-- Apply the configured `Panic` hook to async task factories and polls.
+- Apply the configured `TaskPanic` hook to async task factories and polls.
   Forward its `ShutdownCause` without another panic decision.
 - A blocking callback panic returns through its `JoinHandle`. It does not invoke
-  the `Panic` hook or start runtime shutdown.
+  the `TaskPanic` hook or start runtime shutdown.
 - Keep panic hooks and worker wakers out of shared shutdown state.
 - The shutdown action starts coordinated runtime shutdown. The ignore action
   leaves the scheduler usable.

@@ -1080,12 +1080,16 @@ mod tests {
     fn continued_event_no_processor_wants_is_never_built() {
         struct ProbeEvent;
 
-        impl Event for ProbeEvent {
-            const DESCRIPTION: EventDescription = EventDescription::new("probe", None, None, None, false, false);
+        impl crate::VisitFields for ProbeEvent {
+            const CONTAINS_METRICS: bool = false;
 
             fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
                 ControlFlow::Continue(())
             }
+        }
+
+        impl Event for ProbeEvent {
+            const DESCRIPTION: EventDescription = EventDescription::new("probe", None, None, None, false, false);
         }
 
         let uninterested = CountingProcessor::new(false);

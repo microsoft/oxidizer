@@ -12,7 +12,7 @@ use GLOBAL as Rallocator;
 use seismograph::recorder::{Configuration, Policy, without_recording};
 use seismograph_rallocator::native::{ObservationSource, Snapshot};
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
 static RECORDING: Mutex<()> = Mutex::new(());
 

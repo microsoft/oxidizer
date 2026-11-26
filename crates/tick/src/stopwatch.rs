@@ -31,6 +31,8 @@ pub struct Stopwatch {
     elapsed: Duration,
 }
 
+crate::thread_aware_move!(Stopwatch);
+
 #[derive(Debug)]
 enum StopwatchSource {
     Clock {

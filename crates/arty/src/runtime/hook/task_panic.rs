@@ -12,31 +12,28 @@ use super::hook_fn::HookFn;
 /// panic returns through its join handle without creating this event or
 /// stopping the runtime.
 ///
-/// Each event starts with shutdown selected. The worker runs its panic hooks
-/// on the same event in the order it installed them, then applies the final
-/// response. A callback that only reads the event leaves the response unchanged.
+/// Each event starts with shutdown selected. The worker runs its task-panic
+/// hooks on the same event in the order it installed them, then applies the
+/// final response. A callback that only reads the event leaves the response
+/// unchanged.
 ///
-/// Each worker installs builder hooks in registration order. When a worker calls
-/// [`RuntimeControl::on`](crate::runtime::RuntimeControl::on) for its own runtime,
-/// it installs the hook locally and queues it for the other workers. A worker can install a
-/// local hook before an earlier queued hook, so the order can differ between workers.
-///
-/// Register [`Panic::ignore`] to keep the runtime running. A later hook can
+/// Register [`TaskPanic::ignore`] to keep the runtime running. A later hook can
 /// select shutdown again. Custom callbacks can use [`set_ignore`](Self::set_ignore)
 /// or [`set_shutdown`](Self::set_shutdown) to choose a response for this panic.
-/// The failed task returns [`JoinError`](crate::task::JoinError) with either response.
+/// The failed task returns [`JoinError`](crate::task::JoinError) with either
+/// response.
 ///
 /// Arty does not catch a panic from the callback. You must make sure that the
 /// callback completes without a panic. Arty also cannot repair application
 /// data that the original task panic left in an invalid state.
 #[derive(derive_more::Debug)]
-pub struct Panic {
+pub struct TaskPanic {
     pub(super) action: PanicAction,
     #[debug(ignore)]
     pub(super) payload: TaskPanicPayload,
 }
 
-impl Panic {
+impl TaskPanic {
     /// Creates a hook that selects runtime shutdown for each contained task panic.
     ///
     /// Shutdown is the default. Register this hook to override an earlier ignore response.
@@ -79,11 +76,6 @@ impl Panic {
     }
 }
 
-impl super::Hook for Panic {}
+impl super::Hook for TaskPanic {}
 
-impl super::private::Sealed for Panic {
-    type Erased<D>
-        = super::hook_fn::ErasedHookFn<Self>
-    where
-        D: thread_aware::ThreadAware + Clone + 'static;
-}
+impl super::private::Sealed for TaskPanic {}

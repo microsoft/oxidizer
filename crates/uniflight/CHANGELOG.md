@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0] - 2026-11-24
+
+- Breaking: Use Performables 0.5 strategy types in the public merger API. Remove the forwarding `seismograph` feature.
+- Make merger cancellation and follower regression tests deterministic.
+- Update shared synchronization requirements.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.9.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

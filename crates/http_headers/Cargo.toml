@@ -3,10 +3,8 @@
 
 [package]
 name = "http_headers"
-# TODO: The http_headers name is already reserved on crates.io.
-publish = false
 description = "Fast, ergonomic typed HTTP headers with borrowed views."
-version = "0.1.2"
+version = "0.1.3"
 readme = "README.md"
 edition.workspace = true
 rust-version.workspace = true

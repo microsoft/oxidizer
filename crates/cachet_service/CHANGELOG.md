@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.2] - 2026-11-24
+
+- Expand cache-service adapter and response-validation regression coverage.
+- Update the local requirement for `cachet_tier` from `^0.6.1` to `^0.6.2`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+
 ## [0.6.1] - 2026-11-02
 
 - Update cache-tier, service, and test dependencies. This release does not change the service

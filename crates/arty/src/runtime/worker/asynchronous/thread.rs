@@ -149,7 +149,6 @@ impl ThreadEntry {
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
         let blocking_pool = blocking_pools.pool_for_worker(worker_index);
-        #[cfg(any(test, feature = "monitor"))]
         if let Some(runtime) = monitor_options.runtime() {
             blocking_pool.enable_monitoring(runtime);
         }
@@ -327,7 +326,12 @@ mod tests {
 
     #[test]
     fn gamma_round2_activation_consumes_the_actual_buffered_ready_acknowledgment() {
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(idle_endpoint()), Shutdown::default(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            NonEmpty::new(idle_endpoint()),
+            Shutdown::default(),
+            Vec::new(),
+            None,
+        ));
         let (activation_tx, activation_rx) = channel::oneshot();
         let (ready_tx, ready_rx) = channel::unbounded();
         let observer = ready_rx.clone();
@@ -356,7 +360,12 @@ mod tests {
         }
 
         let shutdown = Shutdown::default();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(idle_endpoint()), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            NonEmpty::new(idle_endpoint()),
+            shutdown.clone(),
+            Vec::new(),
+            None,
+        ));
         let mut runs = 0;
         let result = run_and_drop_worker(FailedDrop, &dispatcher, |_| runs += 1);
         assert_eq!(runs, 1);
@@ -476,7 +485,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
         report_failure(&Err(Box::new("worker panic")), &dispatcher);
 
@@ -490,7 +499,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
         report_failure(&Ok(()), &dispatcher);
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-11-24
+
+- Breaking: Use monitor protocol version 9 and reject other versions.
+- Carry all six recording policies in configuration and statistics messages.
+- Expand bounded framing, native discovery, transport, and cleanup regression coverage.
+
 ## [0.3.0] - 2026-11-02
 
 - Breaking: Use protocol version 8 over Unix sockets or local Windows named pipes instead of

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-11-24
+
+- Breaking: Use backend-backed Rallocator construction and the system-default installation macro.
+- Select system, snmalloc, mimalloc, or dynamic personalities.
+- Record backend-aware allocation and resize telemetry.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `seismograph_rallocator` from `^0.5.0` to `^0.6.0`.
+
 ## [0.4.0] - 2026-11-06
 
 - Breaking: Publish native allocation observations independently of recorder sessions and
