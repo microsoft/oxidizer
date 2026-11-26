@@ -79,17 +79,17 @@ Its capture callback encodes borrowed stack rows into System-backed `SourceData`
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw7Ld7e-ppCEbfBTJFts6MhkbazYIyWwJQfkbRlzqWLynR3FhZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC41LjA
- [__link0]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=snapshot::Snapshot
- [__link1]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/snmalloc/index.html
- [__link10]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=encode_with_owners
- [__link11]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=events::callers
- [__link12]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=native::request_observation
- [__link2]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/mimalloc/index.html
- [__link3]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=native::Snapshot
- [__link4]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=encoded_len
- [__link5]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=encode
- [__link6]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=decode
- [__link7]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/snapshot/index.html
- [__link8]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=MAX_OWNERS
- [__link9]: https://docs.rs/seismograph_rallocator/0.5.0/seismograph_rallocator/?search=encoded_len_with_owners
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw7Ld7e-ppCEbfBTJFts6MhkbazYIyWwJQfkbRlzqWLynR3FhZIGCdnNlaXNtb2dyYXBoX3JhbGxvY2F0b3JlMC42LjA
+ [__link0]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=snapshot::Snapshot
+ [__link1]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/snmalloc/index.html
+ [__link10]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=encode_with_owners
+ [__link11]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=events::callers
+ [__link12]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=native::request_observation
+ [__link2]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/mimalloc/index.html
+ [__link3]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=native::Snapshot
+ [__link4]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=encoded_len
+ [__link5]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=encode
+ [__link6]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=decode
+ [__link7]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/snapshot/index.html
+ [__link8]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=MAX_OWNERS
+ [__link9]: https://docs.rs/seismograph_rallocator/0.6.0/seismograph_rallocator/?search=encoded_len_with_owners

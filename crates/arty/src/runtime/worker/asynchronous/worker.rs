@@ -798,7 +798,11 @@ mod tests {
             F: IntoFuture + 'static,
             F::Output: 'static,
         {
-            self.task(future).register(DiscardCompletion);
+            self.task(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                future,
+            )
+            .register(DiscardCompletion);
         }
     }
 
@@ -1400,7 +1404,11 @@ mod tests {
         }
         let join = worker_context(&worker).dispatcher().spawn(
             |_| std::future::ready(()),
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<()>>(),
+                None,
+            ),
         );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
@@ -1508,11 +1516,13 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        crate::task::preparation::TaskSpawnOptions::new::<()>().register(
+        let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
+        let tasks = worker.tasks.clone();
+        crate::task::preparation::SpawnOptions::new(identity, 0, None).register(
             worker_context(&worker).thread(),
             &worker.tasks,
             async move {
-                assert_eq!(crate::runtime::monitoring::current_task(), None);
+                assert_eq!(tasks.current(), Some(identity));
                 completed.set(true);
             },
             DiscardCompletion,
@@ -2187,7 +2197,11 @@ mod tests {
                     std::future::ready(())
                 }
             },
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<()>>(),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<()>>(),
+                None,
+            ),
         );
 
         assert!(worker.execute_step().is_break());

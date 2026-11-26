@@ -14,7 +14,7 @@
 //! Workers check [`worker::WorkerHandle::is_observed`] once per execution cycle.
 //! Without collection or runtime-event recording, the normal poll loop needs no
 //! diagnostic callbacks, clocks, locks, counters, or reference-count operations.
-//! Allocate task identities and type descriptions only when first observed.
+//! [`TaskIdentity`] lets a runtime assign an identity before observation.
 //!
 //! Ordinary Seismograph snapshots request current task state. To measure polls,
 //! call [`RuntimeHandle::capture`] with a nonzero
@@ -62,8 +62,10 @@ pub mod task;
 pub mod worker;
 
 mod collection;
+mod task_identity;
 
 use snapshot::{Runtime, RuntimeState, Snapshot, Worker, WorkerState};
+pub use task_identity::TaskIdentity;
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
@@ -297,7 +299,7 @@ impl RuntimeHandle {
     }
 }
 
-/// Allocates an identity when native task storage is first inspected.
+/// Allocates a process-wide identity for a runtime task.
 ///
 /// # Panics
 ///

@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
+use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;
@@ -15,7 +16,7 @@ use crate::runtime::hook::{
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTaskFactory, TaskSpawnOptions};
+use crate::task::preparation::{DeferredTaskFactory, SpawnOptions};
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
@@ -90,6 +91,10 @@ impl LocalWorker {
         Self::with_scheduler(|current| current.map(|current| current.thread().clone()))
     }
 
+    pub(crate) fn current_task() -> Option<TaskIdentity> {
+        Self::with_scheduler(|current| current.and_then(|current| current.tasks().current()))
+    }
+
     pub(crate) fn with_scheduler<R>(f: impl FnOnce(Option<&SchedulerContext>) -> R) -> R {
         Self::with_current(|current| f(current.and_then(|current| current.scheduler.as_ref())))
     }
@@ -106,18 +111,18 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_spawn(target: &Thread) -> Option<TaskObservers> {
+    pub(crate) fn on_spawn(target: &Thread, identity: TaskIdentity) -> Option<TaskObservers> {
         let origin = Self::with_scheduler(|current| {
             let current = current?;
             current.has_spawn_hooks.get().then(|| current.thread.clone())
         })?;
-        Self::execute_spawn_hooks(&origin, target)
+        Self::execute_spawn_hooks(&origin, target, identity)
     }
 
-    fn execute_spawn_hooks(origin: &Thread, target: &Thread) -> Option<TaskObservers> {
+    fn execute_spawn_hooks(origin: &Thread, target: &Thread, identity: TaskIdentity) -> Option<TaskObservers> {
         let hooks = SPAWN_HOOKS.with_borrow(|hooks| Arc::clone(hooks.as_ref().expect("a running worker retains its installed hooks")));
         debug_assert!(!hooks.is_empty(), "the scheduler flag tracks installed spawn hooks");
-        let mut event = TaskSpawn::new(Some(origin.clone()), target.clone());
+        let mut event = TaskSpawn::new(Some(origin.clone()), target.clone(), identity);
         for hook in hooks.iter() {
             hook.execute(&mut event);
         }
@@ -272,35 +277,35 @@ impl SchedulerContext {
         &self.tasks
     }
 
-    pub(crate) fn spawn<FF, F>(&self, future_factory: FF) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         if self.has_spawn_hooks.get() {
-            return self.spawn_observed(future_factory);
+            return self.spawn_observed(future_factory, identity);
         }
 
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        TaskSpawnOptions::new::<F>().register(&self.thread, &self.tasks, inner, result_tx);
+        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
+        options.register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
 
     #[cold]
-    fn spawn_observed<FF, F>(&self, future_factory: FF) -> JoinHandle<F::Output>
+    fn spawn_observed<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread);
+        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
+        let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread, identity);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        TaskSpawnOptions::new::<F>()
-            .observed_by(observers)
-            .register(&self.thread, &self.tasks, inner, result_tx);
+        options.observed_by(observers).register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
 }
@@ -349,8 +354,10 @@ mod tests {
 
     impl ThreadAware for ReentrantSpawnProbe {
         fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-            self.relocation_saw_no_observers
-                .store(LocalWorker::on_spawn(destination).is_none(), Ordering::Release);
+            self.relocation_saw_no_observers.store(
+                LocalWorker::on_spawn(destination, TaskIdentity::from_location(std::panic::Location::caller())).is_none(),
+                Ordering::Release,
+            );
         }
     }
 
@@ -371,7 +378,7 @@ mod tests {
         let _guard = LOCAL_SPAWN_HOOK.initialize();
         let target = ThreadBuilder::default().build(std::thread::current().id());
 
-        assert!(LocalWorker::on_spawn(&target).is_none());
+        assert!(LocalWorker::on_spawn(&target, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
     }
 
     #[derive(Clone)]
@@ -431,13 +438,14 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
-            let _task = core.spawn_relocating_to(destination_index, &source, |_| async {});
+            let identity = || TaskIdentity::from_location(std::panic::Location::caller());
+            let _task = core.spawn_relocating_to(destination_index, &source, |_| async {}, identity());
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
             // A different bound thread prevents local execution even when the chosen worker is current.
-            let _task = core.spawn_relocating_to(source_index, &destination, |_| async {});
+            let _task = core.spawn_relocating_to(source_index, &destination, |_| async {}, identity());
             let queued_to_current_worker = source_rx.spawn_receiver().try_recv().is_ok();
             // The bound thread matches the chosen worker, but not the installed scheduler.
-            let _task = core.spawn_relocating_to(destination_index, &destination, |_| async {});
+            let _task = core.spawn_relocating_to(destination_index, &destination, |_| async {}, identity());
             let queued_from_retained_binding = destination_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
@@ -510,7 +518,7 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            assert!(LocalWorker::on_spawn(&thread).is_none());
+            assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
             LocalWorker::install_hook(
                 registration(HookFn::<TaskSpawn, _>::new(
                     ReentrantSpawnProbe {
@@ -523,7 +531,7 @@ mod tests {
                 )),
                 None,
             );
-            assert!(LocalWorker::on_spawn(&thread).is_none());
+            assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
 
             LocalWorker::clear_scheduler();
             (
@@ -541,6 +549,7 @@ mod tests {
     #[test]
     fn relocating_registration_checks_owner_execution_and_shutdown() {
         let observations = std::thread::spawn(|| {
+            let identity = || TaskIdentity::from_location(std::panic::Location::caller());
             let thread = ThreadBuilder::default().build(std::thread::current().id());
             let wakes = std::sync::Arc::new(CountingWake::default());
             let shutdown = Shutdown::default();
@@ -566,7 +575,7 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));
+            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }, identity()));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
             let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
             _ = executor.execute_cycle();
@@ -578,12 +587,16 @@ mod tests {
             let nested_core = Arc::clone(&core);
             let source = thread.clone();
             let nested_wakes = std::sync::Arc::clone(&wakes);
-            let mut parent = std::pin::pin!(core.spawn_relocating(&thread, move |_| async move {
-                let before = nested_wakes.0.load(Ordering::Relaxed);
-                let child = nested_core.spawn_relocating(&source, |_| async { 7 });
-                let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
-                (child.await.unwrap(), executing_worker_not_woken)
-            }));
+            let mut parent = std::pin::pin!(core.spawn_relocating(
+                &thread,
+                move |_| async move {
+                    let before = nested_wakes.0.load(Ordering::Relaxed);
+                    let child = nested_core.spawn_relocating(&source, |_| async { 7 }, identity());
+                    let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
+                    (child.await.unwrap(), executing_worker_not_woken)
+                },
+                identity()
+            ));
             _ = executor.execute_cycle();
             _ = executor.execute_cycle();
             _ = executor.execute_cycle();
@@ -592,23 +605,11 @@ mod tests {
                 Poll::Ready(Ok((7, true)))
             );
             let nested_registered_locally = command_rx.spawn_receiver().try_recv().is_err();
-            let other_thread = ThreadBuilder::default().build(std::thread::current().id());
-            let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let other_core = test_dispatcher(
-                NonEmpty::new(worker_endpoint(
-                    other_tx,
-                    Waker::noop().clone(),
-                    other_thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
-                )),
-                Shutdown::default(),
-            );
-            let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
-            let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
+            let other_owner_queued = other_owner_receives_queued_registration();
             let other_owner_not_registered = !executor.has_tasks();
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
-            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }));
+            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }, identity()));
             let rejected_after_shutdown = matches!(
                 rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Err(error)) if error.is_shutdown()
@@ -642,6 +643,26 @@ mod tests {
         for (description, observed) in observations {
             assert!(observed, "{description}");
         }
+    }
+
+    fn other_owner_receives_queued_registration() -> bool {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let (commands, receiver) = crate::runtime::worker::asynchronous::command_channel();
+        let core = test_dispatcher(
+            NonEmpty::new(worker_endpoint(
+                commands,
+                Waker::noop().clone(),
+                thread.clone(),
+                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            )),
+            Shutdown::default(),
+        );
+        let _remote = core.spawn_relocating(
+            &thread,
+            |_| async { 9 },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
+        matches!(receiver.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }))
     }
 
     thread_local! {

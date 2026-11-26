@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] - 2026-11-24
+
+- Expand Cargo environment, override, linker-flag, and compiler lookup regression coverage.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.1.3] - 2026-11-02
 
 - Update the error dependency requirement. Spectre library discovery behavior does not change.

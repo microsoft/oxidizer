@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.2] - 2026-11-24
+
+- Update the fundle_macros requirement to the resolved group release.
+- Update the local requirement for `fundle_macros` from `=0.4.1` to `=0.4.2`.
+
 ## [0.4.1] - 2026-10-20
 
 - Refresh published documentation and align the Fundle macro family.

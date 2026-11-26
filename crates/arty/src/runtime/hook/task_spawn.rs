@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::task::Poll;
 
+use seismograph_runtime::TaskIdentity;
 use smallvec::SmallVec;
 use thread_aware::{Thread, ThreadAware};
 
@@ -34,6 +35,8 @@ pub trait TaskObserver: 'static {
 ///
 /// Arty creates this event before it sends the task to its selected worker.
 /// The event reports the optional origin worker and the required target worker.
+/// Its debug output includes the task identity and the source location that
+/// submitted the task.
 /// On a runtime worker, Arty uses that worker's hook instance. Outside runtime
 /// workers, Arty uses a worker-neutral hook instance. The event covers tasks submitted through
 /// [`RuntimeScheduler`](crate::task::RuntimeScheduler) and
@@ -45,15 +48,18 @@ pub trait TaskObserver: 'static {
 pub struct TaskSpawn {
     pub(super) origin: Option<Thread>,
     pub(super) target: Thread,
+    #[expect(dead_code, reason = "the immutable task identity is currently exposed only through Debug output")]
+    pub(super) identity: TaskIdentity,
     #[debug(ignore)]
     pub(super) observers: Option<TaskObservers>,
 }
 
 impl TaskSpawn {
-    pub(crate) fn new(origin: Option<Thread>, target: Thread) -> Self {
+    pub(crate) fn new(origin: Option<Thread>, target: Thread, identity: TaskIdentity) -> Self {
         Self {
             origin,
             target,
+            identity,
             observers: None,
         }
     }
@@ -396,7 +402,7 @@ mod tests {
     #[test]
     fn into_single_returns_only_observer() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
-        let mut event = TaskSpawn::new(None, worker.clone());
+        let mut event = TaskSpawn::new(None, worker.clone(), TaskIdentity::from_location(std::panic::Location::caller()));
         event.observe(OneBytePoll(1));
 
         let _observer = event.into_observers().unwrap().relocate_to(&worker).into_single().unwrap();
@@ -405,7 +411,7 @@ mod tests {
     #[test]
     fn into_single_returns_original_collection_for_multiple_observers() {
         let worker = ThreadBuilder::default().build(std::thread::current().id());
-        let mut event = TaskSpawn::new(None, worker.clone());
+        let mut event = TaskSpawn::new(None, worker.clone(), TaskIdentity::from_location(std::panic::Location::caller()));
         event.observe(OneBytePoll(1));
         event.observe(OneBytePoll(2));
         let observers = event.into_observers().unwrap().relocate_to(&worker);
@@ -421,7 +427,11 @@ mod tests {
         let source = ThreadBuilder::default().build(std::thread::current().id());
         let destination = ThreadBuilder::default().build(std::thread::current().id());
         let observed = Arc::new(Mutex::new(RelocationSource::NotRelocated));
-        let mut event = TaskSpawn::new(Some(source.clone()), destination.clone());
+        let mut event = TaskSpawn::new(
+            Some(source.clone()),
+            destination.clone(),
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         event.observe(RelocationProbe(Arc::clone(&observed)));
 
         let _observer = event.into_observers().unwrap().relocate_to(&destination).into_single().unwrap();
@@ -433,7 +443,7 @@ mod tests {
     fn observe_with_creates_a_non_send_observer_on_the_target() {
         let target = ThreadBuilder::default().build(std::thread::current().id());
         let calls = Arc::new(AtomicUsize::new(0));
-        let mut event = TaskSpawn::new(None, target.clone());
+        let mut event = TaskSpawn::new(None, target.clone(), TaskIdentity::from_location(std::panic::Location::caller()));
         event.observe_with(LocalPollData(Arc::clone(&calls)), LocalPoll::create);
 
         let mut observer = event.into_observers().unwrap().relocate_to(&target).into_single().unwrap();
@@ -482,7 +492,11 @@ mod tests {
         {
             let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
             for value in 0..MEASURED_OPERATIONS {
-                let mut event = TaskSpawn::new(Some(worker.clone()), worker.clone());
+                let mut event = TaskSpawn::new(
+                    Some(worker.clone()),
+                    worker.clone(),
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                );
                 for observer in 0..observer_count {
                     event.observe(OneBytePoll(u8::try_from((value + observer) % 256).unwrap()));
                 }

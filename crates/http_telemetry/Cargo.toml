@@ -4,7 +4,7 @@
 [package]
 name = "http_telemetry"
 description = "Automatic telemetry collection for incoming HTTP requests."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "telemetry", "logging", "metrics"]
 categories = ["network-programming", "development-tools::debugging"]

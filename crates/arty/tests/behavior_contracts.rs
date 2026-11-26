@@ -502,10 +502,8 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
 
 #[cfg(feature = "macros")]
 mod entry_points {
-    use arty::task::Context;
-
     #[arty::main(workers = 1)]
-    async fn application_error(_cx: Context) -> Result<(), &'static str> {
+    async fn application_error() -> Result<(), &'static str> {
         Err("application")
     }
 

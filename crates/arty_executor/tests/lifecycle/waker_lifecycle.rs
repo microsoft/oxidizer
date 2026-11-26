@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use arty_executor::{CycleOutcome, Executor, PanicPolicy};
+use seismograph_runtime::TaskIdentity;
 
 use super::support::{TaskBuilderExt as _, TaskOutcome};
 
@@ -33,13 +34,16 @@ fn remote_wake_burst_notifies_the_owner_once() {
         drop(
             executor
                 .tasks()
-                .task(poll_fn({
-                    let retained = Rc::clone(&retained);
-                    move |cx| {
-                        retained.borrow_mut().push(cx.waker().clone());
-                        Poll::<()>::Pending
-                    }
-                }))
+                .task(
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                    poll_fn({
+                        let retained = Rc::clone(&retained);
+                        move |cx| {
+                            retained.borrow_mut().push(cx.waker().clone());
+                            Poll::<()>::Pending
+                        }
+                    }),
+                )
                 .register_test(),
         );
     }
@@ -67,20 +71,23 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
     let mut handles = std::array::from_fn::<_, 3, _>(|index| {
         executor
             .tasks()
-            .task(poll_fn({
-                let ready = Rc::clone(&ready);
-                let polls = Rc::clone(&polls);
-                let retained = Rc::clone(&retained);
-                move |cx| {
-                    polls.borrow_mut().push(index);
-                    if ready.get() {
-                        Poll::Ready(index)
-                    } else {
-                        retained.borrow_mut().push(cx.waker().clone());
-                        Poll::Pending
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                poll_fn({
+                    let ready = Rc::clone(&ready);
+                    let polls = Rc::clone(&polls);
+                    let retained = Rc::clone(&retained);
+                    move |cx| {
+                        polls.borrow_mut().push(index);
+                        if ready.get() {
+                            Poll::Ready(index)
+                        } else {
+                            retained.borrow_mut().push(cx.waker().clone());
+                            Poll::Pending
+                        }
                     }
-                }
-            }))
+                }),
+            )
             .register_test()
     });
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -115,15 +122,18 @@ fn completed_task_discards_its_queued_remote_notification() {
     let polls = Rc::new(Cell::new(0));
     let mut handle = executor
         .tasks()
-        .task(poll_fn({
-            let polls = Rc::clone(&polls);
-            move |cx| {
-                polls.set(polls.get() + 1);
-                let waker = cx.waker().clone();
-                std::thread::spawn(move || waker.wake()).join().unwrap();
-                Poll::Ready(42)
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let polls = Rc::clone(&polls);
+                move |cx| {
+                    polls.set(polls.get() + 1);
+                    let waker = cx.waker().clone();
+                    std::thread::spawn(move || waker.wake()).join().unwrap();
+                    Poll::Ready(42)
+                }
+            }),
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
@@ -146,13 +156,16 @@ fn a_panicked_tasks_retained_waker_does_not_notify_the_live_executor() {
     let retained = Rc::new(RefCell::new(None));
     let _task = executor
         .tasks()
-        .task(poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| -> Poll<()> {
-                *retained.borrow_mut() = Some(cx.waker().clone());
-                panic!("contained task panic");
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let retained = Rc::clone(&retained);
+                move |cx| -> Poll<()> {
+                    *retained.borrow_mut() = Some(cx.waker().clone());
+                    panic!("contained task panic");
+                }
+            }),
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert!(!executor.has_tasks());
@@ -202,14 +215,17 @@ fn remote_consuming_wake_keeps_payload_on_owner_when_notification_panics() {
     };
     let _task = executor
         .tasks()
-        .task(poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                let _probe = &probe;
-                *retained.borrow_mut() = Some(cx.waker().clone());
-                Poll::<()>::Pending
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    let _probe = &probe;
+                    *retained.borrow_mut() = Some(cx.waker().clone());
+                    Poll::<()>::Pending
+                }
+            }),
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let waker = retained.borrow_mut().take().unwrap();
@@ -231,13 +247,16 @@ fn retained_waker_is_noop_after_shutdown() {
     let retained = Rc::new(RefCell::new(None));
     let task = executor
         .tasks()
-        .task(poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                *retained.borrow_mut() = Some(cx.waker().clone());
-                Poll::Ready(())
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    *retained.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Ready(())
+                }
+            }),
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -276,13 +295,16 @@ fn owner_waker_panic_does_not_prevent_shutdown() {
     let retained = Rc::new(RefCell::new(None));
     let task = executor
         .tasks()
-        .task(poll_fn({
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                retained.borrow_mut().get_or_insert_with(|| cx.waker().clone());
-                Poll::<()>::Pending
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    retained.borrow_mut().get_or_insert_with(|| cx.waker().clone());
+                    Poll::<()>::Pending
+                }
+            }),
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let retained = retained.borrow_mut().take().unwrap();

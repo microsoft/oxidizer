@@ -37,7 +37,7 @@ identifier!(TaskId, "Process-monotonic identity assigned to a runtime task.");
 identifier!(TransferId, "Process-monotonic identity assigned to an instance transfer.");
 identifier!(
     TypeDescriptorId,
-    "Process-monotonic identity assigned to a task or instance type descriptor."
+    "Process-local identity assigned to a task or instance type descriptor."
 );
 
 /// Fixed numeric context carried by a runtime event.

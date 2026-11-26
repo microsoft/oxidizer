@@ -5,6 +5,8 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::task::Poll;
 
+use crate::TaskIdentity;
+
 /// Scheduling state read from native executor storage.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskState {
@@ -59,9 +61,12 @@ pub trait PollObserver: std::fmt::Debug {
 }
 
 /// Runtime-owned behavior attached to one task.
+///
+/// Inspection and terminal callbacks borrow the identity stored by the executor.
+/// Implementations do not need to retain their own copy.
 pub trait TaskInstrumentation: 'static {
     /// Visits a temporary description of the task.
-    fn inspect(&self, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+    fn inspect(&self, _identity: &TaskIdentity, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
 
     /// Runs immediately before the executor polls the task.
     fn poll_start(&mut self) {}
@@ -70,13 +75,13 @@ pub trait TaskInstrumentation: 'static {
     fn poll_end(&mut self, _outcome: Poll<()>) {}
 
     /// Reports successful completion.
-    fn completed(&mut self) {}
+    fn completed(&mut self, _identity: &TaskIdentity) {}
 
     /// Reports panic completion.
-    fn panicked(&mut self) {}
+    fn panicked(&mut self, _identity: &TaskIdentity) {}
 
     /// Reports cancellation.
-    fn cancelled(&mut self) {}
+    fn cancelled(&mut self, _identity: &TaskIdentity) {}
 }
 
 impl TaskInstrumentation for () {}
@@ -103,8 +108,8 @@ where
     J: Fn(TaskState) -> Option<D> + 'static,
     D: 'static,
 {
-    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
-        self.instrumentation.inspect(state, visitor);
+    fn inspect(&self, identity: &TaskIdentity, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        self.instrumentation.inspect(identity, state, visitor);
         if let Some(description) = (self.inspect)(state) {
             visitor(&description);
         }
@@ -118,16 +123,16 @@ where
         self.instrumentation.poll_end(outcome);
     }
 
-    fn completed(&mut self) {
-        self.instrumentation.completed();
+    fn completed(&mut self, identity: &TaskIdentity) {
+        self.instrumentation.completed(identity);
     }
 
-    fn panicked(&mut self) {
-        self.instrumentation.panicked();
+    fn panicked(&mut self, identity: &TaskIdentity) {
+        self.instrumentation.panicked(identity);
     }
 
-    fn cancelled(&mut self) {
-        self.instrumentation.cancelled();
+    fn cancelled(&mut self, identity: &TaskIdentity) {
+        self.instrumentation.cancelled(identity);
     }
 }
 
@@ -141,7 +146,7 @@ mod tests {
     struct Recorder(Rc<RefCell<Vec<&'static str>>>);
 
     impl TaskInstrumentation for Recorder {
-        fn inspect(&self, _state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        fn inspect(&self, _identity: &TaskIdentity, _state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
             visitor(&"instrumentation");
         }
 
@@ -153,15 +158,15 @@ mod tests {
             self.0.borrow_mut().push("end");
         }
 
-        fn completed(&mut self) {
+        fn completed(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("completed");
         }
 
-        fn panicked(&mut self) {
+        fn panicked(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("panicked");
         }
 
-        fn cancelled(&mut self) {
+        fn cancelled(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("cancelled");
         }
     }
@@ -173,7 +178,8 @@ mod tests {
         let mut description = None;
         let mut wrapped_description = None;
 
-        instrumentation.inspect(TaskState::Ready, &mut |value| {
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
+        instrumentation.inspect(&identity, TaskState::Ready, &mut |value| {
             if let Some(value) = value.downcast_ref::<TaskState>() {
                 description = Some(*value);
             }
@@ -183,9 +189,9 @@ mod tests {
         });
         instrumentation.poll_start();
         instrumentation.poll_end(Poll::Pending);
-        instrumentation.completed();
-        instrumentation.panicked();
-        instrumentation.cancelled();
+        instrumentation.completed(&identity);
+        instrumentation.panicked(&identity);
+        instrumentation.cancelled(&identity);
 
         assert_eq!(description, Some(TaskState::Ready));
         assert_eq!(wrapped_description, Some("instrumentation"));
