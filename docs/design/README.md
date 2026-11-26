@@ -41,6 +41,9 @@ That compilation counts toward the execution timeout.
 
 Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
 It runs both `--all-features` and `--no-default-features` configurations.
+On Windows x64, the workflow collects those configurations in sequence.
+This releases the large scratch target before the next collection and reduces
+the peak disk use. The gate still evaluates both LCOV reports together.
 The local gate and CI uploads use the same filtered LCOV files, which contain
 line-coverage counts, under `target/coverage`.
 Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.

@@ -337,7 +337,12 @@ anvil-license-headers: anvil-license-headers-validate-prereqs anvil-impact
 
 # Run affected tests and enforce coverage policy in supported feature modes.
 anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
-    cargo +{{ rust_nightly }} each {{ anvil_affected_selection }} --once -- {{ anvil_coverage_gate_command }} {{ anvil_explicit_package_args }} run --configuration all-features --configuration no-default-features --coverage-dir target/coverage --no-coverage-target aarch64-pc-windows-msvc
+    # Windows GitHub runners exhaust their temporary D: drive when one gate run
+    # retains both feature configurations. Sequential runs preserve the LCOV
+    # artifacts and let cargo-coverage-gate remove each large scratch target.
+    {{ if os() == "windows" && env("RUNNER_ARCH", "") != "ARM64" { "cargo +" + rust_nightly + " each " + anvil_affected_selection + " --once -- " + anvil_coverage_gate_command + " " + anvil_explicit_package_args + " run --configuration all-features --coverage-dir target/coverage --no-coverage-target aarch64-pc-windows-msvc" } else { "cargo +" + rust_nightly + " each " + anvil_affected_selection + " --once -- " + anvil_coverage_gate_command + " " + anvil_explicit_package_args + " run --configuration all-features --configuration no-default-features --coverage-dir target/coverage --no-coverage-target aarch64-pc-windows-msvc" } }}
+    {{ if os() == "windows" && env("RUNNER_ARCH", "") != "ARM64" { "cargo +" + rust_nightly + " each " + anvil_affected_selection + " --once -- " + anvil_coverage_gate_command + " " + anvil_explicit_package_args + " run --configuration no-default-features --coverage-dir target/coverage --no-coverage-target aarch64-pc-windows-msvc" } else { "# combined collection already ran" } }}
+    {{ if os() == "windows" && env("RUNNER_ARCH", "") != "ARM64" { "cargo +" + rust_nightly + " each " + anvil_affected_selection + " --once -- " + anvil_coverage_gate_command + " " + anvil_explicit_package_args + " --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info" } else { "# combined collection already evaluated both reports" } }}
 
 # Run affected Loom test targets with the Loom configuration.
 anvil-loom: anvil-loom-validate-prereqs anvil-impact
