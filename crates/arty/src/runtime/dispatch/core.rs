@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::ShutdownCause;
+use arty_executor::{ShutdownCause, TaskIdentity};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use performables::arc::Arc;
@@ -19,9 +19,9 @@ use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
+use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::{RemoteFutureFactory, SpawnOptions, prepare_remote};
-use crate::task::{Context, TaskIdentity};
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {

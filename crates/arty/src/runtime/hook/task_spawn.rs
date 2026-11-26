@@ -5,11 +5,11 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::task::Poll;
 
+use arty_executor::TaskIdentity;
 use smallvec::SmallVec;
 use thread_aware::{Thread, ThreadAware};
 
 use super::hook_fn::ErasedHookFn;
-use crate::task::TaskIdentity;
 
 /// Observes each top-level poll of an async task.
 ///

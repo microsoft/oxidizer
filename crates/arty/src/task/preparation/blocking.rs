@@ -3,10 +3,9 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::TaskCompletion;
+use arty_executor::{TaskCompletion, TaskIdentity};
 
 use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
-use crate::task::TaskIdentity;
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 

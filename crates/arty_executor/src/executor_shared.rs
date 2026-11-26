@@ -16,8 +16,8 @@ use plurality::{Arc as PoolArc, MultiPool};
 
 use crate::wake::RemoteWake;
 use crate::{
-    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskInstrumentation, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
-    discard_task_panic_payload,
+    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskIdentity, TaskInstrumentation, TypeErasedTask, WakeShared, WakeSignal,
+    allocate_task, discard_task_panic_payload,
 };
 
 /// Cloneable handle to state used by reentrant task submissions.
@@ -115,7 +115,7 @@ impl ExecutorShared {
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn add_task<F, T, I>(&self, future: F, instrumentation: I, completion: T)
+    pub(crate) fn add_task<F, T, I>(&self, identity: TaskIdentity, future: F, instrumentation: I, completion: T)
     where
         F: IntoFuture + 'static,
         F::Output: 'static,
@@ -123,25 +123,31 @@ impl ExecutorShared {
         I: TaskInstrumentation,
     {
         if self.shutdown().is_triggered() {
-            Self::reject_task::<F::IntoFuture, _, _>(instrumentation, completion, self.shutdown().cause());
+            Self::reject_task::<F::IntoFuture, _, _>(&identity, instrumentation, completion, self.shutdown().cause());
             return;
         }
         let future = future.into_future();
         if self.shutdown().is_triggered() {
-            Self::reject_task::<F::IntoFuture, _, _>(instrumentation, completion, self.shutdown().cause());
+            Self::reject_task::<F::IntoFuture, _, _>(&identity, instrumentation, completion, self.shutdown().cause());
             return;
         }
-        self.register_task(allocate_task(&self.inner.task_storage, future, instrumentation, completion));
+        self.register_task(allocate_task(
+            &self.inner.task_storage,
+            identity,
+            future,
+            instrumentation,
+            completion,
+        ));
     }
 
-    fn reject_task<F, T, I>(mut instrumentation: I, completion: T, cause: crate::ShutdownCause)
+    fn reject_task<F, T, I>(identity: &TaskIdentity, mut instrumentation: I, completion: T, cause: crate::ShutdownCause)
     where
         F: Future + 'static,
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
         I: TaskInstrumentation,
     {
-        let callback_panic = catch_unwind(AssertUnwindSafe(|| instrumentation.cancelled())).err();
+        let callback_panic = catch_unwind(AssertUnwindSafe(|| instrumentation.cancelled(identity))).err();
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(instrumentation))) {
             discard_task_panic_payload(panic);
         }
@@ -198,7 +204,7 @@ mod tests {
     struct CountCancellation(Rc<Cell<usize>>);
 
     impl crate::TaskInstrumentation for CountCancellation {
-        fn cancelled(&mut self) {
+        fn cancelled(&mut self, _identity: &TaskIdentity) {
             self.0.set(self.0.get() + 1);
         }
     }
@@ -206,7 +212,7 @@ mod tests {
     struct PanickingCancellation;
 
     impl crate::TaskInstrumentation for PanickingCancellation {
-        fn cancelled(&mut self) {
+        fn cancelled(&mut self, _identity: &TaskIdentity) {
             panic!("rejected instrumentation cancellation");
         }
     }
@@ -245,6 +251,7 @@ mod tests {
             let cancellations = Rc::new(Cell::new(0));
             let cancelled = Rc::new(Cell::new(false));
             shared.add_task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
                 StopOnConvert(shared.shutdown().clone()),
                 CountCancellation(Rc::clone(&cancellations)),
                 Cancelled(Rc::clone(&cancelled)),
@@ -266,6 +273,7 @@ mod tests {
 
             let panic = catch_unwind(AssertUnwindSafe(|| {
                 shared.add_task(
+                    TaskIdentity::from_location(std::panic::Location::caller()),
                     StopOnConvert(shared.shutdown().clone()),
                     PanickingCancellation,
                     Cancelled(Rc::clone(&cancelled)),

@@ -28,6 +28,10 @@ The executor runs on one thread. Run one executor on each thread that needs to e
 tasks. Only one executor can be alive on a thread. You can create a replacement after
 you drop the previous executor. A runtime integration supplies a [`TaskCompletion`][__link1]
 target when it registers a task.
+Each registration also requires a [`TaskIdentity`][__link2]. During each poll,
+[`TaskIdentity::current`][__link3] returns that identity on the executor thread.
+Outside a poll, it returns `None`. Runtime integrations can use the current
+identity to record the parent of a newly submitted task.
 
 A task ends when its future returns `Poll::Ready`, when it panics, or when
 executor shutdown cancels it. The executor does not provide methods to
@@ -39,7 +43,7 @@ A cloned task waker can outlive its task. After task completion or cancellation,
 the waker does nothing and cannot delay executor shutdown.
 
 The executor contains task panics. Use
-[`ExecutorBuilder::panic_policy`][__link2] to select
+[`ExecutorBuilder::panic_policy`][__link4] to select
 whether a task panic starts executor shutdown.
 
 
@@ -48,7 +52,9 @@ whether a task panic starts executor shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbu5HIr_hkwHMbj8Df1tFe4NYb1rfELg-bwBMbrz-2IqTxakphZIGCbWFydHlfZXhlY3V0b3JlMC43LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbainrbuXqB90blttXddMkXe4by5pxeRoSKN0bNAv332h7MKthZIGCbWFydHlfZXhlY3V0b3JlMC43LjA
  [__link0]: https://docs.rs/arty
  [__link1]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskCompletion
- [__link2]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=ExecutorBuilder::panic_policy
+ [__link2]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskIdentity
+ [__link3]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskIdentity::current
+ [__link4]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=ExecutorBuilder::panic_policy

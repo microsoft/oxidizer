@@ -798,7 +798,8 @@ mod tests {
             F: IntoFuture + 'static,
             F::Output: 'static,
         {
-            self.task(future).register(DiscardCompletion);
+            self.task(arty_executor::TaskIdentity::from_location(std::panic::Location::caller()), future)
+                .register(DiscardCompletion);
         }
     }
 
@@ -1372,7 +1373,7 @@ mod tests {
         let join = worker_context(&worker).dispatcher().spawn(
             |_| std::future::ready(()),
             crate::task::preparation::SpawnOptions::new(
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
             ),
         );
@@ -1482,11 +1483,12 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        crate::task::preparation::SpawnOptions::new(crate::task::TaskIdentity::from_location(std::panic::Location::caller()), 0).register(
+        let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+        crate::task::preparation::SpawnOptions::new(identity, 0).register(
             worker_context(&worker).thread(),
             &worker.tasks,
             async move {
-                assert_eq!(crate::runtime::monitoring::current_task(), None);
+                assert_eq!(arty_executor::TaskIdentity::current(), Some(identity));
                 completed.set(true);
             },
             DiscardCompletion,
@@ -2155,7 +2157,7 @@ mod tests {
                 }
             },
             crate::task::preparation::SpawnOptions::new(
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
             ),
         );

@@ -7,7 +7,7 @@ use std::any::type_name;
 use std::fmt::Debug;
 use std::thread::ThreadId;
 
-use arty_executor::ShutdownCause;
+use arty_executor::{ShutdownCause, TaskIdentity};
 use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
@@ -16,8 +16,8 @@ use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
+use crate::task::Context;
 use crate::task::handle::JoinHandle;
-use crate::task::{Context, TaskIdentity};
 
 /// Cheap shared access to one runtime's routing and shutdown state.
 #[derive(Clone)]

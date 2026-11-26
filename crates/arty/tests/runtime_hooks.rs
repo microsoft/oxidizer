@@ -299,7 +299,7 @@ fn task_spawn_debug_includes_the_public_spawn_location() {
     assert_eq!(result.unwrap(), 42);
     let observed = locations.take();
     assert_eq!(observed.len(), 2);
-    assert!(observed[0].contains(file!()));
+    assert!(observed[0].contains(&format!("file: {:?}", file!())));
     assert!(observed[1].contains(&format!("file: {:?}, line: {local_spawn_line}", file!())));
 
     runtime.stop().unwrap();

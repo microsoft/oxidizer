@@ -12,6 +12,8 @@ use std::thread::ThreadId;
 
 use performables::sync::channel;
 
+#[cfg(test)]
+use crate::TaskIdentity;
 use crate::{RemoteTaskHandle, TaskPtr, executor_context};
 
 const TASK_ACTIVE: u8 = 0b001;
@@ -347,10 +349,13 @@ mod tests {
         let mut executor = crate::Executor::builder().build();
         executor
             .tasks()
-            .task(std::future::poll_fn(move |cx| {
-                *saved.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending::<()>
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::poll_fn(move |cx| {
+                    *saved.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending::<()>
+                }),
+            )
             .register(Completion(Rc::clone(&cancellations)));
         let _ = executor.execute_cycle();
         let waker = captured.borrow_mut().take().unwrap();

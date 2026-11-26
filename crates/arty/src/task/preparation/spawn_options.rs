@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet};
+use arty_executor::{TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet};
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
-use crate::task::TaskIdentity;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct SpawnOptions {
     identity: TaskIdentity,
@@ -18,7 +17,7 @@ impl SpawnOptions {
     pub(crate) fn new(identity: TaskIdentity, future_size: usize) -> Self {
         Self {
             identity,
-            parent: crate::runtime::monitoring::current_task(),
+            parent: TaskIdentity::current().map(TaskIdentity::id),
             future_size,
             observers: None,
         }
@@ -81,7 +80,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::Shutdown;
-    use crate::runtime::monitoring::{enter_current, set_events};
+    use crate::runtime::monitoring::set_events;
     use crate::task::handle::JoinHandlePool;
 
     #[test]
@@ -91,21 +90,35 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("submission-metadata", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        let parent = seismograph_runtime::allocate_task_id();
+        let parent = TaskIdentity::from_location(std::panic::Location::caller());
         let identity = TaskIdentity::from_location(std::panic::Location::caller());
-        let options = {
-            let _parent = enter_current(parent);
-            SpawnOptions::new(identity, 37)
-        };
-        let _other_parent = enter_current(seismograph_runtime::allocate_task_id());
         set_events(Some(worker.handle().task_events()));
         let _events = scopeguard::guard((), |()| set_events(None));
         let mut executor = Executor::builder().build();
         let results = JoinHandlePool::new(Shutdown::default());
+        let options = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let submitted = std::rc::Rc::clone(&options);
+        let (_handle, sender) = results.handle();
+        executor
+            .tasks()
+            .task(parent, async move {
+                *submitted.borrow_mut() = Some(SpawnOptions::new(identity, 37));
+            })
+            .register(sender);
+        let _ = executor.execute_cycle();
+        let options = options.borrow_mut().take().unwrap();
         let (_handle, sender) = results.handle();
         let future: ErasedFuture = Box::pin(std::future::pending());
         let destination = ThreadBuilder::default().build(std::thread::current().id());
-        options.register(&destination, &executor.tasks(), future, sender);
+        let tasks = executor.tasks();
+        let (_other_handle, other_sender) = results.handle();
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
+                options.register(&destination, &tasks, future, sender);
+            })
+            .register(other_sender);
+        let _ = executor.execute_cycle();
         let mut snapshots = Vec::new();
 
         let status = executor
@@ -118,7 +131,7 @@ mod tests {
             (snapshots[0].id, snapshots[0].type_descriptor),
             (identity.id(), identity.descriptor())
         );
-        assert_eq!(snapshots[0].parent, Some(parent));
+        assert_eq!(snapshots[0].parent, Some(parent.id()));
         assert_eq!(snapshots[0].future_size_bytes, Some(37));
         let mut identities = Vec::new();
         executor.inspect(1, |identity: &TaskIdentity| identities.push(*identity)).unwrap();

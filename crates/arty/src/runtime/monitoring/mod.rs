@@ -7,7 +7,7 @@
 //! Each async worker owns a worker registration and its current poll state.
 //! Blocking queues own worker registrations and share an event context for submissions.
 //! Each submission creates an immutable identity from its caller's source location.
-//! The executor stores each async task's identity in its instrumentation payload.
+//! The executor stores each async task's identity and sets it during polls.
 //! A blocking callback and its
 //! inspection metadata share one allocation so inspection can find queued and running tasks.
 //! Handles provide access to these registrations but do not own runtime shutdown.
@@ -31,6 +31,6 @@ pub(crate) use blocking::{
     BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob,
 };
 pub(crate) use runtime::RuntimeMonitoring;
-pub(crate) use task::{TaskInfo, current_task, register_monitored};
 #[cfg(test)]
-pub(crate) use task::{enter_current, set_events};
+pub(crate) use task::set_events;
+pub(crate) use task::{TaskInfo, register_monitored};

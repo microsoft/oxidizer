@@ -12,7 +12,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskSet, discard_task_panic_payload};
+use arty_executor::{
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload, TaskSet, discard_task_panic_payload,
+};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
@@ -37,7 +39,9 @@ impl TaskCompletion<()> for CountCompletion {
 }
 
 fn spawn_complete_once(executor: &mut Executor, tasks: &TaskSet, completed: &Rc<Cell<usize>>) {
-    tasks.task(async {}).register(CountCompletion(Rc::clone(completed)));
+    tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .register(CountCompletion(Rc::clone(completed)));
     let _ = executor.execute_cycle();
 }
 

@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::{
-    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskInstrumentation,
-    TaskPanicPayload, TaskSet,
+    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskIdentity,
+    TaskInstrumentation, TaskPanicPayload, TaskSet,
 };
 
 use super::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
@@ -35,7 +35,7 @@ fn task_set_execution_state_follows_the_owner_cycle() {
     let task_tasks = tasks.clone();
     assert!(!tasks.is_executing());
     let _completion = tasks
-        .task(async move {
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
             task_observed.set(task_tasks.is_executing());
         })
         .register_test();
@@ -147,18 +147,21 @@ fn failed_construction_preserves_existing_executor_notifications() {
     let retained = Rc::new(RefCell::new(None));
     let mut handle = executor
         .tasks()
-        .task(poll_fn({
-            let ready = Rc::clone(&ready);
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                if ready.get() {
-                    Poll::Ready(42)
-                } else {
-                    *retained.borrow_mut() = Some(cx.waker().clone());
-                    Poll::Pending
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let ready = Rc::clone(&ready);
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    if ready.get() {
+                        Poll::Ready(42)
+                    } else {
+                        *retained.borrow_mut() = Some(cx.waker().clone());
+                        Poll::Pending
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     ready.set(true);
@@ -178,7 +181,10 @@ fn configured_current_thread_executes_tasks() {
         thread_aware_core::__private::v1::new_numa_node(0),
     );
     let mut executor = Executor::builder().thread(thread).build();
-    let mut handle = executor.tasks().task(async { 42 }).register_test();
+    let mut handle = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert_eq!(poll_completed(&mut handle), 42);
@@ -188,7 +194,10 @@ fn configured_current_thread_executes_tasks() {
 #[test]
 fn completed_result_remains_available_after_executor_stops() {
     let mut executor = Executor::builder().build();
-    let mut handle = executor.tasks().task(async { 42 }).register_test();
+    let mut handle = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+        .register_test();
 
     assert!(executor.has_tasks());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -202,7 +211,12 @@ fn completed_result_remains_available_after_executor_stops() {
 fn task_panic_publishes_the_original_payload_and_keeps_the_executor_usable() {
     let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
     let tasks = executor.tasks();
-    let mut panicked = tasks.task(poll_fn(|_| -> Poll<usize> { panic!("task panic") })).register_test();
+    let mut panicked = tasks
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn(|_| -> Poll<usize> { panic!("task panic") }),
+        )
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let Poll::Ready(TaskOutcome::Panicked(payload)) = poll_once(&mut panicked) else {
@@ -210,7 +224,9 @@ fn task_panic_publishes_the_original_payload_and_keeps_the_executor_usable() {
     };
     assert_eq!(payload.downcast_ref::<&str>(), Some(&"task panic"));
 
-    let mut completed = tasks.task(async { 7 }).register_test();
+    let mut completed = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 7 })
+        .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert_eq!(poll_completed(&mut completed), 7);
 }
@@ -221,19 +237,22 @@ fn self_wake_requests_an_immediate_follow_up_cycle() {
     let polls = Rc::new(Cell::new(0));
     let mut completion = executor
         .tasks()
-        .task(poll_fn({
-            let polls = Rc::clone(&polls);
-            move |cx| {
-                let poll = polls.get();
-                polls.set(poll + 1);
-                if poll < 2 {
-                    cx.waker().wake_by_ref();
-                    Poll::Pending
-                } else {
-                    Poll::Ready(42)
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let polls = Rc::clone(&polls);
+                move |cx| {
+                    let poll = polls.get();
+                    polls.set(poll + 1);
+                    if poll < 2 {
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(42)
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
@@ -271,12 +290,15 @@ fn assert_future_is_destroyed_at_its_pinned_address(completes: bool) {
     let dropped = Rc::new(Cell::new(false));
     let mut completion = executor
         .tasks()
-        .task(PinnedDropFuture {
-            polled_at: Cell::new(std::ptr::null()),
-            dropped: Rc::clone(&dropped),
-            completes,
-            _pin: PhantomPinned,
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            PinnedDropFuture {
+                polled_at: Cell::new(std::ptr::null()),
+                dropped: Rc::clone(&dropped),
+                completes,
+                _pin: PhantomPinned,
+            },
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -307,13 +329,16 @@ fn inactive_task_is_not_polled_again_without_a_wake() {
     let polls = Rc::new(Cell::new(0));
     let _completion = executor
         .tasks()
-        .task(poll_fn({
-            let polls = Rc::clone(&polls);
-            move |_| {
-                polls.set(polls.get() + 1);
-                Poll::<()>::Pending
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let polls = Rc::clone(&polls);
+                move |_| {
+                    polls.set(polls.get() + 1);
+                    Poll::<()>::Pending
+                }
+            }),
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -332,10 +357,10 @@ fn tasks_submitted_during_poll_wait_for_the_next_cycle_in_registration_order() {
         let child_tasks = tasks.clone();
         let polls = Rc::clone(&polls);
         tasks
-            .task(async move {
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
                 polls.borrow_mut().push(index);
                 child_tasks
-                    .task({
+                    .task(TaskIdentity::from_location(std::panic::Location::caller()), {
                         let polls = Rc::clone(&polls);
                         async move {
                             polls.borrow_mut().push(index + 2);
@@ -360,20 +385,23 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
     let ready = Rc::new(Cell::new(false));
     let retained = Rc::new(RefCell::new(None));
     tasks
-        .task(poll_fn({
-            let polls = Rc::clone(&polls);
-            let ready = Rc::clone(&ready);
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                polls.borrow_mut().push(2);
-                if ready.get() {
-                    Poll::Ready(())
-                } else {
-                    retained.borrow_mut().replace(cx.waker().clone());
-                    Poll::Pending
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let polls = Rc::clone(&polls);
+                let ready = Rc::clone(&ready);
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    polls.borrow_mut().push(2);
+                    if ready.get() {
+                        Poll::Ready(())
+                    } else {
+                        retained.borrow_mut().replace(cx.waker().clone());
+                        Poll::Pending
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .register(super::support::DiscardCompletion);
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     polls.borrow_mut().clear();
@@ -381,7 +409,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
     retained.borrow().as_ref().unwrap().wake_by_ref();
     for index in 0..2 {
         tasks
-            .task({
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), {
                 let polls = Rc::clone(&polls);
                 async move {
                     polls.borrow_mut().push(index);
@@ -399,7 +427,10 @@ fn shutdown_panic_policy_publishes_the_payload_before_shutdown() {
     let mut executor = Executor::builder().panic_policy(PanicPolicy::SHUTDOWN).build();
     let mut completion = executor
         .tasks()
-        .task(poll_fn(|_| -> Poll<()> { panic!("shutdown panic") }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn(|_| -> Poll<()> { panic!("shutdown panic") }),
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
@@ -483,16 +514,19 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
         let notification = Rc::new(RefCell::new(None));
         executor
             .tasks()
-            .task(poll_fn({
-                let shutdown = shutdown.clone();
-                let mut existing = existing.clone();
-                move |_| -> Poll<()> {
-                    if let Some(cause) = existing.take() {
-                        shutdown.trigger(cause);
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                poll_fn({
+                    let shutdown = shutdown.clone();
+                    let mut existing = existing.clone();
+                    move |_| -> Poll<()> {
+                        if let Some(cause) = existing.take() {
+                            shutdown.trigger(cause);
+                        }
+                        panic!("panic notification");
                     }
-                    panic!("panic notification");
-                }
-            }))
+                }),
+            )
             .register(CapturePanic {
                 shutdown,
                 notification: Rc::clone(&notification),
@@ -545,7 +579,10 @@ impl Drop for ReadyDropPanic {
 #[test]
 fn completed_future_destructor_panic_is_published_as_the_task_panic() {
     let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
-    let mut completion = executor.tasks().task(ReadyDropPanic).register_test();
+    let mut completion = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), ReadyDropPanic)
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let Poll::Ready(TaskOutcome::Panicked(payload)) = poll_once(&mut completion) else {
@@ -575,7 +612,10 @@ impl Drop for PollAndDropPanic {
 #[test]
 fn poll_panic_remains_primary_when_future_disposal_also_panics() {
     let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
-    let mut completion = executor.tasks().task(PollAndDropPanic).register_test();
+    let mut completion = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), PollAndDropPanic)
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let Poll::Ready(TaskOutcome::Panicked(payload)) = poll_once(&mut completion) else {
@@ -618,9 +658,12 @@ fn cancellation_destructor_panic_still_publishes_cancellation_and_completes_shut
     let dropped = Rc::new(Cell::new(false));
     let mut completion = executor
         .tasks()
-        .task(CancellationDropPanic {
-            dropped: Rc::clone(&dropped),
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            CancellationDropPanic {
+                dropped: Rc::clone(&dropped),
+            },
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
 
@@ -634,7 +677,10 @@ fn cancellation_destructor_panic_still_publishes_cancellation_and_completes_shut
 #[test]
 fn retained_handle_reports_shutdown_without_delaying_shutdown() {
     let mut executor = Executor::builder().build();
-    let mut handle = executor.tasks().task(pending::<()>()).register_test();
+    let mut handle = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
+        .register_test();
 
     executor.shutdown().trigger(ShutdownCause::default());
 
@@ -648,11 +694,15 @@ fn retained_handle_reports_shutdown_without_delaying_shutdown() {
 fn caused_shutdown_is_attached_to_cancelled_and_rejected_tasks() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    let mut pending = tasks.task(pending::<()>()).register_test();
+    let mut pending = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
+        .register_test();
     let (cause, expected) = shutdown_cause("executor failed");
 
     executor.shutdown().trigger(cause);
-    let mut rejected = tasks.task(async {}).register_test();
+    let mut rejected = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
 
     for cause in [poll_cancelled(&mut pending), poll_cancelled(&mut rejected)] {
@@ -668,7 +718,9 @@ fn clean_shutdown_remains_authoritative_for_rejected_tasks() {
     let cause = shutdown_cause("later failure").0;
 
     executor.shutdown().trigger(ShutdownCause::default());
-    let mut rejected = tasks.task(async {}).register_test();
+    let mut rejected = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .register_test();
     executor.shutdown().trigger(cause);
 
     assert!(poll_cancelled(&mut rejected).as_error().is_none());
@@ -682,7 +734,9 @@ fn retained_task_set_preserves_the_shutdown_cause_after_executor_drop() {
     executor.shutdown().trigger(cause);
     drop(executor);
 
-    let mut local = tasks.task(async {}).register_test();
+    let mut local = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .register_test();
     let cause = poll_cancelled(&mut local);
     let source = cause.as_error().unwrap();
     assert_same_shutdown_source(source, &expected);
@@ -691,7 +745,10 @@ fn retained_task_set_preserves_the_shutdown_cause_after_executor_drop() {
 #[test]
 fn direct_executor_drop_cancels_tasks_safely() {
     let executor = Executor::builder().build();
-    let mut handle = executor.tasks().task(pending::<()>()).register_test();
+    let mut handle = executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
+        .register_test();
 
     drop(executor);
 
@@ -703,7 +760,9 @@ fn shutdown_handle_cancels_tasks_without_executor_drop() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let shutdown = executor.shutdown();
-    let mut handle = tasks.task(pending::<()>()).register_test();
+    let mut handle = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
+        .register_test();
 
     shutdown.trigger(ShutdownCause::default());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
@@ -737,7 +796,9 @@ fn disconnected_task_set_returns_shutdown_error() {
     let tasks = executor.tasks();
     drop(executor);
 
-    let mut handle = tasks.task(async { 42 }).register_test();
+    let mut handle = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+        .register_test();
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(TaskOutcome::Cancelled(_))));
 }
@@ -759,7 +820,10 @@ fn task_builder_defers_conversion_and_registration() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let converted = Arc::new(AtomicBool::new(false));
-    let builder = tasks.task(IntoFutureProbe(Arc::clone(&converted)));
+    let builder = tasks.task(
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        IntoFutureProbe(Arc::clone(&converted)),
+    );
 
     assert!(!converted.load(Ordering::Acquire));
     assert!(!executor.has_tasks());
@@ -767,7 +831,10 @@ fn task_builder_defers_conversion_and_registration() {
     assert!(!converted.load(Ordering::Acquire));
     assert!(!executor.has_tasks());
 
-    let builder = tasks.task(IntoFutureProbe(Arc::clone(&converted)));
+    let builder = tasks.task(
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        IntoFutureProbe(Arc::clone(&converted)),
+    );
     let mut handle = builder.register_test();
 
     assert!(converted.load(Ordering::Acquire));
@@ -783,7 +850,12 @@ fn rejected_submission_does_not_convert_the_future() {
     executor.shutdown().trigger(ShutdownCause::default());
     let converted = Arc::new(AtomicBool::new(false));
 
-    let mut handle = tasks.task(IntoFutureProbe(Arc::clone(&converted))).register_test();
+    let mut handle = tasks
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            IntoFutureProbe(Arc::clone(&converted)),
+        )
+        .register_test();
 
     assert!(!converted.load(Ordering::Acquire));
     assert!(matches!(poll_once(&mut handle), Poll::Ready(TaskOutcome::Cancelled(_))));
@@ -795,7 +867,9 @@ fn submission_during_shutdown_returns_shutdown_error() {
     let tasks = executor.tasks();
     executor.shutdown().trigger(ShutdownCause::default());
 
-    let mut handle = tasks.task(async { 42 }).register_test();
+    let mut handle = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+        .register_test();
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(TaskOutcome::Cancelled(_))));
 }
@@ -821,15 +895,15 @@ impl TaskInstrumentation for RecordingInstrumentation {
         self.0.borrow_mut().push(InstrumentationEvent::PollEnd(outcome));
     }
 
-    fn completed(&mut self) {
+    fn completed(&mut self, _identity: &TaskIdentity) {
         self.0.borrow_mut().push(InstrumentationEvent::Completed);
     }
 
-    fn panicked(&mut self) {
+    fn panicked(&mut self, _identity: &TaskIdentity) {
         self.0.borrow_mut().push(InstrumentationEvent::Panicked);
     }
 
-    fn cancelled(&mut self) {
+    fn cancelled(&mut self, _identity: &TaskIdentity) {
         self.0.borrow_mut().push(InstrumentationEvent::Cancelled);
     }
 }
@@ -842,18 +916,21 @@ fn task_instrumentation_receives_each_poll_and_terminal_event() {
     let retained = Rc::new(RefCell::new(None));
     let mut completion = executor
         .tasks()
-        .task(poll_fn({
-            let ready = Rc::clone(&ready);
-            let retained = Rc::clone(&retained);
-            move |cx| {
-                if ready.get() {
-                    Poll::Ready(())
-                } else {
-                    retained.borrow_mut().replace(cx.waker().clone());
-                    Poll::Pending
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn({
+                let ready = Rc::clone(&ready);
+                let retained = Rc::clone(&retained);
+                move |cx| {
+                    if ready.get() {
+                        Poll::Ready(())
+                    } else {
+                        retained.borrow_mut().replace(cx.waker().clone());
+                        Poll::Pending
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .instrument(RecordingInstrumentation(Rc::clone(&events)))
         .inspect(|_| Some(()))
         .register_test();
@@ -886,21 +963,21 @@ struct PanicOn(PanickingCallback);
 
 impl TaskInstrumentation for PanicOn {
     #[expect(clippy::panic, reason = "this test injects a completion callback panic")]
-    fn completed(&mut self) {
+    fn completed(&mut self, _identity: &TaskIdentity) {
         if matches!(self.0, PanickingCallback::Completed) {
             panic!("completion callback");
         }
     }
 
     #[expect(clippy::panic, reason = "this test injects a panic callback panic")]
-    fn panicked(&mut self) {
+    fn panicked(&mut self, _identity: &TaskIdentity) {
         if matches!(self.0, PanickingCallback::Panicked) {
             panic!("panic callback");
         }
     }
 
     #[expect(clippy::panic, reason = "this test injects a cancellation callback panic")]
-    fn cancelled(&mut self) {
+    fn cancelled(&mut self, _identity: &TaskIdentity) {
         if matches!(self.0, PanickingCallback::Cancelled) {
             panic!("cancellation callback");
         }
@@ -925,7 +1002,7 @@ fn instrumentation_panics_do_not_prevent_task_completion_notifications() {
     let mut executor = Executor::builder().build();
     let mut completed = executor
         .tasks()
-        .task(async {})
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
         .instrument(PanicOn(PanickingCallback::Completed))
         .inspect(|_| Some(()))
         .register_test();
@@ -936,7 +1013,10 @@ fn instrumentation_panics_do_not_prevent_task_completion_notifications() {
     let mut executor = Executor::builder().build();
     let mut panicked = executor
         .tasks()
-        .task(poll_fn(|_| -> Poll<()> { panic!("task panic") }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn(|_| -> Poll<()> { panic!("task panic") }),
+        )
         .instrument(PanicOn(PanickingCallback::Panicked))
         .inspect(|_| Some(()))
         .register_test();
@@ -953,7 +1033,7 @@ fn instrumentation_panics_do_not_prevent_task_completion_notifications() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         executor
             .tasks()
-            .task(async {})
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
             .instrument(PanicOn(PanickingCallback::Cancelled))
             .inspect(|_| Some(()))
             .register(ObserveCancellation(Rc::clone(&cancelled)));
@@ -994,7 +1074,13 @@ impl Drop for PollAndDropPanicPayload {
 fn dropping_a_secondary_panic_payload_preserves_the_task_panic() {
     let mut executor = Executor::builder().build();
     let drops = Arc::new(AtomicUsize::new(0));
-    let mut completion = executor.tasks().task(PollAndDropPanicPayload(Arc::clone(&drops))).register_test();
+    let mut completion = executor
+        .tasks()
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            PollAndDropPanicPayload(Arc::clone(&drops)),
+        )
+        .register_test();
 
     let _ = executor.execute_cycle();
 
@@ -1016,7 +1102,7 @@ impl IntoFuture for ReentrantIntoFuture {
 
     fn into_future(self) -> Self::IntoFuture {
         self.tasks
-            .task({
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), {
                 let nested_completed = Rc::clone(&self.nested_completed);
                 async move {
                     nested_completed.set(true);
@@ -1033,10 +1119,13 @@ fn into_future_conversion_may_submit_a_nested_task() {
     let tasks = executor.tasks();
     let nested_completed = Rc::new(Cell::new(false));
     let mut handle = tasks
-        .task(ReentrantIntoFuture {
-            tasks: tasks.clone(),
-            nested_completed: Rc::clone(&nested_completed),
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            ReentrantIntoFuture {
+                tasks: tasks.clone(),
+                nested_completed: Rc::clone(&nested_completed),
+            },
+        )
         .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -1056,7 +1145,10 @@ impl IntoFuture for DropOwnerDuringIntoFuture {
 
     fn into_future(self) -> Self::IntoFuture {
         drop(self.owner.borrow_mut().take());
-        let nested = self.tasks.task(async { 42 }).register_test();
+        let nested = self
+            .tasks
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+            .register_test();
         assert!(self.nested.replace(Some(nested)).is_none());
         ready(7)
     }
@@ -1066,15 +1158,20 @@ impl IntoFuture for DropOwnerDuringIntoFuture {
 fn owner_drop_during_conversion_cancels_tasks_and_rejects_nested_submission() {
     let owner = Rc::new(RefCell::new(Some(Executor::builder().build())));
     let tasks = owner.borrow().as_ref().unwrap().tasks();
-    let mut existing = tasks.task(pending::<()>()).register_test();
+    let mut existing = tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
+        .register_test();
     let nested = Rc::new(RefCell::new(None));
 
     let mut outer = tasks
-        .task(DropOwnerDuringIntoFuture {
-            owner: Rc::clone(&owner),
-            tasks: tasks.clone(),
-            nested: Rc::clone(&nested),
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            DropOwnerDuringIntoFuture {
+                owner: Rc::clone(&owner),
+                tasks: tasks.clone(),
+                nested: Rc::clone(&nested),
+            },
+        )
         .register_test();
 
     assert!(owner.borrow().is_none());
@@ -1103,9 +1200,12 @@ fn shutdown_during_into_future_conversion_rejects_the_outer_task() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let mut handle = tasks
-        .task(ShutdownDuringIntoFuture {
-            shutdown: executor.shutdown(),
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            ShutdownDuringIntoFuture {
+                shutdown: executor.shutdown(),
+            },
+        )
         .register_test();
 
     assert!(matches!(poll_once(&mut handle), Poll::Ready(TaskOutcome::Cancelled(_))));
@@ -1127,7 +1227,10 @@ impl Future for SubmitOnDrop {
 
 impl Drop for SubmitOnDrop {
     fn drop(&mut self) {
-        let handle = self.tasks.task(async { 42 }).register_test();
+        let handle = self
+            .tasks
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async { 42 })
+            .register_test();
         assert!(self.submitted.replace(Some(handle)).is_none());
     }
 }
@@ -1138,10 +1241,13 @@ fn cancelled_future_drop_can_submit_and_receive_shutdown_error() {
     let tasks = executor.tasks();
     let submitted = Rc::new(RefCell::new(None));
     let _outer_handle = tasks
-        .task(SubmitOnDrop {
-            tasks: tasks.clone(),
-            submitted: Rc::clone(&submitted),
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            SubmitOnDrop {
+                tasks: tasks.clone(),
+                submitted: Rc::clone(&submitted),
+            },
+        )
         .register_test();
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
 
@@ -1163,7 +1269,7 @@ fn shutdown_retires_a_batch_of_queued_tasks() {
     for _ in 0..TASK_COUNT {
         handles.push(
             tasks
-                .task({
+                .task(TaskIdentity::from_location(std::panic::Location::caller()), {
                     let wakers = Rc::clone(&wakers);
                     poll_fn(move |cx| {
                         wakers.borrow_mut().push(cx.waker().clone());

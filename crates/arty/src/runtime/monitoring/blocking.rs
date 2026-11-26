@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use arty_executor::TaskIdentity;
+
 use super::TaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::task::TaskIdentity;
 use crate::task::preparation::BlockingTask;
 
 pub(crate) enum BlockingJob {
@@ -170,11 +171,6 @@ impl BlockingWorkerMonitoring {
             })
         });
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _current = observation
-                .as_ref()
-                .and_then(|(_, poll)| poll.as_ref())
-                .and_then(|_| body.monitoring())
-                .map(|body| super::task::enter_current(body.info().id()));
             if canceled {
                 drop(body);
             } else {

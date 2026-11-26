@@ -879,7 +879,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
 }
 
 #[test]
-fn blocking_children_retain_their_recorded_parent() {
+fn blocking_callbacks_do_not_establish_an_async_parent() {
     let _recording = RecorderGuard::new();
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
@@ -890,6 +890,7 @@ fn blocking_children_retain_their_recorded_parent() {
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let parent = runtime.scheduler().spawn_blocking(move || {
+        assert_eq!(arty_executor::TaskIdentity::current(), None);
         let child = scheduler.spawn_blocking(|| 42);
         started.send(child).unwrap();
         receive(&released);
@@ -912,7 +913,8 @@ fn blocking_children_retain_their_recorded_parent() {
         .iter()
         .find(|task| task.activity.unwrap().state == TaskActivityState::Ready)
         .unwrap();
-    assert_eq!(child.parent, Some(parent.id));
+    assert_eq!(parent.parent, None);
+    assert_eq!(child.parent, None);
     let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
     let spawn = recorded
@@ -926,7 +928,7 @@ fn blocking_children_retain_their_recorded_parent() {
                     .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == child.id.get())
         })
         .unwrap();
-    assert_eq!(spawn.runtime().unwrap().related_id, parent.id.get());
+    assert_eq!(spawn.runtime().unwrap().related_id, 0);
 }
 
 #[test]

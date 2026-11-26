@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::thread;
 
-use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload, discard_task_panic_payload};
 
 /// Supplies completion callbacks without a result receiver.
 ///
@@ -34,7 +34,7 @@ fn main() {
     let shutdown_signal = Rc::new(Cell::new(false));
 
     tasks
-        .task({
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), {
             let shutdown_signal = Rc::clone(&shutdown_signal);
 
             async move {

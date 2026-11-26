@@ -87,7 +87,6 @@
 
 pub(crate) mod context;
 pub(crate) mod handle;
-mod identity;
 pub(crate) mod preparation;
 mod runtime_scheduler;
 pub(crate) mod scheduler;
@@ -96,7 +95,6 @@ pub(crate) mod scheduler;
 pub use context::Context;
 #[doc(inline)]
 pub use handle::{JoinError, JoinHandle};
-pub(crate) use identity::TaskIdentity;
 #[doc(inline)]
 pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]

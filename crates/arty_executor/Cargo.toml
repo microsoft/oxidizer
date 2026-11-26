@@ -20,7 +20,11 @@ categories = ["asynchronous"]
 private-api = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["thread_aware_core::thread::Thread"]
+allowed_external_types = [
+    "thread_aware_core::thread::Thread",
+    "seismograph::recorder::runtime::TaskId",
+    "seismograph::recorder::runtime::TypeDescriptorId",
+]
 
 [dependencies]
 derive_more = { workspace = true, features = ["debug"] }
@@ -29,6 +33,8 @@ ohno = { workspace = true }
 performables = { workspace = true }
 pin-project = { workspace = true }
 plurality = { workspace = true }
+seismograph = { workspace = true }
+seismograph_runtime = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, features = ["coarse-time"] }
 

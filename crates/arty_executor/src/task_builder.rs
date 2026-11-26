@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{ExecutorShared, TaskCompletion, TaskInstrumentation};
+use crate::{ExecutorShared, TaskCompletion, TaskIdentity, TaskInstrumentation};
 
 /// Configures a task before registering it with an executor.
 ///
@@ -12,6 +12,7 @@ use crate::{ExecutorShared, TaskCompletion, TaskInstrumentation};
 #[must_use = "call register to submit the task"]
 pub struct TaskBuilder<'a, F, I = ()> {
     shared: &'a ExecutorShared,
+    identity: TaskIdentity,
     #[debug(skip)]
     future: F,
     #[debug(skip)]
@@ -19,9 +20,10 @@ pub struct TaskBuilder<'a, F, I = ()> {
 }
 
 impl<'a, F> TaskBuilder<'a, F> {
-    pub(crate) fn new(shared: &'a ExecutorShared, future: F) -> Self {
+    pub(crate) fn new(shared: &'a ExecutorShared, identity: TaskIdentity, future: F) -> Self {
         Self {
             shared,
+            identity,
             future,
             instrumentation: (),
         }
@@ -38,6 +40,7 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
     {
         TaskBuilder {
             shared: self.shared,
+            identity: self.identity,
             future: self.future,
             instrumentation: crate::inspection::InspectWith::new(self.instrumentation, inspect),
         }
@@ -50,6 +53,7 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
     {
         TaskBuilder {
             shared: self.shared,
+            identity: self.identity,
             future: self.future,
             instrumentation,
         }
@@ -71,6 +75,6 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(self.future, self.instrumentation, completion);
+        self.shared.add_task(self.identity, self.future, self.instrumentation, completion);
     }
 }

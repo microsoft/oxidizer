@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskIdentity, TaskSet};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;
@@ -13,9 +13,9 @@ use crate::runtime::hook::{
     HookRegistration, LocalHook, LocalHookGuard, LocalHookStorage, TaskObservers, TaskPanic, TaskSpawn, WorkerSpawn,
 };
 use crate::runtime::worker::{self, WorkerMarker};
+use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::{DeferredTaskFactory, SpawnOptions};
-use crate::task::{Context, TaskIdentity};
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };

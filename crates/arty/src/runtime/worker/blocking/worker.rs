@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 use std::thread;
 
-use arty_executor::discard_task_panic_payload;
+use arty_executor::{TaskIdentity, discard_task_panic_payload};
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
 
@@ -18,7 +18,6 @@ use crate::runtime::monitoring::{BlockingPoolMonitoring, BlockingWorkerMonitorin
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::blocking::queue::{Queue, QueuedJob};
 use crate::runtime::worker::blocking::{LocalWorker, PoolIdentity};
-use crate::task::TaskIdentity;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_blocking;
 
@@ -354,7 +353,7 @@ mod tests {
     use std::sync::mpsc::channel;
     use std::thread;
 
-    use arty_executor::ShutdownCause;
+    use arty_executor::{ShutdownCause, TaskIdentity};
     use events_once::Event;
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
@@ -363,7 +362,6 @@ mod tests {
     use super::{JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};
     use crate::runtime::config::RuntimeName;
     use crate::runtime::shutdown::Shutdown;
-    use crate::task::TaskIdentity;
 
     #[test]
     fn gamma_round2_late_shutdown_rejects_submission_and_drops_the_job_before_entering_the_pool() {

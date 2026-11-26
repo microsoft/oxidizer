@@ -20,6 +20,10 @@
 //! tasks. Only one executor can be alive on a thread. You can create a replacement after
 //! you drop the previous executor. A runtime integration supplies a [`TaskCompletion`]
 //! target when it registers a task.
+//! Each registration also requires a [`TaskIdentity`]. During each poll,
+//! [`TaskIdentity::current`] returns that identity on the executor thread.
+//! Outside a poll, it returns `None`. Runtime integrations can use the current
+//! identity to record the parent of a newly submitted task.
 //!
 //! A task ends when its future returns `Poll::Ready`, when it panics, or when
 //! executor shutdown cancels it. The executor does not provide methods to
@@ -45,6 +49,7 @@ mod shutdown;
 mod task;
 mod task_builder;
 mod task_handle;
+mod task_identity;
 mod task_list;
 mod task_set;
 mod wake;
@@ -60,6 +65,7 @@ pub use task::TaskCompletion;
 pub(crate) use task::*;
 pub use task_builder::*;
 pub(crate) use task_handle::*;
+pub use task_identity::TaskIdentity;
 pub(crate) use task_list::*;
 pub use task_set::*;
 

@@ -153,7 +153,7 @@ mod tests {
             TaskSpawn::new(
                 None,
                 target.clone(),
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
             )
         }));
         assert!(!created.get());
@@ -166,7 +166,7 @@ mod tests {
                     TaskSpawn::new(
                         None,
                         target.clone(),
-                        crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                     )
                 })
                 .is_none()
@@ -200,14 +200,14 @@ mod tests {
             TaskSpawn::new(
                 None,
                 target.clone(),
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
             )
         }));
         drop(hooks.execute_task_spawn(|| {
             TaskSpawn::new(
                 None,
                 target.clone(),
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
             )
         }));
         assert_eq!(hooks.len(), 2);
@@ -223,7 +223,7 @@ mod tests {
             TaskSpawn::new(
                 None,
                 target,
-                crate::task::TaskIdentity::from_location(std::panic::Location::caller()),
+                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
             )
         }));
 
