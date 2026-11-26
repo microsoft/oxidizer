@@ -51,7 +51,7 @@ impl<M: Message> Inbox<M> {
     ///
     /// # Errors
     ///
-    /// Returns [`RecvError`] after a stop, after a drain delivers the last
+    /// Returns `RecvError` after a stop, after a drain delivers the last
     /// buffered message, or after the message channel closes and is empty.
     ///
     /// # Panics
@@ -95,8 +95,8 @@ impl<M: Message> Inbox<M> {
     ///
     /// # Errors
     ///
-    /// Returns [`TryRecvError::Empty`] if no message is ready, or
-    /// [`TryRecvError::Closed`] if the inbox stopped or finished draining.
+    /// Returns `TryRecvError::Empty` if no message is ready, or
+    /// `TryRecvError::Closed` if the inbox stopped or finished draining.
     pub fn try_recv(&self) -> Result<M, TryRecvError> {
         match self.advance() {
             State::Running => self.delivery.try_recv(),
