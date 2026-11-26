@@ -526,14 +526,15 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
     }
 
     let aggregator = Aggregator::new();
-    let monitor = aggregator.monitor();
+    let startup_monitor = aggregator.monitor();
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
     // A turn for a different component runs only after the database startup broadcast returns.
     let mut probe = aggregator.component("probe");
     let _probe_publisher = probe.publisher();
     block_on(probe.changed());
-    assert_eq!(monitor.state(), Health::Healthy);
+    assert_eq!(startup_monitor.state(), Health::Healthy);
+    let monitor = aggregator.monitor();
     let observer_monitor = monitor.clone();
     let mut waiting_monitor = monitor.clone();
     let mut changed = pin!(waiting_monitor.changed());
