@@ -207,9 +207,6 @@ mod tests {
         let signals = [signal(Health::Unhealthy, "down"), signal(Health::Healthy, "ok")];
         let report = Report::new(Arc::from("db"), Arc::new(Snapshot::collect(&signals)));
 
-        assert_eq!(
-            report.to_string(),
-            "db: Unhealthy (healthy: 1, degraded: 0, unhealthy: 1)"
-        );
+        assert_eq!(report.to_string(), "db: Unhealthy (healthy: 1, degraded: 0, unhealthy: 1)");
     }
 }
