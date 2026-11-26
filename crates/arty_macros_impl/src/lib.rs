@@ -263,29 +263,36 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     if sig.asyncness.is_none() {
         return fail(syn::Error::new_spanned(sig.fn_token, "function must be async to use the attribute"));
     }
-    let Some(syn::FnArg::Typed(state)) = inputs.next() else {
-        return fail(syn::Error::new_spanned(
-            sig.fn_token,
-            "function must take an Arty task context argument, such as cx: arty::task::Context",
-        ));
+    let state = match inputs.next() {
+        Some(syn::FnArg::Typed(state)) => {
+            let syn::Pat::Ident(ident) = state.pat.as_ref() else {
+                return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
+            };
+            let syn::Type::Path(ty) = state.ty.as_ref() else {
+                return fail(syn::Error::new_spanned(
+                    &state.ty,
+                    "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
+                ));
+            };
+            Some((ident.clone(), ty.clone()))
+        }
+        Some(receiver) => {
+            return fail(syn::Error::new_spanned(
+                receiver,
+                "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
+            ));
+        }
+        None => None,
     };
-    let syn::Pat::Ident(state_ident) = state.pat.as_ref() else {
-        return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
-    };
-    let syn::Type::Path(state_type) = state.ty.as_ref() else {
-        return fail(syn::Error::new_spanned(
-            &state.ty,
-            "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
-        ));
-    };
-    let state_ident = state_ident.clone();
-    let state_type = state_type.clone();
     let clock = match inputs.next() {
         Some(syn::FnArg::Typed(clock)) if test && matches!(clock.ty.as_ref(), syn::Type::Path(_)) => {
             let syn::Pat::Ident(ident) = clock.pat.as_ref() else {
                 return fail(syn::Error::new_spanned(&clock.pat, "argument must have an identifier"));
             };
-            if ident.ident.unraw() == state_ident.ident.unraw() {
+            if state
+                .as_ref()
+                .is_some_and(|(state_ident, _)| ident.ident.unraw() == state_ident.ident.unraw())
+            {
                 return fail(syn::Error::new_spanned(ident, "arguments must have distinct identifiers"));
             }
             Some((ident.clone(), clock.ty.clone()))
@@ -324,6 +331,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     } else {
         (TokenStream::new(), quote!(#body))
     };
+    let state = state.map_or_else(|| quote!(_), |(ident, ty)| quote!(#ident: #ty));
     quote! {
         #(#attrs)*
         #visibility #sig {
@@ -332,7 +340,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
                 .expect("failed to create the runtime for the entry point");
             let #result_binding = #runtime_binding
                 .scheduler()
-                .block_on(async move |#state_ident: #state_type| #body);
+                .block_on(async move |#state| #body);
             let #shutdown_binding = #runtime_binding.stop();
             #result_binding
                 .and_then(|#value_binding| #shutdown_binding.map(|()| #value_binding))

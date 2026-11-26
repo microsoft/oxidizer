@@ -10,6 +10,29 @@
 use arty::task::Context;
 use arty::test;
 
+#[::core::prelude::v1::test]
+fn argumentless_main_runs_on_a_worker_and_returns_its_value() {
+    #[arty::main]
+    async fn worker() -> std::thread::ThreadId {
+        std::future::ready(std::thread::current().id()).await
+    }
+
+    assert_ne!(worker(), std::thread::current().id());
+}
+
+#[test]
+async fn argumentless_test_awaits_and_returns_a_result() -> Result<(), &'static str> {
+    assert_eq!(std::future::ready(42).await, 42);
+    Ok(())
+}
+
+#[test]
+#[should_panic(expected = "argumentless test panic")]
+async fn argumentless_test_preserves_panic_payload() {
+    std::future::ready(()).await;
+    panic!("argumentless test panic");
+}
+
 /// This compile-pass fixture selects the enabled monitoring policy.
 #[arty::main(monitor = enabled)]
 pub async fn main_with_monitoring_enabled(cx: Context) -> Result<(), arty::task::JoinError> {
@@ -70,7 +93,7 @@ async fn simple_main_returning(cx: Context) -> Result<(), Box<dyn std::error::Er
 }
 
 #[test(panic = shutdown)]
-async fn explicit_shutdown_policy_compiles(_cx: Context) {}
+async fn explicit_shutdown_policy_compiles() {}
 
 #[test(panic = ignore)]
 async fn ignore_policy_keeps_the_test_runtime_operational(cx: Context) {
@@ -139,7 +162,7 @@ async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
 
 #[test(workers = 0)]
 #[should_panic(expected = "failed to create the runtime for the entry point")]
-async fn zero_workers_fail_during_construction(_cx: Context) {
+async fn zero_workers_fail_during_construction() {
     panic!("the test body must not run");
 }
 
