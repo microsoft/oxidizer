@@ -181,14 +181,13 @@ mod tests {
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
         let parent = TaskIdentity::from_location(std::panic::Location::caller());
-        let destination = thread.clone();
         let tasks = executor.tasks();
         let (_parent_handle, parent_sender) = completion.handle();
         executor
             .tasks()
             .task(parent, async move {
                 crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), 0).register(
-                    &destination,
+                    &thread,
                     &tasks,
                     std::future::pending::<()>(),
                     sender,

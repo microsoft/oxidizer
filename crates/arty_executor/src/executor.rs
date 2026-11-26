@@ -718,7 +718,7 @@ mod gamma_round2_tests {
         executor
             .tasks()
             .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
-                shutdown.trigger(ShutdownCause::default())
+                shutdown.trigger(ShutdownCause::default());
             })
             .register(Completion);
         let polled = Rc::new(std::cell::Cell::new(0));
@@ -727,7 +727,7 @@ mod gamma_round2_tests {
             executor
                 .tasks()
                 .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
-                    polled.set(polled.get() + 1)
+                    polled.set(polled.get() + 1);
                 })
                 .register(Completion);
         }

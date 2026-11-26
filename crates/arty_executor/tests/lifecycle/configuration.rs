@@ -13,7 +13,8 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 
 use arty_executor::{
-    ExecutorBuilder, PanicPolicy, TaskBuilder, TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet, discard_task_panic_payload,
+    ExecutorBuilder, PanicPolicy, ShutdownCause, TaskBuilder, TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet,
+    discard_task_panic_payload,
 };
 use static_assertions::assert_not_impl_any;
 
@@ -135,7 +136,7 @@ fn current_identity_clears_after_task_panic_and_cancellation() {
         )
         .register(DiscardCompletion);
     let _ = executor.execute_cycle();
-    executor.shutdown().trigger(Default::default());
+    executor.shutdown().trigger(ShutdownCause::default());
     let _ = executor.execute_cycle();
     assert_eq!(TaskIdentity::current(), None);
     assert!(!executor.has_tasks());
@@ -193,7 +194,7 @@ fn instrumentation_receives_native_identity_for_inspection_and_all_outcomes() {
         let identity = TaskIdentity::from_location(std::panic::Location::caller());
         let callbacks = Rc::new(RefCell::new(Vec::new()));
         if outcome == 3 {
-            executor.shutdown().trigger(Default::default());
+            executor.shutdown().trigger(ShutdownCause::default());
         }
         executor
             .tasks()
@@ -215,7 +216,7 @@ fn instrumentation_receives_native_identity_for_inspection_and_all_outcomes() {
 
         let _ = executor.execute_cycle();
         if outcome == 2 {
-            executor.shutdown().trigger(Default::default());
+            executor.shutdown().trigger(ShutdownCause::default());
             let _ = executor.execute_cycle();
         }
 

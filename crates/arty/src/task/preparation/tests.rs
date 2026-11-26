@@ -40,12 +40,12 @@ where
 
 #[test]
 fn remote_factory_defers_future_creation_until_polling() {
-    async fn future() -> u32 {
+    let future = || async {
         // Retain an Rc across await so the factory-produced future remains non-Send.
         let value = Rc::new(42);
         std::future::ready(()).await;
         *value
-    }
+    };
 
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);

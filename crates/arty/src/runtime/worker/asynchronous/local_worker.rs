@@ -531,6 +531,7 @@ mod tests {
     #[test]
     fn relocating_registration_checks_owner_execution_and_shutdown() {
         let observations = std::thread::spawn(|| {
+            let identity = || TaskIdentity::from_location(std::panic::Location::caller());
             let thread = ThreadBuilder::default().build(std::thread::current().id());
             let wakes = std::sync::Arc::new(CountingWake::default());
             let shutdown = Shutdown::default();
@@ -556,11 +557,7 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            let mut join = std::pin::pin!(core.spawn_relocating(
-                &thread,
-                |_| async { 42 },
-                TaskIdentity::from_location(std::panic::Location::caller())
-            ));
+            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }, identity()));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
             let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
             _ = executor.execute_cycle();
@@ -576,15 +573,11 @@ mod tests {
                 &thread,
                 move |_| async move {
                     let before = nested_wakes.0.load(Ordering::Relaxed);
-                    let child = nested_core.spawn_relocating(
-                        &source,
-                        |_| async { 7 },
-                        TaskIdentity::from_location(std::panic::Location::caller()),
-                    );
+                    let child = nested_core.spawn_relocating(&source, |_| async { 7 }, identity());
                     let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
                     (child.await.unwrap(), executing_worker_not_woken)
                 },
-                TaskIdentity::from_location(std::panic::Location::caller())
+                identity()
             ));
             _ = executor.execute_cycle();
             _ = executor.execute_cycle();
@@ -594,31 +587,11 @@ mod tests {
                 Poll::Ready(Ok((7, true)))
             );
             let nested_registered_locally = command_rx.spawn_receiver().try_recv().is_err();
-            let other_thread = ThreadBuilder::default().build(std::thread::current().id());
-            let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let other_core = test_dispatcher(
-                NonEmpty::new(worker_endpoint(
-                    other_tx,
-                    Waker::noop().clone(),
-                    other_thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
-                )),
-                Shutdown::default(),
-            );
-            let _remote = other_core.spawn_relocating(
-                &other_thread,
-                |_| async { 9 },
-                TaskIdentity::from_location(std::panic::Location::caller()),
-            );
-            let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
+            let other_owner_queued = other_owner_receives_queued_registration();
             let other_owner_not_registered = !executor.has_tasks();
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
-            let mut rejected = std::pin::pin!(core.spawn_relocating(
-                &thread,
-                |_| async { 11 },
-                TaskIdentity::from_location(std::panic::Location::caller())
-            ));
+            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }, identity()));
             let rejected_after_shutdown = matches!(
                 rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Err(error)) if error.is_shutdown()
@@ -652,6 +625,26 @@ mod tests {
         for (description, observed) in observations {
             assert!(observed, "{description}");
         }
+    }
+
+    fn other_owner_receives_queued_registration() -> bool {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let (commands, receiver) = crate::runtime::worker::asynchronous::command_channel();
+        let core = test_dispatcher(
+            NonEmpty::new(worker_endpoint(
+                commands,
+                Waker::noop().clone(),
+                thread.clone(),
+                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            )),
+            Shutdown::default(),
+        );
+        let _remote = core.spawn_relocating(
+            &thread,
+            |_| async { 9 },
+            TaskIdentity::from_location(std::panic::Location::caller()),
+        );
+        matches!(receiver.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }))
     }
 
     thread_local! {
