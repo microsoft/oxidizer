@@ -7,10 +7,10 @@ use crate::{Attribute, Health};
 
 /// One publisher's current [`Health`] state and diagnostic attributes.
 ///
-/// Signals are created by [`Publisher::publish`](crate::Publisher::publish) and inspected through
-/// publishers and reports. Attribute order is not significant for equality. `Signal` does not
-/// implement `Eq` or `Hash` because [`AttributeValue::Double`](crate::AttributeValue::Double) can
-/// contain `NaN`.
+/// Signals are created by [`Component::publisher_with`](crate::Component::publisher_with) and
+/// [`Publisher::publish`](crate::Publisher::publish), then inspected through publishers and
+/// reports. Attribute order is not significant for equality. `Signal` does not implement `Eq` or
+/// `Hash` because [`AttributeValue::Double`](crate::AttributeValue::Double) can contain `NaN`.
 ///
 /// # Examples
 ///
