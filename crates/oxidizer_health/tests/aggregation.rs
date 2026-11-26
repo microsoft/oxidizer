@@ -79,7 +79,7 @@ fn wait_for_monitor(monitor: &mut Monitor, state: Health) {
 #[test]
 fn empty_aggregator_and_component_are_unhealthy() {
     let aggregator = Aggregator::default();
-    let monitor = aggregator.monitor();
+    let mut monitor = aggregator.monitor();
     assert_eq!(monitor.state(), Health::Unhealthy);
 
     let component = aggregator.component("database");
@@ -219,8 +219,7 @@ fn registering_a_component_does_not_wait_for_a_monitor() {
         entered,
         release: Mutex::new(resume),
     }));
-    let mut waiting_monitor = monitor.clone();
-    let mut changed = pin!(waiting_monitor.changed());
+    let mut changed = pin!(monitor.changed());
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
     let (registered, result) = mpsc::channel();
@@ -381,8 +380,7 @@ fn cancelling_a_pending_change_releases_its_last_waker() {
     let task = Arc::new(Task);
     let weak = Arc::downgrade(&task);
     {
-        let mut waiting_monitor = monitor.clone();
-        let mut changed = pin!(waiting_monitor.changed());
+        let mut changed = pin!(monitor.changed());
         let waker = Waker::from(task);
         assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     }
