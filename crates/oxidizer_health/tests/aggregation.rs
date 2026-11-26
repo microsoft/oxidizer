@@ -79,7 +79,7 @@ fn wait_for_monitor(monitor: &mut Monitor, state: Health) {
 #[test]
 fn empty_aggregator_and_component_are_unhealthy() {
     let aggregator = Aggregator::default();
-    let mut monitor = aggregator.monitor();
+    let monitor = aggregator.monitor();
     assert_eq!(monitor.state(), Health::Unhealthy);
 
     let component = aggregator.component("database");
@@ -212,7 +212,7 @@ fn publishing_does_not_wait_for_a_notification_consumer() {
 #[test]
 fn registering_a_component_does_not_wait_for_a_monitor() {
     let aggregator = Aggregator::new();
-    let monitor = aggregator.monitor();
+    let mut monitor = aggregator.monitor();
     let (entered, waiting) = mpsc::channel();
     let (release, resume) = mpsc::channel();
     let waker = Waker::from(Arc::new(BlockingWake {
