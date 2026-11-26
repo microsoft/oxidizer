@@ -179,7 +179,20 @@ impl DispatcherCore {
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        let worker_index = self.next_worker_index();
+        self.spawn_relocating_to(self.next_worker_index(), source, future_factory)
+    }
+
+    pub(in crate::runtime) fn spawn_relocating_to<FF, F>(
+        &self,
+        worker_index: WorkerIndex,
+        source: &Thread,
+        future_factory: FF,
+    ) -> JoinHandle<F::Output>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future + 'static,
+        F::Output: ThreadAware + 'static,
+    {
         let endpoint = &self.worker_endpoints[usize::from(worker_index)];
         let future_factory = if &endpoint.thread == source {
             if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {

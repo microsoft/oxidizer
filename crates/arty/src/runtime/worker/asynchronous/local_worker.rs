@@ -417,9 +417,8 @@ mod tests {
                 vec![hook.clone()],
                 None,
             );
-            let _prime = core.spawn_relocating(&destination, |_| async {});
-            drop(source_rx.spawn_receiver().try_recv().unwrap());
-            sources.lock().unwrap().clear();
+            let source_index = core.worker_index(source.id()).unwrap();
+            let destination_index = core.worker_index(destination.id()).unwrap();
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
                 arty_io_host::IoRuntime::new(observed::Sink::noop()),
@@ -432,11 +431,10 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
-            let _task = core.spawn_relocating(&source, |_| async {});
+            let _task = core.spawn_relocating_to(destination_index, &source, |_| async {});
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
-            // Round robin now selects the executing worker, but the submitting
-            // scheduler is still bound to the other worker.
-            let _task = core.spawn_relocating(&destination, |_| async {});
+            // The chosen worker matches the bound thread, but the installed scheduler is for a different thread.
+            let _task = core.spawn_relocating_to(source_index, &destination, |_| async {});
             let queued_from_retained_binding = source_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
