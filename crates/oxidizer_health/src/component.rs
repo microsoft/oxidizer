@@ -75,9 +75,9 @@ impl Component {
 
     /// Creates an independently owned publisher with its initial signal.
     ///
-    /// The publisher stores the signal before its first aggregation turn. If the state is not
-    /// `Healthy`, it also blocks readiness before that turn. Component and process aggregation
-    /// remain asynchronous after admission.
+    /// The publisher stores the signal before its first aggregation turn. A nonhealthy signal
+    /// reserves readiness so another worker turn cannot publish a premature recovery before this
+    /// signal is processed. Component state, process state, and reports still change asynchronously.
     ///
     /// # Examples
     ///
