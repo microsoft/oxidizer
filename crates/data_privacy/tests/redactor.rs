@@ -25,7 +25,7 @@ enum TestTaxonomy {
 }
 
 #[test]
-fn test_exact_len_default_behavior() {
+fn sensitive_to_redacted_string_returns_custom_redactor_output() {
     let redactor = TestRedactor;
     let sensitive = Sensitive::new("test_value", TestTaxonomy::Sensitive.data_class());
     let output_buffer = sensitive.to_redacted_string(&redactor);

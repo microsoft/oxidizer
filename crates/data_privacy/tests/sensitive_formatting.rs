@@ -49,6 +49,8 @@ fn redacted_to_string_produces_nonempty_output() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn redacted_display_at_exact_buffer_boundary() {
+    // Fill STACK_BUFFER_SIZE (128 bytes) exactly. Display adds no quotes;
+    // Debug adds two, so the Debug case below uses 126 input bytes.
     let value = "x".repeat(128);
     let sensitive = Sensitive::new(value, DataClass::new("test", "pii"));
     let result = sensitive.to_redacted_string(&TagRedactor);

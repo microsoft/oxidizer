@@ -99,6 +99,7 @@ fn other_with_recovery_attaches_what_it_was_given() {
 
 #[test]
 fn other_with_recovery_overrides_what_the_heuristic_would_have_detected() {
+    // The heuristic retries TimedOut, but this caller treats the expired deadline as terminal.
     let error = Error::other_with_recovery(
         "the deadline is gone",
         std::io::Error::from(std::io::ErrorKind::TimedOut),
