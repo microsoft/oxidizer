@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::any::Any;
-use std::collections::HashMap;
 use std::future::{pending, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::pin;
@@ -13,7 +12,9 @@ use std::task::{Poll, Waker};
 use std::thread::{self, JoinHandle};
 use std::{io, mem, ptr};
 
+use foldhash::HashMap;
 use performables::sync::channel::{WatchReceiver, WatchSender};
+use tracing::{Level, event};
 
 use crate::Health;
 use crate::aggregator::ProcessAggregate;
@@ -54,7 +55,13 @@ impl Worker {
             Ok(thread) => Some(thread),
             Err(error) => {
                 status.stop();
-                tracing::error!(%error, "failed to start health aggregation worker");
+                event!(
+                    name: "oxidizer_health.worker.start_failed",
+                    Level::ERROR,
+                    error.message = %error,
+                    worker.name = "oxidizer-health",
+                    "health worker {{worker.name}} failed to start: {{error.message}}"
+                );
                 None
             }
         };
@@ -85,7 +92,12 @@ impl Drop for Worker {
         if let Some(thread) = self.request_stop()
             && thread.join().map_err(discard_panic).is_err()
         {
-            tracing::error!("health aggregation worker terminated unexpectedly");
+            event!(
+                name: "oxidizer_health.worker.terminated",
+                Level::ERROR,
+                worker.name = "oxidizer-health",
+                "health worker {{worker.name}} terminated unexpectedly"
+            );
         }
     }
 }
@@ -100,7 +112,7 @@ fn discard_panic(cause: Box<dyn Any + Send>) {
 
 fn run(receiver: Receiver<Work>, mut aggregate: ProcessAggregate) {
     // Both pending registrations and registered actors belong to this thread, not to readers.
-    let mut actors = HashMap::new();
+    let mut actors = HashMap::default();
     for work in receiver {
         match work {
             Work::Register(id, actor) => {
@@ -140,6 +152,8 @@ impl Status {
         self.running.store(false, Ordering::Release);
         let waiters = mem::take(&mut *self.waiters.lock().unwrap_or_else(PoisonError::into_inner));
         for waker in waiters.into_values() {
+            // Aggregation has ended. A secondary panic must not strand other waiters or replace
+            // the worker failure that the caller of stop will resume.
             if let Err(cause) = catch_unwind(|| waker.wake()) {
                 discard_panic(cause);
             }
@@ -202,12 +216,11 @@ mod tests {
 
     use futures::FutureExt;
     use performables::sync::channel::watch;
-    use testing_aids::is_mutation_testing;
     use testing_aids::tracing_logs::Capture;
 
     use super::*;
+    use crate::Component;
     use crate::component::ComponentOwner;
-    use crate::{Component, Filter};
 
     #[test]
     fn shutdown_finishes_preceding_publications() {
@@ -223,8 +236,8 @@ mod tests {
 
         worker.sender.send(Work::Stop).unwrap();
         thread.join().unwrap();
-        let report = futures::executor::block_on(component.report(Filter::ALL));
-        assert_eq!(report.signal_count(Health::Healthy), 1);
+        let report = futures::executor::block_on(component.report());
+        assert_eq!(report.publisher_count(Health::Healthy), 1);
         assert_eq!(report.signals(Health::Healthy).next().unwrap().0, *publisher.signal());
         assert!(!worker.is_running());
     }
@@ -292,7 +305,19 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_stops_and_joins_the_worker_and_reports_a_failed_join() {
+    fn request_stop_sends_stop_and_returns_the_worker_thread() {
+        let (sender, receiver) = mpsc::channel();
+        let spawned = thread::spawn(|| {});
+        let mut worker = Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned));
+
+        let thread = worker.request_stop().unwrap();
+
+        assert!(matches!(receiver.try_recv(), Ok(Work::Stop)));
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn shutdown_joins_the_worker_and_reports_a_failed_join() {
         struct FailedJoin;
         impl Drop for FailedJoin {
             fn drop(&mut self) {
@@ -302,14 +327,8 @@ mod tests {
         for &fail in if cfg!(panic = "unwind") { &[false, true][..] } else { &[false][..] } {
             let capture = Capture::new();
             let _guard = tracing::subscriber::set_default(capture.subscriber());
-            let (sender, receiver) = mpsc::channel();
+            let (sender, _receiver) = mpsc::channel();
             let spawned = thread::spawn(move || {
-                let message = if is_mutation_testing() {
-                    receiver.recv().unwrap()
-                } else {
-                    receiver.recv_timeout(std::time::Duration::from_secs(2)).unwrap()
-                };
-                assert!(matches!(message, Work::Stop));
                 if fail {
                     panic_any(FailedJoin);
                 }

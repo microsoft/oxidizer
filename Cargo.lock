@@ -3986,19 +3986,13 @@ name = "oxidizer_health"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
- "bitflags 2.13.2",
- "bytesbuf",
  "ctor",
+ "foldhash 0.2.0",
  "futures",
- "http",
- "http_extensions",
- "layered",
  "performables",
  "static_assertions",
  "testing_aids",
  "thread_aware",
- "tick",
- "tower",
  "tracing",
 ]
 

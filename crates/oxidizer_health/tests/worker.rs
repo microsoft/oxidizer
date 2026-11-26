@@ -10,7 +10,7 @@ use std::thread::{self, Thread};
 use std::time::Duration;
 
 use futures::executor::block_on;
-use oxidizer_health::{Aggregator, Component, Filter, Health};
+use oxidizer_health::{Aggregator, Component, Health};
 use testing_aids::is_mutation_testing;
 
 testing_aids::init_tracing!();
@@ -46,7 +46,7 @@ fn turn<T>(probe: &mut Component, publish: impl FnOnce() -> T) -> (T, Thread) {
 #[test]
 fn process_and_component_snapshots_follow_registration_publication_and_removal() {
     let root = Aggregator::new();
-    let reader = root.clone();
+    let reader = root.monitor();
     let mut probe = root.component("probe");
     let producer = probe.clone();
     let (mut marker, worker) = turn(&mut probe, || producer.publisher());
@@ -64,7 +64,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let mut clients = root.component("clients");
     flush();
     assert_eq!(reader.state(), Health::Unhealthy, "a newly registered empty component is unhealthy");
-    assert_eq!(block_on(reader.reports(Filter::ALL)).len(), 2);
+    assert_eq!(block_on(reader.reports()).len(), 2);
 
     let writer = clients.clone();
     let (mut publisher, observed) = turn(&mut clients, || writer.publisher());
@@ -74,8 +74,8 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     flush();
     assert_eq!(clients.state(), Health::Degraded);
     assert_eq!(reader.state(), Health::Degraded);
-    let report = block_on(clients.report(Filter::ALL));
-    assert_eq!(report.signal_count(Health::Healthy), 1, "the clone contributes independently");
+    let report = block_on(clients.report());
+    assert_eq!(report.publisher_count(Health::Healthy), 1, "the clone contributes independently");
     drop(publisher);
     flush();
     assert_eq!(reader.state(), Health::Healthy);

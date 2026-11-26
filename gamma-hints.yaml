@@ -100620,13 +100620,19 @@ files:
     test: every_handle_has_its_own_cursor
   - package: oxidizer_health
     target: test:aggregation
-    test: last_component_handle_unregisters_during_an_in_flight_publish
+    test: publisher_keeps_registration_during_an_in_flight_publish
   - package: oxidizer_health
     target: test:aggregation
     test: readiness_fails_closed_when_a_consumer_panics_on_the_worker
   - package: oxidizer_health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
+  - package: oxidizer_health
+    target: lib:oxidizer_health
+    test: component::tests::component_shared_retains_its_registration_id
+  - package: oxidizer_health
+    target: lib:oxidizer_health
+    test: component::tests::publisher_registration_initializes_and_enqueues_its_slot
   mutants:
   - id: 06574d45e004
     killer: 3
@@ -100914,6 +100920,8 @@ files:
     killer: 12
   - id: 0e53d0225b85
     killer: 0
+  - id: 0fbfcdfc6156
+    killer: 8
   - id: 11e88a3f25c2
     killer: 2
   - id: 12aaa52819e6
@@ -100934,6 +100942,8 @@ files:
     killer: 0
   - id: 17ea4587bc01
     killer: 2
+  - id: 2115d376f9b0
+    killer: 8
   - id: 223687be5623
     killer: 0
   - id: 23323af23fc5
@@ -100944,6 +100954,8 @@ files:
     killer: 0
   - id: 24a3df66b204
     killer: 10
+  - id: 266bc7bc5874
+    killer: 8
   - id: 267f85e6e615
     killer: 0
   - id: 2ac0f285ba98
@@ -100954,6 +100966,8 @@ files:
     killer: 0
   - id: 31d265d3cc0a
     killer: 0
+  - id: 348fb3cd0933
+    killer: 8
   - id: 351eff63acdf
     killer: 12
   - id: 36be566b73fc
@@ -101054,6 +101068,8 @@ files:
     killer: 0
   - id: 82c5b04f6b2a
     killer: 4
+  - id: 831361e985ac
+    killer: 8
   - id: 83344b7fae52
     killer: 8
   - id: 84c7ed5b6b06
@@ -101116,6 +101132,8 @@ files:
     killer: 3
   - id: b0f721b7c8be
     killer: 2
+  - id: b94aa73d9af5
+    killer: 8
   - id: bafaa9f22855
     killer: 12
   - id: bbfe5d214cf1
@@ -101216,6 +101234,12 @@ files:
     killer: 4
   - id: ffc6aadbd68f
     killer: 2
+  - id: d681410156d6
+    killer: 13
+  - id: 6eb9382e2dd2
+    killer: 14
+  - id: c32ccbb1a652
+    killer: 14
 - path: crates/oxidizer_health/src/health.rs
   killers:
   - package: oxidizer_health
@@ -101223,7 +101247,7 @@ files:
     test: report::tests::collect_groups_equal_signals
   - package: oxidizer_health
     target: lib:oxidizer_health
-    test: report::tests::filter_hides_signals_but_keeps_counts
+    test: report::tests::report_keeps_all_signal_groups_and_counts
   - package: oxidizer_health
     target: lib:oxidizer_health
     test: signal::tests::display_lists_attributes
@@ -101253,39 +101277,11 @@ files:
     killer: 3
   - id: fbe6c9deab6a
     killer: 3
-- path: crates/oxidizer_health/src/kubernetes_http.rs
-  killers:
-  - package: oxidizer_health
-    target: test:http
-    test: request_handler_reports_readiness
-  mutants:
-  - id: 01967924c2de
-    killer: 0
-  - id: 1df6f243ec20
-    killer: 0
-  - id: 2591c70514bb
-    killer: 0
-  - id: 2ba21eccfa92
-    killer: 0
-  - id: 383dc776ff3c
-    killer: 0
-  - id: 6e12cc8c90d7
-    killer: 0
-  - id: 8298e68a0b1d
-    killer: 0
-  - id: 89e3e66cceda
-    killer: 0
-  - id: 9435030ae75a
-    killer: 0
-  - id: d6ed68799953
-    killer: 0
-  - id: e8856f4302b1
-    killer: 0
 - path: crates/oxidizer_health/src/report.rs
   killers:
   - package: oxidizer_health
     target: lib:oxidizer_health
-    test: report::tests::filter_hides_signals_but_keeps_counts
+    test: report::tests::report_keeps_all_signal_groups_and_counts
   - package: oxidizer_health
     target: test:aggregation
     test: component_is_idempotent_by_name
@@ -101294,7 +101290,7 @@ files:
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
   - package: oxidizer_health
     target: test:aggregation
-    test: reports_select_signals_by_filter
+    test: reports_select_signals_by_state
   - package: oxidizer_health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
@@ -101386,7 +101382,7 @@ files:
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
   - package: oxidizer_health
     target: test:aggregation
-    test: reports_select_signals_by_filter
+    test: reports_select_signals_by_state
   mutants:
   - id: 05c9f578b63a
     killer: 3

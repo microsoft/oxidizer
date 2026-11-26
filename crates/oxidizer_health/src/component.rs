@@ -2,22 +2,22 @@
 // Licensed under the MIT License.
 
 use std::any::type_name;
-use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Weak};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
+use foldhash::HashMap;
 use performables::sync::channel::{WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::aggregator::{ProcessAggregate, next_id};
 use crate::report::Snapshot;
 use crate::worker::{Changes, Work, Worker};
-use crate::{Attribute, AttributeString, AttributeValue, Filter, Health, Report, Signal};
+use crate::{Attribute, Health, Report, Signal};
 
-const REASON: AttributeString = AttributeString::new("reason");
+// Bound a busy component's turn without rebuilding its snapshot after every slot.
 const MAX_BATCH: usize = 256;
 
 /// One logical application subsystem, aggregating the signals of its publishers.
@@ -25,7 +25,7 @@ const MAX_BATCH: usize = 256;
 /// A component's health is the worst signal among its active publishers. A component without
 /// publishers is `Unhealthy`. Clones refer to the same logical component; each clone has an
 /// independent [`changed`](Self::changed) notification cursor. The component stops and
-/// unregisters from its [`Aggregator`](crate::Aggregator) when its last handle is dropped.
+/// unregisters from its [`Aggregator`](crate::Aggregator) after its last handle and publisher drop.
 ///
 /// # Examples
 ///
@@ -66,17 +66,41 @@ impl Component {
     }
 
     /// Creates an independently owned publisher in `Healthy` state with no attributes.
+    ///
+    /// This is shorthand for [`publisher_with`](Self::publisher_with) with a healthy signal.
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "a live handle cannot have a retired registration")]
     pub fn publisher(&self) -> Publisher {
-        Publisher::register(&self.owner.shared).expect("this handle keeps the component registered")
+        Publisher::register_owned(&self.owner, Signal::healthy())
+    }
+
+    /// Creates an independently owned publisher with its initial signal.
+    ///
+    /// The publisher stores the signal before its first aggregation turn. If the state is not
+    /// `Healthy`, it also blocks readiness before that turn. Component and process aggregation
+    /// remain asynchronous after admission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # testing_aids::init_tracing!();
+    /// use oxidizer_health::{Aggregator, Health};
+    ///
+    /// let aggregator = Aggregator::new();
+    /// let database = aggregator.component("database");
+    /// let publisher = database.publisher_with(Health::Degraded, [("reason", "warming")]);
+    ///
+    /// assert_eq!(publisher.signal().state(), Health::Degraded);
+    /// ```
+    #[must_use]
+    pub fn publisher_with(&self, state: Health, attributes: impl IntoIterator<Item = impl Into<Attribute>>) -> Publisher {
+        Publisher::register_owned(&self.owner, Signal::new(state, attributes.into_iter().map(Into::into).collect()))
     }
 
     /// Waits until the component state or report data may have changed.
     ///
-    /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
-    /// [`report`](Self::report) afterwards. If the worker stops, a handle that was subscribed
-    /// before it stopped observes one final change. Later waits on that handle stay pending.
+    /// Several updates can produce one notification. Read the latest [`state`](Self::state)
+    /// or [`report`](Self::report) rather than expecting a notification for each transition.
+    /// The worker-exit rules are the same as for [`Monitor::changed`](crate::Monitor::changed).
     pub async fn changed(&mut self) {
         self.changes.wait(&self.owner.worker).await;
     }
@@ -101,8 +125,8 @@ impl Component {
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owner"
     )]
-    pub async fn report(&self, filter: Filter) -> Report {
-        self.owner.shared.report(filter)
+    pub async fn report(&self) -> Report {
+        self.owner.shared.report()
     }
 }
 
@@ -165,6 +189,7 @@ pub(crate) struct ComponentShared {
     changes: WatchSender<()>,
 }
 
+/// Only the worker owns the receiver, so its exit releases queued slots even if readers survive.
 pub(crate) struct ComponentActor {
     updates: Receiver<Arc<Slot>>,
     signals: HashMap<u64, Arc<Signal>>,
@@ -199,14 +224,14 @@ impl ComponentShared {
         });
         let actor = ComponentActor {
             updates: receiver,
-            signals: HashMap::new(),
+            signals: HashMap::default(),
             dirty: false,
         };
         (shared, actor)
     }
 
-    pub(crate) fn report(&self, filter: Filter) -> Report {
-        Report::new(Arc::clone(&self.name), self.snapshot.load_full(), filter)
+    pub(crate) fn report(&self) -> Report {
+        Report::new(Arc::clone(&self.name), self.snapshot.load_full())
     }
 
     pub(crate) fn is_registered(&self) -> bool {
@@ -271,6 +296,12 @@ struct ComponentDispatch {
 }
 
 /// Publishers borrow the registration only for an update, never across a notification.
+///
+/// An empty component or a non-healthy publisher blocks readiness. Reserve at the process
+/// before the component and release in reverse order: between operations the process must not
+/// be more optimistic. The first healthy publisher releases the empty component's reservation;
+/// a departing last publisher leaves one behind. All these transitions and the worker's zero
+/// checks use the same `SeqCst` order, but the counter updates are not a single transaction.
 struct Registration {
     id: u64,
     worker: Sender<Work>,
@@ -281,15 +312,34 @@ struct Registration {
 
 impl Registration {
     fn block(&self) {
-        // SeqCst orders overlapping failures and recoveries. Reserve at the root first
-        // so that it is never more optimistic than the individual registrations.
         self.process_blockers.fetch_add(1, Ordering::SeqCst);
         self.blockers.fetch_add(1, Ordering::SeqCst);
     }
 
     fn unblock(&self) {
-        self.blockers.fetch_sub(1, Ordering::SeqCst);
-        self.process_blockers.fetch_sub(1, Ordering::SeqCst);
+        let component_before = self.blockers.fetch_sub(1, Ordering::SeqCst);
+        let process_before = self.process_blockers.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(
+            component_before > 0 && process_before > 0,
+            "a release needs an existing reservation"
+        );
+    }
+
+    fn admit(&self, state: Health) {
+        if state != Health::Healthy {
+            self.block();
+        }
+        if self.live.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.unblock();
+        }
+    }
+
+    fn change_health(&self, previous: Health, next: Health) {
+        match (previous == Health::Healthy, next == Health::Healthy) {
+            (true, false) => self.block(),
+            (false, true) => self.unblock(),
+            _ => {}
+        }
     }
 
     fn leave(&self, state: Health) {
@@ -298,7 +348,9 @@ impl Registration {
         if state == Health::Healthy {
             self.block();
         }
-        if self.live.fetch_sub(1, Ordering::SeqCst) != 1 {
+        let live_before = self.live.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(live_before > 0, "only a live publisher can leave");
+        if live_before != 1 {
             self.unblock();
         }
     }
@@ -344,14 +396,19 @@ struct Slot {
 ///
 /// A publisher stores its current [`Signal`] locally and forwards it to the component only when
 /// it changes. Dropping a publisher unregisters its contribution without blocking. A publisher
-/// does not keep its component alive; after the component is gone, publishing only changes the
-/// local signal. Cloning creates another independent `Healthy` publisher for the same component.
+/// keeps its component registered until the publisher and all component handles are dropped.
+///
+/// A clone represents a new publisher, not another handle to the original signal. It starts
+/// `Healthy` with no attributes, even if the original is `Degraded`. If only the healthy clone
+/// remains after the original drops, the component can become `Healthy`.
+///
+/// For one publisher per worker thread, pass a [`Component`] to each worker and create its
+/// publisher there. The component implements [`ThreadAware`]; the publisher does not.
 ///
 /// # Examples
 ///
-/// To keep readiness false during startup, register the required component on a new
-/// [`Aggregator`](crate::Aggregator) before serving probes. Keep it empty until initialization
-/// succeeds. Creating a publisher and immediately marking it `Unhealthy` is not atomic.
+/// To start with a signal that is not `Healthy`, use [`Component::publisher_with`]. It admits the
+/// signal and its readiness reservation together. Aggregation still runs in the background.
 ///
 /// ```
 /// # testing_aids::init_tracing!();
@@ -359,11 +416,14 @@ struct Slot {
 ///
 /// # futures::executor::block_on(async {
 /// let aggregator = Aggregator::new();
+/// let monitor = aggregator.monitor();
 /// let mut startup = aggregator.component("startup");
-/// assert_eq!(aggregator.state(), Health::Unhealthy);
+/// assert_eq!(monitor.state(), Health::Unhealthy);
+///
+/// let mut publisher = startup.publisher_with(Health::Unhealthy, [("phase", "starting")]);
+/// assert_eq!(publisher.signal().state(), Health::Unhealthy);
 ///
 /// // Initialization succeeded. Keep this publisher to report later changes.
-/// let mut publisher = startup.publisher();
 /// publisher.publish(Health::Healthy, [("phase", "running")]);
 /// while startup.state() != Health::Healthy {
 ///     startup.changed().await;
@@ -374,29 +434,35 @@ pub struct Publisher {
     signal: Signal,
     slot: Arc<Slot>,
     dispatch: Arc<ComponentDispatch>,
+    owner: Option<Arc<ComponentOwner>>,
 }
 
 impl Publisher {
     fn register(component: &Arc<ComponentShared>) -> Option<Self> {
+        Self::register_inner(component, None, Signal::healthy())
+    }
+
+    fn register_owned(owner: &Arc<ComponentOwner>, signal: Signal) -> Self {
+        Self::register_inner(&owner.shared, Some(Arc::clone(owner)), signal).expect("the component handle keeps its registration alive")
+    }
+
+    fn register_inner(component: &Arc<ComponentShared>, owner: Option<Arc<ComponentOwner>>, signal: Signal) -> Option<Self> {
         let registration = component.dispatch.registration.load();
         let registration = registration.as_ref()?;
         let id = next_id(&component.next_publisher);
-        let signal = Signal::healthy();
         let slot = Arc::new(Slot {
             id,
             pending: ArcSwapOption::from_pointee(signal.clone()),
             queued: AtomicBool::new(false),
             removed: AtomicBool::new(false),
         });
-        // The first live publisher replaces the empty-component veto.
-        if registration.live.fetch_add(1, Ordering::SeqCst) == 0 {
-            registration.unblock();
-        }
+        registration.admit(signal.state());
         component.dispatch.enqueue(&slot);
         Some(Self {
             signal,
             slot,
             dispatch: Arc::clone(&component.dispatch),
+            owner,
         })
     }
 
@@ -408,18 +474,17 @@ impl Publisher {
 
     /// Replaces the signal of this publisher.
     ///
-    /// The local signal is updated before this method returns and the component converges to it
-    /// without waiting. Publishing a signal equal to the current one does nothing.
+    /// [`Self::signal`] reflects the update before this method returns. Aggregation runs in the
+    /// background and can skip intermediate signals. Publishing a signal equal to the current one
+    /// does nothing.
     pub fn publish(&mut self, state: Health, attributes: impl IntoIterator<Item = impl Into<Attribute>>) {
         self.replace(Signal::new(state, attributes.into_iter().map(Into::into).collect()));
     }
 
     /// Publishes `Degraded` with a single `reason` attribute.
-    pub fn degraded(&mut self, reason: impl Into<AttributeString>) {
-        self.replace(Signal::new(
-            Health::Degraded,
-            Box::new([Attribute::new(REASON, AttributeValue::String(reason.into()))]),
-        ));
+    pub fn degraded(&mut self, reason: impl Into<Arc<str>>) {
+        let reason: Arc<str> = reason.into();
+        self.replace(Signal::new(Health::Degraded, Box::new([Attribute::from(("reason", reason))])));
     }
 
     fn replace(&mut self, signal: Signal) {
@@ -427,13 +492,7 @@ impl Publisher {
             return;
         }
         if let Some(registration) = self.dispatch.registration.load().as_ref() {
-            if self.signal.state() != signal.state() {
-                if signal.state() == Health::Healthy {
-                    registration.unblock();
-                } else if self.signal.state() == Health::Healthy {
-                    registration.block();
-                }
-            }
+            registration.change_health(self.signal.state(), signal.state());
             self.slot.pending.store(Some(Arc::new(signal.clone())));
             self.dispatch.enqueue(&self.slot);
         }
@@ -443,6 +502,9 @@ impl Publisher {
 
 impl Clone for Publisher {
     fn clone(&self) -> Self {
+        if let Some(owner) = &self.owner {
+            return Self::register_owned(owner, Signal::healthy());
+        }
         self.dispatch
             .component
             .upgrade()
@@ -452,6 +514,7 @@ impl Clone for Publisher {
                 // Removal is permanent. Neither clone forwards to the slot again.
                 slot: Arc::clone(&self.slot),
                 dispatch: Arc::clone(&self.dispatch),
+                owner: None,
             })
     }
 }
@@ -480,6 +543,68 @@ mod tests {
     use futures::FutureExt;
 
     use super::*;
+
+    #[test]
+    fn component_shared_retains_its_registration_id() {
+        let (work, _pending) = mpsc::channel();
+        let (shared, _actor) = ComponentShared::new(Arc::from("clients"), 7, work, Arc::default());
+        let registration = shared.dispatch.registration.load();
+
+        assert_eq!(shared.id, 7);
+        assert_eq!(registration.as_ref().unwrap().id, 7);
+    }
+
+    #[test]
+    fn component_publishers_retain_the_component_owner() {
+        use crate::Aggregator;
+
+        let root = Aggregator::new();
+        let component = root.component("clients");
+        let publisher = component.publisher();
+
+        assert!(publisher.owner.is_some());
+    }
+
+    #[test]
+    fn aggregator_clones_share_component_owners() {
+        use crate::Aggregator;
+
+        let root = Aggregator::new();
+        let clone = root.clone();
+        let first = root.component("clients");
+        let second = clone.component("clients");
+
+        assert!(Arc::ptr_eq(&first.owner, &second.owner));
+    }
+
+    #[test]
+    fn publisher_registration_initializes_and_enqueues_its_slot() {
+        let (work, pending) = mpsc::channel();
+        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let publisher = Publisher::register(&clients).unwrap();
+
+        assert!(publisher.slot.queued.load(Ordering::Acquire));
+        assert!(!publisher.slot.removed.load(Ordering::Acquire));
+        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+    }
+
+    #[test]
+    fn initial_nonhealthy_publisher_keeps_readiness_reserved_before_its_turn() {
+        let process_blockers = Arc::new(AtomicUsize::new(0));
+        let (work, pending) = mpsc::channel();
+        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::clone(&process_blockers));
+
+        let publisher = Publisher::register_inner(
+            &clients,
+            None,
+            Signal::new(Health::Unhealthy, Box::new([Attribute::from(("reason", "starting"))])),
+        )
+        .unwrap();
+
+        assert_eq!(publisher.signal().state(), Health::Unhealthy);
+        assert_eq!(process_blockers.load(Ordering::SeqCst), 1);
+        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+    }
 
     #[test]
     #[cfg_attr(panic = "abort", ignore = "requires worker unwinding")]
@@ -562,17 +687,17 @@ mod tests {
         drop(second);
         drop(first);
         advance();
-        let retained = clients.report(Filter::ALL);
+        let retained = clients.report();
         assert_eq!(retained.state(), Health::Unhealthy);
-        assert_eq!(retained.signal_count(Health::Unhealthy), 1);
-        assert_eq!(retained.signal_count(Health::Healthy), 1);
+        assert_eq!(retained.publisher_count(Health::Unhealthy), 1);
+        assert_eq!(retained.publisher_count(Health::Healthy), 1);
         assert!(changes.changed_async().now_or_never().is_none());
         advance();
         assert!(changes.changed_async().now_or_never().is_some());
-        let empty = clients.report(Filter::ALL);
+        let empty = clients.report();
         assert_eq!(empty.state(), Health::Unhealthy);
-        assert_eq!(empty.signal_count(Health::Unhealthy), 0);
-        assert_eq!(empty.signal_count(Health::Healthy), 0);
+        assert_eq!(empty.publisher_count(Health::Unhealthy), 0);
+        assert_eq!(empty.publisher_count(Health::Healthy), 0);
     }
 
     #[test]
@@ -590,7 +715,7 @@ mod tests {
         let mut first = Publisher::register(&clients).unwrap();
         first.publish(Health::Unhealthy, [("attempt", 1)]);
         advance();
-        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Unhealthy), 1);
+        assert_eq!(clients.report().publisher_count(Health::Unhealthy), 1);
 
         first.publish(Health::Unhealthy, [("attempt", 2)]);
         let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients).unwrap()).collect();
@@ -599,14 +724,14 @@ mod tests {
         second.publish(Health::Unhealthy, [("attempt", 1)]);
         first.publish(Health::Healthy, [("attempt", 3)]);
         advance();
-        assert_eq!(clients.report(Filter::ALL).state(), Health::Unhealthy);
+        assert_eq!(clients.report().state(), Health::Unhealthy);
 
         // Removing the second publisher before its first snapshot is otherwise a no-op.
         drop(second);
         advance();
-        let recovered = clients.report(Filter::ALL);
+        let recovered = clients.report();
         assert_eq!(recovered.state(), Health::Healthy);
-        assert_eq!(recovered.signal_count(Health::Healthy), MAX_BATCH);
+        assert_eq!(recovered.publisher_count(Health::Healthy), MAX_BATCH);
     }
 
     #[test]
@@ -628,16 +753,16 @@ mod tests {
             assert!(changes.changed_async().now_or_never().is_some());
         };
         advance(&mut aggregate);
-        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Degraded), MAX_BATCH);
+        assert_eq!(clients.report().publisher_count(Health::Degraded), MAX_BATCH);
         advance(&mut aggregate);
-        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Degraded), publishers.len());
+        assert_eq!(clients.report().publisher_count(Health::Degraded), publishers.len());
         assert!(pending.try_recv().is_err(), "idle components must not spin");
 
         publishers[0].degraded("busy");
         assert!(pending.try_recv().is_err(), "equal publications must not wake the worker");
         drop(publishers.pop());
         advance(&mut aggregate);
-        assert_eq!(clients.report(Filter::ALL).signal_count(Health::Degraded), publishers.len());
+        assert_eq!(clients.report().publisher_count(Health::Degraded), publishers.len());
     }
 
     #[test]
@@ -646,7 +771,7 @@ mod tests {
         let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let worker = Worker::new(ProcessAggregate::new(Weak::new()));
         let handle = Component::new(ComponentOwner::new(Arc::clone(&clients), worker));
-        let mut publisher = handle.publisher();
+        let mut publisher = Publisher::register(&clients).unwrap();
         publisher.degraded("retiring");
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
         clients.process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
@@ -684,12 +809,12 @@ mod tests {
             drop(Publisher::register(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_none());
-            assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
+            assert_eq!(clients.report().publisher_count(Health::Healthy), retained.len());
 
             retained.push(Publisher::register(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_some());
-            assert_eq!(clients.report(Filter::ALL).signal_count(Health::Healthy), retained.len());
+            assert_eq!(clients.report().publisher_count(Health::Healthy), retained.len());
         }
     }
 
@@ -701,7 +826,7 @@ mod tests {
 
         let root = Aggregator::new();
         let mut component = root.component("retiring");
-        let publisher = component.publisher();
+        let publisher = Publisher::register(&component.owner.shared).unwrap();
         block_on(component.changed());
         drop(component);
 

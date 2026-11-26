@@ -2,55 +2,55 @@
 // Licensed under the MIT License.
 
 use std::any::type_name;
-use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
+use std::iter::FusedIterator;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::vec;
 
+use foldhash::HashMap;
 use performables::sync::channel::{WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::component::{ComponentOwner, ComponentShared};
 use crate::worker::{Changes, Work, Worker};
-use crate::{Component, Filter, Health, Reports};
+use crate::{Component, Health, Report};
 
 /// The process-level health root.
 ///
 /// The process reports the worst state among its registered components, or `Unhealthy` if it has none.
-/// Clones share that state but track [`changed`](Self::changed) notifications independently.
+/// Clones share registration authority. Use [`Monitor`] for process observation.
 ///
 /// # Examples
 ///
 /// ```
 /// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Filter, Health};
+/// use oxidizer_health::{Aggregator, Health};
 ///
 /// # futures::executor::block_on(async {
-/// let mut aggregator = Aggregator::new();
-/// assert_eq!(aggregator.state(), Health::Unhealthy);
+/// let aggregator = Aggregator::new();
+/// let mut monitor = aggregator.monitor();
+/// assert_eq!(monitor.state(), Health::Unhealthy);
 ///
 /// let database = aggregator.component("database");
 /// let cache = aggregator.component("cache");
 /// let _database_publisher = database.publisher();
 /// let mut cache_publisher = cache.publisher();
-/// while aggregator.state() != Health::Healthy {
-///     aggregator.changed().await;
+/// while monitor.state() != Health::Healthy {
+///     monitor.changed().await;
 /// }
 ///
 /// cache_publisher.degraded("evicting");
-/// while aggregator.state() != Health::Degraded {
-///     aggregator.changed().await;
+/// while monitor.state() != Health::Degraded {
+///     monitor.changed().await;
 /// }
 ///
-/// let unhealthy = aggregator
-///     .reports(Filter::DEGRADED | Filter::UNHEALTHY)
-///     .await;
-/// assert_eq!(unhealthy.len(), 2);
+/// let reports = monitor.reports().await;
+/// assert_eq!(reports.len(), 2);
 /// # });
 /// ```
 pub struct Aggregator {
     shared: Arc<AggregatorShared>,
-    changes: Changes,
 }
 
 impl Aggregator {
@@ -58,8 +58,7 @@ impl Aggregator {
     #[must_use]
     pub fn new() -> Self {
         let shared = AggregatorShared::new();
-        let changes = shared.worker.subscribe(&shared.changes);
-        Self { shared, changes }
+        Self { shared }
     }
 
     /// Returns the component registered under `name`, registering it on first use.
@@ -82,35 +81,6 @@ impl Aggregator {
             changes: self.shared.worker.subscribe(&self.shared.changes),
         }
     }
-
-    /// Waits until the aggregate state or report data may have changed.
-    ///
-    /// Intermediate transitions can be coalesced. Read [`state`](Self::state) or
-    /// [`reports`](Self::reports) afterwards. If the worker stops, each handle subscribed
-    /// before it stopped observes one final change. Later waits on that handle stay pending.
-    pub async fn changed(&mut self) {
-        self.changes.wait(&self.shared.worker).await;
-    }
-
-    /// Returns the latest process state. It can briefly lag component registration, removal, or publication.
-    ///
-    /// Returns [`Health::Unhealthy`] if the worker has stopped.
-    #[must_use]
-    pub fn state(&self) -> Health {
-        self.shared.state()
-    }
-
-    /// Returns consistent snapshots of the registered components.
-    ///
-    /// If the worker has stopped, each report describes the component's last snapshot.
-    /// Use [`state`](Self::state) for current readiness. Iteration order is unspecified.
-    #[expect(
-        clippy::unused_async,
-        reason = "the contract allows report assembly to wait for the component owners"
-    )]
-    pub async fn reports(&self, filter: Filter) -> Reports {
-        self.shared.reports(filter)
-    }
 }
 
 impl Default for Aggregator {
@@ -123,7 +93,6 @@ impl Clone for Aggregator {
     fn clone(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
-            changes: self.changes.clone(),
         }
     }
 }
@@ -131,7 +100,7 @@ impl Clone for Aggregator {
 impl Debug for Aggregator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
-            .field("state", &self.state())
+            .field("state", &self.shared.state())
             .finish_non_exhaustive()
     }
 }
@@ -169,26 +138,39 @@ pub struct Monitor {
 impl Monitor {
     /// Waits until the aggregate state or report data may have changed.
     ///
-    /// Follows the same notification and worker-exit rules as [`Aggregator::changed`].
+    /// Several updates can produce one notification. Read the latest [`state`](Self::state)
+    /// or [`reports`](Self::reports) rather than expecting a notification for each transition.
+    /// If the worker stops, each handle subscribed before it stopped observes one final change.
+    /// Later waits stay pending. A new subscription after the worker stops receives no notification.
+    ///
+    /// The worker can call a waiting task's waker directly. A custom waker must return promptly:
+    /// waiting for another update from this worker prevents it from processing that update.
     pub async fn changed(&mut self) {
         self.changes.wait(&self.shared.worker).await;
     }
 
-    /// Returns the latest process state, with the same update timing as [`Aggregator::state`].
+    /// Returns the latest process state.
+    ///
+    /// The state can briefly lag component registration, removal, or publication.
+    /// While a waker blocks the worker, this returns the last published state.
+    /// Returns [`Health::Unhealthy`] if the worker has stopped.
     #[must_use]
     pub fn state(&self) -> Health {
         self.shared.state()
     }
 
-    /// Returns consistent snapshots of the registered components.
+    /// Returns one immutable report per registered component.
     ///
-    /// See [`Aggregator::reports`] for ordering and behavior after the worker stops.
+    /// Each report describes one component at one point in time. Reports for different components
+    /// can come from different times. If the worker has stopped, each report describes the
+    /// component's last snapshot. Use [`state`](Self::state) for current readiness. Iteration order
+    /// is unspecified.
     #[expect(
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owners"
     )]
-    pub async fn reports(&self, filter: Filter) -> Reports {
-        self.shared.reports(filter)
+    pub async fn reports(&self) -> impl ExactSizeIterator<Item = Report> + FusedIterator + Clone + Debug + use<> {
+        self.shared.reports()
     }
 }
 
@@ -236,6 +218,7 @@ pub(crate) fn next_id(counter: &AtomicU64) -> u64 {
 }
 
 struct RegistryEntry {
+    // Reuse requires a live public handle; collecting reports must not prolong registration.
     owner: Weak<ComponentOwner>,
     shared: Weak<ComponentShared>,
 }
@@ -252,7 +235,7 @@ impl AggregatorShared {
         let (changes, _) = watch(());
         Arc::new_cyclic(|root| Self {
             next_component: AtomicU64::default(),
-            registry: Mutex::new(HashMap::new()),
+            registry: Mutex::new(HashMap::default()),
             worker: Worker::new(ProcessAggregate::new(Weak::clone(root))),
             blockers: Arc::default(),
             // #[gamma::skip(expr.increment, tag = "equivalent", reason = "Both 2 and 3 decode to Unhealthy; the raw byte is private and subsequent writes replace it.")]
@@ -294,7 +277,7 @@ impl AggregatorShared {
         Component::new(owner)
     }
 
-    fn reports(&self, filter: Filter) -> Reports {
+    fn reports(&self) -> vec::IntoIter<Report> {
         let components: Vec<_> = self
             .registry
             .lock()
@@ -302,13 +285,12 @@ impl AggregatorShared {
             .values()
             .filter_map(|entry| entry.shared.upgrade())
             .collect();
-        Reports::new(
-            components
-                .iter()
-                .filter(|component| component.is_registered())
-                .map(|component| component.report(filter))
-                .collect(),
-        )
+        components
+            .iter()
+            .filter(|component| component.is_registered())
+            .map(|component| component.report())
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
 
@@ -316,7 +298,7 @@ impl ProcessAggregate {
     pub(crate) fn new(root: Weak<AggregatorShared>) -> Self {
         Self {
             root,
-            components: HashMap::new(),
+            components: HashMap::default(),
             counts: [0; Health::COUNT],
         }
     }
@@ -338,7 +320,8 @@ impl ProcessAggregate {
         self.counts[previous.index()] -= 1;
         if let Some(root) = self.root.upgrade() {
             // The worker reevaluates readiness below, so releasing these vetoes needs no wake.
-            root.blockers.fetch_sub(blockers, Ordering::SeqCst);
+            let before = root.blockers.fetch_sub(blockers, Ordering::SeqCst);
+            debug_assert!(before >= blockers, "retirement cannot release another registration's reservations");
         }
         self.refresh(true);
     }
@@ -381,13 +364,14 @@ mod tests {
             root.shared.worker.sender.send(Work::Stop).unwrap();
             // No publisher changes the idle component. Its cursor witnesses the worker's exit.
             block_on(idle.changed());
-            assert_eq!(block_on(component.report(Filter::ALL)).signal_count(Health::Healthy), 1);
+            assert_eq!(block_on(component.report()).publisher_count(Health::Healthy), 1);
         });
     }
 
     #[test]
     fn overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns() {
         let root = Aggregator::new();
+        let mut monitor = root.monitor();
         let (work, pending) = mpsc::channel();
         let component = |id, name| {
             let (shared, actor) = ComponentShared::new(Arc::from(name), id, work.clone(), Arc::clone(&root.shared.blockers));
@@ -408,7 +392,7 @@ mod tests {
         let _second_healthy = second.publisher();
         advance(&mut first_actor);
         advance(&mut second_actor);
-        assert_eq!(root.state(), Health::Unhealthy);
+        assert_eq!(monitor.state(), Health::Unhealthy);
 
         first_writer.publish(Health::Unhealthy, [("revision", 3)]);
         let mut second_writer = second.publisher();
@@ -416,14 +400,13 @@ mod tests {
         first_writer.publish(Health::Healthy, [("revision", 5)]);
         advance(&mut first_actor);
         assert_eq!(first.state(), Health::Healthy);
-        assert_eq!(root.state(), Health::Unhealthy);
-        let mut monitor = root.monitor();
+        assert_eq!(monitor.state(), Health::Unhealthy);
         // This writer was never in a snapshot. Its removal must release the root even
         // though the second component has no report change to publish.
         drop(second_writer);
         advance(&mut second_actor);
         assert_eq!(monitor.changed().now_or_never(), Some(()));
-        assert_eq!(root.state(), Health::Healthy);
+        assert_eq!(monitor.state(), Health::Healthy);
         drop(second.publisher());
         advance(&mut second_actor);
         assert!(
@@ -434,7 +417,8 @@ mod tests {
 
     #[test]
     fn process_transitions_publish_the_worst_remaining_state() {
-        let mut root = Aggregator::new();
+        let root = Aggregator::new();
+        let mut monitor = root.monitor();
         let mut model = ProcessAggregate::new(Arc::downgrade(&root.shared));
         for (id, state, expected) in [
             (1, Some(Health::Healthy), Health::Healthy),
@@ -453,8 +437,8 @@ mod tests {
             } else {
                 model.remove(id, 0);
             }
-            assert_eq!(root.changed().now_or_never(), Some(()));
-            assert_eq!(root.state(), expected);
+            assert_eq!(monitor.changed().now_or_never(), Some(()));
+            assert_eq!(monitor.state(), expected);
         }
     }
 
@@ -462,6 +446,7 @@ mod tests {
     fn a_degraded_component_cannot_replace_another_components_empty_registration() {
         execute_or_terminate_process(|| {
             let root = Aggregator::new();
+            let monitor = root.monitor();
             let empty = root.component("required");
             let mut reporting = root.component("optional");
             let mut publisher = reporting.publisher();
@@ -471,13 +456,35 @@ mod tests {
             publisher.degraded("retrying");
             block_on(reporting.changed());
             assert_eq!(reporting.state(), Health::Degraded);
-            assert_eq!(root.state(), Health::Unhealthy);
+            assert_eq!(monitor.state(), Health::Unhealthy);
 
             drop(empty);
             publisher.degraded("retrying again");
             block_on(reporting.changed());
-            assert_eq!(root.state(), Health::Degraded);
+            assert_eq!(monitor.state(), Health::Degraded);
         });
+    }
+
+    #[test]
+    fn reports_skip_retired_components_whose_snapshots_are_still_referenced() {
+        let root = Aggregator::new();
+        let component = root.component("retired");
+        let shared = root
+            .shared
+            .registry
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .shared
+            .upgrade()
+            .unwrap();
+
+        drop(component);
+
+        assert!(!shared.is_registered());
+        assert_eq!(root.shared.reports().len(), 0);
     }
 
     #[test]

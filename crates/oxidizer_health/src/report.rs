@@ -5,50 +5,8 @@ use std::any::type_name;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::iter::FusedIterator;
 use std::sync::{Arc, OnceLock};
-use std::{slice, vec};
-
-use bitflags::bitflags;
 
 use crate::{Health, Signal};
-
-bitflags! {
-    /// Selects which publisher signals [`Report::signals`] returns.
-    ///
-    /// Counts remain available for every state. Even with an empty filter, a report keeps
-    /// the complete shared snapshot alive, including attributes of signals the filter hides.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use oxidizer_health::Filter;
-    ///
-    /// let problems = Filter::DEGRADED | Filter::UNHEALTHY;
-    /// assert!(!problems.contains(Filter::HEALTHY));
-    /// assert!(Filter::ALL.contains(problems));
-    /// ```
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub struct Filter: u8 {
-        /// Includes `Healthy` signals in the iterator.
-        const HEALTHY = 1;
-        /// Includes `Degraded` signals in the iterator.
-        const DEGRADED = 1 << 1;
-        /// Includes `Unhealthy` signals in the iterator.
-        const UNHEALTHY = 1 << 2;
-        /// Includes signals of every state in the iterators.
-        const ALL = Self::HEALTHY.bits() | Self::DEGRADED.bits() | Self::UNHEALTHY.bits();
-    }
-}
-
-impl Filter {
-    const fn selects(self, state: Health) -> bool {
-        let flag = match state {
-            Health::Healthy => Self::HEALTHY,
-            Health::Degraded => Self::DEGRADED,
-            Health::Unhealthy => Self::UNHEALTHY,
-        };
-        self.contains(flag)
-    }
-}
 
 /// Immutable aggregation result of one component, shared by its reports.
 #[derive(Debug, Default)]
@@ -99,13 +57,13 @@ impl Snapshot {
 /// Immutable snapshot of one component.
 ///
 /// A report contains the component name, its aggregate state, publisher counts by state, and the
-/// distinct signals selected by a [`Filter`] with the number of publishers reporting each one.
+/// distinct signals with the number of publishers reporting each one.
 ///
 /// # Examples
 ///
 /// ```
 /// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Filter, Health};
+/// use oxidizer_health::{Aggregator, Health};
 ///
 /// # futures::executor::block_on(async {
 /// let aggregator = Aggregator::new();
@@ -115,16 +73,18 @@ impl Snapshot {
 /// primary.degraded("high latency");
 ///
 /// let report = loop {
-///     let report = database.report(Filter::DEGRADED).await;
-///     if report.signal_count(Health::Healthy) == 1 && report.signal_count(Health::Degraded) == 1 {
+///     let report = database.report().await;
+///     if report.publisher_count(Health::Healthy) == 1
+///         && report.publisher_count(Health::Degraded) == 1
+///     {
 ///         break report;
 ///     }
 ///     database.changed().await;
 /// };
 /// assert_eq!(report.name(), "database");
 /// assert_eq!(report.state(), Health::Degraded);
-/// assert_eq!(report.signal_count(Health::Healthy), 1);
-/// assert_eq!(report.signals(Health::Healthy).len(), 0);
+/// assert_eq!(report.publisher_count(Health::Healthy), 1);
+/// assert_eq!(report.signals(Health::Healthy).len(), 1);
 ///
 /// let (signal, publishers) = report.signals(Health::Degraded).next().unwrap();
 /// assert_eq!(signal.to_string(), "Degraded (reason=high latency)");
@@ -137,17 +97,15 @@ pub struct Report {
     state: Health,
     counts: [usize; Health::COUNT],
     snapshot: Arc<Snapshot>,
-    filter: Filter,
 }
 
 impl Report {
-    pub(crate) fn new(name: Arc<str>, snapshot: Arc<Snapshot>, filter: Filter) -> Self {
+    pub(crate) fn new(name: Arc<str>, snapshot: Arc<Snapshot>) -> Self {
         Self {
             name,
             state: snapshot.state(),
             counts: snapshot.counts(),
             snapshot,
-            filter,
         }
     }
 
@@ -165,21 +123,17 @@ impl Report {
 
     /// Returns the number of publishers in `state`.
     #[must_use]
-    pub const fn signal_count(&self, state: Health) -> usize {
+    pub const fn publisher_count(&self, state: Health) -> usize {
         self.counts[state.index()]
     }
 
     /// Returns the distinct signals in `state` with their publisher counts.
-    ///
-    /// The iterator is empty when the report filter excludes `state`.
     #[must_use]
-    pub fn signals(&self, state: Health) -> Signals<'_> {
-        let signals: &[_] = if self.filter.selects(state) {
-            self.snapshot.signals[state.index()].groups()
-        } else {
-            &[]
-        };
-        Signals { inner: signals.iter() }
+    pub fn signals(&self, state: Health) -> impl ExactSizeIterator<Item = (Signal, usize)> + FusedIterator + Clone + Debug + '_ {
+        self.snapshot.signals[state.index()]
+            .groups()
+            .iter()
+            .map(|(signal, count)| (Signal::clone(signal), *count))
     }
 }
 
@@ -200,64 +154,12 @@ impl Display for Report {
             "{}: {} (healthy: {}, degraded: {}, unhealthy: {})",
             self.name,
             self.state,
-            self.signal_count(Health::Healthy),
-            self.signal_count(Health::Degraded),
-            self.signal_count(Health::Unhealthy),
+            self.publisher_count(Health::Healthy),
+            self.publisher_count(Health::Degraded),
+            self.publisher_count(Health::Unhealthy),
         )
     }
 }
-
-/// Iterator over component [`Report`]s, in unspecified order.
-#[derive(Clone, Debug)]
-pub struct Reports {
-    inner: vec::IntoIter<Report>,
-}
-
-impl Reports {
-    pub(crate) fn new(reports: Vec<Report>) -> Self {
-        Self {
-            inner: reports.into_iter(),
-        }
-    }
-}
-
-impl Iterator for Reports {
-    type Item = Report;
-
-    fn next(&mut self) -> Option<Report> {
-        self.inner.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Reports {}
-
-impl FusedIterator for Reports {}
-
-/// Iterator over distinct signals in a [`Report`] and the number of publishers reporting each.
-#[derive(Clone, Debug)]
-pub struct Signals<'a> {
-    inner: slice::Iter<'a, (Arc<Signal>, usize)>,
-}
-
-impl Iterator for Signals<'_> {
-    type Item = (Signal, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(signal, count)| (Signal::clone(signal), *count))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Signals<'_> {}
-
-impl FusedIterator for Signals<'_> {}
 
 #[cfg(test)]
 mod tests {
@@ -271,26 +173,18 @@ mod tests {
     #[test]
     fn collect_groups_equal_signals() {
         let slow = signal(Health::Degraded, "slow");
-        let signals = [
-            Arc::clone(&slow),
-            signal(Health::Degraded, "slow"),
-            signal(Health::Degraded, "busy"),
-        ];
+        let busy = signal(Health::Degraded, "busy");
+        let signals = [Arc::clone(&slow), signal(Health::Degraded, "slow"), Arc::clone(&busy)];
 
         let snapshot = Snapshot::collect(&signals);
 
-        let report = Report::new(Arc::from("clients"), Arc::new(snapshot), Filter::ALL);
+        let report = Report::new(Arc::from("clients"), Arc::new(snapshot));
         assert_eq!(report.state(), Health::Degraded);
-        assert_eq!(report.signal_count(Health::Degraded), 3);
-        let mut groups: Vec<_> = report
-            .signals(Health::Degraded)
-            .map(|(signal, n)| (signal.to_string(), n))
-            .collect();
-        groups.sort();
-        assert_eq!(
-            groups,
-            [("Degraded (reason=busy)".to_owned(), 1), ("Degraded (reason=slow)".to_owned(), 2)]
-        );
+        assert_eq!(report.publisher_count(Health::Degraded), 3);
+        let groups: Vec<_> = report.signals(Health::Degraded).collect();
+        assert_eq!(groups.len(), 2);
+        assert!(groups.iter().any(|(signal, count)| signal == slow.as_ref() && *count == 2));
+        assert!(groups.iter().any(|(signal, count)| signal == busy.as_ref() && *count == 1));
     }
 
     #[test]
@@ -299,13 +193,20 @@ mod tests {
     }
 
     #[test]
-    fn filter_hides_signals_but_keeps_counts() {
+    fn report_keeps_all_signal_groups_and_counts() {
         let signals = [signal(Health::Unhealthy, "down"), signal(Health::Healthy, "ok")];
-        let report = Report::new(Arc::from("db"), Arc::new(Snapshot::collect(&signals)), Filter::UNHEALTHY);
+        let report = Report::new(Arc::from("db"), Arc::new(Snapshot::collect(&signals)));
 
-        assert_eq!(report.signal_count(Health::Healthy), 1);
-        assert_eq!(report.signals(Health::Healthy).count(), 0);
+        assert_eq!(report.publisher_count(Health::Healthy), 1);
+        assert_eq!(report.signals(Health::Healthy).count(), 1);
         assert_eq!(report.signals(Health::Unhealthy).len(), 1);
+    }
+
+    #[test]
+    fn display_summarizes_state_and_publisher_counts() {
+        let signals = [signal(Health::Unhealthy, "down"), signal(Health::Healthy, "ok")];
+        let report = Report::new(Arc::from("db"), Arc::new(Snapshot::collect(&signals)));
+
         assert_eq!(report.to_string(), "db: Unhealthy (healthy: 1, degraded: 0, unhealthy: 1)");
     }
 }

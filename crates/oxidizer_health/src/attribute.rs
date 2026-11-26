@@ -1,140 +1,57 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::fmt::{self, Debug, Display, Formatter};
-use std::hash::{Hash, Hasher};
+use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-/// Immutable string used for attribute names and string values.
-///
-/// Static strings are stored without allocation. Other strings are stored in shared memory, so
-/// cloning never copies the text.
-///
-/// # Examples
-///
-/// ```
-/// use oxidizer_health::AttributeString;
-///
-/// const REASON: AttributeString = AttributeString::new("reason");
-///
-/// assert_eq!(REASON.as_str(), "reason");
-/// assert_eq!(AttributeString::from(String::from("reason")), REASON);
-/// ```
-#[derive(Clone)]
-pub struct AttributeString(Repr);
-
-#[derive(Clone)]
-enum Repr {
-    Static(&'static str),
-    Shared(Arc<str>),
+#[derive(Clone, Debug, PartialEq)]
+enum OwnedAttributeValue {
+    Int(i64),
+    Double(f64),
+    String(Arc<str>),
+    Boolean(bool),
 }
 
-impl AttributeString {
-    /// Creates an attribute string from static text without allocating.
-    #[must_use]
-    pub const fn new(value: &'static str) -> Self {
-        Self(Repr::Static(value))
-    }
-
-    /// Returns the text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        match &self.0 {
-            Repr::Static(value) => value,
-            Repr::Shared(value) => value,
+impl OwnedAttributeValue {
+    fn borrowed(&self) -> AttributeValue<'_> {
+        match self {
+            Self::Int(value) => AttributeValue::Int(*value),
+            Self::Double(value) => AttributeValue::Double(*value),
+            Self::String(value) => AttributeValue::String(value),
+            Self::Boolean(value) => AttributeValue::Boolean(*value),
         }
     }
 }
 
-impl AsRef<str> for AttributeString {
-    fn as_ref(&self) -> &str {
-        self.as_str()
+impl<'a> From<AttributeValue<'a>> for OwnedAttributeValue {
+    fn from(value: AttributeValue<'a>) -> Self {
+        match value {
+            AttributeValue::Int(value) => Self::Int(value),
+            AttributeValue::Double(value) => Self::Double(value),
+            AttributeValue::String(value) => Self::String(Arc::from(value)),
+            AttributeValue::Boolean(value) => Self::Boolean(value),
+        }
     }
 }
 
-impl Borrow<str> for AttributeString {
-    fn borrow(&self) -> &str {
-        self.as_str()
-    }
-}
-
-impl Debug for AttributeString {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(self.as_str(), f)
-    }
-}
-
-impl Display for AttributeString {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl PartialEq for AttributeString {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl Eq for AttributeString {}
-
-// Hashing the text keeps `Hash` consistent with `Borrow<str>`.
-impl Hash for AttributeString {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_str().hash(state);
-    }
-}
-
-impl PartialOrd for AttributeString {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for AttributeString {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.as_str().cmp(other.as_str())
-    }
-}
-
-impl From<&str> for AttributeString {
-    fn from(value: &str) -> Self {
-        Self(Repr::Shared(Arc::from(value)))
-    }
-}
-
-impl From<String> for AttributeString {
-    fn from(value: String) -> Self {
-        Self(Repr::Shared(Arc::from(value)))
-    }
-}
-
-impl From<Box<str>> for AttributeString {
-    fn from(value: Box<str>) -> Self {
-        Self(Repr::Shared(Arc::from(value)))
-    }
-}
-
-/// Structured diagnostic value of an [`Attribute`].
+/// Structured diagnostic value borrowed from an [`Attribute`].
 ///
-/// Attributes are diagnostic-safe values. Do not publish credentials, connection strings,
-/// unrestricted host data, or other sensitive values.
-#[derive(Clone, Debug, PartialEq)]
+/// Publish only values you can disclose in diagnostic reports. The crate does not redact
+/// attribute values. Do not publish credentials, connection strings, or other sensitive data.
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
-pub enum AttributeValue {
+pub enum AttributeValue<'a> {
     /// Signed integer.
     Int(i64),
     /// Floating-point number.
     Double(f64),
     /// Text.
-    String(AttributeString),
+    String(&'a str),
     /// Boolean.
     Boolean(bool),
 }
 
-impl Display for AttributeValue {
+impl Display for AttributeValue<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(value) => Display::fmt(value, f),
@@ -145,43 +62,34 @@ impl Display for AttributeValue {
     }
 }
 
-impl From<i64> for AttributeValue {
+impl From<i64> for AttributeValue<'_> {
     fn from(value: i64) -> Self {
         Self::Int(value)
     }
 }
 
-impl From<f64> for AttributeValue {
+impl From<f64> for AttributeValue<'_> {
     fn from(value: f64) -> Self {
         Self::Double(value)
     }
 }
 
-impl From<bool> for AttributeValue {
+impl From<bool> for AttributeValue<'_> {
     fn from(value: bool) -> Self {
         Self::Boolean(value)
     }
 }
 
-impl From<&str> for AttributeValue {
-    fn from(value: &str) -> Self {
-        Self::String(value.into())
-    }
-}
-
-impl From<String> for AttributeValue {
-    fn from(value: String) -> Self {
-        Self::String(value.into())
-    }
-}
-
-impl From<Box<str>> for AttributeValue {
-    fn from(value: Box<str>) -> Self {
-        Self::String(value.into())
+impl<'a> From<&'a str> for AttributeValue<'a> {
+    fn from(value: &'a str) -> Self {
+        Self::String(value)
     }
 }
 
 /// Named diagnostic value attached to a [`Signal`](crate::Signal).
+///
+/// Pass `(name, value)` pairs to [`Component::publisher_with`](crate::Component::publisher_with)
+/// or [`Publisher::publish`](crate::Publisher::publish) to attach attributes.
 ///
 /// # Examples
 ///
@@ -190,72 +98,117 @@ impl From<Box<str>> for AttributeValue {
 ///
 /// let attribute = Attribute::from(("latency_ms", 250_i64));
 ///
-/// assert_eq!(attribute.name().as_str(), "latency_ms");
-/// assert_eq!(attribute.value(), &AttributeValue::Int(250));
+/// assert_eq!(attribute.name(), "latency_ms");
+/// assert_eq!(attribute.value(), AttributeValue::Int(250));
 /// assert_eq!(attribute.to_string(), "latency_ms=250");
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attribute {
-    name: AttributeString,
-    value: AttributeValue,
+    name: Arc<str>,
+    value: OwnedAttributeValue,
 }
 
 impl Attribute {
-    /// Creates an attribute.
+    /// Creates an attribute with the supplied name and typed diagnostic value.
     #[must_use]
-    pub const fn new(name: AttributeString, value: AttributeValue) -> Self {
-        Self { name, value }
+    pub fn new(name: impl Into<Arc<str>>, value: AttributeValue<'_>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
     }
 
-    /// Returns the attribute name.
+    fn from_owned(name: impl Into<Arc<str>>, value: OwnedAttributeValue) -> Self {
+        Self { name: name.into(), value }
+    }
+
+    /// Borrows the name supplied for this attribute.
     #[must_use]
-    pub const fn name(&self) -> &AttributeString {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the attribute value.
+    /// Borrows the typed value without formatting it as text.
     #[must_use]
-    pub const fn value(&self) -> &AttributeValue {
-        &self.value
+    pub fn value(&self) -> AttributeValue<'_> {
+        self.value.borrowed()
     }
 }
 
 impl Display for Attribute {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}={}", self.name, self.value)
+        write!(f, "{}={}", self.name, self.value.borrowed())
     }
 }
 
-impl<N, V> From<(N, V)> for Attribute
+impl<'a, N> From<(N, AttributeValue<'a>)> for Attribute
 where
-    N: Into<AttributeString>,
-    V: Into<AttributeValue>,
+    N: Into<Arc<str>>,
 {
-    fn from((name, value): (N, V)) -> Self {
-        Self::new(name.into(), value.into())
+    fn from((name, value): (N, AttributeValue<'a>)) -> Self {
+        Self::new(name, value)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-
-    use super::*;
-
-    #[test]
-    fn static_and_shared_strings_compare_and_hash_by_text() {
-        let shared = AttributeString::from(Box::<str>::from("name"));
-        assert_eq!(shared, AttributeString::new("name"));
-        assert!(AttributeString::new("a") < AttributeString::from("b"));
-
-        let set = HashSet::from([shared]);
-        assert!(set.contains("name"));
+impl<N> From<(N, i64)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, i64)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::Int(value))
     }
+}
 
-    #[test]
-    fn values_display_their_payload() {
-        assert_eq!(AttributeValue::from(1.5).to_string(), "1.5");
-        assert_eq!(AttributeValue::from(true).to_string(), "true");
-        assert_eq!(AttributeValue::from(String::from("text")).to_string(), "text");
+impl<N> From<(N, f64)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, f64)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::Double(value))
+    }
+}
+
+impl<N> From<(N, bool)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, bool)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::Boolean(value))
+    }
+}
+
+impl<'a, N> From<(N, &'a str)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, &'a str)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::String(Arc::from(value)))
+    }
+}
+
+impl<N> From<(N, String)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, String)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::String(Arc::from(value)))
+    }
+}
+
+impl<N> From<(N, Box<str>)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, Box<str>)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::String(Arc::from(value)))
+    }
+}
+
+impl<N> From<(N, Arc<str>)> for Attribute
+where
+    N: Into<Arc<str>>,
+{
+    fn from((name, value): (N, Arc<str>)) -> Self {
+        Self::from_owned(name, OwnedAttributeValue::String(value))
     }
 }

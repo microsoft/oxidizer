@@ -3,7 +3,7 @@
 
 [package]
 name = "oxidizer_health"
-description = "Application health aggregation with component reports and HTTP readiness adapters."
+description = "Application health aggregation with component reports."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["health", "readiness", "diagnostics"]
@@ -17,51 +17,24 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health"
 
 [package.metadata.cargo_check_external_types]
-# Filter iteration, thread-aware handles, and the optional Kubernetes HTTP adapters.
-allowed_external_types = [
-    "bitflags::iter::Iter",
-    "bitflags::iter::IterNames",
-    "bitflags::traits::Flags",
-    "bitflags::traits::PublicFlags",
-    "http::request::Request",
-    "http::response::Response",
-    "http_extensions::request_handler::RequestHandler",
-    "thread_aware_core::thread_aware::ThreadAware",
-    "tower_service::Service",
-]
-
-[package.metadata.docs.rs]
-all-features = true
+# Thread-aware handles.
+allowed_external_types = ["thread_aware_core::thread_aware::ThreadAware"]
 
 [features]
 default = []
-http = ["dep:http", "dep:tower"]
-request-handler = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
 
 [dependencies]
 arc-swap.workspace = true
-bitflags.workspace = true
-bytesbuf = { workspace = true, optional = true, features = ["std"] }
-http = { workspace = true, optional = true }
-http_extensions = { workspace = true, optional = true }
-layered = { workspace = true, optional = true }
+foldhash = { workspace = true, features = ["std"] }
 performables.workspace = true
 thread_aware = { workspace = true, features = ["std"] }
-tick = { workspace = true, optional = true }
-tower = { workspace = true, optional = true }
 tracing.workspace = true
 
 [dev-dependencies]
-bytesbuf = { path = "../bytesbuf", default-features = false, features = ["std"] }
 ctor.workspace = true
 futures = { workspace = true, features = ["executor"] }
-http.workspace = true
-http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
-layered = { path = "../layered", default-features = false }
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
-tick = { path = "../tick", default-features = false }
-tower = { workspace = true, features = ["util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]
