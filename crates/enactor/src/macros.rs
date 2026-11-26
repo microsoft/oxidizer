@@ -34,6 +34,50 @@ macro_rules! ask {
     };
 }
 
+/// Sends an ask message and waits up to a timeout for the reply.
+///
+/// `ask_t!` takes the same message forms as [`ask!`](macro@crate::ask), then a
+/// [`&Clock`](tick::Clock) and a [`Duration`](std::time::Duration). One
+/// deadline covers the wait for mailbox capacity and the wait for the reply.
+/// [`AskError::is_timeout`](crate::AskError::is_timeout) reports a missed
+/// deadline.
+///
+/// A request that timed out can still be handled. If the mailbox accepted the
+/// request before the deadline, the actor still handles it and its reply is
+/// dropped.
+///
+/// # Examples
+///
+/// ```rust
+/// # use std::time::Duration;
+/// # use enactor::{ActorRef, AskError, Reply};
+/// # use tick::Clock;
+/// # type UserId = u64;
+/// # #[derive(Debug, PartialEq, Eq)] struct User;
+/// # enum Message { Lookup(UserId, Reply<User>) }
+/// # async fn example(actor: ActorRef<Message>, id: UserId, clock: &Clock) -> Result<User, AskError> {
+/// let user = enactor::ask_t!(actor, Message::Lookup(id), clock, Duration::from_secs(1)).await?;
+/// # Ok(user)
+/// # }
+/// ```
+#[macro_export]
+macro_rules! ask_t {
+    ($actor:expr, $($variant:ident)::+ ( $($args:expr),* $(,)? ), $clock:expr, $timeout:expr $(,)?) => {{
+        let actor = ::core::clone::Clone::clone(&$actor);
+        let clock = ::core::clone::Clone::clone($clock);
+        let timeout = $timeout;
+        async move {
+            let (reply, rx) = $crate::Reply::channel();
+            actor
+                .ask_message_timeout($($variant)::+($($args,)* reply), rx, &clock, timeout)
+                .await
+        }
+    }};
+    ($actor:expr, $variant:path, $clock:expr, $timeout:expr $(,)?) => {
+        ($actor).ask_timeout($variant, $clock, $timeout)
+    };
+}
+
 /// Sends a message expression with [`ActorRef::tell`](crate::ActorRef::tell).
 ///
 /// # Examples

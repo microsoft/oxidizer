@@ -46,10 +46,22 @@ impl<T> From<ChannelSendError<T>> for TellError {
 #[display("actor dropped the reply channel before sending a response")]
 pub struct CanceledError;
 
-/// Error returned by [`ActorRef::ask`](crate::ActorRef::ask) and [`ask!`](macro@crate::ask).
+/// The actor did not reply before the deadline of a timed ask.
+#[ohno::error]
+#[display("actor did not reply within {timeout:?}")]
+pub struct AskTimeoutError {
+    timeout: Duration,
+}
+
+/// Error returned by asks.
+///
+/// [`ActorRef::ask`](crate::ActorRef::ask), [`ask!`](macro@crate::ask), and
+/// their timed forms such as [`ActorRef::ask_timeout`](crate::ActorRef::ask_timeout)
+/// and [`ask_t!`](macro@crate::ask_t) return this error.
 #[ohno::error]
 #[from(TellError)]
 #[from(CanceledError)]
+#[from(AskTimeoutError)]
 pub struct AskError;
 
 impl AskError {
@@ -58,6 +70,12 @@ impl AskError {
     #[must_use]
     pub fn is_canceled(&self) -> bool {
         self.source().and_then(|s| s.downcast_ref::<CanceledError>()).is_some()
+    }
+
+    /// Returns `true` if the deadline of a timed ask passed before the reply arrived.
+    #[must_use]
+    pub fn is_timeout(&self) -> bool {
+        self.source().and_then(|s| s.downcast_ref::<AskTimeoutError>()).is_some()
     }
 }
 

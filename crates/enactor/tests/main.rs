@@ -5,6 +5,7 @@
 
 #![allow(clippy::renamed_function_params, reason = "test actors name the parameter after its message type")]
 
+mod ask_timeout;
 mod basic;
 mod context;
 mod exit;

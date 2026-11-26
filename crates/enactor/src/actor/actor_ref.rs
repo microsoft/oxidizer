@@ -6,8 +6,12 @@
 //! [`ActorRef`] sends messages and lifecycle requests to an actor that has
 //! already been spawned.
 
-use futures::TryFutureExt;
+use std::time::Duration;
 
+use futures::TryFutureExt;
+use tick::{Clock, FutureExt};
+
+use crate::error::AskTimeoutError;
 use crate::inbox::{Control, Sender, TrySendFailure};
 use crate::{AskError, Message, Reply, TellError};
 
@@ -128,6 +132,73 @@ where
         let (reply, rx) = Reply::channel();
         self.tell(variant(arg, reply)).await?;
         rx.await.map_err(Into::into)
+    }
+
+    /// Sends a zero-payload ask variant and waits up to `timeout` for the reply.
+    ///
+    /// One deadline covers the wait for mailbox capacity and the wait for the
+    /// reply. A reply that is ready at the deadline wins.
+    ///
+    /// A request that timed out can still be handled. If the mailbox accepted
+    /// the request before the deadline, the actor still handles it and its
+    /// reply is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AskError`] for which [`is_timeout`](AskError::is_timeout)
+    /// is `true` if the deadline passes first. Otherwise returns the same
+    /// errors as [`ask`](Self::ask).
+    pub async fn ask_timeout<R>(&self, variant: fn(Reply<R>) -> M, clock: &Clock, timeout: Duration) -> Result<R, AskError>
+    where
+        R: Send + 'static,
+    {
+        let (reply, rx) = Reply::channel();
+        self.ask_message_timeout(variant(reply), rx, clock, timeout).await
+    }
+
+    /// Sends a one-payload ask variant and waits up to `timeout` for the reply.
+    ///
+    /// The deadline works as in [`ask_timeout`](Self::ask_timeout). A request
+    /// that timed out can still be handled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AskError`] for which [`is_timeout`](AskError::is_timeout)
+    /// is `true` if the deadline passes first. Otherwise returns the same
+    /// errors as [`ask_with`](Self::ask_with).
+    pub async fn ask_with_timeout<A, R>(
+        &self,
+        variant: fn(A, Reply<R>) -> M,
+        payload: A,
+        clock: &Clock,
+        timeout: Duration,
+    ) -> Result<R, AskError>
+    where
+        A: Send + 'static,
+        R: Send + 'static,
+    {
+        let (reply, rx) = Reply::channel();
+        self.ask_message_timeout(variant(payload, reply), rx, clock, timeout).await
+    }
+
+    /// Sends `message` and waits for `rx` within one deadline.
+    ///
+    /// This method supports [`ask_t!`](macro@crate::ask_t) and is not public API.
+    #[doc(hidden)]
+    pub async fn ask_message_timeout<R>(
+        &self,
+        message: M,
+        rx: oneshot::Receiver<R>,
+        clock: &Clock,
+        timeout: Duration,
+    ) -> Result<R, AskError> {
+        async {
+            self.tell(message).await?;
+            rx.await.map_err(AskError::from)
+        }
+        .timeout(clock, timeout)
+        .await
+        .map_err(|_elapsed| AskTimeoutError::new(timeout))?
     }
 
     /// Stops the actor after the current message finishes.
