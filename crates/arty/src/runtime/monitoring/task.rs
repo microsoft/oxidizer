@@ -1,22 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::TypeId;
-use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::HashMap;
+use std::cell::Cell;
 use std::sync::OnceLock;
 
 use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet, TaskState};
-use seismograph::recorder::event::{EventClass, EventTimestamp};
-use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+use seismograph::recorder::event::EventTimestamp;
+use seismograph::recorder::runtime::TaskId;
+use seismograph_runtime::TaskIdentity;
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
 use seismograph_runtime::task::EventContext;
 
 thread_local! {
     static EVENTS: Cell<Option<EventContext>> = const { Cell::new(None) };
-    static CURRENT: Cell<Option<TaskId>> = const { Cell::new(None) };
-    // This cache contains types, not live tasks. It is touched only during observation.
-    static TYPES: RefCell<HashMap<TypeId, TypeDescriptorId>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) fn current_events() -> Option<EventContext> {
@@ -27,42 +23,8 @@ pub(crate) fn set_events(events: Option<EventContext>) {
     EVENTS.with(|slot| slot.set(events));
 }
 
-pub(super) fn set_current(task: Option<TaskId>) {
-    CURRENT.with(|slot| slot.set(task));
-}
-
-pub(crate) fn current_task() -> Option<TaskId> {
-    CURRENT.with(Cell::get)
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct CurrentTask(Option<TaskId>);
-
-impl Drop for CurrentTask {
-    fn drop(&mut self) {
-        // #[gamma::skip(call_result.default, reason = "set_current returns unit; default_after preserves the thread-local update.")]
-        set_current(self.0);
-    }
-}
-
-pub(crate) fn enter_current(task: TaskId) -> CurrentTask {
-    CurrentTask(CURRENT.with(|slot| slot.replace(Some(task))))
-}
-
-pub(crate) struct PollTask(pub(crate) TaskId);
-
-pub(crate) fn descriptor<T: 'static>() -> TypeDescriptorId {
-    TYPES.with_borrow_mut(|types| {
-        *types
-            .entry(TypeId::of::<T>())
-            .or_insert_with(seismograph_runtime::allocate_type_descriptor_id)
-    })
-}
-
 #[derive(Debug)]
 struct TaskMetadata {
-    describe_type: fn() -> TypeDescriptorId,
     body_size: usize,
     events: EventContext,
     parent: Option<TaskId>,
@@ -72,35 +34,22 @@ struct TaskMetadata {
 impl TaskMetadata {
     fn new<T: 'static>(events: EventContext) -> Self {
         Self {
-            describe_type: descriptor::<T>,
             body_size: size_of::<T>(),
             events,
-            parent: current_task(),
+            parent: crate::runtime::worker::asynchronous::LocalWorker::current_task().map(TaskIdentity::id),
             spawned_at: None,
         }
     }
 
-    fn record_spawn(&mut self) -> Option<TaskIdentity> {
-        self.events
-            .spawned_with(self.describe_type, self.parent, self.body_size)
-            .map(|spawn| {
-                self.spawned_at = Some(spawn.timestamp);
-                TaskIdentity {
-                    id: spawn.id,
-                    descriptor: spawn.descriptor,
-                }
-            })
-    }
-
-    fn identity(&self) -> TaskIdentity {
-        TaskIdentity {
-            id: seismograph_runtime::allocate_task_id(),
-            descriptor: (self.describe_type)(),
-        }
+    fn record_spawn(&mut self, identity: TaskIdentity) {
+        self.spawned_at = self
+            .events
+            .spawned(identity, self.parent, self.body_size)
+            .map(|spawn| spawn.timestamp);
     }
 
     fn describe(&self, identity: &TaskIdentity, state: TaskActivityState) -> Task {
-        let mut task = Task::new(identity.id, identity.descriptor, state);
+        let mut task = Task::new(identity.id(), identity.descriptor(), state);
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
         task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
@@ -109,22 +58,16 @@ impl TaskMetadata {
 }
 
 #[derive(Debug)]
-struct TaskIdentity {
-    id: TaskId,
-    descriptor: TypeDescriptorId,
-}
-
-#[derive(Debug)]
 pub(crate) struct TaskInfo {
     metadata: TaskMetadata,
-    identity: OnceLock<TaskIdentity>,
+    identity: TaskIdentity,
     execution_events: OnceLock<EventContext>,
 }
 
 impl TaskInfo {
-    pub(crate) fn new<T: 'static>(events: EventContext) -> Self {
+    pub(crate) fn new<T: 'static>(events: EventContext, identity: TaskIdentity) -> Self {
         let mut metadata = TaskMetadata::new::<T>(events);
-        let identity = metadata.record_spawn().map_or_else(OnceLock::new, OnceLock::from);
+        metadata.record_spawn(identity);
         Self {
             metadata,
             identity,
@@ -133,12 +76,15 @@ impl TaskInfo {
     }
 
     pub(crate) fn id(&self) -> TaskId {
-        self.identity.get_or_init(|| self.metadata.identity()).id
+        self.identity.id()
+    }
+
+    pub(crate) const fn identity(&self) -> TaskIdentity {
+        self.identity
     }
 
     pub(crate) fn describe(&self, state: TaskActivityState) -> Task {
-        self.metadata
-            .describe(self.identity.get_or_init(|| self.metadata.identity()), state)
+        self.metadata.describe(&self.identity, state)
     }
 
     pub(crate) fn started_on(&self, events: EventContext) {
@@ -148,28 +94,15 @@ impl TaskInfo {
     }
 
     pub(crate) fn completed(&self) {
-        if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).completed(id);
-        }
+        self.execution_events.get().unwrap_or(&self.metadata.events).completed(self.id());
     }
 
     pub(crate) fn panicked(&self) {
-        if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).panicked(id);
-        }
+        self.execution_events.get().unwrap_or(&self.metadata.events).panicked(self.id());
     }
 
     pub(crate) fn canceled(&self) {
-        if let Some(id) = self.terminal_id() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).canceled(id);
-        }
-    }
-
-    fn terminal_id(&self) -> Option<TaskId> {
-        self.identity
-            .get()
-            .map(|identity| identity.id)
-            .or_else(|| seismograph::recorder::is_enabled(EventClass::RuntimeTask).then(|| self.id()))
+        self.execution_events.get().unwrap_or(&self.metadata.events).canceled(self.id());
     }
 }
 
@@ -177,40 +110,27 @@ impl TaskInfo {
 // above remains synchronized because queue inspection and execution can overlap.
 #[derive(Debug)]
 struct AsyncTaskInfo {
-    events: EventContext,
+    events: Option<EventContext>,
     parent: Option<TaskId>,
     spawned_at: Option<EventTimestamp>,
-    identity: OnceCell<TaskId>,
 }
 
 impl AsyncTaskInfo {
-    fn new(describe_type: fn() -> TypeDescriptorId, events: EventContext, parent: Option<TaskId>, body_size: usize) -> Self {
-        let spawn = events.spawned_with(describe_type, parent, body_size);
+    fn new(identity: TaskIdentity, events: Option<EventContext>, parent: Option<TaskId>, body_size: usize) -> Self {
+        let spawn = events.and_then(|events| events.spawned(identity, parent, body_size));
         Self {
             events,
             parent,
             spawned_at: spawn.map(|spawn| spawn.timestamp),
-            identity: spawn.map_or_else(OnceCell::new, |spawn| OnceCell::from(spawn.id)),
         }
     }
 
-    fn id(&self) -> TaskId {
-        *self.identity.get_or_init(seismograph_runtime::allocate_task_id)
-    }
-
-    fn describe(&self, descriptor: TypeDescriptorId, state: TaskActivityState, body_size: usize) -> Task {
-        let mut task = Task::new(self.id(), descriptor, state);
+    fn describe(&self, identity: &TaskIdentity, state: TaskActivityState, body_size: usize) -> Task {
+        let mut task = Task::new(identity.id(), identity.descriptor(), state);
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
         task.future_size_bytes = Some(u64::try_from(body_size).expect("a task body fits the platform address space"));
         task
-    }
-
-    fn terminal_id(&self) -> Option<TaskId> {
-        self.identity
-            .get()
-            .copied()
-            .or_else(|| seismograph::recorder::is_enabled(EventClass::RuntimeTask).then(|| self.id()))
     }
 }
 
@@ -218,7 +138,6 @@ impl AsyncTaskInfo {
 struct TaskMonitor<I> {
     instrumentation: I,
     info: AsyncTaskInfo,
-    describe_type: fn() -> TypeDescriptorId,
     body_size: usize,
 }
 
@@ -226,7 +145,8 @@ impl<I> TaskInstrumentation for TaskMonitor<I>
 where
     I: TaskInstrumentation,
 {
-    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+    fn inspect(&self, identity: &TaskIdentity, state: TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+        visitor(identity);
         match state {
             TaskState::Ready | TaskState::Waiting => {
                 let activity = if state == TaskState::Ready {
@@ -234,14 +154,10 @@ where
                 } else {
                     TaskActivityState::Waiting
                 };
-                let task =
-                    seismograph::recorder::without_recording(|| self.info.describe((self.describe_type)(), activity, self.body_size));
+                let task = seismograph::recorder::without_recording(|| self.info.describe(identity, activity, self.body_size));
                 visitor(&task);
             }
-            TaskState::Running => {
-                let task = seismograph::recorder::without_recording(|| PollTask(self.info.id()));
-                visitor(&task);
-            }
+            TaskState::Running => {}
         }
     }
 
@@ -253,25 +169,25 @@ where
         self.instrumentation.poll_end(outcome);
     }
 
-    fn completed(&mut self) {
-        if let Some(id) = self.info.terminal_id() {
-            self.info.events.completed(id);
+    fn completed(&mut self, identity: &TaskIdentity) {
+        if let Some(events) = self.info.events {
+            events.completed(identity.id());
         }
-        self.instrumentation.completed();
+        self.instrumentation.completed(identity);
     }
 
-    fn panicked(&mut self) {
-        if let Some(id) = self.info.terminal_id() {
-            self.info.events.panicked(id);
+    fn panicked(&mut self, identity: &TaskIdentity) {
+        if let Some(events) = self.info.events {
+            events.panicked(identity.id());
         }
-        self.instrumentation.panicked();
+        self.instrumentation.panicked(identity);
     }
 
-    fn cancelled(&mut self) {
-        if let Some(id) = self.info.terminal_id() {
-            self.info.events.canceled(id);
+    fn cancelled(&mut self, identity: &TaskIdentity) {
+        if let Some(events) = self.info.events {
+            events.canceled(identity.id());
         }
-        self.instrumentation.cancelled();
+        self.instrumentation.cancelled(identity);
     }
 }
 
@@ -280,8 +196,8 @@ pub(crate) fn register_monitored<F, T, I>(
     future: F,
     completion: T,
     instrumentation: I,
+    identity: TaskIdentity,
     parent: Option<TaskId>,
-    describe_type: fn() -> TypeDescriptorId,
     body_size: usize,
 ) where
     F: IntoFuture + 'static,
@@ -289,17 +205,12 @@ pub(crate) fn register_monitored<F, T, I>(
     T: TaskCompletion<F::Output>,
     I: TaskInstrumentation,
 {
-    let Some(events) = current_events() else {
-        tasks.task(future).instrument(instrumentation).register(completion);
-        return;
-    };
     let monitor = TaskMonitor {
         instrumentation,
-        info: AsyncTaskInfo::new(describe_type, events, parent, body_size),
-        describe_type,
+        info: AsyncTaskInfo::new(identity, current_events(), parent, body_size),
         body_size,
     };
-    tasks.task(future).instrument(monitor).register(completion);
+    tasks.task(identity, future).instrument(monitor).register(completion);
 }
 
 #[cfg(test)]
@@ -309,10 +220,10 @@ mod tests {
     use std::rc::Rc;
 
     use arty_executor::TaskInstrumentation;
-    use seismograph_runtime::RuntimeMetadata;
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+    use seismograph_runtime::{RuntimeMetadata, TaskIdentity};
 
-    use super::{AsyncTaskInfo, TaskInfo, TaskMonitor, current_task, enter_current};
+    use super::{AsyncTaskInfo, TaskInfo, TaskMonitor};
 
     struct Recorder(Rc<RefCell<Vec<&'static str>>>);
 
@@ -325,15 +236,15 @@ mod tests {
             self.0.borrow_mut().push("end");
         }
 
-        fn completed(&mut self) {
+        fn completed(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("completed");
         }
 
-        fn panicked(&mut self) {
+        fn panicked(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("panicked");
         }
 
-        fn cancelled(&mut self) {
+        fn cancelled(&mut self, _identity: &TaskIdentity) {
             self.0.borrow_mut().push("cancelled");
         }
     }
@@ -343,67 +254,45 @@ mod tests {
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("instrumentation-forwarding", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let calls = Rc::new(RefCell::new(Vec::new()));
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
         let mut monitor = TaskMonitor {
             instrumentation: Recorder(Rc::clone(&calls)),
-            info: AsyncTaskInfo::new(super::descriptor::<()>, worker.handle().task_events(), None, 0),
-            describe_type: super::descriptor::<()>,
+            info: AsyncTaskInfo::new(identity, Some(worker.handle().task_events()), None, 0),
             body_size: 0,
         };
 
         monitor.poll_start();
         monitor.poll_end(std::task::Poll::Pending);
-        monitor.completed();
-        monitor.panicked();
-        monitor.cancelled();
+        monitor.completed(&identity);
+        monitor.panicked(&identity);
+        monitor.cancelled(&identity);
 
         assert_eq!(*calls.borrow(), ["start", "end", "completed", "panicked", "cancelled"]);
     }
 
     #[test]
-    fn current_task_scope_restores_its_parent_after_return_and_panic() {
-        let parent = seismograph_runtime::allocate_task_id();
-        let child = seismograph_runtime::allocate_task_id();
-        assert_eq!(current_task(), None);
-        {
-            let _parent = enter_current(parent);
-            {
-                let _child = enter_current(child);
-                assert_eq!(current_task(), Some(child));
-            }
-            assert_eq!(current_task(), Some(parent));
-            let result = std::panic::catch_unwind(|| {
-                let _child = enter_current(child);
-                assert_eq!(current_task(), Some(child));
-                panic!("scope restores the parent during unwinding");
-            });
-            assert!(result.is_err());
-            assert_eq!(current_task(), Some(parent));
-        }
-        assert_eq!(current_task(), None);
-    }
-
-    #[test]
-    fn async_metadata_is_smaller_and_stays_owner_local() {
-        static_assertions::assert_not_impl_any!(AsyncTaskInfo: Sync);
+    fn async_metadata_is_smaller_and_immutable() {
+        static_assertions::assert_impl_all!(AsyncTaskInfo: Send, Sync);
         static_assertions::assert_impl_all!(TaskInfo: Send, Sync);
         assert!(size_of::<AsyncTaskInfo>() < size_of::<TaskInfo>());
         #[cfg(target_pointer_width = "64")]
-        assert!(size_of::<AsyncTaskInfo>() <= 56);
+        assert!(size_of::<AsyncTaskInfo>() <= 72);
     }
 
     #[test]
-    fn unobserved_blocking_outcomes_do_not_allocate_task_identities() {
+    fn unobserved_blocking_outcomes_preserve_the_submission_identity() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("idle-outcomes", 1));
         let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
             seismograph_runtime::worker::WorkerRole::Blocking,
         ));
         seismograph::recorder::without_recording(|| {
-            let info = TaskInfo::new::<()>(worker.handle().task_events());
+            let identity = TaskIdentity::from_location(std::panic::Location::caller());
+            let info = TaskInfo::new::<()>(worker.handle().task_events(), identity);
             info.completed();
             info.panicked();
             info.canceled();
-            assert!(info.identity.get().is_none());
+            assert_eq!(info.identity(), identity);
         });
     }
 
@@ -417,7 +306,11 @@ mod tests {
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
 
-        super::register_monitored(&executor.tasks(), future, sender, (), None, super::descriptor::<()>, 0);
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
+        super::register_monitored(&executor.tasks(), future, sender, (), identity, None, 0);
+        let mut identities = Vec::new();
+        executor.inspect(1, |identity: &TaskIdentity| identities.push(*identity)).unwrap();
+        assert_eq!(identities, [identity]);
         let _ = executor.execute_cycle();
 
         assert!(ran.get());

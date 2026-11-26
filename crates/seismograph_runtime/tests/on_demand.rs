@@ -10,9 +10,23 @@ use seismograph::recorder::{Configuration, Policy, without_recording};
 use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 use seismograph_runtime::snapshot::{CaptureOptions, CountersScope, Task, TaskActivityState, TaskCollection, TaskMetricsScope};
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
-use seismograph_runtime::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
+use seismograph_runtime::{RuntimeMetadata, TaskIdentity, allocate_task_id, allocate_type_descriptor_id, register_runtime};
 
 static RECORDING: Mutex<()> = Mutex::new(());
+
+#[test]
+fn identities_preserve_locations_and_allocate_distinct_task_ids() {
+    let location = std::panic::Location::caller();
+    let first = TaskIdentity::from_location(location);
+    let second = TaskIdentity::from_location(location);
+    let other = TaskIdentity::from_location(std::panic::Location::caller());
+
+    assert_ne!(first.id(), second.id());
+    assert_eq!(first.descriptor(), second.descriptor());
+    assert_eq!(first.descriptor().get(), std::ptr::from_ref(location).addr() as u64);
+    assert!(std::ptr::eq(first.location(), location));
+    assert_ne!(first.descriptor(), other.descriptor());
+}
 
 #[expect(
     clippy::unwrap_used,
@@ -184,7 +198,7 @@ fn metadata_backtrace_override_controls_lifecycle_and_spawn_events() {
     worker
         .handle()
         .task_events()
-        .spawned(allocate_type_descriptor_id(), None, 0)
+        .spawned(TaskIdentity::from_location(std::panic::Location::caller()), None, 0)
         .unwrap();
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let captured = seismograph::snapshot::decode(captured.as_bytes()).unwrap();
@@ -714,17 +728,27 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
     let runtime = register_runtime(RuntimeMetadata::new("recorded-task-lifecycle", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let events = worker.handle().task_events();
-    let descriptor = allocate_type_descriptor_id();
+    let location = std::panic::Location::caller();
+    let completed_identity = TaskIdentity::from_location(location);
+    let panicked_identity = TaskIdentity::from_location(location);
+    let canceled_identity = TaskIdentity::from_location(location);
+    let descriptor = completed_identity.descriptor();
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(true),
         ..Configuration::default()
     });
 
-    let completed = events.spawned(descriptor, None, 0).unwrap();
+    let completed = completed_identity.id();
+    assert_eq!(events.spawned(completed_identity, None, 0).unwrap().identity, completed_identity);
     events.completed(completed);
-    let panicked = events.spawned(descriptor, Some(completed), 64).unwrap();
+    let panicked = panicked_identity.id();
+    assert_eq!(
+        events.spawned(panicked_identity, Some(completed), 64).unwrap().identity,
+        panicked_identity
+    );
     events.panicked(panicked);
-    let canceled = events.spawned(descriptor, None, 4096).unwrap();
+    let canceled = canceled_identity.id();
+    assert_eq!(events.spawned(canceled_identity, None, 4096).unwrap().identity, canceled_identity);
     events.canceled(canceled);
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
@@ -774,7 +798,7 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
     previous_worker
         .handle()
         .task_events()
-        .spawned(allocate_type_descriptor_id(), None, 0)
+        .spawned(TaskIdentity::from_location(std::panic::Location::caller()), None, 0)
         .unwrap();
     seismograph::recorder(Configuration::default());
     seismograph::recorder::clear_buffers().unwrap();
@@ -782,10 +806,10 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
         let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let context = worker.handle().task_events();
-        let id = allocate_task_id();
-        let descriptor = allocate_type_descriptor_id();
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
+        let id = identity.id();
 
-        let created = context.spawned(descriptor, None, 64);
+        let created = context.spawned(identity, None, 64);
         context.completed(id);
         context.panicked(id);
         context.canceled(id);
@@ -800,30 +824,20 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
 }
 
 #[test]
-fn lazy_spawn_metadata_matches_the_recorded_event() {
+fn supplied_spawn_metadata_matches_the_recorded_event() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
     let runtime = register_runtime(RuntimeMetadata::new("lazy-spawn-metadata", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();
-    let descriptor = allocate_type_descriptor_id();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
     let parent = allocate_task_id();
-    let calls = std::cell::Cell::new(0);
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
 
-    let spawned = context
-        .spawned_with(
-            || {
-                calls.set(calls.get() + 1);
-                descriptor
-            },
-            Some(parent),
-            64,
-        )
-        .unwrap();
+    let spawned = context.spawned(identity, Some(parent), 64).unwrap();
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
     seismograph::recorder(Configuration::default());
@@ -835,39 +849,38 @@ fn lazy_spawn_metadata_matches_the_recorded_event() {
             event.kind == EventKind::TaskSpawned
                 && event
                     .runtime()
-                    .is_some_and(|payload| payload.runtime_id == runtime.id() && payload.subject_id == spawned.id.get())
+                    .is_some_and(|payload| payload.runtime_id == runtime.id() && payload.subject_id == spawned.identity.id().get())
         })
         .unwrap();
     let payload = event.runtime().unwrap();
 
     assert_eq!(
         (
-            calls.get(),
-            spawned.descriptor,
+            spawned.identity,
             spawned.timestamp,
             payload.related_id,
             payload.value_0,
             payload.value_1
         ),
-        (1, descriptor, event.timestamp, parent.get(), descriptor.get(), 65)
+        (identity, event.timestamp, parent.get(), identity.descriptor().get(), 65)
     );
 }
 
 #[test]
-fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
+fn disabled_and_suppressed_spawns_do_not_record_supplied_metadata() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
     let runtime = register_runtime(RuntimeMetadata::new("lazy-disabled-spawn", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();
-    let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
 
-    let disabled = context.spawned_with(descriptor, None, 0);
+    let disabled = context.spawned(identity, None, 0);
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let suppressed = without_recording(|| context.spawned_with(descriptor, None, 0));
+    let suppressed = without_recording(|| context.spawned(identity, None, 0));
     seismograph::recorder(Configuration::default());
 
     assert_eq!((disabled, suppressed), (None, None));

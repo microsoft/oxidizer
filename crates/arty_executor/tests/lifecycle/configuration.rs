@@ -12,7 +12,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
-use arty_executor::{ExecutorBuilder, PanicPolicy, TaskBuilder, TaskCompletion, TaskInstrumentation, TaskSet, discard_task_panic_payload};
+use arty_executor::{
+    ExecutorBuilder, PanicPolicy, ShutdownCause, TaskBuilder, TaskCompletion, TaskInstrumentation, TaskSet, discard_task_panic_payload,
+};
+use seismograph_runtime::TaskIdentity;
 use static_assertions::assert_not_impl_any;
 
 use super::support::{DiscardCompletion, TaskBuilderExt as _};
@@ -27,6 +30,217 @@ fn default_builder() {
 }
 
 #[test]
+fn current_identity_follows_each_poll_and_child_submission_without_monitoring() {
+    let mut executor = ExecutorBuilder::new().build();
+    let tasks = executor.tasks();
+    let current = tasks.clone();
+    let sibling_tasks = tasks.clone();
+    let parent = TaskIdentity::from_location(std::panic::Location::caller());
+    let child = TaskIdentity::from_location(std::panic::Location::caller());
+    let sibling = TaskIdentity::from_location(std::panic::Location::caller());
+    let polls = Rc::new(Cell::new(0));
+    let polled = Rc::clone(&polls);
+    let child_polled = Rc::new(Cell::new(false));
+    let completed = Rc::clone(&child_polled);
+    let sibling_polled = Rc::new(Cell::new(false));
+    let sibling_completed = Rc::clone(&sibling_polled);
+    let mut first = true;
+
+    assert_eq!(tasks.current(), None);
+    executor
+        .tasks()
+        .task(
+            parent,
+            poll_fn(move |cx| {
+                assert_eq!(current.current(), Some(parent));
+                polled.set(polled.get() + 1);
+                if first {
+                    first = false;
+                    let completed = Rc::clone(&completed);
+                    let child_tasks = tasks.clone();
+                    tasks
+                        .task(child, async move {
+                            assert_eq!(child_tasks.current(), Some(child));
+                            completed.set(true);
+                        })
+                        .register(DiscardCompletion);
+                    assert_eq!(current.current(), Some(parent));
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }),
+        )
+        .instrument(())
+        .inspect(Some)
+        .register(DiscardCompletion);
+    executor
+        .tasks()
+        .task(sibling, async move {
+            assert_eq!(sibling_tasks.current(), Some(sibling));
+            sibling_completed.set(true);
+        })
+        .register(DiscardCompletion);
+    assert_eq!(executor.tasks().current(), None);
+
+    let _ = executor.execute_cycle();
+    assert_eq!(executor.tasks().current(), None);
+    let _ = executor.execute_cycle();
+
+    assert_eq!(executor.tasks().current(), None);
+    assert_eq!(polls.get(), 2);
+    assert!(child_polled.get());
+    assert!(sibling_polled.get());
+    assert!(!executor.has_tasks());
+}
+
+#[test]
+fn current_identity_clears_after_task_panic_and_cancellation() {
+    let mut executor = ExecutorBuilder::new().panic_policy(PanicPolicy::IGNORE).build();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    let failed = Rc::new(Cell::new(false));
+    let panicked = Rc::clone(&failed);
+    let tasks = executor.tasks();
+    executor
+        .tasks()
+        .task(
+            identity,
+            poll_fn(move |_| -> Poll<()> {
+                assert_eq!(tasks.current(), Some(identity));
+                panicked.set(true);
+                panic!("task identity is cleared after a panic");
+            }),
+        )
+        .register(DiscardCompletion);
+
+    let _ = executor.execute_cycle();
+
+    assert!(failed.get());
+    assert_eq!(executor.tasks().current(), None);
+    executor
+        .tasks()
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
+        .register(DiscardCompletion);
+    let _ = executor.execute_cycle();
+    executor.shutdown().trigger(ShutdownCause::default());
+    let _ = executor.execute_cycle();
+    assert_eq!(executor.tasks().current(), None);
+    assert!(!executor.has_tasks());
+}
+
+#[test]
+fn current_identity_clears_when_poll_instrumentation_unwinds() {
+    struct PanickingInstrumentation(TaskIdentity, TaskSet);
+
+    impl TaskInstrumentation for PanickingInstrumentation {
+        fn poll_start(&mut self) {
+            assert_eq!(self.1.current(), Some(self.0));
+            panic!("poll instrumentation unwinds");
+        }
+    }
+
+    let mut executor = ExecutorBuilder::new().build();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    executor
+        .tasks()
+        .task(identity, std::future::pending::<()>())
+        .instrument(PanickingInstrumentation(identity, executor.tasks()))
+        .register(DiscardCompletion);
+
+    let result = catch_unwind(std::panic::AssertUnwindSafe(|| executor.execute_cycle()));
+
+    assert_eq!(*result.unwrap_err().downcast::<&str>().unwrap(), "poll instrumentation unwinds");
+    assert_eq!(executor.tasks().current(), None);
+}
+
+#[test]
+fn instrumentation_receives_native_identity_for_inspection_and_all_outcomes() {
+    struct IdentityCallbacks(Rc<RefCell<Vec<(&'static str, TaskIdentity)>>>);
+
+    impl TaskInstrumentation for IdentityCallbacks {
+        fn inspect(&self, identity: &TaskIdentity, _state: arty_executor::TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+            visitor(identity);
+        }
+
+        fn completed(&mut self, identity: &TaskIdentity) {
+            self.0.borrow_mut().push(("completed", *identity));
+        }
+
+        fn panicked(&mut self, identity: &TaskIdentity) {
+            self.0.borrow_mut().push(("panicked", *identity));
+        }
+
+        fn cancelled(&mut self, identity: &TaskIdentity) {
+            self.0.borrow_mut().push(("cancelled", *identity));
+        }
+    }
+
+    for (outcome, expected) in [(0, "completed"), (1, "panicked"), (2, "cancelled"), (3, "cancelled")] {
+        let mut executor = ExecutorBuilder::new().panic_policy(PanicPolicy::IGNORE).build();
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
+        let callbacks = Rc::new(RefCell::new(Vec::new()));
+        if outcome == 3 {
+            executor.shutdown().trigger(ShutdownCause::default());
+        }
+        executor
+            .tasks()
+            .task(
+                identity,
+                poll_fn(move |_| match outcome {
+                    0 => Poll::Ready(()),
+                    1 => panic!("task panic retains its identity"),
+                    _ => Poll::Pending,
+                }),
+            )
+            .instrument(IdentityCallbacks(Rc::clone(&callbacks)))
+            .inspect(Some)
+            .register(DiscardCompletion);
+        let mut inspected = Vec::new();
+        executor.inspect(1, |identity: &TaskIdentity| inspected.push(*identity)).unwrap();
+        assert_eq!(inspected, if outcome == 3 { vec![] } else { vec![identity] });
+        assert_eq!(executor.tasks().current(), None);
+
+        let _ = executor.execute_cycle();
+        if outcome == 2 {
+            executor.shutdown().trigger(ShutdownCause::default());
+            let _ = executor.execute_cycle();
+        }
+
+        assert_eq!(*callbacks.borrow(), [(expected, identity)]);
+        assert_eq!(executor.tasks().current(), None);
+    }
+}
+
+#[test]
+fn current_identity_belongs_to_the_task_set_instance() {
+    let executor = ExecutorBuilder::new().build();
+    let retired_tasks = executor.tasks();
+    drop(executor);
+    let mut executor = ExecutorBuilder::new().build();
+    let tasks = executor.tasks();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    let observed = Rc::new(Cell::new(false));
+    let polled = Rc::clone(&observed);
+    executor
+        .tasks()
+        .task(identity, async move {
+            assert_eq!(retired_tasks.current(), None);
+            assert_eq!(tasks.current(), Some(identity));
+            polled.set(true);
+        })
+        .register(DiscardCompletion);
+
+    let _ = executor.execute_cycle();
+
+    assert!(observed.get());
+    assert_eq!(executor.tasks().current(), None);
+}
+
+#[test]
 fn panic_policy_is_configurable() {
     for (builder, shuts_down) in [
         (ExecutorBuilder::new(), true),
@@ -35,7 +249,10 @@ fn panic_policy_is_configurable() {
         let mut executor = builder.build();
         let _completion = executor
             .tasks()
-            .task(poll_fn(|_| -> Poll<()> { panic!("configured panic policy") }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                poll_fn(|_| -> Poll<()> { panic!("configured panic policy") }),
+            )
             .register_test();
 
         _ = executor.execute_cycle();
@@ -67,15 +284,18 @@ fn task_observer_receives_each_poll_outcome() {
     let mut first = true;
     executor
         .tasks()
-        .task(poll_fn(move |cx| {
-            if first {
-                first = false;
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            } else {
-                Poll::Ready(())
-            }
-        }))
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            poll_fn(move |cx| {
+                if first {
+                    first = false;
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }),
+        )
         .instrument(PollOutcomes {
             starts: Rc::clone(&starts),
             outcomes: Rc::clone(&outcomes),
@@ -92,7 +312,7 @@ fn task_observer_receives_each_poll_outcome() {
 struct PanickingCancellation;
 
 impl TaskInstrumentation for PanickingCancellation {
-    fn cancelled(&mut self) {
+    fn cancelled(&mut self, _identity: &TaskIdentity) {
         panic!("instrumentation cancellation");
     }
 }
@@ -103,13 +323,13 @@ enum TerminalPanic {
 }
 
 impl TaskInstrumentation for TerminalPanic {
-    fn completed(&mut self) {
+    fn completed(&mut self, _identity: &TaskIdentity) {
         if matches!(self, Self::Completed) {
             panic!("instrumentation completion");
         }
     }
 
-    fn panicked(&mut self) {
+    fn panicked(&mut self, _identity: &TaskIdentity) {
         if matches!(self, Self::Panicked) {
             panic!("instrumentation panic");
         }
@@ -144,10 +364,13 @@ fn terminal_instrumentation_panics_after_completion_delivery() {
         let delivered = Rc::new(Cell::new(None));
         executor
             .tasks()
-            .task(poll_fn(move |_| {
-                assert!(!future_panics, "task panic");
-                Poll::Ready(())
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                poll_fn(move |_| {
+                    assert!(!future_panics, "task panic");
+                    Poll::Ready(())
+                }),
+            )
             .instrument(instrumentation)
             .register(RecordCompletion(Rc::clone(&delivered)));
 
@@ -186,10 +409,13 @@ fn panicking_cancellation_retires_payload_before_remote_waker_release() {
     let mut executor = ExecutorBuilder::new().build();
     executor
         .tasks()
-        .task(CaptureWaker {
-            waker: waker_tx,
-            dropped: dropped_tx,
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            CaptureWaker {
+                waker: waker_tx,
+                dropped: dropped_tx,
+            },
+        )
         .instrument(PanickingCancellation)
         .register(DiscardCompletion);
     _ = executor.execute_cycle();
