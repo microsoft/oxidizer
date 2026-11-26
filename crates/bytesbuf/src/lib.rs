@@ -147,13 +147,21 @@
 //!    provider instance via [`HasMemory::memory()`]. Use this as the memory provider - this
 //!    object will give you memory capacity with a configuration that is optimal for
 //!    delivering bytes of data to that specific consumer (e.g. `TcpConnection`).
-//! 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-//!    instance of a shared [`GlobalPool`]. In a typical web application, the global memory pool
-//!    is a service exposed by the application framework. In a different context (e.g. example
-//!    or test code with no framework), you can create your own instance via [`GlobalPool::new()`].
-//!    In a `no_std` environment, applications that already own a specialized memory provider can
-//!    integrate it by implementing [`Memory`]. The crate does not provide a general-purpose
-//!    allocator-backed provider without `std`.
+//! 1. If you are creating byte sequences as part of usage-neutral data processing, receive a
+//!    provider from the application. With the `std` feature, the application can create one
+//!    shared [`GlobalPool`]. Pass the pool through library builders instead of constructing a
+//!    provider inside library code. In a `no_std` environment, the application provides its own
+//!    specialized implementation of [`Memory`].
+//!
+//! The application is the composition root of the executable binary. It is responsible for
+//! selecting the provider lifetime and policy. For example, its `main` function can create a
+//! `GlobalPool` and pass clones to every downstream component. A library's constructor or builder
+//! should receive this dependency. Use [`OpaqueMemory`] when the public builder does not need to
+//! expose a generic provider type.
+//!
+//! For a test or benchmark binary, create one static lazy `GlobalPool` for general-purpose
+//! memory needs. Pass that pool to the code under test. Tests that require a specific memory
+//! provider or test `GlobalPool` behavior can create a provider for that scenario instead.
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
 //! [`Memory::reserve()`] on it. This returns a [`BytesBuf`] with at least the requested
@@ -351,8 +359,9 @@
 //!   is appropriately configured), return a memory provider that performs the necessary
 //!   configuration.
 //! * If your type neither passes anything to another type that implements [`HasMemory`]
-//!   nor can take advantage of optimizations enabled by specific memory configurations, obtain
-//!   an instance of [`GlobalPool`] as a dependency and return it as the memory provider.
+//!   nor can take advantage of optimizations enabled by specific memory configurations, store a
+//!   provider received from the application and return it as the memory provider. Prefer
+//!   [`OpaqueMemory`] at a builder boundary when callers may supply different provider types.
 //!
 //! Example of forwarding the memory provider (see `examples/bb_has_memory_forwarding.rs`
 //! for full code):
@@ -434,7 +443,8 @@
 //! # }
 //! ```
 //!
-//! Example of returning a global memory pool when the type is agnostic toward memory configuration
+//! Example of returning an application-owned provider when the type is agnostic toward memory
+//! configuration
 //! (see `examples/bb_has_memory_global.rs` for full code):
 //!
 //! ```
@@ -442,10 +452,9 @@
 //! # #[cfg(feature = "std")] {
 //! # #[derive(Debug)]
 //! # struct ChecksumCalculator {
-//! #     memory: GlobalPool,
+//! #     memory: OpaqueMemory,
 //! # }
-//! # use bytesbuf::mem::GlobalPool;
-//! use bytesbuf::mem::{HasMemory, MemoryShared};
+//! use bytesbuf::mem::{HasMemory, MemoryShared, OpaqueMemory};
 //!
 //! impl HasMemory for ChecksumCalculator {
 //!     fn memory(&self) -> impl MemoryShared {
@@ -543,8 +552,8 @@
 //!   consumed (e.g. network connection, file, etc).
 //!
 //! The standard pattern here is to use [`OnceLock`] to lazily initialize a [`BytesView`] from
-//! the static data on first use, using memory from a memory provider that is optimal for the
-//! intended usage.
+//! the static data on first use. Obtain this provider from the consuming object, which received
+//! it from the application, rather than creating a provider in the library.
 //!
 //! ```
 //! # fn main() {
@@ -594,9 +603,21 @@
 //!
 //! # Testing
 //!
-//! For testing purposes, this crate exposes some special-purpose memory providers that are not
-//! optimized for real-world usage but may be useful to test corner cases of byte sequence
-//! processing in your code.
+//! For general-purpose test or benchmark memory, create one lazily initialized static
+//! [`GlobalPool`] in the test or benchmark binary. This models the application-owned provider and
+//! avoids allocating a separate pool for each test. Pass this provider to the code under test.
+//!
+//! ```
+//! # #[cfg(feature = "std")] {
+//! use std::sync::LazyLock;
+//! use bytesbuf::mem::GlobalPool;
+//!
+//! static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+//! # }
+//! ```
+//!
+//! This crate also exposes special-purpose memory providers that are not optimized for real-world
+//! usage but may be useful to test corner cases of byte sequence processing in your code.
 //!
 //! See the `mem::testing` module for details (requires `test-util` Cargo feature).
 //!
@@ -618,6 +639,7 @@
 //! [`HasMemory`]: crate::mem::HasMemory
 //! [`HasMemory::memory()`]: crate::mem::HasMemory::memory
 //! [`GlobalPool`]: crate::mem::GlobalPool
+//! [`OpaqueMemory`]: crate::mem::OpaqueMemory
 //! [`Bytes`]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [`remaining_capacity()`]: crate::BytesBuf::remaining_capacity
 //! [`OnceLock`]: std::sync::OnceLock

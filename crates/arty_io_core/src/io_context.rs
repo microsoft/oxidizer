@@ -5,7 +5,12 @@ use thread_aware_core::ThreadAware;
 
 use crate::{Driver, DriverError, DriverOptions};
 
-/// An application I/O handle that creates worker-local drivers.
+/// An I/O library handle that creates worker-local drivers.
+///
+/// This trait defines a runtime integration boundary. An I/O library should
+/// not make its implementation of this trait the public API of its endpoints.
+/// Its endpoint builder accepts an `arty::io::Io`, collects other
+/// application-owned dependencies, and obtains this context internally.
 ///
 /// The runtime creates one registration for each concrete context type. The
 /// first retrieval creates and registers the context. Each worker creates its
@@ -26,7 +31,10 @@ use crate::{Driver, DriverError, DriverOptions};
 /// contexts and their clones follow the usual [`ThreadAware`] contract. They remain usable after
 /// movement without another `relocate` call. Later relocation affects performance only.
 pub trait IoContext: Clone + ThreadAware + 'static {
-    /// Configuration used to create the context.
+    /// Configuration that creates the context.
+    ///
+    /// An endpoint library should build this value from inputs to its own
+    /// builder rather than expose this type from the endpoint API.
     type ContextOptions;
 
     /// The driver type created by this context.

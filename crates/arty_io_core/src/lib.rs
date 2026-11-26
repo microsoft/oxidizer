@@ -14,9 +14,14 @@
 //!
 //! # How drivers work
 //!
-//! Applications access I/O through an [`IoContext`]. On each async worker, the runtime creates
-//! one local [`Driver`] for that context. The driver submits I/O and processes completed
-//! operations in [`Driver::execute_cycle`].
+//! Applications access I/O through an endpoint or client from an I/O library. The library keeps
+//! an [`IoContext`] inside that endpoint. On each async worker, the runtime creates one local
+//! [`Driver`] for that context. The driver submits I/O and processes completed operations in
+//! [`Driver::execute_cycle`].
+//!
+//! An I/O library accepts `arty::io::Io` and application-owned dependencies through its own
+//! builder. The library builds the concrete [`IoContext::ContextOptions`] privately instead of
+//! exposing them from its endpoint API.
 //!
 //! ```
 //! use std::task::Waker;

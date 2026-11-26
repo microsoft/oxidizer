@@ -58,6 +58,9 @@ The runtime has four supporting service groups:
   shutdown until it returns.
 - I/O contexts provide access to I/O libraries. Their drivers process I/O
   requests. Arty creates contexts once per runtime and drivers once per worker.
+  Applications pass `Io` to an I/O library. The library's builder collects its
+  other dependencies and keeps the concrete context and context options inside
+  its implementation.
   The [I/O guide](IO.md) describes driver roles, access rules, failures, and
   shutdown.
 - Worker clocks wake tasks when their timers expire.

@@ -18,6 +18,10 @@ use crate::task::Context;
 
 /// Access to an Arty runtime's I/O contexts.
 ///
+/// I/O libraries should accept this type at their endpoint builder boundary.
+/// The application selects and passes the dependencies, while the library keeps
+/// concrete context and option types internal.
+///
 /// Use [`Context::io`](crate::task::Context::io) to access these contexts.
 /// Cloning an `Io` value keeps its worker assignment.
 /// Arty can pass the value to another worker in the same runtime.
@@ -46,6 +50,10 @@ impl Io {
     }
 
     /// Returns the runtime's context of type `C`, creating it on the first request.
+    ///
+    /// This is an integration method for I/O libraries. A library should accept
+    /// an [`Io`] at its endpoint builder boundary, call this method internally,
+    /// and keep the concrete `C` and its options out of its public endpoint API.
     ///
     /// The options type must implement `Clone`, `Send`, and `'static`.
     /// Arty can clone `options`, so keep them inexpensive to clone.

@@ -2,16 +2,16 @@
 // Licensed under the MIT License.
 
 //! Showcases how to implement the `HasMemory` trait
-//! using the `GlobalPool` implementation strategy.
+//! with an application-owned memory provider.
 
 use bytesbuf::BytesView;
-use bytesbuf::mem::{GlobalPool, HasMemory, MemoryShared};
+use bytesbuf::mem::{GlobalPool, HasMemory, MemoryShared, OpaqueMemory};
 
 fn main() {
-    // The global memory pool in real-world code would be provided by the application framework.
-    let global_memory_pool = GlobalPool::new();
+    // The application owns the general-purpose provider and supplies it to library code.
+    let memory = GlobalPool::new();
 
-    let mut checksum_calculator = ChecksumCalculator::new(global_memory_pool);
+    let mut checksum_calculator = ChecksumCalculator::new(memory);
 
     // When we obtain an instance of a type that implements `HasMemory`,
     // we should extract the memory provider if we need to access it on demand.
@@ -37,19 +37,21 @@ fn main() {
 /// This type does not benefit from any specific memory configuration - it consumes bytes no
 /// matter what sort of memory they are in. It also does not pass the bytes to some other type.
 ///
-/// Therefore, we simply use `GlobalPool` as the memory provider we publish, as this is
-/// the default choice when there is no specific provider to prefer.
+/// Therefore, we store the provider supplied by the application and publish it to callers.
 #[derive(Debug)]
 struct ChecksumCalculator {
-    // The application logic must provide this - it is our dependency.
-    memory: GlobalPool,
+    // This library-level wrapper accepts the provider selected by the application.
+    memory: OpaqueMemory,
 
     checksum: u64,
 }
 
 impl ChecksumCalculator {
-    pub(crate) const fn new(memory: GlobalPool) -> Self {
-        Self { memory, checksum: 0 }
+    pub(crate) fn new(memory: impl Into<OpaqueMemory>) -> Self {
+        Self {
+            memory: memory.into(),
+            checksum: 0,
+        }
     }
 
     pub(crate) fn add_bytes(&mut self, mut bytes: BytesView) {

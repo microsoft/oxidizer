@@ -18,7 +18,10 @@ use crate::mem::{Memory, MemoryShared};
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
 ///
-/// With the `std` feature, `GlobalPool` converts into this adapter through [`Into::into`].
+/// Use this type at a library's builder boundary when the builder must store a caller-owned
+/// provider without exposing its concrete type or the provider's I/O context options. Accept
+/// `impl Into<OpaqueMemory>` from the application. With the `std` feature, `GlobalPool` converts
+/// into this adapter through [`Into::into`].
 #[derive(Debug, ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,

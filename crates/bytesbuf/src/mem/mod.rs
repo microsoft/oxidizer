@@ -8,6 +8,11 @@
 //! own a specialized memory provider can integrate it by implementing [`Memory`]; this crate does
 //! not provide a general-purpose allocator-backed provider in that configuration.
 //!
+//! The application owns these providers. It creates or selects the provider and passes it to
+//! library builders. A library receives a concrete generic provider for immediate use or stores an
+//! [`OpaqueMemory`] when it must erase the provider type. Library code does not create a
+//! `GlobalPool` for its own general-purpose needs.
+//!
 //! Special-purpose memory providers can be implemented by other crates as needed, providing access
 //! to memory with particular characteristics (e.g. page-aligned memory, memory mapped to specific
 //! physical devices, ...).

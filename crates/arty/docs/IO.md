@@ -5,8 +5,16 @@ built-in network or file I/O implementation.
 A driver processes I/O requests for a worker.
 An I/O context gives your code access to the I/O library.
 
-Use `Context::io()` to access the worker's I/O contexts through `arty::io::Io`.
-Then call `Io::context` with the context type provided by the I/O library.
+Use `Context::io()` to access the worker's `arty::io::Io`.
+Pass that `Io` value to an I/O library's endpoint builder.
+The library obtains its specific context by calling `Io::context`.
+Application code should not keep or pass the concrete I/O context.
+
+An I/O library can require additional application services to create its
+context. For example, it can require a bytesbuf memory provider.
+The library should accept these services through its builder.
+The builder can accept an `OpaqueMemory` value, assemble the context options,
+and keep the concrete context options type out of its public API.
 
 Arty creates each context type once per runtime. Each worker creates its own
 driver the first time that worker requests the context. Requesting a

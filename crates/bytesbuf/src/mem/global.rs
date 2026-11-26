@@ -47,7 +47,11 @@ pub struct GlobalPool {
 }
 
 impl GlobalPool {
-    /// Creates a new instance of the global memory pool.
+    /// Creates an application-owned global memory pool.
+    ///
+    /// The application should create a small number of pools, retain them for their required
+    /// lifetime, and pass clones to downstream libraries. Library code should receive a provider
+    /// through its constructor or builder instead of calling this method.
     ///
     /// # Efficiency
     ///

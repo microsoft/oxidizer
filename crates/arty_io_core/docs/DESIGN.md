@@ -9,8 +9,10 @@ This document uses the following terms:
 
 - An **async worker** is a runtime-owned thread. It runs application tasks and
   I/O drivers.
-- An **I/O context** is the cloneable handle that application code uses to start
-  I/O operations.
+- An **I/O endpoint** is the application-facing client or handle supplied by an
+  I/O library.
+- An **I/O context** is the cloneable handle that an I/O library keeps inside
+  its endpoint. It connects endpoint operations to worker-local drivers.
 - A **driver** is a worker-local object. It submits I/O and receives completions
   for one I/O context type.
 - **Context retrieval** is a request to the runtime for a concrete
@@ -18,6 +20,12 @@ This document uses the following terms:
 - A **registration** is the runtime state created by the first retrieval of one
   concrete `IoContext` type.
 - The **maximum wait time** is the `Duration` in `Cycle::max_wait`.
+
+An I/O library accepts `arty::io::Io` at its endpoint builder boundary. Its
+builder also accepts application-owned inputs, such as memory providers,
+clocks, and credentials. The library assembles `ContextOptions` inside the
+builder and does not expose that type or the concrete context through the
+endpoint API.
 
 ## Context retrieval
 

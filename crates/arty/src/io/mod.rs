@@ -3,7 +3,7 @@
 
 //! Connecting I/O libraries to Arty.
 //!
-//! An I/O context gives your code access to an I/O library.
+//! An I/O context gives an I/O library access to its driver.
 //! A driver processes that library's I/O requests.
 //! Related crates and third-party libraries connect to Arty through `arty_io_core`.
 //! They supply an [`IoContext`](arty_io_core::IoContext) and
@@ -16,13 +16,19 @@
 //!
 //! # Use an I/O library
 //!
-//! Obtain a library's context from [`Context::io`](crate::task::Context::io).
-//! Then use the operations that the library provides. This example requires
+//! A library that provides I/O endpoints should accept an [`Io`] from the
+//! application. Its public API should expose the endpoint or client, not the
+//! library's specific [`IoContext`](arty_io_core::IoContext).
+//!
+//! The library uses `Io` to obtain its internal context. This keeps the
+//! application independent of the I/O implementation's context and lets the
+//! library relocate its context with the Arty worker. This example requires
 //! `macros`, which enables `rt`:
 //!
 //! ```
 //! # use std::task::Waker;
 //! # use arty::core::{Thread, ThreadAware};
+//! # use arty::io::Io;
 //! # use arty::task::Context;
 //! # use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 //! # #[derive(Clone)]
@@ -59,16 +65,43 @@
 //! #         Ok(())
 //! #     }
 //! # }
+//! # struct ExampleEndpoint {
+//! #     context: ExampleIo,
+//! # }
+//! # impl ExampleEndpoint {
+//! #     fn new(io: &Io) -> Self {
+//! #         Self { context: io.context::<ExampleIo>(&()) }
+//! #     }
+//! #
+//! #     fn submit(&self, request: &str) {
+//! #         self.context.submit(request);
+//! #     }
+//! # }
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
 //! async fn main(cx: Context) {
-//!     let io = cx.io().context::<ExampleIo>(&());
-//!     io.submit("request");
+//!     let endpoint = ExampleEndpoint::new(cx.io());
+//!     endpoint.submit("request");
 //! }
 //! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! `ExampleIo` represents an I/O library's context.
+//! `ExampleEndpoint` represents the public endpoint API. `ExampleIo` is the
+//! implementation detail that connects it to Arty.
+//!
+//! # Library configuration
+//!
+//! An I/O context can require inputs such as a memory provider, clock, or
+//! credentials. The I/O library should accept these inputs through its own
+//! builder-style API. The builder should normally accept application-level
+//! values, such as `OpaqueMemory`, rather than expose the concrete
+//! [`IoContext::ContextOptions`](arty_io_core::IoContext::ContextOptions)
+//! type. When the endpoint is built, the library assembles private context
+//! options and calls [`Io::context`].
+//!
+//! The builder should store the [`Io`] and other dependencies separately from
+//! the endpoint. This allows the application to select services for the whole
+//! process while the I/O library decides how its context uses them.
 //!
 //! # Driver roles
 //!

@@ -136,13 +136,21 @@ from the following list:
    provider instance via [`HasMemory::memory()`][__link19]. Use this as the memory provider - this
    object will give you memory capacity with a configuration that is optimal for
    delivering bytes of data to that specific consumer (e.g. `TcpConnection`).
-1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-   instance of a shared [`GlobalPool`][__link20]. In a typical web application, the global memory pool
-   is a service exposed by the application framework. In a different context (e.g. example
-   or test code with no framework), you can create your own instance via [`GlobalPool::new()`][__link21].
-   In a `no_std` environment, applications that already own a specialized memory provider can
-   integrate it by implementing [`Memory`][__link22]. The crate does not provide a general-purpose
-   allocator-backed provider without `std`.
+1. If you are creating byte sequences as part of usage-neutral data processing, receive a
+   provider from the application. With the `std` feature, the application can create one
+   shared [`GlobalPool`][__link20]. Pass the pool through library builders instead of constructing a
+   provider inside library code. In a `no_std` environment, the application provides its own
+   specialized implementation of [`Memory`][__link21].
+
+The application is the composition root of the executable binary. It is responsible for
+selecting the provider lifetime and policy. For example, its `main` function can create a
+`GlobalPool` and pass clones to every downstream component. A library’s constructor or builder
+should receive this dependency. Use [`OpaqueMemory`][__link22] when the public builder does not need to
+expose a generic provider type.
+
+For a test or benchmark binary, create one static lazy `GlobalPool` for general-purpose
+memory needs. Pass that pool to the code under test. Tests that require a specific memory
+provider or test `GlobalPool` behavior can create a provider for that scenario instead.
 
 Once you have a memory provider, you can reserve memory from it by calling
 [`Memory::reserve()`][__link23] on it. This returns a [`BytesBuf`][__link24] with at least the requested
@@ -298,8 +306,9 @@ The recommended implementation strategy for [`HasMemory`][__link51] is as follow
   is appropriately configured), return a memory provider that performs the necessary
   configuration.
 * If your type neither passes anything to another type that implements [`HasMemory`][__link55]
-  nor can take advantage of optimizations enabled by specific memory configurations, obtain
-  an instance of [`GlobalPool`][__link56] as a dependency and return it as the memory provider.
+  nor can take advantage of optimizations enabled by specific memory configurations, store a
+  provider received from the application and return it as the memory provider. Prefer
+  [`OpaqueMemory`][__link56] at a builder boundary when callers may supply different provider types.
 
 Example of forwarding the memory provider (see `examples/bb_has_memory_forwarding.rs`
 for full code):
@@ -341,11 +350,12 @@ impl HasMemory for UdpConnection {
 
 ```
 
-Example of returning a global memory pool when the type is agnostic toward memory configuration
+Example of returning an application-owned provider when the type is agnostic toward memory
+configuration
 (see `examples/bb_has_memory_global.rs` for full code):
 
 ```rust
-use bytesbuf::mem::{HasMemory, MemoryShared};
+use bytesbuf::mem::{HasMemory, MemoryShared, OpaqueMemory};
 
 impl HasMemory for ChecksumCalculator {
     fn memory(&self) -> impl MemoryShared {
@@ -435,8 +445,8 @@ Optimal processing of static data requires satisfying multiple requirements:
   consumed (e.g. network connection, file, etc).
 
 The standard pattern here is to use [`OnceLock`][__link64] to lazily initialize a [`BytesView`][__link65] from
-the static data on first use, using memory from a memory provider that is optimal for the
-intended usage.
+the static data on first use. Obtain this provider from the consuming object, which received
+it from the application, rather than creating a provider in the library.
 
 ```rust
 use std::sync::OnceLock;
@@ -476,9 +486,19 @@ in different contexts.
 
 ## Testing
 
-For testing purposes, this crate exposes some special-purpose memory providers that are not
-optimized for real-world usage but may be useful to test corner cases of byte sequence
-processing in your code.
+For general-purpose test or benchmark memory, create one lazily initialized static
+[`GlobalPool`][__link66] in the test or benchmark binary. This models the application-owned provider and
+avoids allocating a separate pool for each test. Pass this provider to the code under test.
+
+```rust
+use std::sync::LazyLock;
+use bytesbuf::mem::GlobalPool;
+
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+```
+
+This crate also exposes special-purpose memory providers that are not optimized for real-world
+usage but may be useful to test corner cases of byte sequence processing in your code.
 
 See the `mem::testing` module for details (requires `test-util` Cargo feature).
 
@@ -488,7 +508,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbmM0wtr1yCysbcWRKIQTgzCQbbt1HbkVg0BYbE4Uc8vF3ZgNhZIGCaGJ5dGVzYnVmZjAuMTUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQba2PRxJoqKJobsAWAQOj68Ikb9EJpgVeqIVAbZJKGQSu97t9hZIGCaGJ5dGVzYnVmZjAuMTUuMA
  [__link0]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
@@ -503,8 +523,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link19]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::HasMemory::memory
  [__link2]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link20]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool
- [__link21]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool::new
- [__link22]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::Memory
+ [__link21]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::Memory
+ [__link22]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::OpaqueMemory
  [__link23]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::Memory::reserve
  [__link24]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesBuf
  [__link25]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesBuf
@@ -541,7 +561,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link53]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesBuf
  [__link54]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::HasMemory
  [__link55]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::HasMemory
- [__link56]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool
+ [__link56]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::OpaqueMemory
  [__link57]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link58]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link59]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
@@ -552,6 +572,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link63]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link64]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
  [__link65]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
+ [__link66]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool
  [__link7]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link8]: https://doc.rust-lang.org/stable/std/?search=io::Read
  [__link9]: https://doc.rust-lang.org/stable/std/?search=io::BufRead
