@@ -155,6 +155,26 @@ impl ThreadAware for SharedLog {
 }
 
 #[derive(Clone)]
+struct SpawnDebugLog(Arc<Mutex<Vec<String>>>);
+
+impl SpawnDebugLog {
+    fn push(&self, event: &TaskSpawn) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(format!("{event:?}"));
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+impl ThreadAware for SpawnDebugLog {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[derive(Clone)]
 struct SpawnSourceProbe {
     events: mpsc::Sender<(Option<ThreadId>, ThreadId)>,
     observers: mpsc::Sender<(Option<ThreadId>, ThreadId, ThreadId)>,
@@ -248,6 +268,41 @@ impl TaskObserver for PollRecorder {
         assert_eq!(outcome, self.outcome);
         self.log.push(self.after);
     }
+}
+
+#[test]
+fn task_spawn_debug_includes_the_public_spawn_location() {
+    let locations = SpawnDebugLog(Arc::new(Mutex::new(Vec::new())));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<TaskSpawn, _>::new(locations.clone(), |event, locations| {
+            locations.push(event);
+        }))
+        .build()
+        .unwrap();
+
+    let spawn_line = line!() + 1;
+    runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap();
+    let observed = locations.take();
+    assert_eq!(observed.len(), 1);
+    assert!(observed[0].contains("identity: TaskIdentity"));
+    assert!(observed[0].contains(&format!("file: {:?}, line: {spawn_line}", file!())));
+
+    let (result, local_spawn_line) = runtime
+        .scheduler()
+        .block_on(|cx| async move {
+            let local_spawn_line = line!() + 1;
+            let result = cx.scheduler().spawn(|_| async { 42 }).await;
+            (result, local_spawn_line)
+        })
+        .unwrap();
+    assert_eq!(result.unwrap(), 42);
+    let observed = locations.take();
+    assert_eq!(observed.len(), 2);
+    assert!(observed[0].contains(&format!("file: {:?}", file!())));
+    assert!(observed[1].contains(&format!("file: {:?}, line: {local_spawn_line}", file!())));
+
+    runtime.stop().unwrap();
 }
 
 #[test]

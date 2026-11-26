@@ -8,7 +8,7 @@ use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTaskFactory, TaskSpawnOptions, discard_panicking_drop};
+use crate::task::preparation::{DeferredTaskFactory, SpawnOptions, discard_panicking_drop};
 
 thread_local! {
     static FUTURE_FACTORIES: MultiPool = MultiPool::new();
@@ -87,7 +87,7 @@ impl RemoteFutureFactory {
 pub(crate) fn prepare_remote<FF, F>(
     result_pool: &JoinHandlePool,
     future_factory: FF,
-    options: TaskSpawnOptions,
+    options: SpawnOptions,
 ) -> (RemoteFutureFactory, JoinHandle<F::Output>)
 where
     FF: FnOnce(Context) -> F + Send + 'static,

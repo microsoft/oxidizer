@@ -12,6 +12,8 @@ use std::thread::ThreadId;
 use nm::{Event, Magnitude, MetricsPusher, Push};
 use tick::{SimpleClock, Stopwatch};
 
+#[cfg(test)]
+use crate::TaskIdentity;
 use crate::{
     CycleOutcome, ExecutorBuilder, ExecutorShared, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskHandle,
     TaskList, TaskPtr, TaskSet, TaskState, TypeErasedTask, discard_task_panic_payload, executor_context,
@@ -514,7 +516,7 @@ mod gamma_round2_tests {
             let mut executor = Executor::builder().build();
             executor
                 .tasks()
-                .task(std::future::pending())
+                .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
                 .register(CountCancellation(Rc::clone(&cancelled)));
             let dropped_before = metric(&TASKS_DROPPED);
             executor.finish_drop(panicking);
@@ -659,13 +661,22 @@ mod gamma_round2_tests {
         let observed = Rc::clone(&captured);
         executor
             .tasks()
-            .task(std::future::poll_fn(move |cx| {
-                *observed.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::poll_fn(move |cx| {
+                    *observed.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }),
+            )
             .register(Completion);
-        executor.tasks().task(std::future::pending()).register(Completion);
-        executor.tasks().task(std::future::ready(())).register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::ready(()))
+            .register(Completion);
         let accepted = metric(&TASKS_ACCEPTED);
         let inactive = metric(&TASKS_INACTIVATED);
         let completed = metric(&TASKS_COMPLETED);
@@ -682,7 +693,10 @@ mod gamma_round2_tests {
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
         assert_delta(&TASKS_ACTIVATED_VIA_AWAKENED_SET, activated, 1, 1);
         let continued = metric(&CYCLE_OUTCOME_CONTINUE);
-        executor.tasks().task(std::future::pending()).register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
         assert!(matches!(executor.cycle_outcome(), CycleOutcome::Continue));
         assert_delta(&CYCLE_OUTCOME_CONTINUE, continued, 1, 1);
         let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
@@ -703,14 +717,18 @@ mod gamma_round2_tests {
         let shutdown = executor.shutdown();
         executor
             .tasks()
-            .task(async move { shutdown.trigger(ShutdownCause::default()) })
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
+                shutdown.trigger(ShutdownCause::default());
+            })
             .register(Completion);
         let polled = Rc::new(std::cell::Cell::new(0));
         for _ in 0..2 {
             let polled = Rc::clone(&polled);
             executor
                 .tasks()
-                .task(async move { polled.set(polled.get() + 1) })
+                .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
+                    polled.set(polled.get() + 1);
+                })
                 .register(Completion);
         }
         executor.accept_new_tasks();
@@ -728,8 +746,14 @@ mod gamma_round2_tests {
     fn gamma_round2_executor_drop_flushes_abort_metrics_without_counting_them_as_normal_drops() {
         let mut executor = Executor::builder().build();
         executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
-        executor.tasks().task(std::future::pending()).register(Completion);
-        executor.tasks().task(std::future::pending()).register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
         let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
         let dropped = metric(&TASKS_DROPPED);
@@ -747,7 +771,7 @@ mod gamma_round2_tests {
         let task_control = control.clone();
         executor
             .tasks()
-            .task(async move {
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
                 task_control.advance(Duration::from_millis(5));
             })
             .register(Completion);
@@ -773,10 +797,13 @@ mod gamma_round2_tests {
         let observed = Rc::clone(&captured);
         executor
             .tasks()
-            .task(std::future::poll_fn(move |cx| {
-                *observed.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::poll_fn(move |cx| {
+                    *observed.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }),
+            )
             .register(Completion);
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
         captured.borrow().as_ref().unwrap().wake_by_ref();
@@ -801,8 +828,14 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_shutdown_cancellation_reports_its_normal_drop_metric() {
         let mut executor = Executor::builder().build();
-        executor.tasks().task(std::future::pending()).register(Completion);
-        executor.tasks().task(std::future::pending()).register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::pending())
+            .register(Completion);
         executor.shutdown().trigger(ShutdownCause::default());
         let dropped = metric(&TASKS_DROPPED);
         executor.cancel_if_shutting_down();
@@ -820,10 +853,13 @@ mod gamma_round2_tests {
         let observed = Rc::clone(&captured);
         executor
             .tasks()
-            .task(std::future::poll_fn(move |cx| {
-                *observed.borrow_mut() = Some(cx.waker().clone());
-                Poll::Pending
-            }))
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::poll_fn(move |cx| {
+                    *observed.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }),
+            )
             .register(Completion);
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
         let owner = std::thread::current().id();

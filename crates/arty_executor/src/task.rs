@@ -16,7 +16,7 @@ use plurality::{Arc as PoolArc, MultiPool};
 #[cfg(test)]
 use crate::TaskHandle;
 use crate::{
-    ExecutorShared, ShutdownCause, TaskHandleSlot, TaskInstrumentation, TaskPanicPayload, TaskPtr, TaskState, WakeSignal,
+    ExecutorShared, ShutdownCause, TaskHandleSlot, TaskIdentity, TaskInstrumentation, TaskPanicPayload, TaskPtr, TaskState, WakeSignal,
     discard_task_panic_payload,
 };
 
@@ -96,9 +96,10 @@ where
     T: TaskCompletion<F::Output>,
     I: TaskInstrumentation,
 {
-    fn new(future: F, result_target: T, instrumentation: I) -> Self {
+    fn new(identity: TaskIdentity, future: F, result_target: T, instrumentation: I) -> Self {
         Self {
             payload: UnsafeCell::new(PayloadSlot::new(Payload {
+                identity,
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
                 instrumentation,
@@ -113,6 +114,7 @@ where
 
 pub(crate) fn allocate_task<F, T, I>(
     pool: &MultiPool,
+    identity: TaskIdentity,
     future: F,
     instrumentation: I,
     completion: T,
@@ -123,7 +125,7 @@ where
     T: TaskCompletion<F::Output>,
     I: TaskInstrumentation,
 {
-    pool.alloc_arc_pin_with(|| Task::new(future, completion, instrumentation))
+    pool.alloc_arc_pin_with(|| Task::new(identity, future, completion, instrumentation))
 }
 
 #[cfg(test)]
@@ -145,7 +147,13 @@ impl<R: 'static> TaskCompletion<R> for TestCompletion {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
-    TaskHandle::new(allocate_task(pool, std::future::pending::<()>(), (), TestCompletion))
+    TaskHandle::new(allocate_task(
+        pool,
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        std::future::pending::<()>(),
+        (),
+        TestCompletion,
+    ))
 }
 
 impl<F, T, I> TypeErasedTask for Task<F, T, I>
@@ -159,7 +167,7 @@ where
         // SAFETY: Inspection runs on the owner between cycles or immediately before polling.
         let payload = unsafe { &*self.payload.get() };
         if let Some(payload) = payload.as_ref() {
-            payload.instrumentation.inspect(state, visitor);
+            payload.instrumentation.inspect(&payload.identity, state, visitor);
         }
     }
 
@@ -191,7 +199,9 @@ where
             let waker = unsafe { wake_signal.waker_ref() };
 
             let mut cx = task::Context::from_waker(&waker);
-            future_as_mut_pinned.as_mut().poll_instrumented(instrumentation, &mut cx)
+            shared.with_current(payload.identity, || {
+                future_as_mut_pinned.as_mut().poll_instrumented(instrumentation, &mut cx)
+            })
         };
 
         match poll_result {
@@ -266,7 +276,7 @@ where
     ) -> task::Poll<()> {
         let payload = payload_slot.as_mut().expect("a polled task retains its payload");
         let result_target = payload.result_target.take().expect("a polled task retains its result target");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.panicked())).err();
+        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.panicked(&payload.identity))).err();
 
         wake_signal.retire();
         // SAFETY: The future remains pinned with its task and is destroyed in place.
@@ -293,7 +303,7 @@ where
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.completed())).err();
+        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.completed(&payload.identity))).err();
         Self::retire_payload(payload_slot);
         result_target.completed(result);
         if let Some(panic) = instrumentation_panic {
@@ -309,7 +319,7 @@ where
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.cancelled())).err();
+        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.cancelled(&payload.identity))).err();
         // SAFETY: The future is pinned with Task and destroyed in place.
         let future_panic = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err();
         Self::retire_payload(payload_slot);
@@ -360,6 +370,8 @@ where
     T: TaskCompletion<F::Output>,
     I: TaskInstrumentation,
 {
+    identity: TaskIdentity,
+
     /// The future that will be polled by the executor to progress the task.
     future: FutureStorage<F>,
 
@@ -562,7 +574,13 @@ mod tests {
     use super::*;
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
-        let handle = TaskHandle::new(allocate_task(pool, future, (), TestCompletion));
+        let handle = TaskHandle::new(allocate_task(
+            pool,
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            future,
+            (),
+            TestCompletion,
+        ));
         let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
         let signal = WakeSignal::new(shared, handle.as_ptr());
         // SAFETY: The handle owns the task on its creating thread.
@@ -616,7 +634,13 @@ mod tests {
     fn uninitialized_task_can_be_aborted_and_has_no_description() {
         let pool = MultiPool::new();
         let drops = Arc::new(AtomicUsize::new(0));
-        let handle = allocate_task(&pool, DropCountingFuture(Arc::clone(&drops)), (), TestCompletion);
+        let handle = allocate_task(
+            &pool,
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            DropCountingFuture(Arc::clone(&drops)),
+            (),
+            TestCompletion,
+        );
         let task = handle.as_ref();
         let mut descriptions = 0;
 

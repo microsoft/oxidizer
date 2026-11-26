@@ -247,7 +247,10 @@ pub struct Task {
     pub id: TaskId,
     /// Parent task that spawned this task, when known.
     pub parent: Option<TaskId>,
-    /// Runtime-provided descriptor for the task's concrete type.
+    /// Runtime-provided descriptor for this task.
+    ///
+    /// The provider defines its meaning. Arty uses the static spawn location,
+    /// not the concrete task type.
     pub type_descriptor: TypeDescriptorId,
     /// Inline bytes in the concrete future or synchronous task body before runtime wrapping.
     ///
