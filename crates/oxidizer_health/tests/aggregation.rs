@@ -107,12 +107,14 @@ fn attribute_values_display_their_payload() {
 fn attributes_preserve_each_typed_value() {
     let typed = Attribute::from(("typed", AttributeValue::Int(7)));
     let double = Attribute::new("double", AttributeValue::Double(1.5));
+    let tuple_double = Attribute::from(("tuple_double", 2.5));
     let text = Attribute::new("text", AttributeValue::String("value"));
     let boolean = Attribute::from(("boolean", true));
     let typed_boolean = Attribute::new("typed_boolean", AttributeValue::Boolean(false));
 
     assert_eq!(typed.value(), AttributeValue::Int(7));
     assert_eq!(double.value(), AttributeValue::Double(1.5));
+    assert_eq!(tuple_double.value(), AttributeValue::Double(2.5));
     assert_eq!(text.value(), AttributeValue::String("value"));
     assert_eq!(boolean.value(), AttributeValue::Boolean(true));
     assert_eq!(typed_boolean.value(), AttributeValue::Boolean(false));
@@ -314,6 +316,20 @@ fn component_is_idempotent_by_name() {
 }
 
 #[test]
+fn aggregator_clones_share_registration_authority() {
+    let aggregator = Aggregator::new();
+    let clone = aggregator.clone();
+    let mut monitor = aggregator.monitor();
+    let mut database = aggregator.component("database");
+    let mut publisher = clone.component("database").publisher();
+
+    publisher.degraded("slow");
+    wait_for_component(&mut database, Health::Degraded);
+    wait_for_monitor(&mut monitor, Health::Degraded);
+    assert_eq!(block_on(monitor.reports()).len(), 1);
+}
+
+#[test]
 #[should_panic(expected = "empty")]
 fn empty_component_name_panics() {
     let _component = Aggregator::new().component("");
@@ -483,6 +499,10 @@ fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
     }
     assert!(format!("{component:?}").contains("database"));
     assert!(format!("{publisher:?}").contains("slow replica"));
+    let [reason] = publisher.signal().attributes() else {
+        panic!("degraded shorthand must publish one reason attribute");
+    };
+    assert_eq!(reason.name(), "reason");
 }
 
 #[test]

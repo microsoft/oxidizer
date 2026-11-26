@@ -466,6 +466,28 @@ mod tests {
     }
 
     #[test]
+    fn reports_skip_retired_components_whose_snapshots_are_still_referenced() {
+        let root = Aggregator::new();
+        let component = root.component("retired");
+        let shared = root
+            .shared
+            .registry
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .shared
+            .upgrade()
+            .unwrap();
+
+        drop(component);
+
+        assert!(!shared.is_registered());
+        assert_eq!(root.shared.reports().len(), 0);
+    }
+
+    #[test]
     fn last_registration_id_can_be_allocated_once_without_wrapping() {
         let ids = AtomicU64::new(u64::MAX - 1);
         assert_eq!(next_id(&ids), u64::MAX - 1);
