@@ -1375,6 +1375,7 @@ mod tests {
             crate::task::preparation::SpawnOptions::new(
                 arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
+                None,
             ),
         );
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
@@ -1484,11 +1485,12 @@ mod tests {
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
         let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
-        crate::task::preparation::SpawnOptions::new(identity, 0).register(
+        let tasks = worker.tasks.clone();
+        crate::task::preparation::SpawnOptions::new(identity, 0, None).register(
             worker_context(&worker).thread(),
             &worker.tasks,
             async move {
-                assert_eq!(arty_executor::TaskIdentity::current(), Some(identity));
+                assert_eq!(tasks.current(), Some(identity));
                 completed.set(true);
             },
             DiscardCompletion,
@@ -2159,6 +2161,7 @@ mod tests {
             crate::task::preparation::SpawnOptions::new(
                 arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
+                None,
             ),
         );
 

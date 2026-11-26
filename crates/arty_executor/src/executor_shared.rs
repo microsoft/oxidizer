@@ -31,6 +31,7 @@ struct ExecutorSharedInner {
     new_tasks: RefCell<VecDeque<TaskHandle>>,
     task_storage: MultiPool,
     task_count: Cell<usize>,
+    current: Cell<Option<TaskIdentity>>,
     shutdown: Shutdown,
     wake: WakeShared,
     // Owner-only reception breaks the wake queue -> task -> shared wake state ownership cycle.
@@ -57,6 +58,7 @@ impl ExecutorShared {
                 new_tasks: RefCell::new(VecDeque::new()),
                 task_storage: MultiPool::new(),
                 task_count: Cell::new(0),
+                current: Cell::new(None),
                 shutdown,
                 wake,
                 remote_wakes,
@@ -67,6 +69,18 @@ impl ExecutorShared {
 
     pub(crate) fn wake(&self) -> &WakeShared {
         &self.inner.wake
+    }
+
+    pub(crate) fn current(&self) -> Option<TaskIdentity> {
+        self.inner.current.get()
+    }
+
+    pub(crate) fn with_current<R>(&self, identity: TaskIdentity, body: impl FnOnce() -> R) -> R {
+        let _current = CurrentTask {
+            slot: &self.inner.current,
+            previous: self.inner.current.replace(Some(identity)),
+        };
+        body()
     }
 
     pub(crate) fn drain_remote_wakes(&self) {
@@ -178,6 +192,17 @@ impl ExecutorShared {
 
     pub(crate) fn panic_policy(&self) -> &PanicPolicy {
         &self.inner.panic_policy
+    }
+}
+
+struct CurrentTask<'a> {
+    slot: &'a Cell<Option<TaskIdentity>>,
+    previous: Option<TaskIdentity>,
+}
+
+impl Drop for CurrentTask<'_> {
+    fn drop(&mut self) {
+        self.slot.set(self.previous);
     }
 }
 

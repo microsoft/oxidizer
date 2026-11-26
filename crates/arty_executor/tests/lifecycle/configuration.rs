@@ -47,6 +47,8 @@ fn identities_preserve_locations_and_allocate_distinct_task_ids() {
 fn current_identity_follows_each_poll_and_child_submission_without_monitoring() {
     let mut executor = ExecutorBuilder::new().build();
     let tasks = executor.tasks();
+    let current = tasks.clone();
+    let sibling_tasks = tasks.clone();
     let parent = TaskIdentity::from_location(std::panic::Location::caller());
     let child = TaskIdentity::from_location(std::panic::Location::caller());
     let sibling = TaskIdentity::from_location(std::panic::Location::caller());
@@ -58,24 +60,25 @@ fn current_identity_follows_each_poll_and_child_submission_without_monitoring() 
     let sibling_completed = Rc::clone(&sibling_polled);
     let mut first = true;
 
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(tasks.current(), None);
     executor
         .tasks()
         .task(
             parent,
             poll_fn(move |cx| {
-                assert_eq!(TaskIdentity::current(), Some(parent));
+                assert_eq!(current.current(), Some(parent));
                 polled.set(polled.get() + 1);
                 if first {
                     first = false;
                     let completed = Rc::clone(&completed);
+                    let child_tasks = tasks.clone();
                     tasks
                         .task(child, async move {
-                            assert_eq!(TaskIdentity::current(), Some(child));
+                            assert_eq!(child_tasks.current(), Some(child));
                             completed.set(true);
                         })
                         .register(DiscardCompletion);
-                    assert_eq!(TaskIdentity::current(), Some(parent));
+                    assert_eq!(current.current(), Some(parent));
                     cx.waker().wake_by_ref();
                     Poll::Pending
                 } else {
@@ -89,17 +92,17 @@ fn current_identity_follows_each_poll_and_child_submission_without_monitoring() 
     executor
         .tasks()
         .task(sibling, async move {
-            assert_eq!(TaskIdentity::current(), Some(sibling));
+            assert_eq!(sibling_tasks.current(), Some(sibling));
             sibling_completed.set(true);
         })
         .register(DiscardCompletion);
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
 
     let _ = executor.execute_cycle();
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
     let _ = executor.execute_cycle();
 
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
     assert_eq!(polls.get(), 2);
     assert!(child_polled.get());
     assert!(sibling_polled.get());
@@ -112,12 +115,13 @@ fn current_identity_clears_after_task_panic_and_cancellation() {
     let identity = TaskIdentity::from_location(std::panic::Location::caller());
     let failed = Rc::new(Cell::new(false));
     let panicked = Rc::clone(&failed);
+    let tasks = executor.tasks();
     executor
         .tasks()
         .task(
             identity,
             poll_fn(move |_| -> Poll<()> {
-                assert_eq!(TaskIdentity::current(), Some(identity));
+                assert_eq!(tasks.current(), Some(identity));
                 panicked.set(true);
                 panic!("task identity is cleared after a panic");
             }),
@@ -127,7 +131,7 @@ fn current_identity_clears_after_task_panic_and_cancellation() {
     let _ = executor.execute_cycle();
 
     assert!(failed.get());
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
     executor
         .tasks()
         .task(
@@ -138,17 +142,17 @@ fn current_identity_clears_after_task_panic_and_cancellation() {
     let _ = executor.execute_cycle();
     executor.shutdown().trigger(ShutdownCause::default());
     let _ = executor.execute_cycle();
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
     assert!(!executor.has_tasks());
 }
 
 #[test]
 fn current_identity_clears_when_poll_instrumentation_unwinds() {
-    struct PanickingInstrumentation(TaskIdentity);
+    struct PanickingInstrumentation(TaskIdentity, TaskSet);
 
     impl TaskInstrumentation for PanickingInstrumentation {
         fn poll_start(&mut self) {
-            assert_eq!(TaskIdentity::current(), Some(self.0));
+            assert_eq!(self.1.current(), Some(self.0));
             panic!("poll instrumentation unwinds");
         }
     }
@@ -158,13 +162,13 @@ fn current_identity_clears_when_poll_instrumentation_unwinds() {
     executor
         .tasks()
         .task(identity, std::future::pending::<()>())
-        .instrument(PanickingInstrumentation(identity))
+        .instrument(PanickingInstrumentation(identity, executor.tasks()))
         .register(DiscardCompletion);
 
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| executor.execute_cycle()));
 
     assert_eq!(*result.unwrap_err().downcast::<&str>().unwrap(), "poll instrumentation unwinds");
-    assert_eq!(TaskIdentity::current(), None);
+    assert_eq!(executor.tasks().current(), None);
 }
 
 #[test]
@@ -212,7 +216,7 @@ fn instrumentation_receives_native_identity_for_inspection_and_all_outcomes() {
         let mut inspected = Vec::new();
         executor.inspect(1, |identity: &TaskIdentity| inspected.push(*identity)).unwrap();
         assert_eq!(inspected, if outcome == 3 { vec![] } else { vec![identity] });
-        assert_eq!(TaskIdentity::current(), None);
+        assert_eq!(executor.tasks().current(), None);
 
         let _ = executor.execute_cycle();
         if outcome == 2 {
@@ -221,8 +225,33 @@ fn instrumentation_receives_native_identity_for_inspection_and_all_outcomes() {
         }
 
         assert_eq!(*callbacks.borrow(), [(expected, identity)]);
-        assert_eq!(TaskIdentity::current(), None);
+        assert_eq!(executor.tasks().current(), None);
     }
+}
+
+#[test]
+fn current_identity_belongs_to_the_task_set_instance() {
+    let executor = ExecutorBuilder::new().build();
+    let retired_tasks = executor.tasks();
+    drop(executor);
+    let mut executor = ExecutorBuilder::new().build();
+    let tasks = executor.tasks();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    let observed = Rc::new(Cell::new(false));
+    let polled = Rc::clone(&observed);
+    executor
+        .tasks()
+        .task(identity, async move {
+            assert_eq!(retired_tasks.current(), None);
+            assert_eq!(tasks.current(), Some(identity));
+            polled.set(true);
+        })
+        .register(DiscardCompletion);
+
+    let _ = executor.execute_cycle();
+
+    assert!(observed.get());
+    assert_eq!(executor.tasks().current(), None);
 }
 
 #[test]

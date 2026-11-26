@@ -17,6 +17,17 @@ impl TaskSet {
         Self { shared: core.clone() }
     }
 
+    /// Returns the identity of the task currently polled by this executor.
+    ///
+    /// Returns `None` outside a task poll, including after a poll unwinds.
+    /// Clones of this handle share the same current identity. The executor
+    /// owns this state. It does not use thread-local storage for the identity.
+    #[inline]
+    #[must_use]
+    pub fn current(&self) -> Option<TaskIdentity> {
+        self.shared.current()
+    }
+
     /// Configures a future for registration as a new task.
     ///
     /// Call [`TaskBuilder::register`] to submit the task with its completion target.

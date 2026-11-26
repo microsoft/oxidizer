@@ -199,9 +199,9 @@ where
             let waker = unsafe { wake_signal.waker_ref() };
 
             let mut cx = task::Context::from_waker(&waker);
-            payload
-                .identity
-                .scope(|| future_as_mut_pinned.as_mut().poll_instrumented(instrumentation, &mut cx))
+            shared.with_current(payload.identity, || {
+                future_as_mut_pinned.as_mut().poll_instrumented(instrumentation, &mut cx)
+            })
         };
 
         match poll_result {

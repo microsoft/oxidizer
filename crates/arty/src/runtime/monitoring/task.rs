@@ -35,7 +35,7 @@ impl TaskMetadata {
         Self {
             body_size: size_of::<T>(),
             events,
-            parent: TaskIdentity::current().map(TaskIdentity::id),
+            parent: crate::runtime::worker::asynchronous::LocalWorker::current_task().map(TaskIdentity::id),
             spawned_at: None,
         }
     }

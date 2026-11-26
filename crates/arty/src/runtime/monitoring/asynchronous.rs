@@ -186,12 +186,12 @@ mod tests {
         executor
             .tasks()
             .task(parent, async move {
-                crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), 0).register(
-                    &thread,
-                    &tasks,
-                    std::future::pending::<()>(),
-                    sender,
-                );
+                crate::task::preparation::SpawnOptions::new(
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                    0,
+                    tasks.current(),
+                )
+                .register(&thread, &tasks, std::future::pending::<()>(), sender);
             })
             .register(parent_sender);
         let _ = executor.execute_cycle();
@@ -228,12 +228,12 @@ mod tests {
 
         let task = TaskIdentity::from_location(std::panic::Location::caller());
         monitoring.poll_started(&task);
-        assert_eq!(TaskIdentity::current(), None);
+        assert_eq!(executor.tasks().current(), None);
         monitoring.poll_finished();
-        assert_eq!(TaskIdentity::current(), None);
+        assert_eq!(executor.tasks().current(), None);
         monitoring.poll_started(&task);
         drop(monitoring);
-        assert_eq!(TaskIdentity::current(), None);
+        assert_eq!(executor.tasks().current(), None);
         assert!(current_events().is_none());
         assert_eq!(
             runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].state,

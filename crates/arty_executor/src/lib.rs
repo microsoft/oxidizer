@@ -21,7 +21,7 @@
 //! you drop the previous executor. A runtime integration supplies a [`TaskCompletion`]
 //! target when it registers a task.
 //! Each registration also requires a [`TaskIdentity`]. During each poll,
-//! [`TaskIdentity::current`] returns that identity on the executor thread.
+//! [`TaskSet::current`] returns that identity through a handle to the executor.
 //! Outside a poll, it returns `None`. Runtime integrations can use the current
 //! identity to record the parent of a newly submitted task.
 //!

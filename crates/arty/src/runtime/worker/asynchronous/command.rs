@@ -229,6 +229,7 @@ mod tests {
             crate::task::preparation::SpawnOptions::new(
                 arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<i32>>(),
+                None,
             ),
         );
         let mut join = pin!(join);

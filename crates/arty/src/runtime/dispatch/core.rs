@@ -343,7 +343,7 @@ impl DispatcherCore {
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        let options = SpawnOptions::new(identity, size_of::<F>());
+        let options = SpawnOptions::new(identity, size_of::<F>(), LocalWorker::current_task());
         self.enqueue(worker_index, future_factory, options)
     }
 
@@ -360,7 +360,7 @@ impl DispatcherCore {
         F::Output: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        let options = SpawnOptions::new(identity, size_of::<F>());
+        let options = SpawnOptions::new(identity, size_of::<F>(), LocalWorker::current_task());
         self.enqueue(worker_index, future_factory, options).relocate_result_from(source)
     }
 
@@ -479,7 +479,7 @@ mod tests {
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        let options = SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), size_of::<F>());
+        let options = SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), size_of::<F>(), None);
         dispatcher.spawn(future_factory, options)
     }
 

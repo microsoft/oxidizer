@@ -13,6 +13,7 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::worker::asynchronous::LocalWorker;
 use crate::task::{Context, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -138,7 +139,7 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>());
+        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>(), None);
         let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
@@ -196,7 +197,11 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>());
+        let options = crate::task::preparation::SpawnOptions::new(
+            TaskIdentity::from_location(Location::caller()),
+            size_of::<F>(),
+            LocalWorker::current_task(),
+        );
         self.dispatcher.spawn(
             move |cx| {
                 let mut data = data;

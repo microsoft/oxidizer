@@ -14,10 +14,10 @@ pub(crate) struct SpawnOptions {
 }
 
 impl SpawnOptions {
-    pub(crate) fn new(identity: TaskIdentity, future_size: usize) -> Self {
+    pub(crate) fn new(identity: TaskIdentity, future_size: usize, parent: Option<TaskIdentity>) -> Self {
         Self {
             identity,
-            parent: TaskIdentity::current().map(TaskIdentity::id),
+            parent: parent.map(TaskIdentity::id),
             future_size,
             observers: None,
         }
@@ -99,10 +99,11 @@ mod tests {
         let options = std::rc::Rc::new(std::cell::RefCell::new(None));
         let submitted = std::rc::Rc::clone(&options);
         let (_handle, sender) = results.handle();
+        let parent_tasks = executor.tasks();
         executor
             .tasks()
             .task(parent, async move {
-                *submitted.borrow_mut() = Some(SpawnOptions::new(identity, 37));
+                *submitted.borrow_mut() = Some(SpawnOptions::new(identity, 37, parent_tasks.current()));
             })
             .register(sender);
         let _ = executor.execute_cycle();

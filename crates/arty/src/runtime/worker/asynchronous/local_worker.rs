@@ -90,6 +90,10 @@ impl LocalWorker {
         Self::with_scheduler(|current| current.map(|current| current.thread().clone()))
     }
 
+    pub(crate) fn current_task() -> Option<TaskIdentity> {
+        Self::with_scheduler(|current| current.and_then(|current| current.tasks().current()))
+    }
+
     pub(crate) fn with_scheduler<R>(f: impl FnOnce(Option<&SchedulerContext>) -> R) -> R {
         Self::with_current(|current| f(current.and_then(|current| current.scheduler.as_ref())))
     }
@@ -284,7 +288,7 @@ impl SchedulerContext {
 
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        let options = SpawnOptions::new(identity, size_of::<F>());
+        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
         options.register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
@@ -297,7 +301,7 @@ impl SchedulerContext {
         F::Output: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let options = SpawnOptions::new(identity, size_of::<F>());
+        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
         let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread, identity);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         options.observed_by(observers).register(&self.thread, &self.tasks, inner, result_tx);

@@ -890,7 +890,7 @@ fn blocking_callbacks_do_not_establish_an_async_parent() {
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let parent = runtime.scheduler().spawn_blocking(move || {
-        assert_eq!(arty_executor::TaskIdentity::current(), None);
+        assert_eq!(crate::runtime::worker::asynchronous::LocalWorker::current_task(), None);
         let child = scheduler.spawn_blocking(|| 42);
         started.send(child).unwrap();
         receive(&released);
