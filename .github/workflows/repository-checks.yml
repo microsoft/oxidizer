@@ -45,7 +45,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The custom Just recipes use Anvil's Cargo-each helpers.
+          group: msrv-test
       - name: Test isolated AArch64 no_std configuration
         run: just test-http-headers-simd-no-std-arm
 
@@ -60,7 +61,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The custom Just recipes use Anvil's Cargo-each helpers.
+          group: msrv-test
       - name: Install 32-bit linker and C runtime
         if: matrix.target != 'x86_64-unknown-linux-gnu'
         run: |
@@ -78,7 +80,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The native checks explicitly select the workspace MSRV.
+          group: msrv-test
       - name: Install 32-bit target
         run: rustup target add --toolchain 1.95 i686-pc-windows-msvc
       - name: Test cross-width handle restoration
@@ -91,7 +94,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The native checks explicitly select the workspace MSRV.
+          group: msrv-test
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
@@ -107,7 +111,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The custom Just recipes use Anvil's Cargo-each helpers.
+          group: msrv-test
       - name: Test isolated feature combination
         run: just test-feature-regressions --package "${{ matrix.package }}"
 
@@ -125,7 +130,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The native checks explicitly select the workspace MSRV.
+          group: msrv-test
       - name: Check native macOS allocator, snapshots, and viewer
         run: |
           rustup component add --toolchain 1.95 clippy
@@ -144,7 +150,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.anvil/github/actions/setup
         with:
-          group: none
+          # The native checks install Callgrind with the workspace MSRV.
+          group: msrv-test
           free-disk-space: "true"
       - name: Install native prerequisites
         run: |
