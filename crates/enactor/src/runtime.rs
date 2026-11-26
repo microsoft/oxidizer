@@ -21,7 +21,13 @@ use crate::spawn::{ActorSpawner, ActorWithPlacement};
 use crate::{Actor, ActorExit, ActorId, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
 
 /// Values moved into the task that runs one actor.
-pub(crate) type TaskData<A> = Unaware<(Inbox<<A as Actor>::Message>, A, ActorRef<<A as Actor>::Message>)>;
+///
+/// When the actor runs on another worker, Arty relocates the runtime there, so
+/// the actor's own spawns with no placement stay on its worker.
+pub(crate) type TaskData<A> = (
+    ActorRuntime,
+    Unaware<(Inbox<<A as Actor>::Message>, A, ActorRef<<A as Actor>::Message>)>,
+);
 
 /// Default capacity for actor inboxes.
 pub(crate) const DEFAULT_CAPACITY: usize = 224;
@@ -88,7 +94,7 @@ impl ActorRuntime {
         let (control_tx, control_rx) = Channel::unbounded();
         let actor_ref: ActorRef<<A as Actor>::Message> = ActorRef::new(ActorId::next(), message_tx, control_tx);
         let inbox = Inbox::new(message_rx, control_rx, stream);
-        let data: TaskData<A> = unaware((inbox, actor, actor_ref.clone()));
+        let data: TaskData<A> = (self.clone(), unaware((inbox, actor, actor_ref.clone())));
 
         let (placement, completion) = self.spawn_internal_task(task_meta, data, Self::run::<A>);
 
@@ -208,8 +214,9 @@ impl ActorRuntime {
     where
         A: Actor,
     {
-        let (mut inbox, mut actor, actor_ref) = data.into_inner();
-        let mut ctx = Context::new(actor_ref);
+        let (runtime, local) = data;
+        let (mut inbox, mut actor, actor_ref) = local.into_inner();
+        let mut ctx = Context::new(actor_ref, runtime);
 
         while let Ok(message) = inbox.recv().await {
             actor.handle(message, &mut ctx).await;

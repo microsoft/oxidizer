@@ -3,8 +3,10 @@
 
 //! Tests for actor context behavior.
 
+use std::thread::{self, ThreadId};
+
 use arty::task::Context as TaskContext;
-use enactor::{Actor, ActorRef, ActorRuntime, Context};
+use enactor::{Actor, ActorRef, ActorRuntime, Context, Placement, PlacementToken, Reply};
 
 struct Ack {
     ack: oneshot::Sender<()>,
@@ -100,4 +102,50 @@ async fn test_context_can_send_to_self(cx: TaskContext) {
 
     ack_rx.await.expect("actor should process self-sent message");
     actor.stop().await.expect("stop failed");
+}
+
+enum WhereMessage {
+    Where(Reply<ThreadId>),
+}
+
+struct WhereActor;
+
+impl Actor for WhereActor {
+    type Message = WhereMessage;
+
+    async fn handle(&mut self, msg: WhereMessage, _ctx: &mut Context<WhereMessage>) {
+        let WhereMessage::Where(reply) = msg;
+        let _ = reply.send(thread::current().id());
+    }
+}
+
+enum ParentMessage {
+    SpawnChild(Reply<(ThreadId, ThreadId)>),
+}
+
+struct ParentActor;
+
+impl Actor for ParentActor {
+    type Message = ParentMessage;
+
+    async fn handle(&mut self, msg: ParentMessage, ctx: &mut Context<ParentMessage>) {
+        let ParentMessage::SpawnChild(reply) = msg;
+        let child: ActorRef<WhereMessage> = ctx.runtime().spawn(WhereActor);
+        let child_thread = child.ask(WhereMessage::Where).await.expect("the child answers");
+        child.stop().await.expect("the child stops");
+        let _ = reply.send((thread::current().id(), child_thread));
+    }
+}
+
+#[arty::test(workers = 2)]
+async fn child_spawned_from_an_actor_runs_on_the_parent_worker(cx: TaskContext) {
+    let other = cx.control().workers().find(|worker| worker != cx.thread()).unwrap();
+    let parent = ActorRuntime::from_builtins(&cx)
+        .builder()
+        .with_meta(Placement::SameThreadAs(PlacementToken::from(&other)))
+        .spawn(ParentActor);
+
+    let threads = parent.actor().ask(ParentMessage::SpawnChild).await.unwrap();
+
+    assert_eq!(threads, (other.id(), other.id()));
 }

@@ -4,24 +4,29 @@
 //! Context passed to [`Actor::handle`](crate::Actor::handle).
 //!
 //! Every running actor receives a [`Context`] while handling each message. Use
-//! it to get this actor's [`ActorRef`] or request stop or drain after the
-//! current message.
+//! it to get this actor's [`ActorRef`], spawn child actors on this actor's
+//! worker, or request stop or drain after the current message.
 
 use super::{ActorId, ActorRef};
 use crate::inbox::{Control, Signal};
-use crate::{Inbox, Message};
+use crate::{ActorRuntime, Inbox, Message};
 
 /// Context passed to [`Actor::handle`](crate::Actor::handle).
 #[derive(Debug, Clone)]
 pub struct Context<M: Message> {
     actor_ref: ActorRef<M>,
+    runtime: ActorRuntime,
     control: Option<Control>,
 }
 
 impl<M: Message> Context<M> {
     /// Initializes the context for a running actor.
-    pub(crate) const fn new(actor_ref: ActorRef<M>) -> Self {
-        Self { actor_ref, control: None }
+    pub(crate) const fn new(actor_ref: ActorRef<M>, runtime: ActorRuntime) -> Self {
+        Self {
+            actor_ref,
+            runtime,
+            control: None,
+        }
     }
 
     /// Borrows this actor's [`ActorRef`].
@@ -37,6 +42,16 @@ impl<M: Message> Context<M> {
     #[must_use]
     pub const fn id(&self) -> ActorId {
         self.actor_ref.id()
+    }
+
+    /// Borrows a runtime that spawns onto this actor's worker.
+    ///
+    /// A spawn with no placement, such as [`ActorRuntime::spawn`], runs the new
+    /// actor on the same worker as this actor. Other placements work as they do
+    /// on any [`ActorRuntime`].
+    #[must_use]
+    pub const fn runtime(&self) -> &ActorRuntime {
+        &self.runtime
     }
 
     /// Stops the actor after the current message finishes.
