@@ -220,6 +220,7 @@ impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Arc<T, A> {
         // SAFETY: `this` keeps the strong-count prefix alive.
         let strong = unsafe { thin_dst::strong_ref::<T>(this.ptr, value_align) };
         if strong.load(Ordering::Acquire) != 1 {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "The default of Option<&mut T> is None.")]
             return None;
         }
         let mut value = this.as_fat_ptr();

@@ -107,7 +107,12 @@ pub(super) fn bins(intervals: &[Interval], window: Option<TimeWindow>, count: us
     (0..count)
         .map(|index| {
             // Products use u128; every resulting offset is bounded by the original u64 span.
-            let offset = |position: usize| u64::try_from(span * position as u128 / count as u128).unwrap_or(u64::MAX);
+            let offset = |position: usize| {
+                u64::try_from(span * position as u128 / count as u128).unwrap_or(
+                    // #[gamma::skip(expr.decrement, reason = "Position is at most count, so the offset fits in u64 and the fallback cannot execute")]
+                    u64::MAX,
+                )
+            };
             let start = window.start + offset(index);
             let end = window.start + offset(index + 1);
             while cursor < merged.len() && merged[cursor].end < start {

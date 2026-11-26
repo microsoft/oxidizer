@@ -7,6 +7,7 @@
 
 #[cfg(feature = "futures-stream")]
 use std::future::pending;
+use std::io::Error as StdIoError;
 use std::num::NonZero;
 use std::pin::pin;
 #[cfg(feature = "futures-stream")]
@@ -20,26 +21,29 @@ use bytesbuf_io::testing::{FakeRead, Null, Pending};
 use bytesbuf_io::{Read, ReadExt, ReadInspectDecision, Write};
 use futures::executor::block_on;
 
-#[derive(Debug, Default)]
-struct GammaSurvivorErrorRead;
+#[derive(Debug)]
+struct SingleRead(Option<Result<(), StdIoError>>);
 
-impl Memory for GammaSurvivorErrorRead {
+impl Memory for SingleRead {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         TransparentMemory::new().reserve(min_bytes)
     }
 }
 
-impl HasMemory for GammaSurvivorErrorRead {
+impl HasMemory for SingleRead {
     fn memory(&self) -> impl MemoryShared {
         TransparentMemory::new()
     }
 }
 
-impl Read for GammaSurvivorErrorRead {
-    type Error = std::io::Error;
+impl Read for SingleRead {
+    type Error = StdIoError;
 
-    async fn read_at_most_into(&mut self, _: usize, _: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
-        Err(std::io::Error::other("gamma survivor scripted failure"))
+    async fn read_at_most_into(&mut self, _: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+        self.0
+            .take()
+            .unwrap_or_else(|| Err(StdIoError::other("unexpected read after EOF or an error")))
+            .map(|()| (0, into))
     }
 
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
@@ -54,18 +58,21 @@ impl Read for GammaSurvivorErrorRead {
 #[test]
 fn gamma_survivor_exact_and_conditional_errors_preserve_cause() {
     block_on(async {
-        let mut source = GammaSurvivorErrorRead;
+        let mut source = SingleRead(Some(Err(StdIoError::other("gamma survivor scripted failure"))));
         let error = source.read_exactly(2).await.unwrap_err();
         assert!(format!("{error:?}").contains("gamma survivor scripted failure"));
+        let mut source = SingleRead(Some(Err(StdIoError::other("gamma survivor scripted failure"))));
         let error = source
             .read_at_most_while(2, |_| ReadInspectDecision::Complete(1))
             .await
             .unwrap_err();
         assert!(format!("{error:?}").contains("gamma survivor scripted failure"));
-        let mut source = Null::new();
+        // Reuse the source to check that the zero-length read leaves its only response intact.
+        let mut source = SingleRead(Some(Ok(())));
         assert!(source.read_exactly(0).await.unwrap().is_empty());
         let error = source.read_exactly(1).await.unwrap_err();
         assert!(format!("{error:?}").contains("source was closed before exact number of bytes could be read"));
+        let mut source = SingleRead(Some(Ok(())));
         let error = source
             .read_at_most_while(1, |_| ReadInspectDecision::ContinueRead)
             .await
@@ -136,7 +143,7 @@ fn gamma_survivor_fake_read_zero_and_preferred_size_and_memory_forwarders() {
         assert_eq!(read, 0);
         assert_eq!(buffer.peek(), b"pre");
         assert_eq!(buffer.capacity(), 9);
-        let (read, mut buffer) = source.read_more_into(buffer).await.unwrap();
+        let (read, mut buffer) = Read::read_more_into(&mut source, buffer).await.unwrap();
         assert_eq!(read, 100);
         assert_eq!(buffer.consume(3), b"pre");
         assert_eq!(buffer.consume_all(), &content[..100]);
@@ -154,6 +161,12 @@ fn gamma_survivor_fake_read_zero_and_preferred_size_and_memory_forwarders() {
         let (read, buffer) = Read::read_at_most_into(&mut null, usize::MAX, buffer).await.unwrap();
         assert_eq!((read, buffer.capacity()), (0, 9));
         assert_eq!(buffer.peek(), b"kept");
+        let (read, buffer) = null.read_more_into(buffer).await.unwrap();
+        assert_eq!((read, buffer.capacity()), (0, 9));
+        assert_eq!(buffer.peek(), b"kept");
+        let (read, buffer) = Read::read_more_into(&mut null, buffer).await.unwrap();
+        assert_eq!((read, buffer.capacity()), (0, 9));
+        assert_eq!(buffer.peek(), b"kept");
         Write::write(&mut null, BytesView::from(b"discard".to_vec())).await.unwrap();
     });
 }
@@ -164,6 +177,12 @@ fn gamma_survivor_pending_read_and_write_stay_pending_without_runtime() {
     let mut context = Context::from_waker(Waker::noop());
     for length in [0, 1, 7, usize::MAX] {
         let future = Read::read_at_most_into(&mut source, length, BytesBuf::new());
+        let mut future = pin!(future);
+        assert!(future.as_mut().poll(&mut context).is_pending());
+        assert!(future.as_mut().poll(&mut context).is_pending());
+    }
+    {
+        let future = Read::read_more_into(&mut source, BytesBuf::new());
         let mut future = pin!(future);
         assert!(future.as_mut().poll(&mut context).is_pending());
         assert!(future.as_mut().poll(&mut context).is_pending());

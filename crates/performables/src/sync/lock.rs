@@ -312,14 +312,17 @@ impl<T: ?Sized> RwLock<T, Async> {
     /// Returns [`Error`] with the acquired write guard if a writer
     /// poisoned the lock.
     pub(super) fn write_result_inner(&self) -> Result<RwLockWriteGuard<'_, T, Async>, Error<RwLockWriteGuard<'_, T, Async>>> {
+        self.write_result_with(block_on)
+    }
+
+    fn write_result_with<'a>(
+        &'a self,
+        wait: impl FnOnce(RwLockWriteFuture<'a, T>) -> Result<RwLockWriteGuard<'a, T, Async>, Error<RwLockWriteGuard<'a, T, Async>>>,
+    ) -> Result<RwLockWriteGuard<'a, T, Async>, Error<RwLockWriteGuard<'a, T, Async>>> {
         if self.try_acquire_write() {
             return self.acquired_write();
         }
 
-        self.wait_write_with_recorded_contention(block_on)
-    }
-
-    fn wait_write_with_recorded_contention<'a, R>(&'a self, wait: impl FnOnce(RwLockWriteFuture<'a, T>) -> R) -> R {
         self.record(EventKind::RwLockWriteContention);
         wait(RwLockWriteFuture {
             lock: self,
@@ -824,13 +827,18 @@ mod tests {
         );
         let held = lock.read();
         let before_write = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockWriteContention);
-        lock.wait_write_with_recorded_contention(|mut future| {
+        let guard = lock.write_result_with(|mut future| {
             assert!(future.contention_recorded);
             let mut context = std::task::Context::from_waker(std::task::Waker::noop());
             assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
             assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+            drop(held);
+            let Poll::Ready(result) = Pin::new(&mut future).poll(&mut context) else {
+                panic!("released reader must allow the queued writer to acquire");
+            };
+            result
         });
-        drop(held);
+        assert_eq!(*guard.unwrap(), 11);
         assert_eq!(
             crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockWriteContention),
             before_write + 1
@@ -841,6 +849,16 @@ mod tests {
     use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[test]
+    fn uncontended_async_rwlock_writer_does_not_wait() {
+        let lock = RwLock::<_, Async>::new(11);
+        let guard = lock
+            .write_result_with(|_| panic!("writing to an unheld lock must not wait"))
+            .unwrap();
+        assert_eq!(*guard, 11);
+        assert!(lock.try_read().is_none());
+    }
 
     #[test]
     fn gamma_survivor_rwlock_ready_completion_drops_private_waiters_before_future_drop() {

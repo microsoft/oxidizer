@@ -150,6 +150,22 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_removals_keep_both_slots_available_for_reuse() {
+        let mut list = SlotList::new();
+        let first = list.push_back(13);
+        let second = list.push_back(17);
+        assert_eq!(list.remove(second), Some(17));
+        assert_eq!(list.remove(first), Some(13));
+
+        list.push_back(19);
+        list.push_back(23);
+        assert_eq!(list.slots.len(), 2);
+        assert_eq!(list.pop_front(), Some(19));
+        assert_eq!(list.pop_front(), Some(23));
+        assert!(list.is_empty());
+    }
+
+    #[test]
     fn gamma_survivor_slot_generation_advances_on_every_reuse_and_rejects_all_stale_keys() {
         let mut list = SlotList::new();
         let mut stale = Vec::new();

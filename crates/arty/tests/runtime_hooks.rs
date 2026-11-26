@@ -1525,12 +1525,39 @@ fn control_ignores_registration_after_shutdown_starts() {
 
 #[test]
 fn control_clones_nonretained_hook_data_for_each_worker() {
+    struct RegistrationData {
+        clone_count: CloneCount,
+        _original: Option<Arc<()>>,
+    }
+
+    impl Clone for RegistrationData {
+        fn clone(&self) -> Self {
+            Self {
+                clone_count: self.clone_count.clone(),
+                _original: None,
+            }
+        }
+    }
+
+    impl ThreadAware for RegistrationData {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
+    }
+
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
+    let original = Arc::new(());
+    let original_lifetime = Arc::downgrade(&original);
 
-    control.on(HookFn::<TaskPanic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
+    control.on(HookFn::<TaskPanic, _>::new(
+        RegistrationData {
+            clone_count: CloneCount(Arc::clone(&clones)),
+            _original: Some(original),
+        },
+        |_event, _data| {},
+    ));
 
     assert_eq!(clones.load(Ordering::SeqCst), 1);
+    assert!(original_lifetime.upgrade().is_none());
     runtime.stop().unwrap();
 }

@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn dispatcher_uses_worker_local_spawn_hooks_for_remote_submission() {
-        let (queued, sources, source_id, scheduler_cleared) = std::thread::spawn(|| {
+        let outcome = std::thread::spawn(|| {
             let builder = ThreadBuilder::default();
             let destination_builder = builder.clone();
             let source = builder.build(std::thread::current().id());
@@ -402,7 +402,7 @@ mod tests {
                 sources.0.lock().unwrap().push(event.origin().map(Thread::id));
             }));
             let shutdown = Shutdown::default();
-            let (source_commands, _source_rx) = crate::runtime::worker::asynchronous::command_channel();
+            let (source_commands, source_rx) = crate::runtime::worker::asynchronous::command_channel();
             let (destination_commands, destination_rx) = crate::runtime::worker::asynchronous::command_channel();
             let core = DispatcherCore::new(
                 NonEmpty::from_vec(vec![
@@ -424,12 +424,8 @@ mod tests {
                 vec![hook.clone()],
                 None,
             );
-            let _prime = core.spawn_relocating(
-                &destination,
-                |_| async {},
-                TaskIdentity::from_location(std::panic::Location::caller()),
-            );
-            sources.lock().unwrap().clear();
+            let source_index = core.worker_index(source.id()).unwrap();
+            let destination_index = core.worker_index(destination.id()).unwrap();
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
                 arty_io_host::IoRuntime::new(observed::Sink::noop()),
@@ -442,8 +438,15 @@ mod tests {
             LocalWorker::attach();
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
-            let _task = core.spawn_relocating(&source, |_| async {}, TaskIdentity::from_location(std::panic::Location::caller()));
+            let identity = || TaskIdentity::from_location(std::panic::Location::caller());
+            let _task = core.spawn_relocating_to(destination_index, &source, |_| async {}, identity());
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
+            // A different bound thread prevents local execution even when the chosen worker is current.
+            let _task = core.spawn_relocating_to(source_index, &destination, |_| async {}, identity());
+            let queued_to_current_worker = source_rx.spawn_receiver().try_recv().is_ok();
+            // The bound thread matches the chosen worker, but not the installed scheduler.
+            let _task = core.spawn_relocating_to(destination_index, &destination, |_| async {}, identity());
+            let queued_from_retained_binding = destination_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
             let (scheduler_cleared, retained_scheduler, retained_spawn_hooks, retained_panic_hooks) =
@@ -463,17 +466,27 @@ mod tests {
                 drop(retained_panic_hooks);
             }
             let observed_sources = sources.lock().unwrap().clone();
-            (queued, observed_sources, source.id(), scheduler_cleared)
+            (
+                queued,
+                queued_to_current_worker,
+                queued_from_retained_binding,
+                observed_sources,
+                source.id(),
+                scheduler_cleared,
+            )
         })
         .join()
         .unwrap();
 
+        let (queued, queued_to_current_worker, queued_from_retained_binding, sources, source_id, scheduler_cleared) = outcome;
         assert!(
             scheduler_cleared,
             "clear_scheduler must release all worker-local registrations before thread teardown"
         );
         assert!(queued);
-        assert_eq!(sources, [Some(source_id)]);
+        assert!(queued_to_current_worker);
+        assert!(queued_from_retained_binding);
+        assert_eq!(sources, [Some(source_id), Some(source_id), Some(source_id)]);
     }
 
     #[test]

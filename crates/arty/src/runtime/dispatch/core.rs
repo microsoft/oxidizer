@@ -180,7 +180,21 @@ impl DispatcherCore {
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        let worker_index = self.next_worker_index();
+        self.spawn_relocating_to(self.next_worker_index(), source, future_factory, identity)
+    }
+
+    pub(in crate::runtime) fn spawn_relocating_to<FF, F>(
+        &self,
+        worker_index: WorkerIndex,
+        source: &Thread,
+        future_factory: FF,
+        identity: TaskIdentity,
+    ) -> JoinHandle<F::Output>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future + 'static,
+        F::Output: ThreadAware + 'static,
+    {
         let endpoint = &self.worker_endpoints[usize::from(worker_index)];
         let future_factory = if &endpoint.thread == source {
             if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
@@ -425,25 +439,25 @@ mod tests {
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
     use crate::runtime::worker::blocking::Pool;
 
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: StdArc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     #[test]
     fn gamma_survivor_private_dispatch_starts_at_worker_zero_and_wakes_io_destination() {
-        use std::sync::atomic::AtomicUsize;
-        use std::task::{Wake, Waker};
-
-        #[derive(Default)]
-        struct Counter(AtomicUsize);
-        impl Wake for Counter {
-            fn wake(self: std::sync::Arc<Self>) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-            fn wake_by_ref(self: &std::sync::Arc<Self>) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
         let threads = test_threads(3);
-        let counter = std::sync::Arc::new(Counter::default());
+        let counter = StdArc::new(WakeCounter::default());
         let (mut first, rx) = endpoint(&threads[0]);
-        first.waker = Waker::from(std::sync::Arc::clone(&counter));
+        first.waker = Waker::from(StdArc::clone(&counter));
         let (second, _second_rx) = endpoint(&threads[1]);
         let (third, _third_rx) = endpoint(&threads[2]);
         let core = DispatcherCore::new(
@@ -564,6 +578,49 @@ mod tests {
         assert_eq!(dispatcher.retained_hooks.len(), 0);
         assert!(matches!(worker_rx.system_receiver().try_recv().unwrap(), SystemCommand::Shutdown));
         worker_rx.system_receiver().try_recv().unwrap_err();
+    }
+
+    #[test]
+    fn panic_hook_is_queued_before_its_original_capture_can_stop_the_runtime() {
+        struct StopOnOriginalDrop(Option<Arc<DispatcherCore>>);
+
+        impl Clone for StopOnOriginalDrop {
+            fn clone(&self) -> Self {
+                Self(None)
+            }
+        }
+
+        impl Drop for StopOnOriginalDrop {
+            fn drop(&mut self) {
+                if let Some(dispatcher) = &self.0 {
+                    dispatcher.stop_inner(ShutdownCause::default());
+                }
+            }
+        }
+
+        impl ThreadAware for StopOnOriginalDrop {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+        }
+
+        let threads = test_threads(1);
+        let (worker, worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new(), None);
+        // TaskPanic hooks are not retained, and their cloned data is inert. Only dropping
+        // the original can stop the dispatcher, so the command order tests registration.
+        let hook = HookFn::<TaskPanic, _>::new(StopOnOriginalDrop(Some(dispatcher.clone())), |_event, _data| {});
+
+        dispatcher.register_hook(registration(hook));
+
+        let receiver = worker_rx.system_receiver();
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            SystemCommand::RegisterHook {
+                hook: HookRegistration::TaskPanic(_),
+                ..
+            }
+        ));
+        assert!(matches!(receiver.try_recv().unwrap(), SystemCommand::Shutdown));
+        receiver.try_recv().unwrap_err();
     }
 
     #[test]
@@ -740,10 +797,14 @@ mod tests {
     }
 
     #[test]
-    fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
+    fn dispatcher_stop_sends_one_stop_command_and_wakes_each_worker_once() {
         let threads = test_threads(2);
-        let (worker1, worker1_rx) = endpoint(&threads[0]);
-        let (worker2, worker2_rx) = endpoint(&threads[1]);
+        let (mut worker1, worker1_rx) = endpoint(&threads[0]);
+        let (mut worker2, worker2_rx) = endpoint(&threads[1]);
+        let wake1 = StdArc::new(WakeCounter::default());
+        let wake2 = StdArc::new(WakeCounter::default());
+        worker1.waker = Waker::from(StdArc::clone(&wake1));
+        worker2.waker = Waker::from(StdArc::clone(&wake2));
 
         let dispatcher = DispatcherCore::new(
             NonEmpty::from_vec(vec![worker1, worker2]).unwrap(),
@@ -759,12 +820,17 @@ mod tests {
 
         assert_eq!(drain_system(&worker1_rx).len(), 1);
         assert_eq!(drain_system(&worker2_rx).len(), 1);
+        // The dispatcher invokes these wakers inline. The counters publish no other state.
+        assert_eq!(wake1.0.load(Ordering::Relaxed), 1);
+        assert_eq!(wake2.0.load(Ordering::Relaxed), 1);
 
-        // A second stop call sends no more stop commands.
+        // A second stop call neither sends commands nor wakes workers.
         dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_system(&worker1_rx).len(), 0);
         assert_eq!(drain_system(&worker2_rx).len(), 0);
+        assert_eq!(wake1.0.load(Ordering::Relaxed), 1);
+        assert_eq!(wake2.0.load(Ordering::Relaxed), 1);
     }
 
     #[test]

@@ -1428,14 +1428,34 @@ mod tests {
         assert_eq!((idle_is_closed, readable_is_closed), (false, false));
     }
 
-    #[cfg_attr(miri, ignore)]
+    fn cache_recording_configuration(
+        stream: &mut Connection,
+        policy: seismograph_protocol::message::RecordingPolicy,
+    ) -> (crate::recorder::Configuration, crate::recorder::Configuration) {
+        let previous = crate::recorder::Configuration {
+            cache: crate::recorder::Policy::default(),
+            ..crate::recorder::configuration()
+        };
+        crate::recorder::configure(previous);
+        seismograph_protocol::write_request(stream, 2, &Request::SetCacheRecording(policy)).unwrap();
+        assert_eq!(seismograph_protocol::read_response(stream).unwrap(), (2, Response::Acknowledged));
+        (
+            crate::recorder::configuration(),
+            crate::recorder::Configuration {
+                cache: recorder_policy(policy),
+                ..previous
+            },
+        )
+    }
+
     #[test]
+    #[cfg_attr(miri, ignore = "uses native monitor IPC; recorder unit tests cover configuration under Miri")]
     #[expect(
         clippy::useless_let_if_seq,
         reason = "The end-to-end monitor scenario stays together; default initialization keeps impossible response-shape branches out of line coverage"
     )]
     fn monitor_configures_recording_and_returns_snapshot() {
-        let _test = crate::recorder::TEST_LOCK.lock().unwrap();
+        let test_lock = crate::recorder::TEST_LOCK.lock().unwrap();
         let monitor = Monitor::builder().isolated().name("monitor-test").instance("one").start().unwrap();
         let descriptor = monitor.descriptor().clone();
         assert!(monitor.descriptor_path.exists());
@@ -1458,11 +1478,7 @@ mod tests {
             sampling_one_in: 4,
             ..Default::default()
         };
-        seismograph_protocol::write_request(&mut stream, 2, &Request::SetCacheRecording(cache_policy)).unwrap();
-        assert_eq!(
-            seismograph_protocol::read_response(&mut stream).unwrap(),
-            (2, Response::Acknowledged)
-        );
+        let (actual_cache_configuration, expected_cache_configuration) = cache_recording_configuration(&mut stream, cache_policy);
 
         seismograph_protocol::write_request(
             &mut stream,
@@ -1541,6 +1557,8 @@ mod tests {
         drop(monitor);
         assert!(!path.exists());
         let _ = fs::remove_file(path);
+        drop(test_lock);
+        assert_eq!(actual_cache_configuration, expected_cache_configuration);
     }
 
     #[cfg_attr(miri, ignore)]

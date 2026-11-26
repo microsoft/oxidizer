@@ -208,6 +208,7 @@ impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Rc<T, A> {
         let strong = unsafe { thin_dst::local_strong_ptr::<T>(this.ptr, value_align) };
         // SAFETY: `Rc` is single-threaded and the count slot is live.
         if unsafe { ptr::read_unaligned(strong) } != 1 {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "The default of Option<&mut T> is None.")]
             return None;
         }
         let mut value = this.as_fat_ptr();
