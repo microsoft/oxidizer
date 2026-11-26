@@ -109,11 +109,13 @@ fn attributes_preserve_each_typed_value() {
     let double = Attribute::new("double", AttributeValue::Double(1.5));
     let text = Attribute::new("text", AttributeValue::String("value"));
     let boolean = Attribute::from(("boolean", true));
+    let typed_boolean = Attribute::new("typed_boolean", AttributeValue::Boolean(false));
 
     assert_eq!(typed.value(), AttributeValue::Int(7));
     assert_eq!(double.value(), AttributeValue::Double(1.5));
     assert_eq!(text.value(), AttributeValue::String("value"));
     assert_eq!(boolean.value(), AttributeValue::Boolean(true));
+    assert_eq!(typed_boolean.value(), AttributeValue::Boolean(false));
 }
 
 #[test]
