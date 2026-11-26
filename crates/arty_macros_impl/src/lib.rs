@@ -240,6 +240,20 @@ pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, true)
 }
 
+fn context_parameter(arg: &syn::FnArg) -> syn::Result<(syn::PatIdent, syn::TypePath)> {
+    let message = "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context";
+    let syn::FnArg::Typed(state) = arg else {
+        return Err(syn::Error::new_spanned(arg, message));
+    };
+    let syn::Pat::Ident(ident) = state.pat.as_ref() else {
+        return Err(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
+    };
+    let syn::Type::Path(ty) = state.ty.as_ref() else {
+        return Err(syn::Error::new_spanned(&state.ty, message));
+    };
+    Ok((ident.clone(), ty.clone()))
+}
+
 fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let mut input: ItemFn = match parse2(item.clone()) {
         Ok(input) => input,
@@ -263,26 +277,9 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     if sig.asyncness.is_none() {
         return fail(syn::Error::new_spanned(sig.fn_token, "function must be async to use the attribute"));
     }
-    let state = match inputs.next() {
-        Some(syn::FnArg::Typed(state)) => {
-            let syn::Pat::Ident(ident) = state.pat.as_ref() else {
-                return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
-            };
-            let syn::Type::Path(ty) = state.ty.as_ref() else {
-                return fail(syn::Error::new_spanned(
-                    &state.ty,
-                    "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
-                ));
-            };
-            Some((ident.clone(), ty.clone()))
-        }
-        Some(receiver) => {
-            return fail(syn::Error::new_spanned(
-                receiver,
-                "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
-            ));
-        }
-        None => None,
+    let state = match inputs.next().map(context_parameter).transpose() {
+        Ok(state) => state,
+        Err(error) => return fail(error),
     };
     let clock = match inputs.next() {
         Some(syn::FnArg::Typed(clock)) if test && matches!(clock.ty.as_ref(), syn::Type::Path(_)) => {
