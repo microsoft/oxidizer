@@ -10,12 +10,14 @@
 //! # Examples
 //!
 //! ```
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, deflate};
 //!
-//! let compressed = deflate::compress(b"the quick brown fox", &Resources::default())?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = deflate::compress(b"the quick brown fox", &resources)?;
 //!
 //! assert_eq!(
-//!     deflate::decompress(compressed, &Resources::default())?.to_vec(),
+//!     deflate::decompress(compressed, &resources)?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())

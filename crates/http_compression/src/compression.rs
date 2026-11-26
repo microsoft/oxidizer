@@ -113,8 +113,10 @@ impl OriginalBody {
 /// Server-side response compression is not available on a client layer:
 ///
 /// ```compile_fail,E0599
+/// # use bytesbuf::mem::GlobalPool;
+/// # use compressors::Resources;
 /// # use http_compression::Compression;
-/// Compression::client().compress_responses(&[]);
+/// Compression::client(Resources::new(GlobalPool::new())).compress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -133,8 +135,10 @@ pub struct Client {
 /// Client-side response decompression is not available on a server layer:
 ///
 /// ```compile_fail,E0599
+/// # use bytesbuf::mem::GlobalPool;
+/// # use compressors::Resources;
 /// # use http_compression::Compression;
-/// Compression::server().decompress_responses(&[]);
+/// Compression::server(Resources::new(GlobalPool::new())).decompress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -191,14 +195,12 @@ pub struct CompressionLayer<R> {
 impl Compression<()> {
     /// Creates a client compression layer.
     ///
-    /// The layer uses the shared process-wide [`Resources`] by default.
-    /// Use [`CompressionLayer::resources`] to select a different memory provider
-    /// and engine pool.
+    /// `resources` supplies the application-owned memory provider and engine pool.
     /// Streaming transformations keep the original body's policies.
     #[must_use]
-    pub fn client() -> CompressionLayer<Client> {
+    pub fn client(resources: Resources) -> CompressionLayer<Client> {
         CompressionLayer {
-            config: Config::new(),
+            config: Config::new(resources),
             role: Client {
                 decompress_responses: Formats::new(),
                 advertise: true,
@@ -209,14 +211,12 @@ impl Compression<()> {
 
     /// Creates a server compression layer.
     ///
-    /// The layer uses the shared process-wide [`Resources`] by default.
-    /// Use [`CompressionLayer::resources`] to select a different memory provider
-    /// and engine pool. Streaming transformations keep the original body's
-    /// policies.
+    /// `resources` supplies the application-owned memory provider and engine pool.
+    /// Streaming transformations keep the original body's policies.
     #[must_use]
-    pub fn server() -> CompressionLayer<Server> {
+    pub fn server(resources: Resources) -> CompressionLayer<Server> {
         CompressionLayer {
-            config: Config::new(),
+            config: Config::new(resources),
             role: Server {
                 decompress_requests: Formats::new(),
                 compress_responses: Formats::new(),
@@ -267,7 +267,7 @@ impl<R> CompressionLayer<R> {
         self
     }
 
-    /// Uses `resources` instead of the shared process-wide resources.
+    /// Replaces the resources used by this layer.
     #[must_use]
     pub fn resources(mut self, resources: Resources) -> Self {
         self.config.resources = resources;
@@ -374,10 +374,11 @@ impl CompressionLayer<Server> {
     ///
     /// ```
     /// # #[cfg(feature = "gzip")] {
-    /// use compressors::Level;
+    /// use bytesbuf::mem::GlobalPool;
+    /// use compressors::{Level, Resources};
     /// use compressors::format::Format;
     /// use http_compression::Compression;
-    /// let layer = Compression::server()
+    /// let layer = Compression::server(Resources::new(GlobalPool::new()))
     ///     .compress_responses(&[Format::Gzip])
     ///     .level(Level::DEFAULT);
     /// # let _ = layer;
@@ -409,9 +410,10 @@ impl CompressionLayer<Server> {
     ///
     /// ```
     /// # #[cfg(feature = "gzip")] {
-    /// # use compressors::format::Format;
+    /// # use bytesbuf::mem::GlobalPool;
+    /// # use compressors::{Resources, format::Format};
     /// # use http_compression::{Compression, DEFAULT_COMPRESSIBLE_TYPES};
-    /// let layer = Compression::server()
+    /// let layer = Compression::server(Resources::new(GlobalPool::new()))
     ///     .compress_responses(&[Format::Gzip])
     ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
     ///     .unwrap();
@@ -910,10 +912,10 @@ struct Config {
 }
 
 impl Config {
-    fn new() -> Self {
+    fn new(resources: Resources) -> Self {
         Self {
             limits: default_decompressor_limits(),
-            resources: Resources::default(),
+            resources,
             on_unsupported: UnsupportedCompression::default(),
         }
     }
@@ -1041,7 +1043,7 @@ mod tests {
     #[test]
     fn gamma_round2_negotiation_skips_head_and_disabled_formats() {
         for (formats, method) in [(&[Format::Gzip][..], Method::HEAD), (&[][..], Method::GET)] {
-            let layer = Compression::server().compress_responses(formats);
+            let layer = Compression::server(crate::test_resources().clone()).compress_responses(formats);
             let request = http::Request::builder()
                 .method(method)
                 .header(ACCEPT_ENCODING, "gzip, identity;q=0")
@@ -1076,7 +1078,7 @@ mod tests {
 
     #[test]
     fn raw_deflate_has_no_http_content_encoding() {
-        let layer = Compression::server();
+        let layer = Compression::server(crate::test_resources().clone());
         let mut headers = HeaderMap::new();
         let body = http_extensions::HttpResponseBuilder::new_fake()
             .text("unchanged")

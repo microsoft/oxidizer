@@ -451,7 +451,7 @@ mod tests {
     use std::task::{Context, Poll, Wake, Waker};
     use std::thread;
 
-    use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, GlobalPool};
+    use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable};
     use bytesbuf::{BytesBuf, BytesView};
     use events_once::RawReceiver;
     use performables::arc::Arc as PerformableArc;
@@ -1024,7 +1024,7 @@ mod tests {
         let read_address = read_memory.as_mut_ptr().addr();
         let read = guard.submit(
             OperationKind::Read,
-            OperationBuffer::read(GlobalPool::new().reserve(8), read_address, 8),
+            OperationBuffer::read(crate::test_memory().clone().reserve(8), read_address, 8),
             |_, _| {
                 // SAFETY: as for the send completion above, except that this
                 // notification carries a payload: the address and filled length
@@ -1042,7 +1042,7 @@ mod tests {
         let mut written = 4_u32;
         let write = guard.submit(
             OperationKind::Write,
-            OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
+            OperationBuffer::write(BytesView::copied_from_slice(b"data", &crate::test_memory().clone()), 4),
             |_, _| {
                 // SAFETY: as for the send completion above, except that this
                 // notification carries a payload: the initialized local
@@ -1140,8 +1140,12 @@ mod tests {
     #[test]
     fn cancellation_retains_read_and_write_operations_until_handle_closing() {
         for buffer in [
-            OperationBuffer::read(GlobalPool::new().reserve(8), NonNull::<u8>::dangling().as_ptr().addr(), 8),
-            OperationBuffer::write(BytesView::copied_from_slice(b"outstanding", &GlobalPool::new()), 11),
+            OperationBuffer::read(
+                crate::test_memory().clone().reserve(8),
+                NonNull::<u8>::dangling().as_ptr().addr(),
+                8,
+            ),
+            OperationBuffer::write(BytesView::copied_from_slice(b"outstanding", &crate::test_memory().clone()), 11),
         ] {
             let (mut guard, context, contexts, session, closes) = installed();
             let kind = match buffer {

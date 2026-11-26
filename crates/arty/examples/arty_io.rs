@@ -5,12 +5,33 @@
 
 use std::task::Waker;
 
+use arty::io::Io;
 use arty::task::{Context, JoinError};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use thread_aware::ThreadAware;
 
 #[derive(Clone, ThreadAware)]
 struct ExampleContext;
+
+/// An application-facing endpoint that keeps the Arty context internal.
+struct ExampleEndpoint {
+    context: ExampleContext,
+}
+
+impl ExampleEndpoint {
+    /// Builds the endpoint from the runtime's I/O access.
+    fn new(io: &Io) -> Self {
+        Self {
+            context: io.context::<ExampleContext>(&()),
+        }
+    }
+
+    /// Submits work through the endpoint without exposing its context.
+    fn submit(&self, request: &str) {
+        println!("submitted {request}");
+        _ = &self.context;
+    }
+}
 
 impl IoContext for ExampleContext {
     type ContextOptions = ();
@@ -52,7 +73,7 @@ async fn main(cx: Context) -> Result<(), JoinError> {
         .workers()
         .map(|worker| {
             cx.scheduler().spawn_at(&worker, cx.clone(), |worker| async move {
-                let _ = worker.io().context::<ExampleContext>(&());
+                ExampleEndpoint::new(worker.io()).submit("request");
             })
         })
         .collect();

@@ -3,17 +3,22 @@
 
 //! In-memory body, builder, cloning, and routing contracts.
 
+use std::sync::OnceLock;
+
 use futures::executor::block_on;
 use http::{Method, Version};
 use http_extensions::routing::{BaseUriConflict, RequestUris, Router, RouterContext};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder, HttpRequestExt, HttpResponseBuilder, RequestExt};
 use templated_uri::BaseUri;
 
+fn memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: OnceLock<bytesbuf::mem::GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
+
 fn body_builder() -> HttpBodyBuilder {
-    HttpBodyBuilder::new(
-        bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
-        &tick::Clock::new_frozen(),
-    )
+    HttpBodyBuilder::new(bytesbuf::mem::OpaqueMemory::new(memory().clone()), &tick::Clock::new_frozen())
 }
 
 #[test]

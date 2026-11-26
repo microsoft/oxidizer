@@ -26,9 +26,11 @@
 )]
 
 use std::num::{NonZeroU64, NonZeroUsize};
+use std::sync::OnceLock;
 
 use bolero::TypeGenerator;
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, TrailingData};
 
@@ -44,6 +46,12 @@ const MAX_COPIES: usize = 4;
 /// campaign budget producing megabytes, and report nothing. The scenario's own bound is applied on
 /// top of this, never instead of it.
 const HARD_OUTPUT_CEILING: u64 = 1 << 20;
+
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
+}
 
 /// What to do to a valid stream before decompressing it.
 #[derive(Debug, Clone, Copy, TypeGenerator)]
@@ -124,11 +132,11 @@ fn run(scenario: &Scenario) {
         return;
     };
 
-    let resources = Resources::default();
+    let resources = resources();
     let mut payload = scenario.payload.clone();
     payload.truncate(MAX_PAYLOAD);
 
-    let Some(encoded) = encode(scenario, format, &payload, &resources) else {
+    let Some(encoded) = encode(scenario, format, &payload, resources) else {
         return;
     };
 
@@ -140,8 +148,8 @@ fn run(scenario: &Scenario) {
     let pristine = scenario.valid && matches!(scenario.mutation, Mutation::None);
     let natural = payload.len() as u64;
 
-    let input = fragmented(&mutated, scenario.fragments, &resources);
-    let outcome = decompress(scenario, format, input, natural, &resources);
+    let input = fragmented(&mutated, scenario.fragments, resources);
+    let outcome = decompress(scenario, format, input, natural, resources);
 
     match (pristine, scenario.output_limit) {
         (true, LimitChoice::Exact | LimitChoice::Generous | LimitChoice::Unset) => {

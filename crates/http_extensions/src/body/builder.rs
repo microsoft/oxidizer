@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(any(feature = "test-util", test))]
-use bytesbuf::mem::GlobalPool;
 use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
@@ -73,7 +71,7 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        Self::new(GlobalPool::new(), &Clock::new_frozen())
+        Self::new(crate::test_memory().clone(), &Clock::new_frozen())
     }
 
     /// Creates a new instance of [`HttpBodyBuilder`].
@@ -384,7 +382,7 @@ mod tests {
     #[test]
     fn transforming_preserves_the_source_idle_timeout() {
         let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock())
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let source = builder.with_options(options).stream(stream::pending());
@@ -431,7 +429,7 @@ mod tests {
     #[test]
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
-        let memory = GlobalPool::new();
+        let memory = crate::test_memory().clone();
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(memory), &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
@@ -502,9 +500,9 @@ mod tests {
 
     #[test]
     fn bytes_from_bytes_view() {
-        let memory = GlobalPool::new();
+        let memory = crate::test_memory();
         let builder = HttpBodyBuilder::new_fake();
-        let bytes = BytesView::copied_from_slice(b"test", &memory);
+        let bytes = BytesView::copied_from_slice(b"test", memory);
         let body = builder.bytes(bytes);
         assert_eq!(body.content_length(), Some(4));
     }
@@ -572,7 +570,7 @@ mod tests {
     #[test]
     fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
@@ -668,7 +666,7 @@ mod tests {
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
         let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(builder_options);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));

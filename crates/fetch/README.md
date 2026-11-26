@@ -80,12 +80,16 @@ The bundled transport runs on Tokio. Use a custom transport for another runtime.
 [`custom`][__link7] module.
 
 ```rust
+use bytesbuf::mem::GlobalPool;
 use fetch::{HttpClient, HttpError};
+use fetch::tokio::TokioDeps;
+use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
     // Create a client with the bundled Tokio transport.
-    let client: HttpClient = HttpClient::new_tokio();
+    let client: HttpClient =
+        HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 
     // Return an error for a `4xx` or `5xx` status, then read the body as text.
     let body: String = client.get("https://example.com").fetch_text_body().await?;
@@ -532,7 +536,7 @@ Reuse clients, parse repeated URIs once, and keep binary data in [`BytesView`][_
 
 ```rust
 // Create one client and reuse it.
-let client = HttpClient::new_tokio();
+let client = HttpClient::new_tokio(deps);
 
 // Parse repeated URIs once.
 let users_uri: Uri = "https://api.example.com/users".parse()?;
@@ -587,11 +591,15 @@ platform trust store. It:
 The default client applies the selected TLS backend:
 
 ```rust
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
+use fetch::tokio::TokioDeps;
+use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = HttpClient::new_tokio();
+    let client =
+        HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 
     // Send an HTTPS request.
     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -713,7 +721,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0ln95Baxpa0b38KaVl3eFr0bei6yo0MfQlMbmdeNHfsx5EJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQboyhxX6q_8uMbpD1Q176IgzIbMLha5bCHHn8bguZlHGlOzn1hZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNS4wgmVmZXRjaGYwLjIyLjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCZ2xheWVyZWRmMC4zLjEwgmhzZWF0YmVsdGYwLjEzLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.22.0/fetch/?search=HttpClient::post

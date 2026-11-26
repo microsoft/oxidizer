@@ -23,9 +23,11 @@
 use std::process;
 
 use argh::FromArgs;
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
 use fetch::tls::{ClientIdentity, TlsOptions};
 use serde_json::Value;
+use tick::Clock;
 use tracing::info;
 
 #[path = "util/utils.rs"]
@@ -74,7 +76,7 @@ async fn main() -> Result<(), ohno::AppError> {
     info!("Loaded the client identity");
 
     // Build a rustls client with the client identity.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()))
         .tls_options(TlsOptions::builder_rustls().client_identity(identity).build())
         .build();
 

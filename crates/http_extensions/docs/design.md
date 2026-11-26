@@ -5,7 +5,8 @@ Callers select the provider when they create an `HttpBodyBuilder`.
 The constructor accepts `impl Into<bytesbuf::mem::OpaqueMemory>`.
 Pass `GlobalPool::new()` directly or wrap a custom `MemoryShared` provider with `OpaqueMemory::new(provider)`.
 Explicit `OpaqueMemory` arguments remain valid.
-`new_fake` uses the global pool and a frozen clock.
+`new_fake` is test support. It reuses one lazily initialized provider for the
+test binary and supplies a frozen clock.
 
 The builder uses the provider for copied slices, text, JSON, and explicit memory reservations.
 Bodies built from existing byte views keep their existing storage.

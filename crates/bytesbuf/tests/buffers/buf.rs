@@ -8,8 +8,6 @@
 use std::mem::MaybeUninit;
 use std::pin::pin;
 
-#[cfg(feature = "std")]
-use bytesbuf::mem::GlobalPool;
 use bytesbuf::mem::{BlockMeta, Memory};
 use bytesbuf::{BytesBuf, BytesView};
 use new_zealand::nz;
@@ -45,7 +43,7 @@ fn _can_use_in_dyn_traits(mem: &dyn Memory) {
 fn seismograph_identity_follows_consumed_data() {
     use seismograph_io::Buffer;
 
-    let memory = GlobalPool::new();
+    let memory = crate::memory();
     let mut buffer = memory.reserve(16);
     buffer.put_slice(*b"abcd");
     let original_id = buffer.recording_state().id();
@@ -815,7 +813,7 @@ fn vectored_write_abort() {
 #[test]
 #[cfg(feature = "std")]
 fn from_view() {
-    let memory = GlobalPool::new();
+    let memory = crate::memory();
 
     let view1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
 

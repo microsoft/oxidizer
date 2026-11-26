@@ -8,8 +8,9 @@ This path keeps one provider choice across client and transport construction wit
 
 The Tokio constructor copies `TokioDeps::memory` into `CustomDeps`.
 Its handler passes the context's body builder to `HyperTransportBuilder`.
-The standalone Hyper builder uses an explicitly wrapped `GlobalPool` only when no caller supplies a body builder.
-Fake constructors also wrap `GlobalPool` explicitly.
+The standalone Hyper builder requires a caller-supplied body builder.
+Fake constructors copy `FakeDeps::memory`. The test-only default clones the
+shared provider from `HttpBodyBuilder::new_fake`.
 
 Thread-aware derives include the memory fields.
 The isolated transport path relocates its stored dependencies before it creates a handler on a new thread.

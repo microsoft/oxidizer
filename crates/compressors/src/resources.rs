@@ -6,9 +6,7 @@
 //! Compression needs a memory provider for output and a pool for reusable engine state.
 //! [`Resources`] stores shared handles to both.
 
-use std::sync::OnceLock;
-
-use bytesbuf::mem::{GlobalPool, MemoryShared, OpaqueMemory};
+use bytesbuf::mem::{MemoryShared, OpaqueMemory};
 use thread_aware::{Thread, ThreadAware};
 
 use crate::pool::Pool;
@@ -40,12 +38,14 @@ use crate::pool::Pool;
 /// # {
 /// use compressors::{Resources, gzip};
 ///
-/// // Use the process-wide memory provider and engine pool.
-/// let resources = Resources::global();
+/// use bytesbuf::mem::GlobalPool;
 ///
-/// let compressed = gzip::compress(b"hello", resources)?;
+/// // The application owns the provider and passes it to the library.
+/// let resources = Resources::new(GlobalPool::new());
+///
+/// let compressed = gzip::compress(b"hello", &resources)?;
 /// assert_eq!(
-///     gzip::decompress(compressed, resources)?.to_vec(),
+///     gzip::decompress(compressed, &resources)?.to_vec(),
 ///     b"hello".to_vec()
 /// );
 /// # }
@@ -94,16 +94,6 @@ impl Resources {
         self
     }
 
-    /// The shared resources of the process: one memory provider, one set of recycled engines.
-    ///
-    /// Use this value when the application does not need separate memory accounting.
-    #[must_use]
-    pub fn global() -> &'static Self {
-        static GLOBAL: OnceLock<Resources> = OnceLock::new();
-
-        GLOBAL.get_or_init(|| Self::new(global_memory().clone()))
-    }
-
     /// The memory provider output buffers are drawn from.
     ///
     /// Also the provider to build input with, so that a message is allocated out of the same memory
@@ -123,13 +113,6 @@ impl Resources {
     }
 }
 
-impl Default for Resources {
-    /// The [`global`][Resources::global] resources, as an owned handle.
-    fn default() -> Self {
-        Self::global().clone()
-    }
-}
-
 /// Relocates the memory provider but keeps the shared engine pool.
 impl ThreadAware for Resources {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
@@ -141,14 +124,6 @@ impl ThreadAware for Resources {
     }
 }
 
-/// The one global memory provider this crate creates, shared by every [`Resources`] that does not
-/// name its own.
-fn global_memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
@@ -156,7 +131,7 @@ mod tests {
 
     #[test]
     fn recycling_is_on_by_default_and_its_capacity_is_adjustable() {
-        let recycling = Resources::new(GlobalPool::new());
+        let recycling = Resources::new(crate::testing::memory().clone());
         assert!(recycling.pool().capacity() > 0, "recycling must be the default");
 
         let plain = recycling.with_pool_capacity(0);

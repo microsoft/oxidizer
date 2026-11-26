@@ -36,13 +36,14 @@
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, gzip};
 //!
-//! let resources = Resources::global();
-//! let compressed = gzip::compress(b"hello", resources)?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = gzip::compress(b"hello", &resources)?;
 //!
 //! assert_eq!(
-//!     gzip::decompress(compressed, resources)?.to_vec(),
+//!     gzip::decompress(compressed, &resources)?.to_vec(),
 //!     b"hello".to_vec()
 //! );
 //! # }
@@ -62,11 +63,12 @@
 //! use std::io::Error as IoError;
 //!
 //! use bytesbuf::BytesView;
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{CompressionStream, Resources, gzip};
 //! use futures::{TryStreamExt, stream};
 //!
 //! # futures::executor::block_on(async {
-//! let resources = Resources::global();
+//! let resources = Resources::new(GlobalPool::new());
 //! let body = stream::iter(vec![
 //!     Ok::<_, IoError>(BytesView::copied_from_slice(b"a body ", resources.memory())),
 //!     Ok(BytesView::copied_from_slice(
@@ -75,7 +77,7 @@
 //!     )),
 //! ]);
 //!
-//! let mut compressed = CompressionStream::compress(body, gzip::Compressor::new(resources));
+//! let mut compressed = CompressionStream::compress(body, gzip::Compressor::new(&resources));
 //!
 //! // Inspect and drop each chunk to keep retained memory bounded.
 //! let mut magic = Vec::new();
@@ -107,16 +109,17 @@
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::Resources;
 //! use compressors::format::{self, Format};
 //!
 //! let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 //!
-//! let resources = Resources::global();
-//! let compressed = format::compress(format, b"runtime selected", resources)?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = format::compress(format, b"runtime selected", &resources)?;
 //!
 //! assert_eq!(
-//!     format::decompress(format, compressed, resources)?.to_vec(),
+//!     format::decompress(format, compressed, &resources)?.to_vec(),
 //!     b"runtime selected".to_vec()
 //! );
 //! # }
@@ -136,15 +139,16 @@
 //! ```
 //! # #[cfg(feature = "gzip")]
 //! # {
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Level, Resources, gzip};
 //!
 //! // Keep one value for the application.
-//! let resources = Resources::global();
+//! let resources = Resources::new(GlobalPool::new());
 //!
 //! // Build one compressor for each request. Dropping it recycles its engine.
 //! let compressor = gzip::Compressor::builder()
 //!     .level(Level::DEFAULT)
-//!     .build(resources);
+//!     .build(&resources);
 //! # let _ = compressor;
 //! # }
 //! ```
@@ -273,17 +277,18 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// # #[cfg(feature = "gzip")]
 /// # {
 /// use bytesbuf::BytesView;
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::format::Format;
 /// use compressors::{CompressorBuilder, Resources, gzip};
 ///
-/// let resources = Resources::global();
+/// let resources = Resources::new(GlobalPool::new());
 /// let input = BytesView::copied_from_slice(b"either way", resources.memory());
 ///
 /// // A compressor built by hand, or one for a format chosen at runtime.
-/// let by_hand = compressors::compress(input.clone(), gzip::Compressor::new(resources))?;
+/// let by_hand = compressors::compress(input.clone(), gzip::Compressor::new(&resources))?;
 /// let at_runtime = compressors::compress(
 ///     input,
-///     CompressorBuilder::new().build_format(Format::Gzip, resources)?,
+///     CompressorBuilder::new().build_format(Format::Gzip, &resources)?,
 /// )?;
 ///
 /// assert_eq!(by_hand.to_vec(), at_runtime.to_vec());

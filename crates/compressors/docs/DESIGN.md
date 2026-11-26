@@ -123,7 +123,9 @@ stream, so output is provisional until the decompressor reports that it is done.
 
 `Resources` supplies a memory provider and a pool of idle engine state.
 A builder describes engine behavior. Keep one `Resources` value per application,
-or per subsystem that needs separate memory accounting.
+or per subsystem that needs separate memory accounting. The application
+creates or selects the memory provider and passes it to `Resources::new`.
+The crate does not create a provider.
 
 Recycling is enabled by default. Each engine-building API therefore takes
 `Resources` instead of only a memory provider. `with_pool_capacity` sets the
@@ -168,8 +170,8 @@ default. A build that names no format still gets `Compression`, the builders,
 
 ## Design tenets
 
-- Buffers come from the caller's memory provider. The crate does not select a
-  global allocator instead.
+- Buffers come from the application's memory provider. The crate does not
+  create a general-purpose provider.
 - Nothing is flattened or copied that the underlying buffers can express
   directly.
 - What is bounded is what the caller retains.

@@ -3,12 +3,14 @@
 
 //! Enables native TLS for the HTTP client.
 
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;
+use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()))
         .tls_options(TlsOptions::new_native_tls())
         .build();
 

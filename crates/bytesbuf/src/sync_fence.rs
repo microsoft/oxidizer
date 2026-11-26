@@ -113,7 +113,9 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn gamma_nov4_pool_blocks_acquire_only_on_final_release() {
-        let pool = GlobalPool::new();
+        static POOL: std::sync::OnceLock<GlobalPool> = std::sync::OnceLock::new();
+
+        let pool = POOL.get_or_init(GlobalPool::new);
         let view = BytesView::copied_from_slice(b"retained", &pool);
         let other = view.clone();
         let trace = Trace::start();

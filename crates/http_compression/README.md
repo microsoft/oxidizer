@@ -16,9 +16,12 @@
 Compresses and decompresses HTTP message bodies.
 
 ```rust
+use bytesbuf::mem::GlobalPool;
+use compressors::Resources;
 use compressors::format::Format;
 use http_compression::Compression;
-let layer = Compression::client().decompress_responses(&[Format::Gzip]);
+let layer = Compression::client(Resources::new(GlobalPool::new()))
+    .decompress_responses(&[Format::Gzip]);
 ```
 
 [`Compression`][__link0] transforms HTTP bodies. It compresses small buffered bodies
@@ -65,16 +68,18 @@ with `Content-Range` bypass this negotiation.
 ```rust
 use std::num::NonZeroU64;
 
-use compressors::DecompressorLimits;
+use bytesbuf::mem::GlobalPool;
+use compressors::{DecompressorLimits, Resources};
 use compressors::format::Format;
 use http_compression::Compression;
-let client = Compression::client()
+let resources = Resources::new(GlobalPool::new());
+let client = Compression::client(resources.clone())
     .decompress_responses(&[Format::Gzip])
     .limits(
         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
     );
 
-let server = Compression::server()
+let server = Compression::server(resources)
     .decompress_requests(&[Format::Gzip])
     .compress_responses(&[Format::Gzip]);
 ```
@@ -129,7 +134,7 @@ unchanged.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjIF91VUuDpAbNLyEfqDaEpQbkNTJTajiwz4b6v07tnkCpXthZIKCa2NvbXByZXNzb3JzZTAuNi4wgnBodHRwX2NvbXByZXNzaW9uZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbk8UIia6Oljsb3MAok5mw9RQbNEIKHYwFrhAbM5jnOiEqRABhZIKCa2NvbXByZXNzb3JzZTAuNi4wgnBodHRwX2NvbXByZXNzaW9uZTAuNi4w
  [__link0]: https://docs.rs/http_compression/0.6.0/http_compression/?search=Compression
  [__link1]: https://docs.rs/http_compression/0.6.0/http_compression/?search=Client
  [__link10]: https://docs.rs/http_compression/0.6.0/http_compression/?search=CompressionLayer::compressible_types

@@ -13,12 +13,14 @@
 //! # Examples
 //!
 //! ```
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, brotli};
 //!
-//! let compressed = brotli::compress(b"the quick brown fox", &Resources::default())?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = brotli::compress(b"the quick brown fox", &resources)?;
 //!
 //! assert_eq!(
-//!     brotli::decompress(compressed, &Resources::default())?.to_vec(),
+//!     brotli::decompress(compressed, &resources)?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -231,6 +233,7 @@ impl From<WindowSize> for u8 {
 /// # Examples
 ///
 /// ```
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::Resources;
 /// use compressors::brotli::{self, Mode, Quality, WindowSize};
 ///
@@ -239,7 +242,7 @@ impl From<WindowSize> for u8 {
 ///         .quality(Quality::new(8).expect("8 is in range"))
 ///         .mode(Mode::Text)
 ///         .window_size(WindowSize::new(20).expect("20 is in range"))
-///         .build(&Resources::default()),
+///         .build(&Resources::new(GlobalPool::new())),
 /// );
 /// # let _ = compressor;
 /// ```

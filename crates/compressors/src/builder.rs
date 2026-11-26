@@ -44,12 +44,14 @@ pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::format::Format;
 /// use compressors::{CompressorBuilder, Level, Resources};
 ///
 /// // Apply shared settings to a format selected at run time.
 /// let settings = CompressorBuilder::new().level(Level::HIGH);
-/// let compressor = settings.build_format(Format::Gzip, Resources::global())?;
+/// let resources = Resources::new(GlobalPool::new());
+/// let compressor = settings.build_format(Format::Gzip, &resources)?;
 /// # let _ = compressor;
 /// # }
 /// # Ok::<(), compressors::BuildError>(())

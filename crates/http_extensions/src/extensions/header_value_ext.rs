@@ -54,21 +54,20 @@ mod sealed {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytesbuf::BytesView;
-    use bytesbuf::mem::GlobalPool;
     use http::HeaderValue;
 
     use crate::HeaderValueExt;
 
     #[test]
     fn from_shared_valid_ascii() {
-        let view = BytesView::copied_from_slice(b"text/plain", &GlobalPool::new());
+        let view = BytesView::copied_from_slice(b"text/plain", &crate::test_memory().clone());
         let value = HeaderValue::from_shared(view.to_bytes()).unwrap();
         assert_eq!(value, "text/plain");
     }
 
     #[test]
     fn from_shared_valid_opaque_bytes() {
-        let view = BytesView::copied_from_slice(b"hello\x80\xff", &GlobalPool::new());
+        let view = BytesView::copied_from_slice(b"hello\x80\xff", &crate::test_memory().clone());
         let value = HeaderValue::from_shared(view.to_bytes()).unwrap();
         assert_eq!(value.as_bytes(), b"hello\x80\xff");
     }
@@ -83,13 +82,13 @@ mod tests {
 
     #[test]
     fn from_shared_rejects_invalid_bytes() {
-        let view = BytesView::copied_from_slice(b"bad\x00value", &GlobalPool::new());
+        let view = BytesView::copied_from_slice(b"bad\x00value", &crate::test_memory().clone());
         HeaderValue::from_shared(view.to_bytes()).unwrap_err();
     }
 
     #[test]
     fn from_shared_rejects_newline() {
-        let view = BytesView::copied_from_slice(b"line1\nline2", &GlobalPool::new());
+        let view = BytesView::copied_from_slice(b"line1\nline2", &crate::test_memory().clone());
         HeaderValue::from_shared(view.to_bytes()).unwrap_err();
     }
 }

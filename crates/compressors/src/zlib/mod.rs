@@ -8,12 +8,14 @@
 //! # Examples
 //!
 //! ```
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, zlib};
 //!
-//! let compressed = zlib::compress(b"the quick brown fox", &Resources::default())?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = zlib::compress(b"the quick brown fox", &resources)?;
 //!
 //! assert_eq!(
-//!     zlib::decompress(compressed, &Resources::default())?.to_vec(),
+//!     zlib::decompress(compressed, &resources)?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())

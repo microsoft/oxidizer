@@ -8,7 +8,6 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use anyspawn::Spawner;
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_options::{ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, TransportOptions};
 use fetch_tls::TlsBackend;
 use http::Version;
@@ -78,8 +77,10 @@ where
 ///
 /// ```
 /// use anyspawn::Spawner;
+/// use bytesbuf::mem::GlobalPool;
 /// use fetch_hyper::{HyperTransport, HyperTransportBuilder};
 /// use fetch_options::TransportOptions;
+/// use http_extensions::HttpBodyBuilder;
 /// use hyper_util::rt::TokioIo;
 /// use layered::Execute;
 /// use templated_uri::BaseUri;
@@ -103,6 +104,7 @@ where
 ///     tick::ClockControl::new()
 ///         .auto_advance_timers(true)
 ///         .to_clock(),
+///     HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen()),
 ///     TransportOptions::default(),
 /// )
 /// .build(tls);
@@ -116,7 +118,7 @@ where
 {
     pub(crate) connector: C,
     pub(crate) clock: Clock,
-    pub(crate) body_builder: Option<HttpBodyBuilder>,
+    pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) options: TransportOptions,
     pub(crate) pool_index: PoolIndex,
     pub(crate) meter: Option<Meter>,
@@ -148,13 +150,14 @@ where
     /// background tasks. `clock` drives connect-timeout and connection-age
     /// accounting and acts as `hyper`'s timer.
     ///
-    /// `options` drives every transport-level knob; pass
-    /// [`TransportOptions::default`] to accept the defaults. The body builder,
-    /// pool index, and OpenTelemetry meter have dedicated setters instead.
+    /// `body_builder` supplies the application-owned memory provider and body
+    /// policies. `options` drives every transport-level knob; pass
+    /// [`TransportOptions::default`] to accept the defaults. The pool index and
+    /// OpenTelemetry meter have dedicated setters.
     ///
     /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
-    pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions) -> Self {
+    pub fn new(connector: C, spawner: Spawner, clock: Clock, body_builder: HttpBodyBuilder, mut options: TransportOptions) -> Self {
         // #[gamma::skip(call_result.default, tag = "equivalent", reason = "coerce_options returns unit; default_after still executes its option updates and replaces only () with ()")]
         coerce_options(&mut options);
 
@@ -163,7 +166,7 @@ where
         Self {
             connector,
             clock,
-            body_builder: None,
+            body_builder,
             options,
             pool_index: PoolIndex::new(0),
             meter: None,
@@ -172,13 +175,10 @@ where
         }
     }
 
-    /// Sets the [`HttpBodyBuilder`] used to wrap incoming response bodies.
-    ///
-    /// When not set, [`build`](Self::build) constructs one with a fresh
-    /// [`GlobalPool`] and the builder's clock.
+    /// Replaces the [`HttpBodyBuilder`] used to wrap incoming response bodies.
     #[must_use]
     pub fn body_builder(mut self, body_builder: HttpBodyBuilder) -> Self {
-        self.body_builder = Some(body_builder);
+        self.body_builder = body_builder;
         self
     }
 
@@ -203,10 +203,7 @@ where
     #[must_use]
     pub fn build(self, tls: TlsBackend) -> HyperTransport {
         let meter = transport_meter(self.meter.clone(), opentelemetry::global::meter);
-        let body_builder = self
-            .body_builder
-            .clone()
-            .unwrap_or_else(|| HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &self.clock));
+        let body_builder = self.body_builder.clone();
 
         HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
     }
@@ -688,7 +685,7 @@ mod tests {
         let body = HttpBodyBuilder::new_fake().with_options(http_extensions::HttpBodyOptions::default().buffer_limit(17));
         let expected = format!("{body:?}");
         let builder = make_builder().body_builder(body);
-        assert_eq!(format!("{:?}", builder.body_builder.unwrap()), expected);
+        assert_eq!(format!("{:?}", builder.body_builder), expected);
     }
 
     fn tls() -> TlsBackend {
@@ -700,6 +697,7 @@ mod tests {
             FakeConnector::new_success(Bytes::new(), tick::ClockControl::new().auto_advance_timers(true).to_clock()),
             Spawner::new_tokio(None),
             tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+            HttpBodyBuilder::new_fake(),
             options,
         )
     }
@@ -826,9 +824,9 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            HttpBodyBuilder::new_fake(),
             http_and_https_options(),
         )
-        .body_builder(HttpBodyBuilder::new_fake())
         .meter(provider.meter("test"))
         .build(tls());
         let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
@@ -848,9 +846,9 @@ mod tests {
             FakeConnector::new_success(Bytes::new(), clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            HttpBodyBuilder::new_fake(),
             options,
         )
-        .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
     }
 
@@ -863,9 +861,9 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            HttpBodyBuilder::new_fake(),
             http_and_https_options(),
         )
-        .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
         let cloned = handler.clone();
         let _ = format!("{cloned:?}");
@@ -882,32 +880,13 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            HttpBodyBuilder::new_fake(),
             http_and_https_options(),
         )
-        .body_builder(HttpBodyBuilder::new_fake())
         .build(tls());
 
         let service: DynamicService<HttpRequest, Result<HttpResponse>> = handler.into();
         let resp = service.execute(crate::testing::create_test_request()).await.unwrap();
-        assert_eq!(resp.status(), 200);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn build_without_body_builder_uses_default() {
-        // Pin the default body builder path in `build`: when no `body_builder`
-        // is provided, `build` synthesizes one and still produces a working
-        // transport.
-        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
-        let handler = HyperTransportBuilder::new(
-            FakeConnector::new_success(response_bytes, clock.clone()),
-            Spawner::new_tokio(None),
-            clock,
-            http_and_https_options(),
-        )
-        .build(tls());
-        let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 

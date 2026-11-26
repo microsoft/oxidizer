@@ -15,6 +15,12 @@ use tick::Clock;
 
 testing_aids::init_tracing!();
 
+fn memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
+
 #[test]
 fn gamma_survivor_buffering_preserves_stream_error() {
     let handler = Buffering::layer().layer(FakeHandler::from_fn(|_| {
@@ -194,7 +200,7 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     let expected_tls = format!("{tls:?}");
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
+        memory: bytesbuf::mem::OpaqueMemory::new(memory().clone()),
         extras: (),
     };
     let builder = create_builder(
@@ -241,15 +247,18 @@ fn gamma_survivor_standard_pipeline_retains_zero_hedge_configuration() {
         HttpResponseBuilder::new_fake().status(status).build()
     });
     let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
-    let client = HttpClient::builder_fake(handler, fetch::fake::FakeDeps { clock })
-        .standard_pipeline(|pipeline, _| {
-            pipeline
-                .total_timeout(|layer| layer.timeout(Duration::MAX))
-                .attempt_timeout(|layer| layer.timeout(Duration::MAX))
-                .recovery_mode(RecoveryMode::Hedging)
-                .hedging(|layer| layer.max_hedged_attempts(0))
-        })
-        .build();
+    let client = HttpClient::builder_fake(
+        handler,
+        fetch::fake::FakeDeps::new(&clock, http_extensions::HttpBodyBuilder::new_fake()),
+    )
+    .standard_pipeline(|pipeline, _| {
+        pipeline
+            .total_timeout(|layer| layer.timeout(Duration::MAX))
+            .attempt_timeout(|layer| layer.timeout(Duration::MAX))
+            .recovery_mode(RecoveryMode::Hedging)
+            .hedging(|layer| layer.max_hedged_attempts(0))
+    })
+    .build();
     let response = block_on(client.get("https://example.test").fetch()).unwrap();
     assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(calls.load(Ordering::SeqCst), 1);

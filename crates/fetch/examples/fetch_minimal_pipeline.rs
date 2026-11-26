@@ -5,7 +5,9 @@
 //!
 //! The minimal pipeline contains no middleware.
 
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
+use tick::Clock;
 
 #[path = "util/utils.rs"]
 mod utils;
@@ -15,7 +17,7 @@ async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
     // This client uses no middleware.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()))
         .minimal_pipeline()
         .build();
 

@@ -8,9 +8,10 @@
 //!
 //! This module re-exports [`FakeHandler`] for canned responses.
 
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::{MemoryShared, OpaqueMemory};
 #[doc(no_inline)]
 pub use http_extensions::FakeHandler;
+use http_extensions::HttpBodyBuilder;
 use thread_aware::ThreadAware;
 use tick::Clock;
 
@@ -20,24 +21,35 @@ use crate::{HttpClient, HttpClientBuilder};
 
 /// Dependencies for fake HTTP operations.
 ///
-/// Fake clients require only a clock.
+/// The test binary supplies the clock and memory provider.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct FakeDeps {
     /// Clock for testing time-based operations.
     pub clock: Clock,
+    /// Memory provider for fake HTTP body allocations.
+    pub memory: OpaqueMemory,
+}
+
+impl FakeDeps {
+    /// Creates fake-client dependencies from application-owned test resources.
+    #[must_use]
+    pub fn new(clock: &Clock, memory: impl MemoryShared) -> Self {
+        Self {
+            clock: clock.clone(),
+            memory: OpaqueMemory::new(memory),
+        }
+    }
 }
 
 impl Default for FakeDeps {
     fn default() -> Self {
-        Self {
-            clock: tick::ClockControl::new().into(),
-        }
+        Self::new(&tick::ClockControl::new().to_clock(), HttpBodyBuilder::new_fake())
     }
 }
 
 impl From<&Clock> for FakeDeps {
     fn from(clock: &Clock) -> Self {
-        Self { clock: clock.clone() }
+        Self::new(clock, HttpBodyBuilder::new_fake())
     }
 }
 
@@ -51,10 +63,13 @@ impl HttpClient {
     /// ```
     /// # use std::time::Duration;
     /// # use fetch::HttpClient;
-    /// # use http::StatusCode;
     /// # use fetch::fake::FakeDeps;
+    /// # use http::StatusCode;
+    /// # use bytesbuf::mem::GlobalPool;
+    /// # use tick::Clock;
     /// async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = HttpClient::builder_fake(StatusCode::NOT_FOUND, FakeDeps::default())
+    /// # let deps = FakeDeps::new(&Clock::new_frozen(), GlobalPool::new());
+    /// let client = HttpClient::builder_fake(StatusCode::NOT_FOUND, deps)
     ///     .connect_timeout(Duration::from_millis(100))
     ///     .insecure_allow_http()
     ///     .build();
@@ -78,7 +93,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock: deps.clock,
-                memory: OpaqueMemory::new(GlobalPool::new()),
+                memory: deps.memory,
                 extras: handler,
             },
         )

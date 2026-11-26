@@ -10,7 +10,6 @@
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::OnceLock;
 
-use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::core::{Compress, Compression, CompressionInternal, Decompress, Destination, Output};
@@ -25,7 +24,7 @@ use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, R
 fn resources() -> &'static Resources {
     static RESOURCES: OnceLock<Resources> = OnceLock::new();
 
-    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
+    RESOURCES.get_or_init(|| Resources::new(crate::testing::memory().clone()))
 }
 
 /// Erases the difference between a build that can fail and one that cannot.
@@ -703,9 +702,12 @@ macro_rules! format_contract {
                         .built()
                 }
 
-                let shared = Resources::new(GlobalPool::new());
+                let shared = Resources::new(crate::testing::memory().clone());
                 let input = view(&payload());
-                let baseline = run(&mut build(&Resources::new(GlobalPool::new()).with_pool_capacity(0)), &input);
+                let baseline = run(
+                    &mut build(&Resources::new(crate::testing::memory().clone()).with_pool_capacity(0)),
+                    &input,
+                );
 
                 // Prime the pool so there is exactly one idle engine for two codecs to want.
                 drop(run(&mut build(&shared), &input));
@@ -752,7 +754,7 @@ macro_rules! format_contract {
                 };
 
                 let mut compressor = {
-                    let owned = Resources::new(GlobalPool::new());
+                    let owned = Resources::new(crate::testing::memory().clone());
                     let compressor = $module::Compressor::builder()
                         .output_chunk_size(chunk(4096))
                         .build(&owned)
@@ -782,7 +784,7 @@ macro_rules! format_contract {
                 };
 
                 for capacity in [0_usize, 1, 4] {
-                    let bounded = Resources::new(GlobalPool::new()).with_pool_capacity(capacity);
+                    let bounded = Resources::new(crate::testing::memory().clone()).with_pool_capacity(capacity);
 
                     for round in 0..12 {
                         let mut compressor = $module::Compressor::builder()
@@ -1572,7 +1574,7 @@ mod pooling {
     fn pooled_resources() -> &'static Resources {
         static POOLED: OnceLock<Resources> = OnceLock::new();
 
-        POOLED.get_or_init(|| Resources::new(GlobalPool::new()))
+        POOLED.get_or_init(|| Resources::new(crate::testing::memory().clone()))
     }
 
     /// A private pool holding exactly one idle engine.
@@ -1583,12 +1585,12 @@ mod pooling {
     /// another proves nothing. Each value owns its pool, so the engine under test is fresh.
     /// The assertion then passes even if reset is incorrect.
     fn solo_resources() -> Resources {
-        Resources::new(GlobalPool::new()).with_pool_capacity(1)
+        Resources::new(crate::testing::memory().clone()).with_pool_capacity(1)
     }
 
     /// Resources that recycle nothing, for the baseline a pooled run has to match.
     fn unpooled_resources() -> Resources {
-        Resources::new(GlobalPool::new()).with_pool_capacity(0)
+        Resources::new(crate::testing::memory().clone()).with_pool_capacity(0)
     }
 
     fn compress_with(resources: &Resources, level: Level, data: &[u8]) -> BytesView {
@@ -1751,7 +1753,7 @@ mod pooling {
 
     #[test]
     fn resources_without_recycling_still_work() {
-        let plain = Resources::new(GlobalPool::new()).with_pool_capacity(0);
+        let plain = Resources::new(crate::testing::memory().clone()).with_pool_capacity(0);
         let payload = b"no recycling here".repeat(20);
 
         let compressed = compress_with(&plain, Level::DEFAULT, &payload);

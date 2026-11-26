@@ -3,9 +3,11 @@
 
 //! Integration tests exercising real network requests through the HTTP client.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use bytes::Bytes;
+use bytesbuf::mem::GlobalPool;
 use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, PoolIndex};
 use fetch::telemetry::ConnectionInfo;
 use fetch::tokio::TokioDeps;
@@ -16,6 +18,12 @@ use ohno::{ErrorExt, assert_error_message};
 use tick::ClockControl;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -162,7 +170,7 @@ async fn json_borrowed() {
 async fn connection_info_attached_and_recreated_after_max_lifetime() {
     let control = ClockControl::new();
     let max_age = Duration::from_mins(1);
-    let client = HttpClient::builder_tokio(TokioDeps::with_clock(&control.to_clock()))
+    let client = HttpClient::builder_tokio(TokioDeps::new(&control.to_clock(), memory().clone()))
         .insecure_allow_http()
         .connection_pool_options(ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::fixed(max_age)))
         .build();
@@ -203,7 +211,7 @@ async fn connection_info_attached_and_recreated_after_max_lifetime() {
 }
 
 fn create_builder() -> HttpClientBuilder {
-    HttpClient::builder_tokio(TokioDeps::default()).insecure_allow_http()
+    HttpClient::builder_tokio(TokioDeps::new(&ClockControl::new().to_clock(), memory().clone())).insecure_allow_http()
 }
 
 async fn serve(body: impl Into<Bytes>) -> MockServer {

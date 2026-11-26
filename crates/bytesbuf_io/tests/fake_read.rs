@@ -6,9 +6,16 @@
 #![cfg(test)]
 
 #[cfg(feature = "test-util")]
+fn memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
+
+#[cfg(feature = "test-util")]
 mod testing_fake_read {
     use bytesbuf::BytesView;
-    use bytesbuf::mem::{GlobalPool, Memory};
+    use bytesbuf::mem::Memory;
     use bytesbuf_io::ReadExt;
     use bytesbuf_io::testing::FakeRead;
     use new_zealand::nz;
@@ -17,7 +24,7 @@ mod testing_fake_read {
     #[test]
     fn smoke_test() {
         async_test(async || {
-            let memory = GlobalPool::new();
+            let memory = crate::memory().clone();
             let mut buf = memory.reserve(100);
             buf.put_byte(1);
             buf.put_byte(2);
@@ -45,7 +52,7 @@ mod testing_fake_read {
     #[test]
     fn with_max_read_size() {
         async_test(async || {
-            let memory = GlobalPool::new();
+            let memory = crate::memory().clone();
             let test_data = BytesView::copied_from_slice(b"Hello, world!", &memory);
             let mut read_stream = FakeRead::builder().contents(test_data).max_read_size(nz!(2)).build();
 
@@ -95,7 +102,7 @@ mod testing_fake_read {
     #[test]
     fn read_more() {
         async_test(async || {
-            let memory = GlobalPool::new();
+            let memory = crate::memory().clone();
             let test_data = BytesView::copied_from_slice(b"Hello, world!", &memory);
             let mut read_stream = FakeRead::builder().contents(test_data.clone()).max_read_size(nz!(2)).build();
 
@@ -150,7 +157,7 @@ mod testing_fake_read {
             inner.reserve(min_bytes + MARKER_OFFSET)
         }));
 
-        let memory = GlobalPool::new();
+        let memory = crate::memory().clone();
         let contents = BytesView::copied_from_slice(b"test", &memory);
         let read_stream = FakeRead::builder().contents(contents).memory(custom_memory).build();
 

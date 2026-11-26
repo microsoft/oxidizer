@@ -5,9 +5,12 @@
 //!
 //! ```
 //! # #[cfg(feature = "gzip")] {
+//! use bytesbuf::mem::GlobalPool;
+//! use compressors::Resources;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! let layer = Compression::client().decompress_responses(&[Format::Gzip]);
+//! let layer = Compression::client(Resources::new(GlobalPool::new()))
+//!     .decompress_responses(&[Format::Gzip]);
 //! # let _ = layer;
 //! # }
 //! ```
@@ -64,16 +67,18 @@
 //! # #[cfg(feature = "gzip")] {
 //! use std::num::NonZeroU64;
 //!
-//! use compressors::DecompressorLimits;
+//! use bytesbuf::mem::GlobalPool;
+//! use compressors::{DecompressorLimits, Resources};
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! let client = Compression::client()
+//! let resources = Resources::new(GlobalPool::new());
+//! let client = Compression::client(resources.clone())
 //!     .decompress_responses(&[Format::Gzip])
 //!     .limits(
 //!         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
 //!     );
 //!
-//! let server = Compression::server()
+//! let server = Compression::server(resources)
 //!     .decompress_requests(&[Format::Gzip])
 //!     .compress_responses(&[Format::Gzip]);
 //! # let _ = (client, server);
@@ -134,3 +139,11 @@ pub(crate) const REPR_DIGEST_HEADER: &str = "repr-digest";
 
 pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
 pub use error::CompressibleTypeError;
+
+/// Supplies the one general-purpose resource set used by unit tests.
+#[cfg(test)]
+pub(crate) fn test_resources() -> &'static compressors::Resources {
+    static RESOURCES: std::sync::OnceLock<compressors::Resources> = std::sync::OnceLock::new();
+
+    RESOURCES.get_or_init(|| compressors::Resources::new(bytesbuf::mem::GlobalPool::new()))
+}

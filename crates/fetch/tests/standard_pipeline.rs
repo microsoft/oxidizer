@@ -87,7 +87,7 @@ fn create_per_host_client(calls: Calls) -> HttpClient {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::new(&clock, http_extensions::HttpBodyBuilder::new_fake()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 // Large timeouts keep auto-advance from firing before the test completes.
@@ -112,7 +112,7 @@ fn create_uniform_client(status: StatusCode, calls: Calls) -> HttpClient {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::new(&clock, http_extensions::HttpBodyBuilder::new_fake()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 .total_timeout(|t| t.timeout(Duration::MAX))
@@ -301,7 +301,7 @@ fn create_hedging_client(calls: Calls, responses: Vec<StatusCode>) -> HttpClient
         HttpResponseBuilder::new_fake().status(status).build()
     });
 
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::new(&clock, http_extensions::HttpBodyBuilder::new_fake()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 .total_timeout(|t| t.timeout(Duration::MAX))
@@ -375,7 +375,7 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    let client = HttpClient::builder_fake(handler, FakeDeps { clock })
+    let client = HttpClient::builder_fake(handler, FakeDeps::new(&clock, http_extensions::HttpBodyBuilder::new_fake()))
         .router(Router::fallback(
             BaseUri::from_static("https://primary.example.com/"),
             BaseUri::from_static("https://secondary.example.com/"),

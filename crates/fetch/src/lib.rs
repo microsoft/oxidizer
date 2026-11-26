@@ -81,12 +81,16 @@
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
+//! use bytesbuf::mem::GlobalPool;
 //! use fetch::{HttpClient, HttpError};
+//! use fetch::tokio::TokioDeps;
+//! use tick::Clock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
 //!     // Create a client with the bundled Tokio transport.
-//!     let client: HttpClient = HttpClient::new_tokio();
+//!     let client: HttpClient =
+//!         HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 //!
 //!     // Return an error for a `4xx` or `5xx` status, then read the body as text.
 //!     let body: String = client.get("https://example.com").fetch_text_body().await?;
@@ -624,7 +628,9 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create one client and reuse it.
-//! let client = HttpClient::new_tokio();
+//! # let memory = bytesbuf::mem::GlobalPool::new();
+//! # let deps = fetch::tokio::TokioDeps::new(&tick::Clock::new_tokio(), memory);
+//! let client = HttpClient::new_tokio(deps);
 //!
 //! // Parse repeated URIs once.
 //! let users_uri: Uri = "https://api.example.com/users".parse()?;
@@ -684,11 +690,15 @@
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
+//! use bytesbuf::mem::GlobalPool;
 //! use fetch::HttpClient;
+//! use fetch::tokio::TokioDeps;
+//! use tick::Clock;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = HttpClient::new_tokio();
+//!     let client =
+//!         HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 //!
 //!     // Send an HTTPS request.
 //!     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -880,5 +890,13 @@ pub mod documentation;
 // unit test in this crate runs. This keeps `tracing` emission paths executing
 // deterministically (never poisoned into the "disabled" state) and lets per-test
 // thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+/// Supplies the one general-purpose provider used by the unit-test binary.
+#[cfg(test)]
+fn test_memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
+
 #[cfg(test)]
 testing_aids::init_tracing!();

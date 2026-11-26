@@ -10,6 +10,7 @@ Its `HasMemory` implementation returns a clone of the provider.
 The builder must not replace those operations with a shared wrapper.
 Providers can keep independent state in each clone.
 
-`new_fake` passes a `GlobalPool` directly to `new`, which converts it to `OpaqueMemory`.
-It also supplies a frozen clock.
+Test-support code stores one lazily initialized `GlobalPool` in the linked
+test binary. `new_fake` clones that provider into `HttpBodyBuilder` and also
+supplies a frozen clock.
 The body representations, streaming policies, and timeout wrapper do not depend on the provider's concrete type.

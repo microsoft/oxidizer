@@ -22,6 +22,7 @@
 
 use std::hint::black_box;
 use std::num::NonZeroUsize;
+use std::sync::OnceLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -32,6 +33,12 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 /// Sizes chosen to bracket real traffic: a small API response, a page, and a large document.
 const SIZES: [usize; 3] = [1024, 64 * 1024, 1024 * 1024];
+
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 /// Builds a payload that compresses like real data rather than like a repeated string.
 ///
@@ -153,7 +160,7 @@ struct Input {
 
 impl Input {
     fn new(format: Format, size: usize) -> Self {
-        let memory = GlobalPool::new();
+        let memory = memory().clone();
         Self {
             format,
             bytes: view(&payload(size), &memory),
@@ -348,7 +355,7 @@ fn pooling(criterion: &mut Criterion) {
 }
 
 fn segmentation_input(segment: Option<usize>) -> Input {
-    let memory = GlobalPool::new();
+    let memory = memory().clone();
     let bytes = payload(64 * 1024);
     let input = Input {
         format: REPRESENTATIVE_FORMAT,
@@ -571,7 +578,7 @@ fn brotli_window(criterion: &mut Criterion) {
 /// leaves the level groups undecidable on their own. Ratio is deterministic, so it is computed
 /// once rather than benchmarked.
 fn ratios() {
-    let memory = GlobalPool::new();
+    let memory = memory().clone();
     let resources = Resources::new(memory.clone());
     let bytes = payload(64 * 1024);
     let input = view(&bytes, &memory);

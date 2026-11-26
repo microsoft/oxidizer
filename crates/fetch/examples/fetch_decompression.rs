@@ -4,6 +4,7 @@
 //! Enables automatic response decompression with a fake transport.
 
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use compressors::Resources;
 use compressors::format::Format;
 use fetch::fake::{FakeDeps, FakeHandler};
@@ -15,11 +16,10 @@ use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 fn main() -> Result<(), ohno::AppError> {
     futures::executor::block_on(async {
         let expected = "a mocked gzip response";
-        let compressed = compressors::format::compress(
-            Format::Gzip,
-            BytesView::copied_from_slice(expected.as_bytes(), &fetch::HttpBodyBuilder::new_fake()),
-            Resources::global(),
-        )?;
+        let memory = GlobalPool::new();
+        let resources = Resources::new(memory.clone());
+        let compressed =
+            compressors::format::compress(Format::Gzip, BytesView::copied_from_slice(expected.as_bytes(), &memory), &resources)?;
 
         let handler = FakeHandler::from_fn(move |request| {
             assert_eq!(request.headers().get(ACCEPT_ENCODING), Some(&HeaderValue::from_static("gzip")));

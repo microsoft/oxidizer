@@ -43,13 +43,14 @@ Each format module provides `compress` and `decompress`. The crate-level [`compr
 [`decompress`][__link8] functions accept any engine that implements [`Compression`][__link9].
 
 ```rust
+use bytesbuf::mem::GlobalPool;
 use compressors::{Resources, gzip};
 
-let resources = Resources::global();
-let compressed = gzip::compress(b"hello", resources)?;
+let resources = Resources::new(GlobalPool::new());
+let compressed = gzip::compress(b"hello", &resources)?;
 
 assert_eq!(
-    gzip::decompress(compressed, resources)?.to_vec(),
+    gzip::decompress(compressed, &resources)?.to_vec(),
     b"hello".to_vec()
 );
 ```
@@ -65,10 +66,11 @@ converts a stream of byte sequences:
 use std::io::Error as IoError;
 
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use compressors::{CompressionStream, Resources, gzip};
 use futures::{TryStreamExt, stream};
 
-let resources = Resources::global();
+let resources = Resources::new(GlobalPool::new());
 let body = stream::iter(vec![
     Ok::<_, IoError>(BytesView::copied_from_slice(b"a body ", resources.memory())),
     Ok(BytesView::copied_from_slice(
@@ -77,7 +79,7 @@ let body = stream::iter(vec![
     )),
 ]);
 
-let mut compressed = CompressionStream::compress(body, gzip::Compressor::new(resources));
+let mut compressed = CompressionStream::compress(body, gzip::Compressor::new(&resources));
 
 // Inspect and drop each chunk to keep retained memory bounded.
 let mut magic = Vec::new();
@@ -103,16 +105,17 @@ zlib-wrapped stream (RFC 1950). `Format::from_content_encoding("deflate")` there
 to `Format::Zlib` and needs the `zlib` feature, not the `deflate` feature.
 
 ```rust
+use bytesbuf::mem::GlobalPool;
 use compressors::Resources;
 use compressors::format::{self, Format};
 
 let format = Format::from_content_encoding("gzip").expect("this build supports gzip");
 
-let resources = Resources::global();
-let compressed = format::compress(format, b"runtime selected", resources)?;
+let resources = Resources::new(GlobalPool::new());
+let compressed = format::compress(format, b"runtime selected", &resources)?;
 
 assert_eq!(
-    format::decompress(format, compressed, resources)?.to_vec(),
+    format::decompress(format, compressed, &resources)?.to_vec(),
     b"runtime selected".to_vec()
 );
 ```
@@ -128,15 +131,16 @@ Set the pool capacity to zero with [`with_pool_capacity`][__link13] to
 disable recycling.
 
 ```rust
+use bytesbuf::mem::GlobalPool;
 use compressors::{Level, Resources, gzip};
 
 // Keep one value for the application.
-let resources = Resources::global();
+let resources = Resources::new(GlobalPool::new());
 
 // Build one compressor for each request. Dropping it recycles its engine.
 let compressor = gzip::Compressor::builder()
     .level(Level::DEFAULT)
-    .build(resources);
+    .build(&resources);
 ```
 
 The pool retains only engine state for which reuse justifies its memory cost. This choice is not
@@ -191,7 +195,7 @@ See [`documentation`][__link19] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6y7_UedsNgUbjtIbIb-UfQsbjmTeDR3Oi9IbqbHLaorJVi5hZIKCaGJ5dGVzYnVmZjAuMTUuMIJrY29tcHJlc3NvcnNlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVgAQTz8Pow4bTv1BigtOEpYbDQDBiSEoMUsb1ZiCH73NLEphZIKCaGJ5dGVzYnVmZjAuMTUuMIJrY29tcHJlc3NvcnNlMC42LjA
  [__link0]: https://crates.io/crates/bytesbuf/0.15.0
  [__link1]: https://docs.rs/compressors/0.6.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.6.0/compressors/?search=format

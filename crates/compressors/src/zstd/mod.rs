@@ -14,16 +14,18 @@
 //! # Examples
 //!
 //! ```
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, zstd};
 //!
-//! let compressed = zstd::compress(b"the quick brown fox", &Resources::default())?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = zstd::compress(b"the quick brown fox", &resources)?;
 //! assert_eq!(
 //!     compressed.range(0..4).to_vec(),
 //!     vec![0x28, 0xb5, 0x2f, 0xfd]
 //! );
 //!
 //! assert_eq!(
-//!     zstd::decompress(compressed, &Resources::default())?.to_vec(),
+//!     zstd::decompress(compressed, &resources)?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())
@@ -220,13 +222,14 @@ impl TryFrom<u32> for WindowLog {
 /// # Examples
 ///
 /// ```
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::Resources;
 /// use compressors::zstd::{self, CompressionLevel};
 ///
 /// // Select a negative fast level that is below the portable scale.
 /// let compressor = zstd::Compressor::builder()
 ///     .compression_level(CompressionLevel::new(-3).expect("-3 is in range"))
-///     .build(&Resources::default())?;
+///     .build(&Resources::new(GlobalPool::new()))?;
 /// # let _ = compressor;
 /// # Ok::<(), compressors::BuildError>(())
 /// ```

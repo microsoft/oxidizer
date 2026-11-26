@@ -7,16 +7,30 @@
 
 use std::error::Error as _;
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::sync::OnceLock;
 
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Error, Resources, TrailingData};
 use recoverable::{Recovery as _, RecoveryInfo};
 
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
+
+fn shared_resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(memory().clone()))
+}
+
 #[cfg(feature = "deflate")]
 #[test]
 fn gamma_round2_raw_decoder_reuse_does_not_add_a_zlib_header_requirement() {
-    let resources = Resources::default().with_pool_capacity(1);
+    let resources = shared_resources().clone().with_pool_capacity(1);
     for payload in [b"first".as_slice(), b"SECOND".as_slice(), b"third".as_slice()] {
         let encoded = compressors::format::compress(Format::Deflate, payload, &resources).unwrap();
         let decoded = compressors::format::decompress(Format::Deflate, encoded, &resources).unwrap();
@@ -35,15 +49,15 @@ fn gamma_round2_gzip_retains_long_distance_window_history() {
         })
         .collect();
     let payload = [block.as_slice(), block.as_slice()].concat();
-    let resources = Resources::default();
-    let compressed = compressors::format::compress(Format::Gzip, payload.as_slice(), &resources).unwrap();
+    let resources = shared_resources();
+    let compressed = compressors::format::compress(Format::Gzip, payload.as_slice(), resources).unwrap();
     assert!(
         compressed.len() < 30_000,
         "the second block must reuse history more than 16 KiB behind it"
     );
     let decoder = DecompressorBuilder::new()
         .output_chunk_size(NonZeroUsize::new(1_024).unwrap())
-        .build_format(Format::Gzip, &resources)
+        .build_format(Format::Gzip, resources)
         .unwrap();
     let plain = compressors::decompress(compressed, decoder).unwrap();
     assert_eq!(plain.to_vec(), payload);
@@ -75,7 +89,7 @@ fn gamma_round2_relocation_preserves_the_optional_source_coordinate() {
     let sources = Arc::new(Mutex::new(Vec::new()));
     let memory = CallbackMemory::new(
         RecordsSource {
-            memory: GlobalPool::new(),
+            memory: memory().clone(),
             sources: Arc::clone(&sources),
         },
         reserve,
@@ -88,23 +102,23 @@ fn gamma_round2_relocation_preserves_the_optional_source_coordinate() {
 
 #[test]
 fn gamma_survivor_chunked_roundtrip_truncation_and_trailing_data() {
-    let resources = Resources::default();
+    let resources = shared_resources();
     let payload: Vec<u8> = (0_u16..257).map(|i| u8::try_from(i % 251).unwrap()).collect();
     for &format in Format::ALL {
         for size in [1, 7, 64] {
             let chunk = NonZeroUsize::new(size).unwrap();
             let encoder = CompressorBuilder::new()
                 .output_chunk_size(chunk)
-                .build_format(format, &resources)
+                .build_format(format, resources)
                 .unwrap();
             let compressed = compressors::compress(BytesView::copied_from_slice(&payload, resources.memory()), encoder).unwrap();
             let decoder = DecompressorBuilder::new()
                 .output_chunk_size(chunk)
-                .build_format(format, &resources)
+                .build_format(format, resources)
                 .unwrap();
             assert_eq!(compressors::decompress(compressed.clone(), decoder).unwrap().to_vec(), payload);
             let truncated = compressed.range(..compressed.len() - 1);
-            let error = compressors::format::decompress(format, truncated, &resources).unwrap_err();
+            let error = compressors::format::decompress(format, truncated, resources).unwrap_err();
             assert!(
                 error.is_corrupt_data() || error.is_unexpected_end_of_stream(),
                 "{format:?}: {error}"
@@ -116,7 +130,7 @@ fn gamma_survivor_chunked_roundtrip_truncation_and_trailing_data() {
             let trailing = BytesView::from_views([compressed.clone(), BytesView::copied_from_slice(b"not a frame", resources.memory())]);
             let decoder = DecompressorBuilder::new()
                 .multi_stream(false)
-                .build_format(format, &resources)
+                .build_format(format, resources)
                 .unwrap();
             let error = compressors::decompress(trailing.clone(), decoder).unwrap_err();
             assert!(error.is_corrupt_data());
@@ -124,7 +138,7 @@ fn gamma_survivor_chunked_roundtrip_truncation_and_trailing_data() {
             let decoder = DecompressorBuilder::new()
                 .multi_stream(false)
                 .trailing_data(TrailingData::Ignore)
-                .build_format(format, &resources)
+                .build_format(format, resources)
                 .unwrap();
             assert_eq!(compressors::decompress(trailing, decoder).unwrap().to_vec(), payload);
         }
@@ -133,12 +147,12 @@ fn gamma_survivor_chunked_roundtrip_truncation_and_trailing_data() {
 
 #[test]
 fn gamma_survivor_output_limit_exact_boundary_and_message() {
-    let resources = Resources::default();
+    let resources = shared_resources();
     for &format in Format::ALL {
-        let compressed = compressors::format::compress(format, b"abcdefghijklmnop", &resources).unwrap();
+        let compressed = compressors::format::compress(format, b"abcdefghijklmnop", resources).unwrap();
         for maximum in [15, 16, 17] {
             let limits = DecompressorLimits::new().max_output_len(NonZeroU64::new(maximum).unwrap());
-            let result = compressors::format::decompress_with_limits(format, compressed.clone(), &resources, limits);
+            let result = compressors::format::decompress_with_limits(format, compressed.clone(), resources, limits);
             if maximum < 16 {
                 let error = result.unwrap_err();
                 assert!(error.is_limit_exceeded());
@@ -152,16 +166,16 @@ fn gamma_survivor_output_limit_exact_boundary_and_message() {
 
 #[test]
 fn gamma_survivor_concatenated_members_reset_and_obey_stream_cap() {
-    let resources = Resources::default();
+    let resources = shared_resources();
     for &format in Format::ALL {
-        let first = compressors::format::compress(format, b"first", &resources).unwrap();
-        let second = compressors::format::compress(format, b"SECOND", &resources).unwrap();
+        let first = compressors::format::compress(format, b"first", resources).unwrap();
+        let second = compressors::format::compress(format, b"SECOND", resources).unwrap();
         let both = BytesView::from_views([first.clone(), second.clone()]);
         let decoder = DecompressorBuilder::new()
             .multi_stream(true)
             .output_chunk_size(NonZeroUsize::new(1).unwrap())
             .limits(DecompressorLimits::new().max_streams(NonZeroU64::new(2).unwrap()))
-            .build_format(format, &resources)
+            .build_format(format, resources)
             .unwrap();
         assert_eq!(
             compressors::decompress(both.clone(), decoder).unwrap().to_vec(),
@@ -172,7 +186,7 @@ fn gamma_survivor_concatenated_members_reset_and_obey_stream_cap() {
         let decoder = DecompressorBuilder::new()
             .multi_stream(true)
             .limits(DecompressorLimits::new().max_streams(NonZeroU64::new(2).unwrap()))
-            .build_format(format, &resources)
+            .build_format(format, resources)
             .unwrap();
         let error = compressors::decompress(third, decoder).unwrap_err();
         assert!(error.is_limit_exceeded(), "{format:?}: {error}");
@@ -208,9 +222,9 @@ fn gamma_survivor_resources_uses_the_supplied_memory() {
         RESERVATIONS.fetch_add(1, Ordering::Relaxed);
         memory.reserve(size)
     }
-    let resources = Resources::new(CallbackMemory::new(GlobalPool::new(), reserve));
+    let custom_resources = Resources::new(CallbackMemory::new(memory().clone(), reserve));
     let before = RESERVATIONS.load(Ordering::Relaxed);
-    let buffer = resources.memory().reserve(17);
+    let buffer = custom_resources.memory().reserve(17);
     assert!(buffer.remaining_capacity() >= 17);
     assert_eq!(RESERVATIONS.load(Ordering::Relaxed), before + 1);
 }
@@ -233,7 +247,7 @@ fn gamma_survivor_brotli_window_conversion_keeps_nondefault_value() {
     for exponent in 10..=24 {
         assert_eq!(u8::from(compressors::brotli::WindowSize::new(exponent).unwrap()), exponent);
     }
-    let error = compressors::format::decompress(Format::Brotli, [255; 16].as_slice(), Resources::global()).unwrap_err();
+    let error = compressors::format::decompress(Format::Brotli, [255; 16].as_slice(), shared_resources()).unwrap_err();
     assert!(error.is_corrupt_data());
     assert_eq!(error.to_string(), "the compressed data is not a valid brotli stream");
 }
@@ -256,9 +270,9 @@ fn gamma_survivor_stream_source_failure_is_fused() {
     futures::executor::block_on(async {
         let source = stream::iter([
             Err::<BytesView, _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
-            Ok(BytesView::copied_from_slice(b"must not be read", Resources::global().memory())),
+            Ok(BytesView::copied_from_slice(b"must not be read", shared_resources().memory())),
         ]);
-        let mut stream = compressors::CompressionStream::compress(source, compressors::gzip::Compressor::new(Resources::global()));
+        let mut stream = compressors::CompressionStream::compress(source, compressors::gzip::Compressor::new(shared_resources()));
         let mut failure = None;
         for _ in 0..4 {
             match stream.next().await.unwrap() {

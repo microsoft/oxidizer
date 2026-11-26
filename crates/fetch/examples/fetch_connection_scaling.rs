@@ -6,9 +6,11 @@
 
 use std::time::Duration;
 
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
 use fetch::options::ConnectionPoolOptions;
 use fetch::tokio::TokioDeps;
+use tick::Clock;
 use tokio::spawn;
 use tracing::info;
 
@@ -22,7 +24,7 @@ const URL: &str = "https://example.com";
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    let deps = TokioDeps::default();
+    let deps = TokioDeps::new(&Clock::new_tokio(), GlobalPool::new());
     let clock = deps.clock.clone();
 
     let client = HttpClient::builder_tokio(deps)

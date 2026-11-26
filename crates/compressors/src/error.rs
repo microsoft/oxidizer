@@ -69,9 +69,11 @@ fn detect_recovery(source: &(dyn StdError + 'static)) -> RecoveryInfo {
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::{Resources, gzip};
 ///
-/// let error = gzip::decompress(b"definitely not gzip", &Resources::default()).unwrap_err();
+/// let resources = Resources::new(GlobalPool::new());
+/// let error = gzip::decompress(b"definitely not gzip", &resources).unwrap_err();
 /// assert!(error.is_corrupt_data());
 /// # }
 /// ```
@@ -347,9 +349,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 /// # #[cfg(feature = "zstd")]
 /// # {
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::{Resources, zstd};
 ///
-/// let compressor = zstd::Compressor::builder().build(&Resources::default())?;
+/// let resources = Resources::new(GlobalPool::new());
+/// let compressor = zstd::Compressor::builder().build(&resources)?;
 /// # let _ = compressor;
 /// # }
 /// # Ok::<(), compressors::BuildError>(())

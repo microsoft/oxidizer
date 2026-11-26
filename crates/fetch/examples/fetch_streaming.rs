@@ -5,12 +5,15 @@
 
 use std::io::{BufWriter, Write};
 
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
+use fetch::tokio::TokioDeps;
 use futures::TryStreamExt;
+use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let client = HttpClient::new_tokio();
+    let client = HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 
     // Send a GET request and read the body as a stream.
     let body = client.get("https://example.com").fetch().await?.into_body();

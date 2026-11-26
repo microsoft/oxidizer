@@ -10,7 +10,7 @@
 //! These APIs require the `tokio` feature and at least one TLS backend: `rustls` or `native-tls`.
 
 use anyspawn::Spawner;
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::OpaqueMemory;
 use fetch_hyper::HyperTransportBuilder;
 use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
@@ -53,18 +53,12 @@ pub struct TokioDeps {
     pub memory: OpaqueMemory,
 }
 
-impl Default for TokioDeps {
-    fn default() -> Self {
-        Self::with_clock(&Clock::new_tokio())
-    }
-}
-
 impl TokioDeps {
-    /// Creates `TokioDeps` with the given clock and the global memory pool.
+    /// Creates dependencies with an application-owned clock and memory provider.
     #[must_use]
-    pub fn with_clock(clock: &Clock) -> Self {
+    pub fn new(clock: &Clock, memory: impl Into<OpaqueMemory>) -> Self {
         Self {
-            memory: OpaqueMemory::new(GlobalPool::new()),
+            memory: memory.into(),
             clock: clock.clone(),
         }
     }
@@ -143,8 +137,10 @@ impl HttpClient {
     /// # use fetch::options::SocketOptions;
     /// # use fetch::tokio::{TokioDeps, TokioTransportOptions};
     /// # fn build() -> fetch::HttpClientBuilder {
+    /// # let clock = tick::Clock::new_tokio();
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// HttpClient::builder_tokio_with_options(
-    ///     TokioDeps::default(),
+    ///     TokioDeps::new(&clock, memory),
     ///     TokioTransportOptions::default().socket(SocketOptions::default().no_delay(true)),
     /// )
     /// # }
@@ -157,14 +153,14 @@ impl HttpClient {
 
     /// Creates an HTTP client for Tokio.
     ///
-    /// This method uses the default configuration. Use [`builder_tokio`][Self::builder_tokio] to
-    /// change the configuration or pass custom [`TokioDeps`].
+    /// This method uses the default transport and pipeline configuration. The caller supplies the
+    /// application-owned clock and memory provider through `deps`.
     ///
     /// Available only when compiled with the `tokio` feature and a TLS backend
     /// (`rustls` and/or `native-tls`).
     #[must_use]
-    pub fn new_tokio() -> Self {
-        Self::builder_tokio(TokioDeps::default()).build()
+    pub fn new_tokio(deps: impl Into<TokioDeps>) -> Self {
+        Self::builder_tokio(deps).build()
     }
 }
 
@@ -307,8 +303,7 @@ fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOpt
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
     let connector = TokioConnector::new(options.socket);
 
-    HyperTransportBuilder::new(connector, Spawner::new_tokio(None), cx.clock, cx.options)
-        .body_builder(cx.body_builder)
+    HyperTransportBuilder::new(connector, Spawner::new_tokio(None), cx.clock, cx.body_builder, cx.options)
         .pool_index(cx.pool_index)
         .meter(cx.meter)
         .build(tls_backend)
@@ -353,7 +348,7 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
+    use bytesbuf::mem::{CallbackMemory, HasMemory as _, Memory as _, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
     use thread_aware::{Relocator, unaware};
@@ -372,7 +367,7 @@ mod tests {
             SocketOptions::default().no_delay(true).send_buffer_size(31).receive_buffer_size(47),
         ] {
             let _client = crate::HttpClient::builder_tokio_with_options(
-                super::TokioDeps::with_clock(&Clock::new_frozen()),
+                super::TokioDeps::new(&Clock::new_frozen(), crate::test_memory().clone()),
                 super::TokioTransportOptions::default().socket(socket),
             )
             .minimal_pipeline()
@@ -429,13 +424,17 @@ mod tests {
         let observed = Arc::clone(&seen);
         let options =
             super::TokioTransportOptions::default().socket(SocketOptions::default().send_buffer_size(123).receive_buffer_size(456));
-        let _client = super::create_tokio_builder_with_options(TokioDeps::with_clock(&Clock::new_frozen()), options, move |_, actual| {
-            observed
-                .lock()
-                .unwrap()
-                .push((actual.socket.send_buffer_size, actual.socket.receive_buffer_size));
-            TransportHandler::new(FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().build()))
-        })
+        let _client = super::create_tokio_builder_with_options(
+            TokioDeps::new(&Clock::new_frozen(), crate::test_memory().clone()),
+            options,
+            move |_, actual| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push((actual.socket.send_buffer_size, actual.socket.receive_buffer_size));
+                TransportHandler::new(FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().build()))
+            },
+        )
         .minimal_pipeline()
         .build();
         assert_eq!(*seen.lock().unwrap(), [(Some(123), Some(456))]);
@@ -447,7 +446,7 @@ mod tests {
         let reservations = Arc::new(Mutex::new(Vec::new()));
         let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
             reservations.lock().unwrap().push(min_bytes);
-            GlobalPool::new().reserve(min_bytes)
+            crate::test_memory().reserve(min_bytes)
         });
         let client = create_tokio_builder(
             TokioDeps {
@@ -476,7 +475,9 @@ mod tests {
     #[tokio::test]
     async fn test_builder_tokio() {
         let clock = Clock::new_tokio();
-        let client = HttpClient::builder_tokio(TokioDeps::with_clock(&clock)).minimal_pipeline().build();
+        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone()))
+            .minimal_pipeline()
+            .build();
 
         assert!(matches!(client.pipeline(), Pipeline::Minimal(_)));
 
@@ -523,16 +524,16 @@ mod tests {
     #[tokio::test]
     async fn test_new_tokio() {
         let clock = Clock::new_tokio();
-        let client = HttpClient::builder_tokio(TokioDeps::with_clock(&clock)).build();
+        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone())).build();
 
         assert!(client.pipeline().is_standard());
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn new_tokio_uses_default_deps() {
-        // new_tokio uses TokioDeps::default, Clock::new_tokio, and the standard pipeline.
-        let client = HttpClient::new_tokio();
+    async fn new_tokio_uses_supplied_deps() {
+        let deps = TokioDeps::new(&Clock::new_tokio(), crate::test_memory().clone());
+        let client = HttpClient::new_tokio(deps);
 
         assert!(client.pipeline().is_standard());
     }
@@ -542,7 +543,7 @@ mod tests {
     async fn tokio_client_works_after_relocation() {
         let clock = Clock::new_tokio();
 
-        let mut client = HttpClient::builder_tokio(TokioDeps::with_clock(&clock))
+        let mut client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone()))
             .custom_pipeline(|_root, _ctx| FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).build()))
             .build();
 

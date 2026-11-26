@@ -733,7 +733,6 @@ unsafe impl Sync for RequestContext {}
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use bytesbuf::mem::GlobalPool;
     use bytesbuf::{BytesBuf, BytesView};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
@@ -974,7 +973,7 @@ mod tests {
         // slot torn down while still armed owns the only completion sender and
         // the only reference to the buffer lent to WinHTTP, and must release
         // both exactly once, which Miri verifies.
-        let pool = GlobalPool::new();
+        let pool = crate::test_memory().clone();
         let slot = Box::pin(CallbackOperationSlot::new());
         let buffer = OperationBuffer::write(BytesView::copied_from_slice(b"lent", &pool), 4);
 
@@ -998,7 +997,7 @@ mod tests {
         // was lent, so the error completion has to keep that buffer alive until
         // the caller drops the result. Only the operation that lent nothing may
         // carry nothing.
-        let pool = GlobalPool::new();
+        let pool = crate::test_memory().clone();
 
         assert!(OperationBuffer::none().into_completion().is_none());
 

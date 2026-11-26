@@ -285,7 +285,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+    use bytesbuf::mem::OpaqueMemory;
     use http::StatusCode;
     use http_extensions::FakeHandler;
     use thread_aware::unaware;
@@ -298,7 +298,7 @@ mod tests {
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
-            memory: OpaqueMemory::new(GlobalPool::new()),
+            memory: OpaqueMemory::new(crate::test_memory().clone()),
             extras: (),
         }
     }
@@ -341,7 +341,7 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            memory: OpaqueMemory::new(GlobalPool::new()),
+            memory: OpaqueMemory::new(crate::test_memory().clone()),
             extras: unaware(Arc::clone(&counter)),
         };
 

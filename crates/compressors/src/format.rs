@@ -26,21 +26,22 @@ use crate::resources::Resources;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
+/// use bytesbuf::mem::GlobalPool;
 /// use compressors::format::{self, Format};
 /// use compressors::{CompressorBuilder, Level, Resources};
 ///
 /// // The format arrives as a string, from an HTTP header.
 /// let format = Format::from_content_encoding("gzip").expect("a supported encoding");
 ///
-/// let resources = Resources::global();
-/// let compressed = format::compress(format, b"payload", resources)?;
+/// let resources = Resources::new(GlobalPool::new());
+/// let compressed = format::compress(format, b"payload", &resources)?;
 ///
 /// assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
 ///
 /// // Or build the compressor yourself when the level or chunk size matters.
 /// let tuned = CompressorBuilder::new()
 ///     .level(Level::HIGH)
-///     .build_format(format, resources)?;
+///     .build_format(format, &resources)?;
 /// # let _ = tuned;
 /// # }
 /// # Ok::<(), compressors::Error>(())
@@ -558,7 +559,7 @@ mod tests {
     }
 
     fn compressed_bytes(builder: CompressorBuilder<()>, format: Format, payload: &[u8]) -> Vec<u8> {
-        let mut compressor = builder.build_format(format, &Resources::default()).unwrap();
+        let mut compressor = builder.build_format(format, crate::testing::resources()).unwrap();
         compressor.push(view(payload)).unwrap();
         compressor.end_input();
 
@@ -588,7 +589,7 @@ mod tests {
         let payload = b"counted and flushed ".repeat(200);
 
         for &format in Format::ALL {
-            let mut compressor = Compressor::new(format, &Resources::default()).unwrap();
+            let mut compressor = Compressor::new(format, crate::testing::resources()).unwrap();
 
             compressor.push(view(&payload)).unwrap();
             compressor.flush().unwrap();
@@ -634,7 +635,7 @@ mod tests {
                 }
             }
 
-            let mut decompressor = Decompressor::new(format, &Resources::default()).unwrap();
+            let mut decompressor = Decompressor::new(format, crate::testing::resources()).unwrap();
 
             let compressed_len = compressed.len() as u64;
             decompressor.push(compressed.consume_all()).unwrap();
@@ -731,7 +732,7 @@ mod tests {
         for &format in Format::ALL {
             let mut compressor = CompressorBuilder::new()
                 .output_chunk_size(bound)
-                .build_format(format, &Resources::default())
+                .build_format(format, crate::testing::resources())
                 .unwrap();
             compressor.push(view(&b"chunked ".repeat(5_000))).unwrap();
             compressor.end_input();
@@ -756,7 +757,7 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_limits() {
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), crate::testing::resources()).unwrap();
 
             let mut decompressor = DecompressorBuilder::new()
                 .limits(
@@ -765,7 +766,7 @@ mod tests {
                         .max_output_len(NonZeroU64::new(1024).unwrap()),
                 )
                 .output_chunk_size(NonZeroUsize::new(64).unwrap())
-                .build_format(format, &Resources::default())
+                .build_format(format, crate::testing::resources())
                 .unwrap();
             decompressor.push(compressed).unwrap();
             decompressor.end_input();
@@ -792,9 +793,11 @@ mod tests {
         const EXPECTED_DEFAULT_CHUNK_SIZE: usize = 65_536;
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 256 * 1024]), crate::testing::resources()).unwrap();
 
-            let mut decompressor = DecompressorBuilder::new().build_format(format, &Resources::default()).unwrap();
+            let mut decompressor = DecompressorBuilder::new()
+                .build_format(format, crate::testing::resources())
+                .unwrap();
             decompressor.push(compressed).unwrap();
             decompressor.end_input();
 
@@ -831,10 +834,10 @@ mod tests {
         let bound = NonZeroUsize::new(128).unwrap();
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&b"chunked output ".repeat(5_000)), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&b"chunked output ".repeat(5_000)), crate::testing::resources()).unwrap();
             let mut decompressor = DecompressorBuilder::new()
                 .output_chunk_size(bound)
-                .build_format(format, &Resources::default())
+                .build_format(format, crate::testing::resources())
                 .unwrap();
             decompressor.push(compressed).unwrap();
             decompressor.end_input();
@@ -859,13 +862,13 @@ mod tests {
     #[test]
     fn the_decompressor_builder_applies_its_trailing_data_policy() {
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&b"payload ".repeat(4_096)), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&b"payload ".repeat(4_096)), crate::testing::resources()).unwrap();
             let joined = BytesView::from_views([compressed, view(b"trailing")]);
             let mut decompressor = DecompressorBuilder::new()
                 .multi_stream(false)
                 .trailing_data(TrailingData::Reject)
                 .output_chunk_size(NonZeroUsize::new(64).unwrap())
-                .build_format(format, &Resources::default())
+                .build_format(format, crate::testing::resources())
                 .unwrap();
             decompressor.push(joined).unwrap();
             decompressor.end_input();
@@ -891,11 +894,11 @@ mod tests {
     #[test]
     fn explicit_limits_are_available_on_the_one_shot_runtime_api() {
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&vec![0_u8; 4096]), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&vec![0_u8; 4096]), crate::testing::resources()).unwrap();
             let error = crate::format::decompress_with_limits(
                 format,
                 compressed,
-                &Resources::default(),
+                crate::testing::resources(),
                 DecompressorLimits::new()
                     .unbounded_ratio()
                     .max_output_len(NonZeroU64::new(1024).unwrap()),
@@ -913,7 +916,7 @@ mod tests {
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&payload), crate::testing::resources()).unwrap();
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             let joined_len = decompressed_len(
@@ -944,7 +947,7 @@ mod tests {
             // Matching the variant by name keeps this free of the cfg gates the variants carry.
             let joins_by_default = matches!(format!("{format:?}").as_str(), "Gzip" | "Zstd");
 
-            let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
+            let compressed = crate::format::compress(format, view(&payload), crate::testing::resources()).unwrap();
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             // `Ignore` isolates the multi-stream default under test from the trailing-data policy.
@@ -965,7 +968,7 @@ mod tests {
     }
 
     fn decompressor_for(builder: DecompressorBuilder<()>, format: Format) -> Decompressor {
-        builder.build_format(format, &Resources::default()).unwrap()
+        builder.build_format(format, crate::testing::resources()).unwrap()
     }
 
     #[test]

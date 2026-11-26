@@ -196,7 +196,7 @@ mod tests {
 
     use anyspawn::Spawner;
     use bytes::Bytes;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::OpaqueMemory;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
@@ -286,7 +286,7 @@ mod tests {
         let connector = FakeConnector::new_success(Bytes::from_static(b"NOT HTTP"), clock.clone());
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
-        let builder = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options);
+        let builder = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, fake_body_builder(), options);
         let handler = build_hyper_handler(builder, tls(), fake_body_builder(), &opentelemetry::global::meter("test"));
         let error = handler.client.request(test_request()).await.unwrap_err();
         gamma_check_error_display(&HyperError::Legacy(error));
@@ -305,9 +305,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.connection_pool.connection_lifetime = lifetime;
-        HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
-            .body_builder(HttpBodyBuilder::new_fake())
-            .build(tls())
+        HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, HttpBodyBuilder::new_fake(), options).build(tls())
     }
 
     fn test_request() -> HttpRequest {
@@ -325,7 +323,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler: HyperHandler<FakeConnector, crate::testing::FakeStream> = build_hyper_handler(
-            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options),
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, HttpBodyBuilder::new_fake(), options),
             tls(),
             HttpBodyBuilder::new_fake(),
             &opentelemetry::global::meter("test"),
@@ -353,12 +351,12 @@ mod tests {
         let connection_clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\n\r\n"), connection_clock.clone());
         let body_clock = tick::ClockControl::new();
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &body_clock.to_clock())
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(HttpBodyBuilder::new_fake()), &body_clock.to_clock())
             .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)));
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler = build_hyper_handler(
-            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), connection_clock, options),
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), connection_clock, body_builder.clone(), options),
             tls(),
             body_builder,
             &opentelemetry::global::meter("test"),
@@ -393,9 +391,8 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.supported_http_versions = vec![Version::HTTP_2];
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
-            .body_builder(HttpBodyBuilder::new_fake())
-            .build(tls());
+        let handler =
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, HttpBodyBuilder::new_fake(), options).build(tls());
         // Execute to drive the http2 path; we don't care if it fails or not.
         let _ = handler.execute(test_request()).await;
     }
@@ -464,9 +461,14 @@ mod tests {
             FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"), clock.clone());
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock.clone(), options)
-            .body_builder(HttpBodyBuilder::new(bytesbuf::mem::GlobalPool::new(), &clock))
-            .build(tls());
+        let handler = HyperTransportBuilder::new(
+            connector,
+            Spawner::new_tokio(None),
+            clock.clone(),
+            HttpBodyBuilder::new(OpaqueMemory::new(HttpBodyBuilder::new_fake()), &clock),
+            options,
+        )
+        .build(tls());
         let mut request = test_request();
         request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
         let response = handler.execute(request).await.unwrap();

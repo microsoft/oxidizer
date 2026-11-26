@@ -12,13 +12,15 @@
 //! # Examples
 //!
 //! ```
+//! use bytesbuf::mem::GlobalPool;
 //! use compressors::{Resources, gzip};
 //!
-//! let compressed = gzip::compress(b"the quick brown fox", &Resources::default())?;
+//! let resources = Resources::new(GlobalPool::new());
+//! let compressed = gzip::compress(b"the quick brown fox", &resources)?;
 //! assert_eq!(compressed.range(0..2).to_vec(), vec![0x1f, 0x8b]);
 //!
 //! assert_eq!(
-//!     gzip::decompress(compressed, &Resources::default())?.to_vec(),
+//!     gzip::decompress(compressed, &resources)?.to_vec(),
 //!     b"the quick brown fox".to_vec()
 //! );
 //! # Ok::<(), compressors::Error>(())

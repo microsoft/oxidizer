@@ -150,8 +150,9 @@ pub struct Decompress;
 /// }
 ///
 /// let memory = GlobalPool::new();
+/// let resources = Resources::new(memory.clone());
 /// let compressed = compress(
-///     gzip::Compressor::new(&Resources::default()),
+///     gzip::Compressor::new(&resources),
 ///     BytesView::copied_from_slice(b"format agnostic", &memory),
 /// )?;
 ///

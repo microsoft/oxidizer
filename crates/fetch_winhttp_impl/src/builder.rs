@@ -172,7 +172,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
+    use bytesbuf::mem::{CallbackMemory, HasMemory as _, Memory as _, OpaqueMemory};
     use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
     use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
@@ -226,7 +226,7 @@ mod tests {
             unaware(Arc::clone(&reservations)),
             |reservations, min_bytes| {
                 reservations.lock().unwrap().push(min_bytes);
-                GlobalPool::new().reserve(min_bytes)
+                crate::test_memory().clone().reserve(min_bytes)
             },
         ));
         let deps = WinHttpDeps::builder(clock(), memory, Sink::noop()).build();
@@ -348,7 +348,7 @@ mod tests {
     }
 
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder(clock(), OpaqueMemory::new(GlobalPool::new()), Sink::noop())
+        WinHttpDeps::builder(clock(), OpaqueMemory::new(crate::test_memory().clone()), Sink::noop())
     }
 
     fn clock() -> Clock {

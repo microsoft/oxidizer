@@ -18,7 +18,9 @@ use azure_core::credentials::TokenCredential;
 use azure_core::http::{ClientOptions, Transport, Url};
 use azure_identity::{DeveloperToolsCredential, DeveloperToolsCredentialOptions, Executor};
 use azure_storage_blob::{BlobServiceClient, BlobServiceClientOptions};
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient as FetchClient;
+use fetch::tokio::TokioDeps;
 use fetch_azure::HttpClient;
 use futures::TryStreamExt as _;
 use tick::Clock;
@@ -38,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DeveloperToolsCredential::new(Some(DeveloperToolsCredentialOptions { executor: Some(executor) }))?;
 
     // Use a tokio `fetch` client for Azure SDK HTTP requests.
-    let transport = Transport::new(HttpClient::from(FetchClient::new_tokio()).into());
+    let transport = Transport::new(HttpClient::from(FetchClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()))).into());
     let options = BlobServiceClientOptions {
         client_options: ClientOptions {
             transport: Some(transport),

@@ -400,9 +400,9 @@ mod tests {
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            fake_body_builder(),
             options,
         )
-        .body_builder(fake_body_builder())
         .build(build_tls());
 
         let response = handler.execute(create_test_request()).await.unwrap();
@@ -426,9 +426,9 @@ mod tests {
             ),
             Spawner::new_tokio(None),
             clock,
+            fake_body_builder(),
             options,
         )
-        .body_builder(fake_body_builder())
         .build(build_tls());
 
         let error = handler
@@ -451,10 +451,10 @@ mod tests {
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(None),
             clock,
+            fake_body_builder(),
             // default RequestFilter is Https only
             fetch_options::TransportOptions::default(),
         )
-        .body_builder(fake_body_builder())
         .build(build_tls());
 
         let error = handler

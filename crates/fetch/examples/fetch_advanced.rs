@@ -11,12 +11,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpClient;
 use fetch::options::{ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options};
 use fetch::tls::TlsOptions;
 use http::Version;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::crypto::CryptoProvider;
+use tick::Clock;
 use tracing::info;
 
 #[path = "util/utils.rs"]
@@ -39,7 +41,7 @@ async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
     // Create a client with custom transport and resilience options.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()))
         // Use a custom rustls certificate verifier.
         .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
         // Keep active and idle connections alive with periodic probes.
