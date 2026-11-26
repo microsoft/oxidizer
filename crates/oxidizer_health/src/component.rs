@@ -224,7 +224,7 @@ impl ComponentShared {
         });
         let actor = ComponentActor {
             updates: receiver,
-            signals: HashMap::new(),
+            signals: HashMap::default(),
             dirty: false,
         };
         (shared, actor)

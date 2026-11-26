@@ -112,7 +112,7 @@ fn discard_panic(cause: Box<dyn Any + Send>) {
 
 fn run(receiver: Receiver<Work>, mut aggregate: ProcessAggregate) {
     // Both pending registrations and registered actors belong to this thread, not to readers.
-    let mut actors = HashMap::new();
+    let mut actors = HashMap::default();
     for work in receiver {
         match work {
             Work::Register(id, actor) => {

@@ -235,7 +235,7 @@ impl AggregatorShared {
         let (changes, _) = watch(());
         Arc::new_cyclic(|root| Self {
             next_component: AtomicU64::default(),
-            registry: Mutex::new(HashMap::new()),
+            registry: Mutex::new(HashMap::default()),
             worker: Worker::new(ProcessAggregate::new(Weak::clone(root))),
             blockers: Arc::default(),
             // #[gamma::skip(expr.increment, tag = "equivalent", reason = "Both 2 and 3 decode to Unhealthy; the raw byte is private and subsequent writes replace it.")]
@@ -298,7 +298,7 @@ impl ProcessAggregate {
     pub(crate) fn new(root: Weak<AggregatorShared>) -> Self {
         Self {
             root,
-            components: HashMap::new(),
+            components: HashMap::default(),
             counts: [0; Health::COUNT],
         }
     }
