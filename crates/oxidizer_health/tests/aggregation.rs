@@ -316,20 +316,6 @@ fn component_is_idempotent_by_name() {
 }
 
 #[test]
-fn aggregator_clones_share_registration_authority() {
-    let aggregator = Aggregator::new();
-    let clone = aggregator.clone();
-    let mut monitor = aggregator.monitor();
-    let mut database = aggregator.component("database");
-    let mut publisher = clone.component("database").publisher();
-
-    publisher.degraded("slow");
-    wait_for_component(&mut database, Health::Degraded);
-    wait_for_monitor(&mut monitor, Health::Degraded);
-    assert_eq!(block_on(monitor.reports()).len(), 1);
-}
-
-#[test]
 #[should_panic(expected = "empty")]
 fn empty_component_name_panics() {
     let _component = Aggregator::new().component("");
@@ -487,6 +473,12 @@ fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
     let mut monitor = aggregator.monitor();
     let mut publisher = component.publisher();
     publisher.degraded("slow replica");
+    assert_eq!(publisher.signal().state(), Health::Degraded);
+    let [reason] = publisher.signal().attributes() else {
+        panic!("degraded shorthand must publish one reason attribute");
+    };
+    assert_eq!(reason.name(), "reason");
+    assert_eq!(reason.value(), AttributeValue::String("slow replica"));
     wait_for_monitor(&mut monitor, Health::Degraded);
 
     for diagnostic in [
@@ -499,10 +491,6 @@ fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
     }
     assert!(format!("{component:?}").contains("database"));
     assert!(format!("{publisher:?}").contains("slow replica"));
-    let [reason] = publisher.signal().attributes() else {
-        panic!("degraded shorthand must publish one reason attribute");
-    };
-    assert_eq!(reason.name(), "reason");
 }
 
 #[test]

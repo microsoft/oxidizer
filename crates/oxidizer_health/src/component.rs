@@ -545,6 +545,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn component_shared_retains_its_registration_id() {
+        let (work, _pending) = mpsc::channel();
+        let (shared, _actor) = ComponentShared::new(Arc::from("clients"), 7, work, Arc::default());
+        let registration = shared.dispatch.registration.load();
+
+        assert_eq!(shared.id, 7);
+        assert_eq!(registration.as_ref().unwrap().id, 7);
+    }
+
+    #[test]
+    fn component_publishers_retain_the_component_owner() {
+        use crate::Aggregator;
+
+        let root = Aggregator::new();
+        let component = root.component("clients");
+        let publisher = component.publisher();
+
+        assert!(publisher.owner.is_some());
+    }
+
+    #[test]
+    fn aggregator_clones_share_component_owners() {
+        use crate::Aggregator;
+
+        let root = Aggregator::new();
+        let clone = root.clone();
+        let first = root.component("clients");
+        let second = clone.component("clients");
+
+        assert!(Arc::ptr_eq(&first.owner, &second.owner));
+    }
+
+    #[test]
+    fn publisher_registration_initializes_and_enqueues_its_slot() {
+        let (work, pending) = mpsc::channel();
+        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let publisher = Publisher::register(&clients).unwrap();
+
+        assert!(publisher.slot.queued.load(Ordering::Acquire));
+        assert!(!publisher.slot.removed.load(Ordering::Acquire));
+        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+    }
+
+    #[test]
     fn initial_nonhealthy_publisher_keeps_readiness_reserved_before_its_turn() {
         let process_blockers = Arc::new(AtomicUsize::new(0));
         let (work, pending) = mpsc::channel();
