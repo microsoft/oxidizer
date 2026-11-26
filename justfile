@@ -50,8 +50,8 @@ test-feature-regressions package: anvil-tool-rustc-validate-prereqs
 license: anvil-license-headers-validate-prereqs
     cargo heather --fix
 
-# Run the Pester suite for the release-related PowerShell scripts.
-[arg("scope", long, pattern='(?:unit|integration|scenarios)?')]
+# Run the repository Pester suite.
+[arg("scope", long, pattern='(?:unit)?')]
 [script("pwsh", "-NoProfile")]
 test-scripts scope="":
     $ErrorActionPreference = "Stop"
