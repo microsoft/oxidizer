@@ -159,6 +159,12 @@ changelog updates, and `Cargo.toml` rewrites in one shot. A second
 invocation is treated as a fresh, independent release plan — there is
 no notion of "adding to a previous run".
 
+Version rewrites follow local `path` dependencies, both in the root workspace
+dependency table and in crate-owned inline dependency tables (including dev,
+build, and target-specific dependencies). Exact `=x.y.z` pins remain exact.
+Registry-only requirements are left unchanged, even when a local workspace
+package has the same name; upgrading published consumers is a separate change.
+
 Version arithmetic anchors on what is currently in each `Cargo.toml` on
 disk. The planner does not consult `git` for prior versions; it
 increments from the value it reads right now. Consequently, if you
