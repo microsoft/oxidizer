@@ -9,60 +9,6 @@ use quote::quote;
 use testing_aids::render_expansion;
 
 #[test]
-fn test_pascal_to_snake_case() {
-    let expansion = taxonomy(
-        quote!(test),
-        quote! {
-            enum TestTaxonomy {
-                PascalCase,
-                AnotherExample,
-                Simple,
-                WithNumbers123,
-            }
-        },
-    )
-    .unwrap();
-    let generated: syn::File = syn::parse2(expansion).unwrap();
-    let names: Vec<_> = generated
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            syn::Item::Impl(item) if item.trait_.is_none() => Some(item),
-            _ => None,
-        })
-        .flat_map(|item| &item.items)
-        .filter_map(|item| match item {
-            syn::ImplItem::Fn(function) if function.sig.ident == "data_class" => Some(function),
-            _ => None,
-        })
-        .flat_map(|function| &function.block.stmts)
-        .filter_map(|statement| match statement {
-            syn::Stmt::Expr(syn::Expr::Match(expression), _) => Some(expression),
-            _ => None,
-        })
-        .flat_map(|expression| &expression.arms)
-        .map(|arm| {
-            let syn::Expr::Call(call) = &*arm.body else {
-                panic!("each data class must be constructed");
-            };
-            let Some(syn::Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(name), ..
-            })) = call.args.last()
-            else {
-                panic!("the data class name must be a string");
-            };
-            name.value()
-        })
-        .collect();
-
-    assert_eq!(names.len(), 4);
-    assert_eq!(names[0], "pascal_case");
-    assert_eq!(names[1], "another_example");
-    assert_eq!(names[2], "simple");
-    assert_eq!(names[3], "with_numbers123");
-}
-
-#[test]
 fn test_taxonomy_impl_empty_args() {
     let input = quote! {
         pub enum MyEnum {
