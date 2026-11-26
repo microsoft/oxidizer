@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn dispatcher_uses_worker_local_spawn_hooks_for_remote_submission() {
-        let (queued, queued_from_retained_binding, sources, source_id, scheduler_cleared) = std::thread::spawn(|| {
+        let outcome = std::thread::spawn(|| {
             let builder = ThreadBuilder::default();
             let destination_builder = builder.clone();
             let source = builder.build(std::thread::current().id());
@@ -433,9 +433,12 @@ mod tests {
 
             let _task = core.spawn_relocating_to(destination_index, &source, |_| async {});
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
-            // The chosen worker matches the bound thread, but the installed scheduler is for a different thread.
+            // A different bound thread prevents local execution even when the chosen worker is current.
             let _task = core.spawn_relocating_to(source_index, &destination, |_| async {});
-            let queued_from_retained_binding = source_rx.spawn_receiver().try_recv().is_ok();
+            let queued_to_current_worker = source_rx.spawn_receiver().try_recv().is_ok();
+            // The bound thread matches the chosen worker, but not the installed scheduler.
+            let _task = core.spawn_relocating_to(destination_index, &destination, |_| async {});
+            let queued_from_retained_binding = destination_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
             let (scheduler_cleared, retained_scheduler, retained_spawn_hooks, retained_panic_hooks) =
@@ -457,6 +460,7 @@ mod tests {
             let observed_sources = sources.lock().unwrap().clone();
             (
                 queued,
+                queued_to_current_worker,
                 queued_from_retained_binding,
                 observed_sources,
                 source.id(),
@@ -466,13 +470,15 @@ mod tests {
         .join()
         .unwrap();
 
+        let (queued, queued_to_current_worker, queued_from_retained_binding, sources, source_id, scheduler_cleared) = outcome;
         assert!(
             scheduler_cleared,
             "clear_scheduler must release all worker-local registrations before thread teardown"
         );
         assert!(queued);
+        assert!(queued_to_current_worker);
         assert!(queued_from_retained_binding);
-        assert_eq!(sources, [Some(source_id), Some(source_id)]);
+        assert_eq!(sources, [Some(source_id), Some(source_id), Some(source_id)]);
     }
 
     #[test]
