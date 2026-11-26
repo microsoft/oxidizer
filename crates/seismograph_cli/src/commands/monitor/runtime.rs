@@ -591,8 +591,8 @@ mod tests {
     use seismograph::recorder::event::{Address, BacktraceCapture, Event, EventPayload, EventSequence, EventTimestamp};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
     use seismograph::recorder::thread::ThreadId;
+    use seismograph_runtime::WorkerRole;
     use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker};
-    use seismograph_runtime::worker::WorkerRole;
 
     use super::*;
 

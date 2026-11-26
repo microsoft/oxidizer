@@ -13,48 +13,44 @@
 
 </div>
 
-On-demand runtime diagnostics for [`seismograph`][__link0].
+Runtime diagnostics and task lifecycle reporting for [`seismograph`][__link0].
 
-Register runtime and worker metadata only when diagnostics are requested by
-the application. Each worker registers a task provider that routes bounded
-requests to its native task storage. The provider returns owned descriptions
-between execution cycles. There is no separate diagnostic task registry.
+[`RuntimeBuilder`][__link1] creates a [`Runtime`][__link2]. The runtime owns worker
+registrations and creates dedicated [`asynchronous::Worker`][__link3] and
+[`blocking::Worker`][__link4] handles.
 
-Workers check [`worker::WorkerHandle::is_observed`][__link1] once per execution cycle.
-Without collection or runtime-event recording, the normal poll loop needs no
-diagnostic callbacks, clocks, locks, counters, or reference-count operations.
-[`TaskIdentity`][__link2] lets a runtime assign an identity before observation.
+An asynchronous worker can provide snapshots of tasks in its native task
+storage. A blocking worker reports lifecycle events only. Blocking tasks do
+not appear in task snapshots.
 
-Ordinary Seismograph snapshots request current task state. To measure polls,
-call [`RuntimeHandle::capture`][__link3] with a nonzero
-[`snapshot::CaptureOptions::measure_for`][__link4]. The diagnostic caller waits for that
-interval, not the workers. Private observation windows prevent a poll from a
-previous request from entering a new measurement window.
-[`snapshot::decode`][__link5] accepts only wire version 1 and source schema 9.
-Other versions are rejected.
+Both task types use the shared `Task*` event kinds. The enqueue methods
+return lightweight tokens when runtime task recording is enabled. The caller
+moves each token through queue, execution, poll, and outcome transitions.
+Dropping an unfinished token records cancellation.
 
-Runtime-event recording is separate from task inspection. It retains only
-events emitted after recording starts. Missing creation times, wake ages,
-earlier polls, and completed task history are not reconstructed.
-Stopping event recording does not freeze the actual runtime’s current state.
-[`worker::WorkerHandle::task_events`][__link6] supplies a [`Copy`][__link7] context for task
-creation and real outcomes, without per-task registration or shared ownership.
+[`TaskIdentity`][__link5] lets the runtime assign an identity before it records the
+task. Event recording retains only events emitted after recording starts.
+It does not reconstruct earlier task history.
 
 ## Example
 
 ```rust
-use seismograph_runtime::RuntimeMetadata;
-use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+use seismograph_runtime::{Runtime, TaskIdentity, TaskOutcome, WorkerMetadata, WorkerRole};
 
-let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("primary", 1));
-let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-worker.handle().register_task_provider(|request| {
-    // A real runtime moves this request to its worker before inspecting tasks.
-    request.respond(
-        Vec::new(),
-        seismograph_runtime::snapshot::TaskCollection::Complete,
-    );
-})?;
+seismograph::recorder(seismograph::recorder::Configuration {
+    runtime_tasks: seismograph::recorder::Policy::all(false),
+    ..seismograph::recorder::Configuration::default()
+});
+let runtime = Runtime::builder("primary").configured_workers(1).build();
+let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
+let identity = TaskIdentity::from_location(std::panic::Location::caller());
+let queued = runtime.enqueue_async(None, identity, None, 0, 0).unwrap();
+let task = queued.activated(&worker);
+let poll = task.poll_started(&worker);
+assert!(
+    poll.finished(&worker, Some(TaskOutcome::Completed))
+        .is_none()
+);
 ```
 
 
@@ -63,12 +59,10 @@ worker.handle().register_task_provider(|request| {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVO5KrNS6sQkbMDQNNSn8UoUbnUVAD0AZdq0bButZh2UETP9hZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb7vIJdZ0I5O8bU0HndxO0ld8b_naw_GxFrb8bcXdL1rgYTxxhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
  [__link0]: https://crates.io/crates/seismograph/0.6.0
- [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::is_observed
- [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=TaskIdentity
- [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeHandle::capture
- [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
- [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::decode
- [__link6]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
- [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html
+ [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/struct.RuntimeBuilder.html
+ [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/struct.Runtime.html
+ [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=asynchronous::Worker
+ [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=blocking::Worker
+ [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=TaskIdentity

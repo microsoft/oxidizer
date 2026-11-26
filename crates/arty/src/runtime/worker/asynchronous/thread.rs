@@ -14,7 +14,7 @@ use thread_aware::{Thread as ThreadCoordinate, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::config::{MonitorOptions, RuntimeName};
+use crate::runtime::config::RuntimeName;
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::hook::HookRegistration;
@@ -33,7 +33,7 @@ pub(crate) struct StartOptions {
     pub(crate) blocking_pools: blocking::Pools,
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
-    pub(crate) monitor_options: MonitorOptions,
+    pub(crate) monitoring: Option<seismograph_runtime::Runtime>,
     pub(crate) hook_registrations: Vec<HookRegistration>,
 }
 
@@ -133,7 +133,7 @@ impl ThreadEntry {
             blocking_pools,
             shutdown,
             io_runtime,
-            monitor_options,
+            monitoring,
             hook_registrations,
             ..
         } = options;
@@ -142,16 +142,11 @@ impl ThreadEntry {
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
-        asynchronous::LocalWorker::attach();
-
         let clock = prepare_worker_clock(inactive_clock, &current);
 
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
         let blocking_pool = blocking_pools.pool_for_worker(worker_index);
-        if let Some(runtime) = monitor_options.runtime() {
-            blocking_pool.enable_monitoring(runtime);
-        }
         let blocking_worker = blocking::Worker::new(blocking_pool, shutdown);
 
         endpoint_tx
@@ -165,6 +160,15 @@ impl ThreadEntry {
         let dispatcher = futures::executor::block_on(activation_rx)
             .expect("RuntimeBuilder failed between initializing and activating a worker")
             .dispatcher;
+        let monitoring_worker = monitoring.map(|runtime| {
+            let worker = runtime.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+            dispatcher.register_task_provider(current.id(), &worker);
+            worker
+        });
+        let monitoring = monitoring_worker
+            .as_ref()
+            .map(|_| crate::runtime::monitoring::InspectionObserver::default());
+        asynchronous::LocalWorker::attach(monitoring_worker);
         let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
         let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));
         // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
@@ -177,7 +181,7 @@ impl ThreadEntry {
             io,
             clock,
             asynchronous::WorkerSignal(signal),
-            &monitor_options,
+            monitoring,
             hook_registrations,
         );
 
@@ -303,7 +307,7 @@ mod tests {
             commands: asynchronous::command_channel().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(thread::current().id()),
-            blocking_worker: blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            blocking_worker: blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
         }
     }
 
@@ -483,7 +487,7 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
@@ -497,7 +501,7 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 

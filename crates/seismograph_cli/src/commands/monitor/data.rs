@@ -5185,10 +5185,10 @@ mod tests {
         reason = "the lifetime-source fixture keeps worker, task, and retained-event metrics together"
     )]
     fn runtime_source_lifetime_metrics_do_not_override_retained_event_counts() {
+        use seismograph_runtime::WorkerRole;
         use seismograph_runtime::snapshot::{
             Counters, Runtime, RuntimeState, Snapshot as RuntimeSourceSnapshot, Task, TaskMetrics, Worker, WorkerState,
         };
-        use seismograph_runtime::worker::WorkerRole;
 
         let events = Events {
             clock: EventClock::Unspecified,

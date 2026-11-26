@@ -72,7 +72,7 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
-    monitoring: Option<seismograph_runtime::RuntimeHandle>,
+    monitoring: Option<seismograph_runtime::Runtime>,
 }
 
 impl DispatcherCore {
@@ -80,7 +80,7 @@ impl DispatcherCore {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         shutdown: Shutdown,
         hook_registrations: Vec<HookRegistration>,
-        monitoring: Option<seismograph_runtime::RuntimeHandle>,
+        monitoring: Option<seismograph_runtime::Runtime>,
     ) -> Arc<Self> {
         // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
@@ -115,14 +115,14 @@ impl DispatcherCore {
         })
     }
 
-    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, worker: &seismograph_runtime::asynchronous::Worker) {
         let index = self
             .worker_index(thread)
             .expect("worker monitoring uses a registered runtime thread");
         let endpoint = &self.worker_endpoints[usize::from(index)];
         let commands = endpoint.commands.system_sender().clone();
         let waker = endpoint.waker.clone();
-        handle
+        worker
             .register_task_provider(move |request| {
                 if commands.send(SystemCommand::Inspect { request }).is_ok() {
                     waker.wake_by_ref();
@@ -468,7 +468,7 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
             },
             command_rx,
         )
@@ -772,35 +772,36 @@ mod tests {
         use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
+        let runtime = seismograph_runtime::Runtime::builder("dispatcher-stop")
+            .configured_workers(1)
+            .build();
         let threads = test_threads(1);
         let (worker, _worker_rx) = endpoint(&threads[0]);
-        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new(), Some(runtime.handle()));
+        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new(), Some(runtime.clone()));
         let client = DispatcherClient::new(core);
 
         client.stop(ShutdownCause::default());
 
-        assert_eq!(
-            runtime.handle().capture(CaptureOptions::default()).unwrap().state,
-            RuntimeState::Stopping
-        );
+        assert_eq!(runtime.capture(CaptureOptions::default()).unwrap().state, RuntimeState::Stopping);
     }
 
     #[test]
     fn a_closed_worker_command_channel_reports_collection_failure() {
         use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
-        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+        use seismograph_runtime::{WorkerMetadata, WorkerRole};
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-worker-channel", 1));
+        let runtime = seismograph_runtime::Runtime::builder("closed-worker-channel")
+            .configured_workers(1)
+            .build();
         let threads = test_threads(1);
         let (endpoint, receiver) = endpoint(&threads[0]);
         let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default(), Vec::new(), None);
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        dispatcher.register_task_provider(threads[0].id(), &worker.handle());
+        let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
+        dispatcher.register_task_provider(threads[0].id(), &worker);
         drop(receiver);
 
-        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        let snapshot = runtime.capture(CaptureOptions::default()).unwrap();
         assert!(snapshot.tasks.is_empty());
         assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
     }

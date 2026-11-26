@@ -11,7 +11,7 @@ use crate::runtime::config::RuntimeConfig;
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
-use crate::runtime::monitoring::RuntimeMonitoring;
+use crate::runtime::monitoring::Monitoring;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::{WorkerJoiner, asynchronous};
 
@@ -41,7 +41,7 @@ fn build_with_processors(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         prepared.shutdown,
         prepared.hook_registrations,
-        prepared.monitoring.as_ref().map(RuntimeMonitoring::handle),
+        prepared.monitoring.as_ref().map(Monitoring::runtime),
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
     let mut join_handles = Vec::with_capacity(workers.len());
@@ -56,7 +56,7 @@ struct PreparedWorkers<W> {
     workers: Vec<W>,
     shutdown: Shutdown,
     hook_registrations: Vec<crate::runtime::hook::HookRegistration>,
-    monitoring: Option<RuntimeMonitoring>,
+    monitoring: Option<Monitoring>,
 }
 
 fn prepare_workers<W>(
@@ -67,25 +67,26 @@ fn prepare_workers<W>(
     environment: impl FnOnce(&str) -> Option<String>,
     mut start: impl FnMut(asynchronous::StartOptions) -> W,
 ) -> Result<PreparedWorkers<W>, Error> {
-    let name = processor_config.name;
-    name.validate()?;
+    processor_config.name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
     let worker_count = processors.len();
     let mut workers = Vec::with_capacity(worker_count);
+    let monitoring = Monitoring::from_config(&processor_config, worker_count)?;
+    let RuntimeConfig {
+        name,
+        stack_size,
+        blocking_pool_policy,
+        hook_registrations,
+        ..
+    } = processor_config;
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
-    let stack_size = select_stack_size(processor_config.stack_size, environment);
-    let mut monitor_options = processor_config.monitor_options;
-    let hook_registrations = processor_config
-        .hook_registrations
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let stack_size = select_stack_size(stack_size, environment);
+    let hook_registrations = hook_registrations.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
-    let monitoring = RuntimeMonitoring::start(monitor_options.policy(), &name, worker_count)?;
-    monitor_options.set_runtime(monitoring.as_ref().map(RuntimeMonitoring::handle));
+    let blocking_pools = blocking_pool_policy.into_pools(name.clone(), monitoring.as_ref().map(Monitoring::runtime).as_ref())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(start(asynchronous::StartOptions {
@@ -98,7 +99,7 @@ fn prepare_workers<W>(
             blocking_pools: blocking_pools.clone(),
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
-            monitor_options: monitor_options.for_worker(),
+            monitoring: monitoring.as_ref().map(Monitoring::runtime),
             hook_registrations: hook_registrations.clone(),
         }));
     }
@@ -157,14 +158,14 @@ mod tests {
         );
         let started = std::cell::Cell::new(false);
         let hardware = fake_hardware(1);
-        let result = crate::runtime::monitoring::RuntimeMonitoring::with_test_io(io, || {
+        let result = crate::runtime::monitoring::Monitoring::with_test_io(io, || {
             prepare_workers(
                 RuntimeConfig {
                     name: crate::runtime::config::RuntimeName::default(),
                     workers_policy: WorkersPolicy::exactly(1),
                     stack_size: NonZero::new(16_384).unwrap(),
                     blocking_pool_policy: BlockingPoolPolicy::shared(),
-                    monitor_options: MonitorPolicy::enabled().into(),
+                    monitor_policy: MonitorPolicy::enabled(),
                     hook_registrations: std::sync::Mutex::new(Vec::new()),
                 },
                 &InactiveClock::new_isolated(),
@@ -194,7 +195,7 @@ mod tests {
                     workers_policy: WorkersPolicy::at_most(2),
                     stack_size: NonZero::new(16_385).unwrap(),
                     blocking_pool_policy: BlockingPoolPolicy::shared(),
-                    monitor_options: MonitorOptions::default(),
+                    monitor_policy: MonitorPolicy::default(),
                     hook_registrations: std::sync::Mutex::new(Vec::new()),
                 },
                 &InactiveClock::new_isolated(),
@@ -246,7 +247,6 @@ mod tests {
     use thread_aware::{Thread, ThreadAware};
 
     use super::*;
-    use crate::runtime::config::MonitorOptions;
     use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
     thread_local! {
@@ -400,7 +400,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(WorkersPolicy::all(), MonitorPolicy::disabled().into(), &hardware.processors());
+        let runtime = runtime_with_processors(WorkersPolicy::all(), MonitorPolicy::disabled(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = cx
             .control()
@@ -420,14 +420,14 @@ mod tests {
         ))
     }
 
-    fn runtime_with_processors(policy: WorkersPolicy, monitor_options: MonitorOptions, processors: &ProcessorSet) -> Runtime {
+    fn runtime_with_processors(policy: WorkersPolicy, monitor_policy: MonitorPolicy, processors: &ProcessorSet) -> Runtime {
         build_with_processors(
             RuntimeConfig {
                 name: crate::runtime::config::RuntimeName::default(),
                 workers_policy: policy,
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
-                monitor_options,
+                monitor_policy,
                 hook_registrations: std::sync::Mutex::new(Vec::new()),
             },
             &InactiveClock::new_isolated(),

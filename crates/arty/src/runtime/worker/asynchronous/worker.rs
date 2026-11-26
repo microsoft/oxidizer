@@ -15,10 +15,9 @@ use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::hook::HookRegistration;
-use crate::runtime::monitoring::WorkerMonitoring;
+use crate::runtime::monitoring::InspectionObserver;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandReceiver, LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
@@ -109,7 +108,7 @@ pub(crate) struct Worker {
     // Cycle-local timestamps and wait budgets use precise system time.
     cycle_clock: SimpleClock,
     signal: Arc<Signal>,
-    monitoring: Option<WorkerMonitoring>,
+    monitoring: Option<InspectionObserver>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -140,7 +139,7 @@ impl Worker {
         io: Io,
         clock: InactiveClock,
         signal: WorkerSignal,
-        monitor_options: &MonitorOptions,
+        monitoring: Option<InspectionObserver>,
         hook_registrations: Vec<HookRegistration>,
     ) -> Self {
         let WorkerSignal(signal) = signal;
@@ -157,9 +156,6 @@ impl Worker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
-        let monitoring = monitor_options
-            .runtime()
-            .map(|runtime| WorkerMonitoring::new(runtime, &dispatcher, &thread));
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hook_registrations);
 
@@ -198,10 +194,10 @@ impl Worker {
             CycleAction::Poll | CycleAction::WaitForSignal(_) => Duration::ZERO,
         };
 
-        if !matches!(action, CycleAction::Poll)
-            && let Some(monitoring) = &self.monitoring
-        {
-            monitoring.parked();
+        if !matches!(action, CycleAction::Poll) {
+            if let Some(worker) = LocalWorker::monitoring() {
+                worker.parked();
+            }
         }
 
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
@@ -215,10 +211,10 @@ impl Worker {
             }
         }
 
-        if !matches!(action, CycleAction::Poll)
-            && let Some(monitoring) = &self.monitoring
-        {
-            monitoring.unparked();
+        if !matches!(action, CycleAction::Poll) {
+            if let Some(worker) = LocalWorker::monitoring() {
+                worker.unparked();
+            }
         }
 
         ControlFlow::Continue(())
@@ -242,8 +238,9 @@ impl Worker {
             .expect("system command processing only succeeds while the worker is ready")
             .executor;
 
+        let observed = LocalWorker::monitoring().is_some_and(|worker| worker.is_observed());
         let cycle_outcome = match &self.monitoring {
-            Some(monitoring) if monitoring.is_observed() => executor.execute_cycle_observed(monitoring),
+            Some(monitoring) if observed => executor.execute_cycle_observed(monitoring),
             _ => executor.execute_cycle(),
         };
 
@@ -420,7 +417,7 @@ mod tests {
         let destination = thread::spawn(move || builder.build(thread::current().id())).join().unwrap();
         let shutdown = Shutdown::default();
         let blocking = blocking::Worker::new(
-            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None, None),
             shutdown.clone(),
         );
         let endpoint = |thread| worker_endpoint(command_channel().0, Waker::noop().clone(), thread, Arc::clone(&blocking));
@@ -772,7 +769,6 @@ mod tests {
     use super::*;
     use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::DispatcherCore;
-    use crate::runtime::policy::MonitorPolicy;
     use crate::runtime::testing::worker_endpoint;
     use crate::runtime::worker::asynchronous::{QueuedFactory, QueuedIoAccess};
     use crate::task::preparation::RemoteFutureFactory;
@@ -780,7 +776,7 @@ mod tests {
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+            blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
             shutdown,
         )
     }
@@ -905,15 +901,15 @@ mod tests {
         clock: InactiveClock,
         signal: Arc<Signal>,
     ) -> Worker {
-        test_worker_with_monitor_options(commands, blocking, clock, signal, &MonitorOptions::default())
+        test_worker_with_monitoring(commands, blocking, clock, signal, None)
     }
 
-    fn test_worker_with_monitor_options(
+    fn test_worker_with_monitoring(
         commands: (CommandSender, CommandReceiver),
         blocking: (Arc<blocking::Worker>, Shutdown),
         clock: InactiveClock,
         signal: Arc<Signal>,
-        monitor_options: &MonitorOptions,
+        monitoring: Option<&seismograph_runtime::Runtime>,
     ) -> Worker {
         let (blocking_worker, shutdown) = blocking;
         let (command_tx, command_rx) = commands;
@@ -923,8 +919,14 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new(), None));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
+        let monitoring_worker = monitoring.map(|runtime| {
+            let worker = runtime.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+            dispatcher.register_task_provider(thread.id(), &worker);
+            worker
+        });
+        let monitoring = monitoring_worker.as_ref().map(|_| InspectionObserver::default());
         if !LocalWorker::is_current() {
-            LocalWorker::attach();
+            LocalWorker::attach(monitoring_worker);
         }
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
         signal.set_driver_waker(driver_waker);
@@ -936,7 +938,7 @@ mod tests {
             io,
             clock,
             WorkerSignal(signal),
-            monitor_options,
+            monitoring,
             Vec::new(),
         )
     }
@@ -1273,7 +1275,7 @@ mod tests {
     #[test]
     fn inspection_without_worker_monitoring_reports_failure() {
         use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
-        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+        use seismograph_runtime::{Runtime, WorkerMetadata, WorkerRole};
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let (commands, command_rx) = command_channel();
@@ -1283,16 +1285,15 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("missing-worker-monitoring", 1));
-        let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let runtime = Runtime::builder("missing-worker-monitoring").configured_workers(1).build();
+        let registration = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
         let (sender, receiver) = std::sync::mpsc::channel();
         registration
-            .handle()
             .register_task_provider(move |request| sender.send(request).unwrap())
             .unwrap();
 
         let snapshot = std::thread::scope(|scope| {
-            let handle = runtime.handle();
+            let handle = runtime.clone();
             let captured = scope.spawn(move || {
                 handle
                     .capture(CaptureOptions {
@@ -1420,12 +1421,12 @@ mod tests {
     fn disabled_monitoring_creates_no_worker_monitoring() {
         let (commands, command_rx) = command_channel();
         let signal = Arc::new(Signal::default());
-        let worker = test_worker_with_monitor_options(
+        let worker = test_worker_with_monitoring(
             (commands, command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             signal,
-            &MonitorPolicy::disabled().into(),
+            None,
         );
 
         assert!(worker.monitoring.is_none());
@@ -1434,11 +1435,11 @@ mod tests {
     #[cfg(all(feature = "test-util", not(miri)))]
     #[test]
     fn monitoring_cycles_only_park_when_waiting_and_leave_idle_polls_unobserved() {
-        use seismograph_runtime::RuntimeHandle;
+        use seismograph_runtime::Runtime;
         use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
 
         #[derive(Clone)]
-        struct ProbeContext(RuntimeHandle, Arc<std::sync::Mutex<Vec<WorkerState>>>);
+        struct ProbeContext(Runtime, Arc<std::sync::Mutex<Vec<WorkerState>>>);
 
         impl ThreadAware for ProbeContext {
             fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
@@ -1474,16 +1475,14 @@ mod tests {
         }
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("cycle-observation", 1));
-        let mut options = MonitorOptions::default();
-        options.set_runtime(Some(runtime.handle()));
+        let runtime = Runtime::builder("cycle-observation").configured_workers(1).build();
         let (commands, command_rx) = command_channel();
-        let mut worker = test_worker_with_monitor_options(
+        let mut worker = test_worker_with_monitoring(
             (commands.clone(), command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
-            &options,
+            Some(&runtime),
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
@@ -1506,10 +1505,10 @@ mod tests {
         let states = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _io = worker_context(&worker)
             .io()
-            .context::<ProbeContext>(&ProbeContext(runtime.handle(), Arc::clone(&states)));
+            .context::<ProbeContext>(&ProbeContext(runtime.clone(), Arc::clone(&states)));
         assert!(worker.execute_step().is_continue());
         assert_eq!(
-            runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap().workers[0].state,
+            runtime.capture_with_timeout(CaptureOptions::default()).unwrap().workers[0].state,
             WorkerState::Running
         );
         for _ in 0..COMMANDS_PER_CYCLE {

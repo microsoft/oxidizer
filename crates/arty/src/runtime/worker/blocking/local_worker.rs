@@ -16,15 +16,26 @@ thread_local! {
 #[derive(Debug)]
 pub(crate) struct LocalWorker {
     pool: PoolIdentity,
+    monitoring: Option<seismograph_runtime::blocking::Worker>,
 }
 
 impl LocalWorker {
-    pub(crate) fn attach(pool: PoolIdentity) {
+    pub(crate) fn attach(pool: PoolIdentity, monitoring: Option<seismograph_runtime::blocking::Worker>) {
         worker::WorkerMarker::attach();
         CURRENT.with_borrow_mut(|current| {
             assert!(current.is_none(), "a blocking local worker is already attached to this thread");
-            *current = Some(Self { pool });
+            *current = Some(Self { pool, monitoring });
         });
+    }
+
+    pub(crate) fn monitoring() -> Option<seismograph_runtime::blocking::Worker> {
+        CURRENT
+            .try_with(|current| {
+                let current = current.borrow();
+                current.as_ref().and_then(|current| current.monitoring.clone())
+            })
+            .ok()
+            .flatten()
     }
 
     fn owns_pool(&self, pool: &PoolIdentity) -> bool {

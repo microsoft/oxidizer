@@ -116,7 +116,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub fn monitor(mut self, policy: MonitorPolicy) -> Self {
-        self.config.monitor_options = policy.into();
+        self.config.monitor_policy = policy;
         self
     }
 
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(!builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_policy.is_enabled());
     }
 
     #[test]
@@ -300,13 +300,13 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(!builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_policy.is_enabled());
     }
 
     #[test]
     fn monitor_policy_replaces_the_default() {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
-        assert!(!builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_policy.is_enabled());
     }
 }

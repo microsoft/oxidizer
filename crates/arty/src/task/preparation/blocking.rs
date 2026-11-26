@@ -6,7 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::TaskCompletion;
 use seismograph_runtime::TaskIdentity;
 
-use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
+use crate::runtime::monitoring::{BlockingJob, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 
@@ -38,15 +38,15 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    pub(crate) fn run(mut self, monitoring: BlockingTaskEvents<'_>) {
+    pub(crate) fn run(mut self, finished: impl FnOnce(seismograph_runtime::TaskOutcome)) {
         let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => {
-                monitoring.completed();
+                finished(seismograph_runtime::TaskOutcome::Completed);
                 result_tx.completed(result);
             }
             Err(panic) => {
-                monitoring.panicked();
+                finished(seismograph_runtime::TaskOutcome::Panicked);
                 result_tx.panicked(panic, None);
             }
         }

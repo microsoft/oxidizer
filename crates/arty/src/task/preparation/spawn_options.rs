@@ -9,6 +9,7 @@ use crate::runtime::hook::TaskObservers;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct SpawnOptions {
     identity: TaskIdentity,
+    origin: Option<seismograph_runtime::WorkerOrigin>,
     parent: Option<seismograph::recorder::runtime::TaskId>,
     future_size: usize,
     observers: Option<TaskObservers>,
@@ -18,6 +19,7 @@ impl SpawnOptions {
     pub(crate) fn new(identity: TaskIdentity, future_size: usize, parent: Option<TaskIdentity>) -> Self {
         Self {
             identity,
+            origin: crate::runtime::monitoring::current_origin(),
             parent: parent.map(TaskIdentity::id),
             future_size,
             observers: None,
@@ -62,9 +64,12 @@ impl SpawnOptions {
             future,
             completion,
             instrumentation,
-            self.identity,
-            self.parent,
-            self.future_size,
+            crate::runtime::monitoring::TaskSubmission {
+                identity: self.identity,
+                origin: self.origin,
+                parent: self.parent,
+                body_size: self.future_size,
+            },
         );
     }
 }
@@ -75,13 +80,12 @@ mod tests {
     use std::pin::Pin;
 
     use arty_executor::{Executor, InspectionStatus};
-    use seismograph_runtime::RuntimeMetadata;
-    use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+    use seismograph_runtime::{Runtime, WorkerMetadata, WorkerRole};
     use thread_aware::ThreadBuilder;
 
     use super::*;
     use crate::runtime::Shutdown;
-    use crate::runtime::monitoring::set_events;
+    use crate::runtime::worker::asynchronous::LocalWorker;
     use crate::task::handle::JoinHandlePool;
 
     #[test]
@@ -89,12 +93,11 @@ mod tests {
         type ErasedFuture = Pin<Box<dyn Future<Output = ()>>>;
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("submission-metadata", 1));
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let runtime = Runtime::builder("submission-metadata").configured_workers(1).build();
+        let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
         let parent = TaskIdentity::from_location(std::panic::Location::caller());
         let identity = TaskIdentity::from_location(std::panic::Location::caller());
-        set_events(Some(worker.handle().task_events()));
-        let _events = scopeguard::guard((), |()| set_events(None));
+        LocalWorker::attach(Some(worker));
         let mut executor = Executor::builder().build();
         let results = JoinHandlePool::new(Shutdown::default());
         let options = std::rc::Rc::new(std::cell::RefCell::new(None));

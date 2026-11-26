@@ -301,8 +301,15 @@ pub enum EventKind {
     /// known zero-byte body. Excludes runtime wrappers and separate allocations.
     TaskSpawned,
     /// A task was enqueued for execution.
+    ///
+    /// New producers use `worker_id` for the optional origin worker,
+    /// `related_id` for the parent task, `value_0` for the task descriptor, and
+    /// `value_1` for the queue length before the runtime adds the task.
     TaskEnqueued,
-    /// A task instance was materialized.
+    /// A task instance began its first execution.
+    ///
+    /// New producers use `worker_id` for the execution worker, `value_0` for
+    /// queue duration in nanoseconds, and `value_1` for body size plus one.
     TaskMaterialized,
     /// A task poll began.
     ///
@@ -313,12 +320,22 @@ pub enum EventKind {
     /// These are discriminator values, not combinable flag bits.
     TaskPollStarted,
     /// A task poll finished.
+    ///
+    /// New producers use `value_0` for poll duration in nanoseconds. `value_1`
+    /// is `0` while pending, `1` when completed, `2` when canceled, and `3`
+    /// when panicked.
     TaskPollFinished,
     /// A task completed successfully.
+    ///
+    /// Blocking producers use `value_0` for execution duration in nanoseconds.
     TaskCompleted,
     /// A task was canceled.
+    ///
+    /// Blocking producers use `value_0` for execution duration in nanoseconds.
     TaskCanceled,
     /// A task panicked.
+    ///
+    /// Blocking producers use `value_0` for execution duration in nanoseconds.
     TaskPanicked,
     /// A task instance transfer began.
     TransferStarted,

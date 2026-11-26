@@ -4,7 +4,7 @@
 use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-use crate::runtime::monitoring::RuntimeMonitoring;
+use crate::runtime::monitoring::Monitoring;
 use crate::runtime::worker::WorkerJoiner;
 use crate::task::RuntimeScheduler;
 
@@ -57,7 +57,7 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
-    monitoring: Option<RuntimeMonitoring>,
+    monitoring: Option<Monitoring>,
 }
 
 impl Runtime {
@@ -144,8 +144,8 @@ impl Runtime {
     /// This does not change the process-wide recorder.
     #[cfg(all(test, not(miri)))]
     #[must_use]
-    pub(crate) fn monitoring(&self) -> Option<seismograph_runtime::RuntimeHandle> {
-        self.monitoring.as_ref().map(RuntimeMonitoring::handle)
+    pub(crate) fn monitoring(&self) -> Option<seismograph_runtime::Runtime> {
+        self.monitoring.as_ref().map(Monitoring::runtime)
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
@@ -220,11 +220,7 @@ impl Runtime {
         monitor_result(wait_error, monitor_error)
     }
 
-    pub(crate) const fn with_dispatcher(
-        dispatcher: DispatcherClient,
-        worker_joiner: WorkerJoiner,
-        monitoring: Option<RuntimeMonitoring>,
-    ) -> Self {
+    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner, monitoring: Option<Monitoring>) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
@@ -292,7 +288,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(thread::current().id()),
             Worker::new(
-                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None, None),
                 shutdown.clone(),
             ),
         );
@@ -330,7 +326,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
+                Pool::new(RuntimeName::default(), None, None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );
@@ -353,7 +349,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
+                Pool::new(RuntimeName::default(), None, None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );

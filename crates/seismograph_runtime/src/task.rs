@@ -1,129 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Native-storage requests, task lifecycle events, and observed poll tokens.
+//! Native asynchronous task inspection requests.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
-use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
-
 use crate::snapshot::{Task, TaskCollection, TaskMetrics};
-use crate::{TaskIdentity, WorkerControl, collection, lock};
-
-/// Task-event identities and backtrace policy that implement [`Copy`].
-///
-/// Obtain this from [`WorkerHandle::task_events`](crate::worker::WorkerHandle::task_events).
-/// It owns no registration, counter, task state, or shared handle.
-#[derive(Clone, Copy, Debug)]
-pub struct EventContext {
-    runtime: RuntimeId,
-    worker: Option<WorkerId>,
-    backtrace: BacktraceCapture,
-}
-
-/// Caller-assigned identity and the timestamp of a task creation event.
-///
-/// Sampling or a concurrent recording change can omit the event after its
-/// timestamp is assigned. Keep the identity for inspection and later outcomes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TaskSpawn {
-    /// Caller-assigned task identity used by the event.
-    pub identity: TaskIdentity,
-    /// Timestamp used by the task creation event.
-    pub timestamp: EventTimestamp,
-}
-
-impl EventContext {
-    pub(crate) const fn new(runtime: RuntimeId, worker: Option<WorkerId>, backtrace: BacktraceCapture) -> Self {
-        Self {
-            runtime,
-            worker,
-            backtrace,
-        }
-    }
-
-    /// Emits task creation with the identity assigned by the caller.
-    ///
-    /// Returns `None` when the recorder does not run the event builder. Sampling
-    /// or a concurrent policy change can still omit the event after assigning
-    /// its timestamp. Keep the supplied identity for native inspection and
-    /// later outcomes. Reuse the returned timestamp in native task metadata.
-    /// Measure `body_size` before runtime wrapping or type erasure.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `body_size` cannot be encoded below `u64::MAX`.
-    #[must_use]
-    pub fn spawned(&self, identity: TaskIdentity, parent: Option<TaskId>, body_size: usize) -> Option<TaskSpawn> {
-        let mut assigned = None;
-        seismograph::record(EventClass::RuntimeTask, || {
-            let size = u64::try_from(body_size)
-                .ok()
-                .and_then(|size| size.checked_add(1))
-                .expect("a concrete task body must be smaller than u64::MAX");
-            let timestamp = EventTimestamp::now();
-            assigned = Some(TaskSpawn { identity, timestamp });
-            Some(Record::runtime(
-                timestamp,
-                EventKind::TaskSpawned,
-                RuntimeEvent {
-                    runtime_id: self.runtime,
-                    worker_id: self.worker,
-                    subject_id: identity.id().get(),
-                    related_id: parent.map_or(0, TaskId::get),
-                    value_0: identity.descriptor().get(),
-                    value_1: size,
-                },
-                self.backtrace,
-            ))
-        });
-        assigned
-    }
-
-    /// Emits a real successful outcome without retaining task state.
-    #[inline]
-    pub fn completed(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskCompleted, BacktraceCapture::Never);
-    }
-
-    /// Emits a real task panic with the configured backtrace policy.
-    #[inline]
-    pub fn panicked(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskPanicked, self.backtrace);
-    }
-
-    /// Emits cancellation without retaining task state.
-    #[inline]
-    pub fn canceled(&self, task: TaskId) {
-        self.outcome(task, EventKind::TaskCanceled, BacktraceCapture::Never);
-    }
-
-    fn outcome(&self, task: TaskId, kind: EventKind, backtrace: BacktraceCapture) {
-        seismograph::record(EventClass::RuntimeTask, || {
-            Some(Record::runtime(
-                EventTimestamp::now(),
-                kind,
-                RuntimeEvent {
-                    runtime_id: self.runtime,
-                    worker_id: self.worker,
-                    subject_id: task.get(),
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                },
-                backtrace,
-            ))
-        });
-    }
-}
+use crate::{WorkerControl, collection, lock};
 
 /// An owned request that a provider moves to its worker and answers once.
-///
-/// Dropping an unanswered request reports collection failure and releases the
-/// worker's request slot. Canceled requests do not send a response.
-/// No references to native task storage can escape in the response.
 #[derive(Debug)]
 pub struct TaskRequest {
     pub(crate) worker: Arc<WorkerControl>,
@@ -135,7 +21,7 @@ pub struct TaskRequest {
 }
 
 impl TaskRequest {
-    /// Maximum native tasks to inspect, including tasks without descriptions.
+    /// Maximum native tasks to inspect.
     #[must_use]
     pub const fn limit(&self) -> usize {
         self.limit
@@ -144,15 +30,10 @@ impl TaskRequest {
     /// Whether the diagnostic caller stopped waiting for this request.
     #[must_use]
     pub fn is_canceled(&self) -> bool {
-        // Acquire observes the collector's Release when it stops receiving.
         self.canceled.load(Ordering::Acquire)
     }
 
-    /// Sends owned descriptions without waiting for the diagnostic caller.
-    ///
-    /// Excess descriptions are truncated and marked incomplete. A canceled
-    /// request discards its response. Measurement data comes from observed polls,
-    /// not from values supplied by the provider.
+    /// Sends owned task descriptions without waiting for the diagnostic caller.
     pub fn respond(mut self, mut tasks: Vec<Task>, mut collection: TaskCollection) {
         if self.is_canceled() {
             return;
@@ -200,32 +81,6 @@ impl Drop for TaskRequest {
                 collection: TaskCollection::Failed,
             });
         }
-        // Release transfers this single pending slot to the next dispatch.
         self.worker.request_pending.store(false, Ordering::Release);
-    }
-}
-
-/// Token pairing a poll observed by one worker.
-///
-/// Event-recording changes do not reset requested poll measurements.
-/// Dropping an unfinished token clears its worker slot without publishing a duration.
-#[derive(Debug)]
-#[must_use = "finish the observed poll with WorkerHandle::task_poll_finished, or drop it to cancel observation"]
-pub struct TaskPoll {
-    pub(crate) task: TaskId,
-    pub(crate) worker: Arc<WorkerControl>,
-    pub(crate) started_at: Option<EventTimestamp>,
-    pub(crate) window: u64,
-    pub(crate) active: bool,
-}
-
-impl Drop for TaskPoll {
-    fn drop(&mut self) {
-        if self.active {
-            let _previous = self
-                .worker
-                .current_task
-                .compare_exchange(self.task.get(), 0, Ordering::AcqRel, Ordering::Acquire);
-        }
     }
 }

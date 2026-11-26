@@ -4,9 +4,9 @@
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
-use crate::runtime::config::{MonitorOptions, RuntimeName};
+use crate::runtime::config::RuntimeName;
 use crate::runtime::hook::HookRegistration;
-use crate::runtime::policy::{BlockingPoolPolicy, WorkersPolicy};
+use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
 /// Resource settings validated during runtime construction.
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
-    pub(crate) monitor_options: MonitorOptions,
+    pub(crate) monitor_policy: MonitorPolicy,
     pub(crate) hook_registrations: Mutex<Vec<HookRegistration>>,
 }
 
@@ -28,7 +28,7 @@ impl Default for RuntimeConfig {
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
-            monitor_options: MonitorOptions::default(),
+            monitor_policy: MonitorPolicy::default(),
             hook_registrations: Mutex::new(Vec::new()),
         }
     }

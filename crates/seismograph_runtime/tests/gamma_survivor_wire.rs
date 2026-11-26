@@ -10,8 +10,8 @@ mod wire;
 
 use seismograph::recorder::event::{BacktraceCapture, EventTimestamp};
 use seismograph::recorder::runtime::WorkerId;
+use seismograph_runtime::WorkerRole;
 use seismograph_runtime::snapshot::{CountersScope, ErrorKind, RuntimeState, TaskActivityState, TaskMetricsScope, WorkerState, decode};
-use seismograph_runtime::worker::WorkerRole;
 
 const WORKER_START: usize = 131;
 const TASK_START: usize = 163;

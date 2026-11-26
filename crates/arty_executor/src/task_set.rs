@@ -28,6 +28,18 @@ impl TaskSet {
         self.shared.current()
     }
 
+    /// Returns the number of live tasks before a new task is registered.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.shared.task_count()
+    }
+
+    /// Returns whether the executor has no live tasks.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Configures a future for registration as a new task.
     ///
     /// Call [`TaskBuilder::register`] to submit the task with its completion target.

@@ -2,11 +2,10 @@
 // Licensed under the MIT License.
 
 use seismograph::monitor::Monitor;
-use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration};
+use seismograph_runtime::Runtime;
 
 use crate::runtime::Error;
-use crate::runtime::config::RuntimeName;
-use crate::runtime::policy::MonitorPolicy;
+use crate::runtime::config::RuntimeConfig;
 
 #[cfg(test)]
 thread_local! {
@@ -14,35 +13,39 @@ thread_local! {
 }
 
 #[derive(Debug)]
-pub(crate) struct RuntimeMonitoring {
+pub(crate) struct Monitoring {
     monitor: Monitor,
-    registration: RuntimeRegistration,
+    runtime: Runtime,
 }
 
-impl RuntimeMonitoring {
-    pub(crate) fn start(policy: &MonitorPolicy, name: &RuntimeName, workers: usize) -> Result<Option<Self>, Error> {
-        if !policy.is_enabled() {
+impl Monitoring {
+    pub(crate) fn from_config(config: &RuntimeConfig, workers: usize) -> Result<Option<Self>, Error> {
+        if !config.monitor_policy.is_enabled() {
             return Ok(None);
         }
         let workers = u32::try_from(workers).map_err(Error::new)?;
-        let monitor_name = if name.as_str().is_empty() { "arty" } else { name.as_str() };
+        let monitor_name = if config.name.as_str().is_empty() {
+            "arty"
+        } else {
+            config.name.as_str()
+        };
         let builder = Monitor::builder().name(monitor_name);
         #[cfg(test)]
         let builder = builder.io(TEST_IO
             .with_borrow(Clone::clone)
             .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
         let monitor = builder.start().map_err(Error::new)?;
-        let registration = seismograph_runtime::register_runtime(RuntimeMetadata::new(name.as_str(), workers));
-        Ok(Some(Self { monitor, registration }))
+        let runtime = Runtime::builder(config.name.as_str()).configured_workers(workers).build();
+        Ok(Some(Self { monitor, runtime }))
     }
 
-    pub(crate) fn handle(&self) -> RuntimeHandle {
-        self.registration.handle()
+    pub(crate) fn runtime(&self) -> Runtime {
+        self.runtime.clone()
     }
 
     pub(crate) fn finish(self) -> Result<(), Error> {
-        // #[gamma::skip(stmt.delete_call, reason = "Dropping self below also stops the registration through RuntimeRegistration::drop.")]
-        self.registration.stopped();
+        // #[gamma::skip(stmt.delete_call, reason = "Dropping self below also stops the runtime.")]
+        self.runtime.stop();
         let error = self.monitor.last_error();
         drop(self);
         error.map_or(Ok(()), |message| Err(Error::new(MonitorFailure::new(message))))
@@ -70,19 +73,31 @@ struct MonitorFailure {
 #[cfg(all(test, not(miri)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use seismograph_protocol::io::{IoOperation, MonitorIo};
 
     use super::*;
+    use crate::runtime::config::RuntimeName;
+    use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+
+    fn config(name: &str) -> RuntimeConfig {
+        RuntimeConfig {
+            name: RuntimeName::new(name),
+            workers_policy: WorkersPolicy::exactly(1),
+            stack_size: NonZeroUsize::new(1).unwrap(),
+            blocking_pool_policy: BlockingPoolPolicy::shared(),
+            monitor_policy: MonitorPolicy::enabled(),
+            hook_registrations: std::sync::Mutex::new(Vec::new()),
+        }
+    }
 
     #[test]
     fn monitor_start_returns_the_directory_error_without_panicking() {
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::CreateDirectory, std::io::Error::other("monitor directory failed"));
 
-        let error = RuntimeMonitoring::with_test_io(io, || {
-            RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
-        })
-        .unwrap_err();
+        let error = Monitoring::with_test_io(io, || Monitoring::from_config(&config(""), 1)).unwrap_err();
 
         let mut source: &dyn std::error::Error = &error;
         while let Some(inner) = source.source() {
@@ -96,11 +111,9 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::Accept, std::io::Error::other("monitor listener failed"));
-        let monitoring = RuntimeMonitoring::with_test_io(io, || {
-            RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
-        })
-        .unwrap()
-        .unwrap();
+        let monitoring = Monitoring::with_test_io(io, || Monitoring::from_config(&config(""), 1))
+            .unwrap()
+            .unwrap();
         while monitoring.monitor.last_error().is_none() {
             std::thread::yield_now();
         }
@@ -118,9 +131,7 @@ mod tests {
     fn monitor_connections_keep_named_runtimes_and_supply_an_empty_name_fallback() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         for (name, connection_name) in [("requests", "requests"), ("", "arty")] {
-            let monitoring = RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::new(name), 1)
-                .unwrap()
-                .unwrap();
+            let monitoring = Monitoring::from_config(&config(name), 1).unwrap().unwrap();
 
             assert_eq!(monitoring.monitor.descriptor().name, connection_name);
             monitoring.finish().unwrap();
@@ -130,6 +141,6 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn an_unrepresentable_worker_count_returns_an_error() {
-        RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), usize::MAX).unwrap_err();
+        Monitoring::from_config(&config(""), usize::MAX).unwrap_err();
     }
 }

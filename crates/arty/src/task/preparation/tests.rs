@@ -100,7 +100,7 @@ fn blocking_task_delivers_its_result() {
         BlockingTaskMonitoring::default(),
         seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
-    task.run();
+    task.run(false).unwrap();
 
     assert_eq!(block_on(handle).unwrap(), 42);
     assert!(result_pool.shutdown().cause().is_none());
@@ -115,7 +115,7 @@ fn blocking_panic_is_delivered_to_joiner() {
         BlockingTaskMonitoring::default(),
         seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
-    task.run();
+    task.run(false).unwrap();
 
     assert!(block_on(handle).unwrap_err().is_panic());
     assert!(result_pool.shutdown().cause().is_none());

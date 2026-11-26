@@ -729,8 +729,8 @@ mod tests {
     fn filtered_runtime_keeps_workers_with_either_task_or_event_evidence() {
         use seismograph::recorder::event::BacktraceCapture;
         use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+        use seismograph_runtime::WorkerRole;
         use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
-        use seismograph_runtime::worker::WorkerRole;
 
         let source = RuntimeSource {
             runtimes: vec![Runtime {
@@ -913,10 +913,10 @@ mod tests {
     fn runtime_metadata_cannot_reintroduce_an_excluded_current_task() {
         use seismograph::recorder::event::BacktraceCapture;
         use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+        use seismograph_runtime::WorkerRole;
         use seismograph_runtime::snapshot::{
             Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics, Worker, WorkerState,
         };
-        use seismograph_runtime::worker::WorkerRole;
 
         let source = RuntimeSource {
             runtimes: vec![Runtime {

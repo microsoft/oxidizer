@@ -50,7 +50,7 @@ mod tests {
     fn marker_remains_accessible_after_destructible_worker_state() {
         std::thread::spawn(|| {
             OWNER.with(|_| {});
-            asynchronous::LocalWorker::attach();
+            asynchronous::LocalWorker::attach(None);
         })
         .join()
         .unwrap();

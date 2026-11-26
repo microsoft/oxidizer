@@ -124,6 +124,10 @@ impl ExecutorShared {
         );
     }
 
+    pub(crate) fn task_count(&self) -> usize {
+        self.inner.task_count.get()
+    }
+
     pub(crate) fn shutdown_complete(&self) -> bool {
         debug_assert!(self.inner.new_tasks.borrow().is_empty());
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0

@@ -1,64 +1,102 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use seismograph_runtime::TaskIdentity;
+use seismograph_runtime::blocking::{Execution, QueuedTask, Worker};
+use seismograph_runtime::{Runtime, TaskIdentity, WorkerOrigin};
 
-use super::TaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::task::preparation::BlockingTask;
 
+fn current_worker() -> Option<Worker> {
+    crate::runtime::worker::blocking::LocalWorker::monitoring()
+}
+
+fn current_origin() -> Option<WorkerOrigin> {
+    crate::runtime::worker::asynchronous::LocalWorker::monitoring()
+        .map(|worker| worker.origin())
+        .or_else(|| current_worker().map(|worker| worker.origin()))
+}
+
 pub(crate) enum BlockingJob {
     Plain(Box<dyn FnOnce() + Send + 'static>),
-    Monitored(std::sync::Arc<dyn MonitoredBlockingJob>),
+    Monitored(Box<dyn MonitoredBlockingJob>),
 }
 
 impl BlockingJob {
-    pub(crate) fn run(self) {
-        match self {
-            Self::Plain(body) => body(),
-            Self::Monitored(body) => body.run(),
+    pub(crate) fn enqueue(&mut self, queue_len: u64) {
+        if let Self::Monitored(body) = self {
+            body.enqueue(queue_len);
         }
     }
 
-    pub(crate) fn monitoring(&self) -> Option<&std::sync::Arc<dyn MonitoredBlockingJob>> {
-        match self {
-            Self::Plain(_) => None,
-            Self::Monitored(body) => Some(body),
+    pub(crate) fn started_on(&mut self, worker: &Worker) {
+        if let Self::Monitored(body) = self {
+            body.started_on(worker);
         }
+    }
+
+    pub(crate) fn run(self, canceled: bool) -> std::thread::Result<()> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if canceled {
+                drop(self);
+            } else {
+                match self {
+                    Self::Plain(body) => body(),
+                    Self::Monitored(body) => body.run(),
+                }
+            }
+        }))
     }
 }
 
-pub(crate) trait MonitoredBlockingJob: Send + Sync {
-    fn info(&self) -> &TaskInfo;
-    fn run(&self);
+pub(crate) trait MonitoredBlockingJob: Send {
+    fn enqueue(&mut self, queue_len: u64);
+    fn started_on(&mut self, worker: &Worker);
+    fn run(self: Box<Self>);
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BlockingPoolMonitoring {
-    events: std::sync::Arc<std::sync::OnceLock<seismograph_runtime::task::EventContext>>,
+    runtime: Option<Runtime>,
 }
 
 impl BlockingPoolMonitoring {
+    pub(crate) fn new(runtime: Option<Runtime>) -> Self {
+        Self { runtime }
+    }
+
     pub(crate) fn task<F: 'static>(&self, shutdown: &Shutdown, identity: TaskIdentity) -> BlockingTaskMonitoring {
         BlockingTaskMonitoring {
-            info: matches!(shutdown.state(), ShutdownState::Running)
-                .then(|| self.events().map(|events| TaskInfo::new::<F>(events, identity)))
+            metadata: matches!(shutdown.state(), ShutdownState::Running)
+                .then(|| {
+                    self.runtime().map(|runtime| BlockingTaskMetadata {
+                        runtime,
+                        origin: current_origin(),
+                        identity,
+                        parent: crate::runtime::worker::asynchronous::LocalWorker::current_task().map(TaskIdentity::id),
+                        body_size: size_of::<F>(),
+                    })
+                })
                 .flatten(),
         }
     }
 
-    pub(crate) fn enable(&self, events: seismograph_runtime::task::EventContext) {
-        self.events.set(events).expect("monitoring is enabled once under the queue lock");
+    pub(crate) fn runtime(&self) -> Option<Runtime> {
+        self.runtime.clone()
     }
+}
 
-    pub(crate) fn events(&self) -> Option<seismograph_runtime::task::EventContext> {
-        self.events.get().copied()
-    }
+struct BlockingTaskMetadata {
+    runtime: Runtime,
+    origin: Option<WorkerOrigin>,
+    identity: TaskIdentity,
+    parent: Option<seismograph::recorder::runtime::TaskId>,
+    body_size: usize,
 }
 
 #[derive(Default)]
 pub(crate) struct BlockingTaskMonitoring {
-    info: Option<TaskInfo>,
+    metadata: Option<BlockingTaskMetadata>,
 }
 
 impl BlockingTaskMonitoring {
@@ -67,40 +105,24 @@ impl BlockingTaskMonitoring {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        if let Some(info) = self.info {
-            return BlockingJob::Monitored(std::sync::Arc::new(MonitoredTask {
-                task: std::sync::Mutex::new(task),
-                info,
+        if let Some(metadata) = self.metadata {
+            debug_assert_eq!(task.identity, metadata.identity);
+            return BlockingJob::Monitored(Box::new(MonitoredTask {
+                task: Some(task),
+                metadata: Some(metadata),
+                queued: None,
+                execution: None,
             }));
         }
-        BlockingJob::Plain(Box::new(move || task.run(BlockingTaskEvents::default())))
+        BlockingJob::Plain(Box::new(move || task.run(|_| {})))
     }
 }
 
-#[derive(Clone, Copy, Default)]
-pub(crate) struct BlockingTaskEvents<'a> {
-    info: Option<&'a TaskInfo>,
-}
-
-impl BlockingTaskEvents<'_> {
-    pub(crate) fn completed(self) {
-        if let Some(info) = self.info {
-            info.completed();
-        }
-    }
-
-    pub(crate) fn panicked(self) {
-        if let Some(info) = self.info {
-            info.panicked();
-        }
-    }
-}
-
-// Inspection shares this allocation with execution. Only taking the callback
-// needs the mutex; neither the callback nor its destructor runs under the lock.
 struct MonitoredTask<F, R: Send + 'static> {
-    task: std::sync::Mutex<BlockingTask<F, R>>,
-    info: TaskInfo,
+    task: Option<BlockingTask<F, R>>,
+    metadata: Option<BlockingTaskMetadata>,
+    queued: Option<QueuedTask>,
+    execution: Option<Execution>,
 }
 
 impl<F, R> MonitoredBlockingJob for MonitoredTask<F, R>
@@ -108,103 +130,35 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    fn info(&self) -> &TaskInfo {
-        &self.info
+    fn enqueue(&mut self, queue_len: u64) {
+        let metadata = self.metadata.take().expect("a blocking task enters its queue once");
+        self.queued = metadata
+            .runtime
+            .enqueue_blocking(metadata.origin, metadata.identity, metadata.parent, metadata.body_size, queue_len);
     }
 
-    fn run(&self) {
-        let task = std::mem::replace(
-            &mut *self.task.lock().expect("taking a blocking callback does not execute user code"),
-            BlockingTask {
-                pending: None,
-                identity: self.info.identity(),
-            },
-        );
-        debug_assert_eq!(
-            task.identity,
-            self.info.identity(),
-            "blocking metadata must retain the submitted task identity"
-        );
-        task.run(BlockingTaskEvents { info: Some(&self.info) });
+    fn started_on(&mut self, worker: &Worker) {
+        if let Some(queued) = self.queued.take() {
+            self.execution = Some(queued.started(worker));
+        }
+    }
+
+    fn run(mut self: Box<Self>) {
+        let task = self.task.take().expect("a blocking callback runs exactly once");
+        let execution = self.execution.take();
+        task.run(move |outcome| {
+            if let (Some(worker), Some(execution)) = (current_worker(), execution) {
+                execution.finished(&worker, outcome);
+            }
+        });
     }
 }
 
 impl<F, R: Send + 'static> Drop for MonitoredTask<F, R> {
     fn drop(&mut self) {
-        if self
-            .task
-            .get_mut()
-            .expect("taking a blocking callback does not execute user code")
-            .pending
-            .is_some()
-        {
-            self.info.canceled();
+        if self.task.is_some() {
+            drop(self.execution.take());
+            drop(self.queued.take());
         }
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct BlockingWorkerMonitoring {
-    pub(crate) handle: Option<seismograph_runtime::worker::WorkerHandle>,
-}
-
-impl BlockingWorkerMonitoring {
-    pub(crate) fn parked(&self) {
-        if let Some(worker) = &self.handle {
-            worker.parked();
-        }
-    }
-
-    pub(crate) fn unparked(&self) {
-        if let Some(worker) = &self.handle {
-            worker.unparked();
-        }
-    }
-
-    pub(crate) fn run(&self, body: BlockingJob, canceled: bool) -> std::thread::Result<()> {
-        let observation = self.handle.as_ref().filter(|_| !canceled).and_then(|worker| {
-            body.monitoring().map(|body| {
-                let info = body.info();
-                info.started_on(worker.task_events());
-                let poll = worker.is_observed().then(|| worker.task_poll_started(info.id()));
-                (worker, poll)
-            })
-        });
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if canceled {
-                drop(body);
-            } else {
-                body.run();
-            }
-        }));
-        if let Some((worker, Some(poll))) = observation {
-            worker.task_poll_finished(poll);
-        }
-        outcome
-    }
-}
-
-#[cfg(all(test, feature = "test-util"))]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_monitored_callback_runs_and_delivers_its_result() {
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("blocking-callback-result", 1));
-        let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
-            seismograph_runtime::worker::WorkerRole::Blocking,
-        ));
-        let monitoring = BlockingPoolMonitoring::default();
-        monitoring.enable(worker.handle().task_events());
-        let shutdown = Shutdown::default();
-        let pool = crate::task::handle::JoinHandlePool::new(shutdown.clone());
-        let identity = TaskIdentity::from_location(std::panic::Location::caller());
-        let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown, identity), identity);
-
-        body.run();
-
-        assert_eq!(handle.join().unwrap(), 42);
     }
 }

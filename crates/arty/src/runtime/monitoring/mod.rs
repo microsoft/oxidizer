@@ -5,11 +5,10 @@
 //!
 //! The runtime owns its monitor connection and registration until its workers stop.
 //! Each async worker owns a worker registration and its current poll state.
-//! Blocking queues own worker registrations and share an event context for submissions.
+//! Blocking queues own worker registrations and runtime handles for submissions.
 //! Each submission creates an immutable identity from its caller's source location.
 //! The executor stores each async task's identity and sets it during polls.
-//! A blocking callback and its
-//! inspection metadata share one allocation so inspection can find queued and running tasks.
+//! Blocking tasks report their queue and execution lifecycle without task inspection.
 //! Handles provide access to these registrations but do not own runtime shutdown.
 
 mod asynchronous;
@@ -26,11 +25,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub(crate) use asynchronous::WorkerMonitoring;
-pub(crate) use blocking::{
-    BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob,
-};
-pub(crate) use runtime::RuntimeMonitoring;
-#[cfg(test)]
-pub(crate) use task::set_events;
-pub(crate) use task::{TaskInfo, register_monitored};
+pub(crate) use asynchronous::InspectionObserver;
+pub(crate) use blocking::{BlockingJob, BlockingPoolMonitoring, BlockingTaskMonitoring};
+pub(crate) use runtime::Monitoring;
+pub(crate) use task::{TaskSubmission, current_origin, register_monitored};

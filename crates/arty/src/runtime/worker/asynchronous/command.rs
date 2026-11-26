@@ -73,7 +73,9 @@ pub(crate) enum SystemCommand {
 
     /// Copies task descriptions from native executor storage between cycles.
     #[debug("Inspect")]
-    Inspect { request: seismograph_runtime::task::TaskRequest },
+    Inspect {
+        request: seismograph_runtime::asynchronous::TaskRequest,
+    },
 
     /// Registers or executes one runtime hook on this worker.
     #[debug("RegisterHook")]

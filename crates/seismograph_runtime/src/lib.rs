@@ -4,49 +4,44 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! On-demand runtime diagnostics for [`seismograph`].
+//! Runtime diagnostics and task lifecycle reporting for [`seismograph`].
 //!
-//! Register runtime and worker metadata only when diagnostics are requested by
-//! the application. Each worker registers a task provider that routes bounded
-//! requests to its native task storage. The provider returns owned descriptions
-//! between execution cycles. There is no separate diagnostic task registry.
+//! [`RuntimeBuilder`] creates a [`Runtime`]. The runtime owns worker
+//! registrations and creates dedicated [`asynchronous::Worker`] and
+//! [`blocking::Worker`] handles.
 //!
-//! Workers check [`worker::WorkerHandle::is_observed`] once per execution cycle.
-//! Without collection or runtime-event recording, the normal poll loop needs no
-//! diagnostic callbacks, clocks, locks, counters, or reference-count operations.
-//! [`TaskIdentity`] lets a runtime assign an identity before observation.
+//! An asynchronous worker can provide snapshots of tasks in its native task
+//! storage. A blocking worker reports lifecycle events only. Blocking tasks do
+//! not appear in task snapshots.
 //!
-//! Ordinary Seismograph snapshots request current task state. To measure polls,
-//! call [`RuntimeHandle::capture`] with a nonzero
-//! [`snapshot::CaptureOptions::measure_for`]. The diagnostic caller waits for that
-//! interval, not the workers. Private observation windows prevent a poll from a
-//! previous request from entering a new measurement window.
-//! [`snapshot::decode`] accepts only wire version 1 and source schema 9.
-//! Other versions are rejected.
+//! Both task types use the shared `Task*` event kinds. The enqueue methods
+//! return lightweight tokens when runtime task recording is enabled. The caller
+//! moves each token through queue, execution, poll, and outcome transitions.
+//! Dropping an unfinished token records cancellation.
 //!
-//! Runtime-event recording is separate from task inspection. It retains only
-//! events emitted after recording starts. Missing creation times, wake ages,
-//! earlier polls, and completed task history are not reconstructed.
-//! Stopping event recording does not freeze the actual runtime's current state.
-//! [`worker::WorkerHandle::task_events`] supplies a [`Copy`] context for task
-//! creation and real outcomes, without per-task registration or shared ownership.
+//! [`TaskIdentity`] lets the runtime assign an identity before it records the
+//! task. Event recording retains only events emitted after recording starts.
+//! It does not reconstruct earlier task history.
 //!
 //! # Example
 //!
 //! ```
-//! use seismograph_runtime::RuntimeMetadata;
-//! use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+//! use seismograph_runtime::{Runtime, TaskIdentity, TaskOutcome, WorkerMetadata, WorkerRole};
 //!
-//! let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("primary", 1));
-//! let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-//! worker.handle().register_task_provider(|request| {
-//!     // A real runtime moves this request to its worker before inspecting tasks.
-//!     request.respond(
-//!         Vec::new(),
-//!         seismograph_runtime::snapshot::TaskCollection::Complete,
-//!     );
-//! })?;
-//! # Ok::<(), seismograph::Error>(())
+//! seismograph::recorder(seismograph::recorder::Configuration {
+//!     runtime_tasks: seismograph::recorder::Policy::all(false),
+//!     ..seismograph::recorder::Configuration::default()
+//! });
+//! let runtime = Runtime::builder("primary").configured_workers(1).build();
+//! let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
+//! let identity = TaskIdentity::from_location(std::panic::Location::caller());
+//! let queued = runtime.enqueue_async(None, identity, None, 0, 0).unwrap();
+//! let task = queued.activated(&worker);
+//! let poll = task.poll_started(&worker);
+//! assert!(
+//!     poll.finished(&worker, Some(TaskOutcome::Completed))
+//!         .is_none()
+//! );
 //! ```
 
 use std::num::NonZeroU64;
@@ -54,24 +49,27 @@ use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TransferId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::without_recording;
 
+pub mod asynchronous;
+pub mod blocking;
 pub mod snapshot;
-pub mod task;
-pub mod worker;
 
 mod collection;
+mod task;
 mod task_identity;
+mod task_outcome;
+mod worker;
 
-use snapshot::{Runtime, RuntimeState, Snapshot, Worker, WorkerState};
+use snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot, Worker, WorkerState};
 pub use task_identity::TaskIdentity;
+pub use task_outcome::TaskOutcome;
+pub use worker::{WorkerMetadata, WorkerOrigin, WorkerRole};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
-static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
-static NEXT_TYPE_DESCRIPTOR_ID: AtomicU64 = AtomicU64::new(1);
 static REGISTRY: OnceLock<Mutex<Vec<Arc<RuntimeControl>>>> = OnceLock::new();
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     snapshot::source::ID,
@@ -80,100 +78,215 @@ static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::ne
     capture_source,
 );
 
-/// Metadata retained for one opted-in runtime.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RuntimeMetadata<'a> {
-    name: &'a str,
+/// Builds one runtime diagnostics registration.
+#[derive(Clone, Debug)]
+pub struct RuntimeBuilder {
+    name: String,
     configured_workers: u32,
     lifecycle_backtraces: BacktraceCapture,
 }
 
-impl<'a> RuntimeMetadata<'a> {
-    /// Creates metadata with category-configured lifecycle backtraces.
+impl RuntimeBuilder {
+    /// Creates a runtime builder with no configured workers.
     #[must_use]
-    pub const fn new(name: &'a str, configured_workers: u32) -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name,
-            configured_workers,
+            name: name.into(),
+            configured_workers: 0,
             lifecycle_backtraces: BacktraceCapture::Configured,
         }
     }
 
-    /// Selects the lifecycle and task-spawn backtrace policy.
+    /// Sets the number of workers requested by runtime configuration.
+    #[must_use]
+    pub const fn configured_workers(mut self, configured_workers: u32) -> Self {
+        self.configured_workers = configured_workers;
+        self
+    }
+
+    /// Selects the lifecycle and task backtrace policy.
     #[must_use]
     pub const fn lifecycle_backtraces(mut self, capture: BacktraceCapture) -> Self {
         self.lifecycle_backtraces = capture;
         self
     }
+
+    /// Registers and returns the runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if process runtime identities are exhausted.
+    #[must_use]
+    pub fn build(self) -> Runtime {
+        Runtime {
+            owner: Arc::new(RuntimeOwner {
+                handle: build_runtime(self),
+            }),
+        }
+    }
 }
 
-/// Registration whose drop retires a runtime without reclaiming event metadata.
+/// Runtime diagnostics registration and task lifecycle entry point.
+#[derive(Clone, Debug)]
+pub struct Runtime {
+    owner: Arc<RuntimeOwner>,
+}
+
 #[derive(Debug)]
-pub struct RuntimeRegistration {
+struct RuntimeOwner {
     handle: RuntimeHandle,
 }
 
-impl RuntimeRegistration {
+impl Runtime {
+    /// Creates a runtime builder.
+    #[must_use]
+    pub fn builder(name: impl Into<String>) -> RuntimeBuilder {
+        RuntimeBuilder::new(name)
+    }
+
     /// Returns the process-monotonic runtime identity.
     #[must_use]
     pub fn id(&self) -> RuntimeId {
-        self.handle.id()
+        self.owner.handle.id()
     }
 
-    /// Returns a shared handle for worker setup and requested collection.
+    /// Creates an asynchronous worker on the current thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if metadata uses [`WorkerRole::Blocking`] or the runtime stopped.
     #[must_use]
-    pub fn handle(&self) -> RuntimeHandle {
-        self.handle.clone()
+    pub fn async_worker(&self, metadata: WorkerMetadata) -> asynchronous::Worker {
+        assert_ne!(
+            metadata.role,
+            WorkerRole::Blocking,
+            "an asynchronous worker cannot use the blocking role"
+        );
+        asynchronous::Worker::new(self.clone(), self.owner.handle.register_worker(metadata))
     }
 
-    /// Registers one worker's metadata.
+    /// Creates a blocking worker on the current thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if metadata does not use [`WorkerRole::Blocking`] or the runtime stopped.
     #[must_use]
-    pub fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
-        self.handle.register_worker(metadata)
+    pub fn blocking_worker(&self, metadata: WorkerMetadata) -> blocking::Worker {
+        assert_eq!(metadata.role, WorkerRole::Blocking, "a blocking worker requires the blocking role");
+        blocking::Worker::new(self.clone(), self.owner.handle.register_worker(metadata))
+    }
+
+    /// Records an asynchronous task entering its initial queue.
+    ///
+    /// `origin` identifies the worker that submitted the task. `parent`
+    /// identifies its logical parent task. `queue_len` is the queue length
+    /// before the caller adds this task.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `origin` belongs to another runtime or `body_size` cannot be
+    /// encoded below `u64::MAX`.
+    #[must_use]
+    pub fn enqueue_async(
+        &self,
+        origin: Option<WorkerOrigin>,
+        identity: TaskIdentity,
+        parent: Option<TaskId>,
+        body_size: usize,
+        queue_len: u64,
+    ) -> Option<asynchronous::QueuedTask> {
+        asynchronous::QueuedTask::enqueue(
+            self.id(),
+            self.owner.handle.control.lifecycle_backtraces,
+            origin,
+            identity,
+            parent,
+            body_size,
+            queue_len,
+        )
+    }
+
+    /// Records a blocking task entering its queue.
+    ///
+    /// `origin` identifies the asynchronous or blocking worker that submitted
+    /// the task. `parent` identifies its logical parent task. `queue_len` is the
+    /// queue length before the caller adds this task.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `origin` belongs to another runtime or `body_size` cannot be
+    /// encoded below `u64::MAX`.
+    #[must_use]
+    pub fn enqueue_blocking(
+        &self,
+        origin: Option<WorkerOrigin>,
+        identity: TaskIdentity,
+        parent: Option<TaskId>,
+        body_size: usize,
+        queue_len: u64,
+    ) -> Option<blocking::QueuedTask> {
+        blocking::QueuedTask::enqueue(
+            self.id(),
+            self.owner.handle.control.lifecycle_backtraces,
+            origin,
+            identity,
+            parent,
+            body_size,
+            queue_len,
+        )
+    }
+
+    /// Requests bounded descriptions, optionally measuring polls first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid limits or a runtime that already stopped.
+    pub fn capture(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
+        self.owner.handle.capture(options)
     }
 
     /// Marks the runtime as stopping.
     pub fn stopping(&self) {
-        self.handle.stopping();
+        self.owner.handle.stopping();
     }
 
-    /// Marks the runtime as stopped.
-    pub fn stopped(&self) {
-        self.handle.stopped();
+    /// Stops the runtime and retires its workers.
+    pub fn stop(&self) {
+        self.owner.handle.stopped();
+    }
+
+    /// Dispatches a capture and simulates a response timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid limits or a runtime that already stopped.
+    #[cfg(feature = "test-util")]
+    pub fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
+        self.owner.handle.capture_with_timeout(options)
     }
 }
 
-impl Drop for RuntimeRegistration {
+impl Drop for RuntimeOwner {
     fn drop(&mut self) {
         self.handle.stopped();
     }
 }
 
-/// Shared runtime metadata and its native-storage providers.
 #[derive(Clone, Debug)]
-pub struct RuntimeHandle {
+pub(crate) struct RuntimeHandle {
     pub(crate) control: Arc<RuntimeControl>,
 }
 
 impl RuntimeHandle {
-    /// Returns the process-monotonic runtime identity.
-    #[must_use]
-    #[inline]
-    pub fn id(&self) -> RuntimeId {
+    pub(crate) fn id(&self) -> RuntimeId {
         self.control.id
     }
 
-    /// Registers worker metadata without registering any tasks.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the runtime already stopped or process worker identities are exhausted.
-    #[must_use]
     #[expect(
         clippy::panic,
         reason = "registering a worker after runtime retirement violates the documented caller contract"
     )]
-    pub fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
+    pub(crate) fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
         let worker = without_recording(|| {
             let worker = Arc::new(WorkerControl {
                 id: WorkerId::from_raw(next_id(&NEXT_WORKER_ID).get()).expect("worker identities are nonzero"),
@@ -216,7 +329,7 @@ impl RuntimeHandle {
     ///
     /// Returns an error for invalid limits or a runtime that already stopped.
     /// Worker timeouts and provider failures appear in the returned worker rows.
-    pub fn capture(&self, options: snapshot::CaptureOptions) -> Result<Runtime, seismograph::Error> {
+    pub(crate) fn capture(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
         self.validate_capture(&options)?;
         Ok(without_recording(|| collection::capture(&self.control, options)))
     }
@@ -230,7 +343,7 @@ impl RuntimeHandle {
     ///
     /// Returns an error for invalid limits or a runtime that already stopped.
     #[cfg(feature = "test-util")]
-    pub fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<Runtime, seismograph::Error> {
+    pub(crate) fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
         self.validate_capture(&options)?;
         Ok(without_recording(|| collection::capture_with_timeout(&self.control, options)))
     }
@@ -244,7 +357,7 @@ impl RuntimeHandle {
     }
 
     /// Marks the runtime as stopping and records the transition once.
-    pub fn stopping(&self) {
+    pub(crate) fn stopping(&self) {
         stopping_with(&self.control.state, || {
             record_now(
                 &self.control,
@@ -260,7 +373,7 @@ impl RuntimeHandle {
     }
 
     /// Retires providers and records the runtime's stop once.
-    pub fn stopped(&self) {
+    pub(crate) fn stopped(&self) {
         let at = EventTimestamp::now();
         if !self.retire_at(at) {
             return;
@@ -299,38 +412,16 @@ impl RuntimeHandle {
     }
 }
 
-/// Allocates a process-wide identity for a runtime task.
-///
-/// # Panics
-///
-/// Panics if process task identities are exhausted.
-#[must_use]
-pub fn allocate_task_id() -> TaskId {
+pub(crate) fn allocate_task_id() -> TaskId {
     TaskId::from_raw(next_id(&NEXT_TASK_ID).get()).expect("task identity counters start at one")
 }
 
-/// Allocates a process-wide descriptor for a runtime's concrete task type.
-///
-/// # Panics
-///
-/// Panics if process type identities are exhausted.
-#[must_use]
-pub fn allocate_type_descriptor_id() -> TypeDescriptorId {
-    TypeDescriptorId::from_raw(next_id(&NEXT_TYPE_DESCRIPTOR_ID).get()).expect("type identity counters start at one")
-}
-
-/// Registers metadata for an opted-in runtime without enabling recording.
-///
-/// # Panics
-///
-/// Panics if process runtime identities are exhausted.
-#[must_use]
-pub fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeRegistration {
+fn build_runtime(metadata: RuntimeBuilder) -> RuntimeHandle {
     let control = without_recording(|| {
         seismograph::snapshot::register_source(&SOURCE);
         let control = Arc::new(RuntimeControl {
             id: RuntimeId::from_raw(next_id(&NEXT_RUNTIME_ID).get()).expect("runtime identity counters start at one"),
-            name: metadata.name.to_owned(),
+            name: metadata.name,
             configured_workers: metadata.configured_workers,
             lifecycle_backtraces: metadata.lifecycle_backtraces,
             created_at: EventTimestamp::now(),
@@ -355,9 +446,57 @@ pub fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeRegistration {
         0,
         control.lifecycle_backtraces,
     );
-    RuntimeRegistration {
-        handle: RuntimeHandle { control },
+    RuntimeHandle { control }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) struct RuntimeMetadata<'a> {
+    name: &'a str,
+    configured_workers: u32,
+}
+
+#[cfg(test)]
+impl<'a> RuntimeMetadata<'a> {
+    pub(crate) const fn new(name: &'a str, configured_workers: u32) -> Self {
+        Self { name, configured_workers }
     }
+}
+
+#[cfg(test)]
+pub(crate) struct RuntimeTestRegistration {
+    pub(crate) handle: RuntimeHandle,
+}
+
+#[cfg(test)]
+impl RuntimeTestRegistration {
+    pub(crate) fn handle(&self) -> RuntimeHandle {
+        self.handle.clone()
+    }
+
+    pub(crate) fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
+        self.handle.register_worker(metadata)
+    }
+}
+
+#[cfg(test)]
+impl Drop for RuntimeTestRegistration {
+    fn drop(&mut self) {
+        self.handle.stopped();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeTestRegistration {
+    RuntimeTestRegistration {
+        handle: build_runtime(RuntimeBuilder::new(metadata.name).configured_workers(metadata.configured_workers)),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn allocate_type_descriptor_id() -> seismograph::recorder::runtime::TypeDescriptorId {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    seismograph::recorder::runtime::TypeDescriptorId::from_raw(next_id(&NEXT).get()).expect("type identity counters start at one")
 }
 
 #[derive(Debug)]
@@ -529,10 +668,6 @@ fn stopping_with(state: &AtomicU8, record: impl FnOnce()) {
     }
 }
 
-pub(crate) fn next_transfer_id() -> TransferId {
-    TransferId::from_raw(next_id(&NEXT_TRANSFER_ID).get()).expect("transfer identity counters start at one")
-}
-
 pub(crate) fn duration_nanos(end: EventTimestamp, start: EventTimestamp) -> u64 {
     u64::try_from(end.duration_since(start).as_nanos()).unwrap_or(
         // #[gamma::skip(expr.decrement, reason = "EventTimestamp::duration_since constructs Duration::from_nanos from a saturating u64 subtraction, so as_nanos always fits u64 and this fallback is unreachable")]
@@ -547,7 +682,6 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker::WorkerRole;
 
     #[test]
     fn november_duration_nanos_preserves_the_full_timestamp_range_without_a_clock() {
@@ -674,12 +808,15 @@ mod tests {
     fn gamma_round2_retirement_uses_exact_frozen_boundaries_and_is_idempotent() {
         let _test = test_lock();
         for (at, expected) in [(0, 1), (1, 1), (37, 37)] {
-            let runtime = crate::worker::gamma_round2_tests::runtime();
-            assert!(runtime.retire_at(EventTimestamp::from_ticks(at)));
-            assert_eq!(runtime.control.retired_at.load(Ordering::Acquire), expected);
-            assert_eq!(runtime.control.state.load(Ordering::Acquire), RuntimeState::Stopped.wire_value());
-            assert!(!runtime.retire_at(EventTimestamp::from_ticks(99)));
-            assert_eq!(runtime.control.retired_at.load(Ordering::Acquire), expected);
+            let runtime = Runtime::builder("retirement-boundaries").build();
+            assert!(runtime.owner.handle.retire_at(EventTimestamp::from_ticks(at)));
+            assert_eq!(runtime.owner.handle.control.retired_at.load(Ordering::Acquire), expected);
+            assert_eq!(
+                runtime.owner.handle.control.state.load(Ordering::Acquire),
+                RuntimeState::Stopped.wire_value()
+            );
+            assert!(!runtime.owner.handle.retire_at(EventTimestamp::from_ticks(99)));
+            assert_eq!(runtime.owner.handle.control.retired_at.load(Ordering::Acquire), expected);
         }
     }
 

@@ -13,22 +13,35 @@ pub(crate) enum Pools {
     PerWorker {
         name: RuntimeName,
         max_workers: Option<NonZeroUsize>,
+        monitoring: Option<seismograph_runtime::Runtime>,
     },
 }
 
 impl Pools {
-    pub(crate) fn per_worker(name: RuntimeName, max_workers: Option<NonZeroUsize>) -> Self {
-        Self::PerWorker { name, max_workers }
+    pub(crate) fn per_worker(
+        name: RuntimeName,
+        max_workers: Option<NonZeroUsize>,
+        monitoring: Option<&seismograph_runtime::Runtime>,
+    ) -> Self {
+        Self::PerWorker {
+            name,
+            max_workers,
+            monitoring: monitoring.cloned(),
+        }
     }
 
-    pub(crate) fn shared(name: RuntimeName, max_workers: Option<NonZeroUsize>) -> Self {
-        Self::Shared(Pool::new(name, None, max_workers))
+    pub(crate) fn shared(name: RuntimeName, max_workers: Option<NonZeroUsize>, monitoring: Option<&seismograph_runtime::Runtime>) -> Self {
+        Self::Shared(Pool::new(name, None, max_workers, monitoring))
     }
 
     pub(crate) fn pool_for_worker(&self, worker_index: usize) -> Pool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::PerWorker { name, max_workers } => Pool::new(name.clone(), Some(worker_index), *max_workers),
+            Self::PerWorker {
+                name,
+                max_workers,
+                monitoring,
+            } => Pool::new(name.clone(), Some(worker_index), *max_workers, monitoring.as_ref()),
         }
     }
 }
@@ -41,13 +54,13 @@ mod tests {
 
     #[test]
     fn shared_policy_reuses_the_same_blocking_pool() {
-        let pools = Pools::shared(RuntimeName::default(), NonZeroUsize::new(1));
+        let pools = Pools::shared(RuntimeName::default(), NonZeroUsize::new(1), None);
         assert!(pools.pool_for_worker(0).shares_pool_with(&pools.pool_for_worker(1)));
     }
 
     #[test]
     fn per_worker_policy_creates_independent_blocking_pools() {
-        let pools = Pools::per_worker(RuntimeName::default(), NonZeroUsize::new(1));
+        let pools = Pools::per_worker(RuntimeName::default(), NonZeroUsize::new(1), None);
         assert!(!pools.pool_for_worker(0).shares_pool_with(&pools.pool_for_worker(1)));
     }
 }

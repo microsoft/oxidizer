@@ -27,8 +27,8 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
-        self.core.register_task_provider(thread, handle);
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, worker: &seismograph_runtime::asynchronous::Worker) {
+        self.core.register_task_provider(thread, worker);
     }
 
     pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
@@ -194,7 +194,7 @@ mod tests {
             tx,
             Waker::noop().clone(),
             thread.clone(),
-            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
         );
         let shutdown = Shutdown::default();
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
@@ -228,7 +228,7 @@ mod tests {
             commands,
             Waker::noop().clone(),
             test_threads(1).pop().unwrap(),
-            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
         );
         let client = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(worker),
@@ -257,13 +257,13 @@ mod tests {
                 first_tx,
                 Waker::noop().clone(),
                 threads[0].clone(),
-                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
             ),
             worker_endpoint(
                 second_tx,
                 Waker::noop().clone(),
                 threads[1].clone(),
-                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
             ),
         ])
         .unwrap();
@@ -304,7 +304,7 @@ mod tests {
         let (worker0_tx, worker0_rx) = crate::runtime::worker::asynchronous::command_channel();
         let (worker1_tx, worker1_rx) = crate::runtime::worker::asynchronous::command_channel();
         let threads = test_threads(2);
-        let blocking_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+        let blocking_worker = Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default());
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
@@ -341,9 +341,9 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+        let source_worker = Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default());
         let destination_shutdown = Shutdown::default();
-        let destination_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), destination_shutdown.clone());
+        let destination_worker = Worker::new(Pool::new(RuntimeName::default(), None, None, None), destination_shutdown.clone());
         destination_shutdown.begin(ShutdownCause::default());
         let (source_commands, _source_rx) = crate::runtime::worker::asynchronous::command_channel();
         let (destination_commands, _destination_rx) = crate::runtime::worker::asynchronous::command_channel();
@@ -430,7 +430,7 @@ mod tests {
             commands,
             Waker::noop().clone(),
             threads[0].clone(),
-            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
         );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(worker),

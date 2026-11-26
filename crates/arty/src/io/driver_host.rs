@@ -149,7 +149,7 @@ mod tests {
     }
 
     fn host() -> (IoRuntime, Thread, InstalledHost) {
-        LocalWorker::attach();
+        LocalWorker::attach(None);
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);

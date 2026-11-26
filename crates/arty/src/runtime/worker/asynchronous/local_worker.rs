@@ -30,6 +30,7 @@ static LOCAL_PANIC_HOOK: LocalHook<TaskPanic> = LocalHook { hooks: &PANIC_HOOKS 
 /// Asynchronous worker state that remains attached throughout thread teardown.
 #[derive(Debug)]
 pub(crate) struct LocalWorker {
+    monitoring: Option<seismograph_runtime::asynchronous::Worker>,
     scheduler: Option<SchedulerContext>,
     driver_host: Option<RuntimeDriverHost>,
     spawn_hooks: Option<LocalHookGuard<TaskSpawn>>,
@@ -37,8 +38,9 @@ pub(crate) struct LocalWorker {
 }
 
 impl LocalWorker {
-    fn new() -> Self {
+    fn new(monitoring: Option<seismograph_runtime::asynchronous::Worker>) -> Self {
         Self {
+            monitoring,
             scheduler: None,
             driver_host: None,
             spawn_hooks: None,
@@ -46,11 +48,11 @@ impl LocalWorker {
         }
     }
 
-    pub(crate) fn attach() {
+    pub(crate) fn attach(monitoring: Option<seismograph_runtime::asynchronous::Worker>) {
         worker::WorkerMarker::attach();
         CURRENT.with_borrow_mut(|current| {
             assert!(current.is_none(), "a task local worker is already attached to this thread");
-            *current = Some(Self::new());
+            *current = Some(Self::new(monitoring));
         });
     }
 
@@ -93,6 +95,10 @@ impl LocalWorker {
 
     pub(crate) fn current_task() -> Option<TaskIdentity> {
         Self::with_scheduler(|current| current.and_then(|current| current.tasks().current()))
+    }
+
+    pub(crate) fn monitoring() -> Option<seismograph_runtime::asynchronous::Worker> {
+        Self::with_current(|current| current.and_then(|current| current.monitoring.clone()))
     }
 
     pub(crate) fn with_scheduler<R>(f: impl FnOnce(Option<&SchedulerContext>) -> R) -> R {
@@ -410,13 +416,13 @@ mod tests {
                         source_commands,
                         Waker::noop().clone(),
                         source.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                     ),
                     worker_endpoint(
                         destination_commands,
                         Waker::noop().clone(),
                         destination.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                     ),
                 ])
                 .unwrap(),
@@ -439,7 +445,7 @@ mod tests {
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher, clock, io, source.clone());
             let executor = Executor::builder().thread(source.clone()).build();
-            LocalWorker::attach();
+            LocalWorker::attach(None);
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
             let _task = core.spawn_relocating(&source, |_| async {}, TaskIdentity::from_location(std::panic::Location::caller()));
@@ -487,7 +493,7 @@ mod tests {
                     commands,
                     Waker::noop().clone(),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                 )),
                 shutdown,
             );
@@ -502,7 +508,7 @@ mod tests {
             let executor = Executor::builder().thread(thread.clone()).build();
             let relocation_saw_no_observers = Arc::new(AtomicBool::new(false));
             let callbacks = Arc::new(AtomicUsize::new(0));
-            LocalWorker::attach();
+            LocalWorker::attach(None);
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
             assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
@@ -546,7 +552,7 @@ mod tests {
                     commands,
                     Waker::from(std::sync::Arc::clone(&wakes)),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
                 )),
                 shutdown.clone(),
             );
@@ -559,7 +565,7 @@ mod tests {
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher, clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
-            LocalWorker::attach();
+            LocalWorker::attach(None);
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
             let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }, identity()));
@@ -640,7 +646,7 @@ mod tests {
                 commands,
                 Waker::noop().clone(),
                 thread.clone(),
-                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
             )),
             Shutdown::default(),
         );
