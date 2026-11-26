@@ -3,7 +3,6 @@
 
 //! Dynamic cache tier wrapper for type erasure.
 
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::tier::DynCacheTier;
@@ -23,7 +22,8 @@ use crate::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 /// // DynamicCache is Clone
 /// let clone = dynamic.clone();
 /// ```
-pub struct DynamicCache<K, V>(Arc<DynCacheTier<'static, K, V>>);
+#[derive(derive_more::Debug)]
+pub struct DynamicCache<K, V>(#[debug(skip)] Arc<DynCacheTier<'static, K, V>>);
 
 impl<K, V> DynamicCache<K, V> {
     /// Creates a new dynamic cache from any `CacheTier` implementation.
@@ -32,12 +32,6 @@ impl<K, V> DynamicCache<K, V> {
         T: CacheTier<K, V> + Send + Sync + 'static,
     {
         Self(DynCacheTier::new_arc(strategy))
-    }
-}
-
-impl<K, V> Debug for DynamicCache<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynamicCache").finish()
     }
 }
 

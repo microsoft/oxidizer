@@ -9,8 +9,8 @@ use cachet_tier::MockCache;
 
 #[cfg(feature = "test-util")]
 #[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 fn debug_output_is_correct() {
     let cache = DynamicCache::new(MockCache::<String, i32>::new());
-    let debug_output = format!("{cache:?}");
-    assert_eq!(debug_output, "DynamicCache");
+    insta::assert_debug_snapshot!(cache);
 }

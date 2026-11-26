@@ -4,7 +4,6 @@
 //! The main cache type with telemetry and stampede protection.
 
 use std::borrow::Borrow;
-use std::fmt::Debug;
 use std::hash::Hash;
 
 use cachet_tier::{CacheEntry, CacheTier, DynamicCache, InsertOutcome, SizeError};
@@ -25,6 +24,7 @@ pub type CacheName = &'static str;
 
 /// Mergers for stampede protection on all cache operations.
 /// Only created when `stampede_protection` is enabled.
+#[derive(derive_more::Debug)]
 struct Mergers<K, V> {
     get: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
     invalidate: Merger<K, Result<(), Error>>,
@@ -50,12 +50,6 @@ where
             try_get_or_insert_with: Merger::new(),
             optionally_get_or_insert: Merger::new(),
         }
-    }
-}
-
-impl<K, V> Debug for Mergers<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Mergers").finish_non_exhaustive()
     }
 }
 

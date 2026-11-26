@@ -1,0 +1,8 @@
+---
+source: crates/bytesbuf/tests/memory.rs
+expression: memory
+---
+CallbackMemory {
+    reserve_fn: [address],
+    ..
+}

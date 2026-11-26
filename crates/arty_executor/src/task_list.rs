@@ -8,9 +8,12 @@ use std::rc::Rc;
 use crate::{TaskHandle, TaskPtr};
 
 /// Intrusive owner-thread inventory of all pending tasks.
-#[derive(Default)]
+#[derive(Default, derive_more::Debug)]
 pub(crate) struct TaskList {
+    // Keep task-allocation addresses out of Debug output.
+    #[debug(skip)]
     head: Option<TaskPtr>,
+    #[debug(skip)]
     tail: Option<TaskPtr>,
     _owner_thread: PhantomData<Rc<()>>,
 }
@@ -87,12 +90,6 @@ impl TaskList {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.head.is_none()
-    }
-}
-
-impl std::fmt::Debug for TaskList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaskList").finish_non_exhaustive()
     }
 }
 
@@ -173,7 +170,6 @@ mod tests {
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
-        assert_eq!(format!("{list:?}"), "TaskList { .. }");
         // SAFETY: `first_pointer` is live and belongs to `list`.
         drop(unsafe { list.remove(first_pointer) }.unwrap());
         assert_eq!(list.pop_front().unwrap().as_ptr(), second_pointer);

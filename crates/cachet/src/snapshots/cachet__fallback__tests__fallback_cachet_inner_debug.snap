@@ -1,0 +1,30 @@
+---
+source: crates/cachet/src/fallback.rs
+expression: cache
+---
+FallbackCache {
+    inner: FallbackCacheInner {
+        name: "fallback",
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            ..
+        },
+        refresh: Some(
+            TimeToRefresh {
+                duration: 60s,
+                spawner: Spawner(
+                    "tokio",
+                ),
+                ..
+            },
+        ),
+        telemetry: CacheTelemetry {
+            logging_enabled: false,
+            has_handler: false,
+        },
+        _phantom: PhantomData<(alloc::string::String, i32)>,
+        ..
+    },
+}

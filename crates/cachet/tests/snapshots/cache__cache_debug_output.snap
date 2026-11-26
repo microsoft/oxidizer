@@ -1,0 +1,19 @@
+---
+source: crates/cachet/tests/cache.rs
+expression: cache
+---
+Cache {
+    name: "debug-cache",
+    storage: DynamicCache(..),
+    clock: Clock {
+        kind: "controlled",
+        timers: 0,
+        alive: true,
+        ..
+    },
+    telemetry: CacheTelemetry {
+        logging_enabled: false,
+        has_handler: false,
+    },
+    mergers: None,
+}

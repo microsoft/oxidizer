@@ -784,22 +784,24 @@ async fn optionally_get_or_insert_with_storage_error_propagates() {
     result.unwrap_err();
 }
 
-#[cfg_attr(miri, ignore)]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 #[test]
 fn cache_debug_output() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().build();
-    let debug_str = format!("{cache:?}");
-    assert!(debug_str.contains("Cache"), "got: {debug_str}");
+    let cache = Cache::builder::<String, i32>(clock).name("debug-cache").memory().build();
+    insta::assert_debug_snapshot!(cache);
 }
 
-#[cfg_attr(miri, ignore)]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 #[test]
 fn cache_debug_with_stampede_protection() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
-    let debug_str = format!("{cache:?}");
-    assert!(debug_str.contains("Mergers"), "got: {debug_str}");
+    let cache = Cache::builder::<String, i32>(clock)
+        .name("debug-cache")
+        .memory()
+        .stampede_protection()
+        .build();
+    insta::assert_debug_snapshot!(cache);
 }
 
 // =============================================================================

@@ -36,7 +36,6 @@
 //! ```
 
 use std::cell::Cell;
-use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -152,19 +151,11 @@ pub fn with_hint_async<F>(heap: &heaps::Heap, future: F) -> WithHint<F> {
 pin_project_lite::pin_project! {
     /// A future that requests a prospective heap around every poll.
     #[must_use = "futures do nothing unless polled or awaited"]
+    #[derive(derive_more::Debug)]
     pub struct WithHint<F> {
         heap: heaps::Heap,
         #[pin]
         future: F,
-    }
-}
-
-impl<F: fmt::Debug> fmt::Debug for WithHint<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WithHint")
-            .field("heap", &self.heap)
-            .field("future", &self.future)
-            .finish()
     }
 }
 

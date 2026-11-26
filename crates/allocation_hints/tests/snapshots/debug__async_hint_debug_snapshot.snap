@@ -1,0 +1,20 @@
+---
+source: crates/allocation_hints/tests/debug.rs
+expression: future
+---
+WithHint {
+    heap: Heap {
+        id: HeapId([id]),
+        kind: General(
+            Options {
+                locality_segment_bytes: 4194304,
+                medium_cache_max_bytes: 8388608,
+            },
+        ),
+    },
+    future: Ready(
+        Some(
+            42,
+        ),
+    ),
+}
