@@ -219,6 +219,26 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
 }
 
 #[test]
+fn external_submission_transfers_enrichment_and_preserves_caller_context() {
+    let sink = sink();
+    let runtime = Runtime::builder().enable_observed(&sink).build().unwrap();
+
+    (|| {
+        assert_eq!(active_keys(&sink), ["external"]);
+        let task = runtime
+            .scheduler()
+            .spawn_anywhere(sink.clone(), |_, sink| async move { active_keys(&sink) });
+
+        assert_eq!(futures::executor::block_on(task).unwrap(), ["external"]);
+        assert_eq!(active_keys(&sink), ["external"]);
+    })
+    .enrich(&sink, Layer("external", 1))();
+
+    assert!(active_keys(&sink).is_empty());
+    stop_bounded(runtime);
+}
+
+#[test]
 fn runtime_control_enables_transfer_for_later_local_tasks() {
     let sink = sink();
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
