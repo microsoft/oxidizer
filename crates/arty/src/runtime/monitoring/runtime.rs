@@ -14,12 +14,12 @@ thread_local! {
 }
 
 #[derive(Debug)]
-pub(crate) struct RuntimeDiagnostics {
+pub(crate) struct RuntimeMonitoring {
     monitor: Monitor,
     registration: RuntimeRegistration,
 }
 
-impl RuntimeDiagnostics {
+impl RuntimeMonitoring {
     pub(crate) fn start(policy: &MonitorPolicy, name: &RuntimeName, workers: usize) -> Result<Option<Self>, Error> {
         if !policy.is_enabled() {
             return Ok(None);
@@ -79,8 +79,8 @@ mod tests {
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::CreateDirectory, std::io::Error::other("monitor directory failed"));
 
-        let error = RuntimeDiagnostics::with_test_io(io, || {
-            RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
+        let error = RuntimeMonitoring::with_test_io(io, || {
+            RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
         })
         .unwrap_err();
 
@@ -96,16 +96,16 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::Accept, std::io::Error::other("monitor listener failed"));
-        let diagnostics = RuntimeDiagnostics::with_test_io(io, || {
-            RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
+        let monitoring = RuntimeMonitoring::with_test_io(io, || {
+            RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), 1)
         })
         .unwrap()
         .unwrap();
-        while diagnostics.monitor.last_error().is_none() {
+        while monitoring.monitor.last_error().is_none() {
             std::thread::yield_now();
         }
 
-        let error = diagnostics.finish().unwrap_err();
+        let error = monitoring.finish().unwrap_err();
 
         let mut source: &dyn std::error::Error = &error;
         while let Some(inner) = source.source() {
@@ -118,18 +118,18 @@ mod tests {
     fn monitor_connections_keep_named_runtimes_and_supply_an_empty_name_fallback() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         for (name, connection_name) in [("requests", "requests"), ("", "arty")] {
-            let diagnostics = RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::new(name), 1)
+            let monitoring = RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::new(name), 1)
                 .unwrap()
                 .unwrap();
 
-            assert_eq!(diagnostics.monitor.descriptor().name, connection_name);
-            diagnostics.finish().unwrap();
+            assert_eq!(monitoring.monitor.descriptor().name, connection_name);
+            monitoring.finish().unwrap();
         }
     }
 
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn an_unrepresentable_worker_count_returns_an_error() {
-        RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::default(), usize::MAX).unwrap_err();
+        RuntimeMonitoring::start(&MonitorPolicy::enabled(), &RuntimeName::default(), usize::MAX).unwrap_err();
     }
 }

@@ -249,12 +249,11 @@ impl Scheduler {
     /// let destination = cx
     ///     .control()
     ///     .workers()
-    ///     .into_iter()
     ///     .next()
     ///     .ok_or_else(|| std::io::Error::other("runtime has no workers"))?;
     /// let task = cx
     ///     .scheduler()
-    ///     .spawn_at(destination, cx.clone(), |worker| async move {
+    ///     .spawn_at(&destination, cx.clone(), |worker| async move {
     ///         worker.thread().id()
     ///     });
     /// assert_eq!(task.await?, destination.id());
@@ -276,9 +275,7 @@ impl Scheduler {
     ///     let destination = runtime.scheduler().block_on(async |cx| {
     ///         cx.control()
     ///             .workers()
-    ///             .into_iter()
     ///             .next()
-    ///             .cloned()
     ///             .ok_or_else(|| std::io::Error::other("runtime has no workers"))
     ///     })??;
     ///     scheduler.spawn_at(&destination, (), |()| async { SendOnly });

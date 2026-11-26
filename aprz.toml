@@ -75,15 +75,6 @@ advisories_cache_ttl = "1 week"
 # version = "^2.0"
 # ----------------------------------------------------------------------------
 
-# Adopter-owned: exempt un-upgradeable transitive advisories from --error-if-high-risk.
-# quick-xml 0.39.4 has two DoS advisories (RUSTSEC-2026-0194/0195) fixed only in
-# >=0.41.0, but it is pinned transitively by the Azure SDK (typespec <- azure_core
-# 1.0.0) and cannot be upgraded until an upstream release. Mirrors deny.toml and
-# .cargo/audit.toml. Remove once azure_core/typespec move to quick-xml >=0.41.
-[[allow_list]]
-name = "quick-xml"
-version = "=0.39.4"
-
 # Workspace-only helper crates do not have registry appraisal metadata.
 [[allow_list]]
 name = "benchmarking"

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.2] - 2026-11-24
+
+- Clarify TLS defaults, backend selection, and setup errors.
+- Expand identity and native-TLS configuration regression coverage.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.5.1] - 2026-11-02
 
 - Update error and test dependencies. This release does not change the TLS source code.

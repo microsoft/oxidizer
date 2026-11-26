@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.6] - 2026-11-24
+
+- Clarify backend support for keep-alive, pool limits, idle timeouts, and connection lifetimes.
+
 ## [0.2.5] - 2026-10-20
 
 - Refresh published option documentation and inherited package metadata.

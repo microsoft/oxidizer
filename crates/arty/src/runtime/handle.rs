@@ -4,6 +4,7 @@
 use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
+use crate::runtime::monitoring::RuntimeMonitoring;
 use crate::runtime::worker::WorkerJoiner;
 use crate::task::RuntimeScheduler;
 
@@ -56,8 +57,7 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
-    #[cfg(any(test, feature = "monitor"))]
-    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
+    monitoring: Option<RuntimeMonitoring>,
 }
 
 impl Runtime {
@@ -137,17 +137,15 @@ impl Runtime {
         &self.scheduler
     }
 
-    /// Returns the runtime's diagnostic handle for collection tests.
+    /// Returns the runtime's monitoring handle for collection tests.
     ///
-    /// Returns `None` when monitoring is disabled. Capture from a diagnostic
+    /// Returns `None` when monitoring is disabled. Capture from a separate
     /// thread, not from an Arty worker that must answer the collection request.
     /// This does not change the process-wide recorder.
     #[cfg(all(test, not(miri)))]
     #[must_use]
-    pub(crate) fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
-        self.diagnostics
-            .as_ref()
-            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle)
+    pub(crate) fn monitoring(&self) -> Option<seismograph_runtime::RuntimeHandle> {
+        self.monitoring.as_ref().map(RuntimeMonitoring::handle)
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
@@ -212,41 +210,26 @@ impl Runtime {
         wait(self)
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(
-            clippy::needless_pass_by_ref_mut,
-            reason = "monitoring consumes the diagnostic registration after workers stop"
-        )
-    )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
         self.scheduler.dispatcher.release_retained_hooks();
-        #[cfg(any(test, feature = "monitor"))]
-        let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
+        let monitor_error = self.monitoring.take().and_then(|monitoring| monitoring.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
-        #[cfg(any(test, feature = "monitor"))]
-        {
-            monitor_result(wait_error, monitor_error)
-        }
-        #[cfg(not(any(test, feature = "monitor")))]
-        wait_error.map_or(Ok(()), Err)
+        monitor_result(wait_error, monitor_error)
     }
 
-    #[cfg(any(test, feature = "monitor"))]
-    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
-        self.diagnostics = diagnostics;
-    }
-
-    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner) -> Self {
+    pub(crate) const fn with_dispatcher(
+        dispatcher: DispatcherClient,
+        worker_joiner: WorkerJoiner,
+        monitoring: Option<RuntimeMonitoring>,
+    ) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
-            #[cfg(any(test, feature = "monitor"))]
-            diagnostics: None,
+            monitoring,
         }
     }
 }
@@ -270,7 +253,6 @@ impl Drop for Runtime {
     }
 }
 
-#[cfg(any(test, feature = "monitor"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
 fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
     worker_error.or(monitor_error).map_or(Ok(()), Err)
@@ -314,8 +296,8 @@ mod tests {
                 shutdown.clone(),
             ),
         );
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new()));
-        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new(), None));
+        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()), None);
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
         }));
@@ -356,8 +338,9 @@ mod tests {
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
             Vec::new(),
+            None,
         ));
-        let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
+        let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]), None);
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
     }
 
@@ -378,8 +361,9 @@ mod tests {
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
             Vec::new(),
+            None,
         ));
-        let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));
+        let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]), None);
         dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());
 
         assert_eq!(runtime.stop().unwrap_err().to_string(), "first runtime failure");

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Update private task building, instrumentation, cancellation, and panic handoff for Arty runtime hooks.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+- Align the version with the `arty` package group at `0.7.0`.
+
 ## [0.6.1] - 2026-11-06
 
 - Add the optional `inspection` feature. A runtime can request bounded task descriptions

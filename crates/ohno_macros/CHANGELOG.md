@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.5] - 2026-11-24
+
+- Update the private error macro shim and mutation-testing guidance.
+- Update the local requirement for `ohno_macros_impl` from `=0.5.4` to `=0.5.5`.
+
 ## [0.5.4] - 2026-11-02
 
 - Use version 0.5.4 to match the Ohno packages. Macro behavior does not change.

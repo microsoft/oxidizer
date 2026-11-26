@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.5] - 2026-11-24
+
+- Expand attribute, lifetime, wrapper-delegation, and mock-generation regression coverage.
+- Update the local requirement for `fakeable_impl` from `=0.2.4` to `=0.2.5`.
+
 ## [0.2.4] - 2026-11-06
 
 - Align the version with the `fakeable` package group. No independent source

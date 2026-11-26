@@ -26,12 +26,6 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    #[cfg(any(test, feature = "monitor"))]
-    pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
-        self.core.set_diagnostics(runtime);
-    }
-
-    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
         self.core.register_task_provider(thread, handle);
     }
@@ -44,7 +38,7 @@ impl DispatcherClient {
         self.core.worker_index(thread_id)
     }
 
-    pub(crate) fn workers(&self) -> &Workers {
+    pub(crate) fn workers(&self) -> Workers {
         self.core.workers()
     }
 
@@ -125,7 +119,7 @@ impl DispatcherClient {
 impl fmt::Debug for DispatcherClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
-            .field("worker_count", &self.workers().into_iter().len())
+            .field("worker_count", &self.workers().len())
             .finish_non_exhaustive()
     }
 }
@@ -188,7 +182,12 @@ mod tests {
             Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
         );
         let shutdown = Shutdown::default();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            nonempty::NonEmpty::new(endpoint),
+            shutdown.clone(),
+            Vec::new(),
+            None,
+        ));
         let runtime = IoRuntime::new(Sink::noop());
         let expected = format!("Io {{ runtime: {runtime:?}, dispatcher: {dispatcher:?}, thread: {thread:?} }}");
         let io = Io::new(runtime, dispatcher, thread);
@@ -222,6 +221,7 @@ mod tests {
             nonempty::NonEmpty::new(worker),
             Shutdown::default(),
             Vec::new(),
+            None,
         ));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -254,7 +254,7 @@ mod tests {
             ),
         ])
         .unwrap();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(endpoints, Shutdown::default(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(endpoints, Shutdown::default(), Vec::new(), None));
         let io = Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher.clone(), threads[0].clone());
         let mut context = Context::new(dispatcher, tick::Clock::new_frozen(), io, threads[0].clone());
         let source = context.clone();
@@ -301,6 +301,7 @@ mod tests {
             .unwrap(),
             Shutdown::default(),
             Vec::new(),
+            None,
         );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -352,6 +353,7 @@ mod tests {
             .unwrap(),
             Shutdown::default(),
             Vec::new(),
+            None,
         );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
@@ -421,6 +423,7 @@ mod tests {
             nonempty::NonEmpty::new(worker),
             Shutdown::default(),
             Vec::new(),
+            None,
         ));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
