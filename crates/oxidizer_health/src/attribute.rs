@@ -62,19 +62,19 @@ impl Display for AttributeValue<'_> {
     }
 }
 
-impl<'a> From<i64> for AttributeValue<'a> {
+impl From<i64> for AttributeValue<'_> {
     fn from(value: i64) -> Self {
         Self::Int(value)
     }
 }
 
-impl<'a> From<f64> for AttributeValue<'a> {
+impl From<f64> for AttributeValue<'_> {
     fn from(value: f64) -> Self {
         Self::Double(value)
     }
 }
 
-impl<'a> From<bool> for AttributeValue<'a> {
+impl From<bool> for AttributeValue<'_> {
     fn from(value: bool) -> Self {
         Self::Boolean(value)
     }
