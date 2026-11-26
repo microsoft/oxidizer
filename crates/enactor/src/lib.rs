@@ -92,7 +92,7 @@ mod spawn;
 pub use placement::{Placement, PlacementToken, TaskMeta};
 
 #[doc(inline)]
-pub use actor::{Actor, ActorRef, Context, TryTellFailure};
+pub use actor::{Actor, ActorId, ActorRef, Context, TryTellFailure};
 pub use error::{AskError, CompletionTimeoutError, TellError};
 pub use exit::ActorExit;
 pub use inbox::Inbox;

@@ -9,9 +9,11 @@
 
 use crate::Message;
 
+mod actor_id;
 mod actor_ref;
 mod context;
 
+pub use self::actor_id::ActorId;
 pub use self::actor_ref::{ActorRef, TryTellFailure};
 pub use self::context::Context;
 

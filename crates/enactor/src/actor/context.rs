@@ -7,7 +7,7 @@
 //! it to get this actor's [`ActorRef`] or request stop or drain after the
 //! current message.
 
-use super::ActorRef;
+use super::{ActorId, ActorRef};
 use crate::inbox::{Control, Signal};
 use crate::{Inbox, Message};
 
@@ -31,6 +31,12 @@ impl<M: Message> Context<M> {
     #[must_use]
     pub const fn actor_ref(&self) -> &ActorRef<M> {
         &self.actor_ref
+    }
+
+    /// Returns the id of this actor.
+    #[must_use]
+    pub const fn id(&self) -> ActorId {
+        self.actor_ref.id()
     }
 
     /// Stops the actor after the current message finishes.

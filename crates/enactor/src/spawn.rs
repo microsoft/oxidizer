@@ -17,7 +17,7 @@ use tick::Clock;
 use crate::exit::LoopExit;
 use crate::inbox::MessageStream;
 use crate::runtime::{ActorRuntime, DEFAULT_CAPACITY};
-use crate::{Actor, ActorExit, ActorRef, CompletionTimeoutError, Message, PlacementToken, TaskMeta};
+use crate::{Actor, ActorExit, ActorId, ActorRef, CompletionTimeoutError, Message, PlacementToken, TaskMeta};
 
 /// Completion of an actor task, shared by every clone of its handle.
 type Completion = Shared<BoxFuture<'static, Outcome>>;
@@ -122,6 +122,12 @@ impl<M: Message> ActorWithPlacement<M> {
     #[must_use]
     pub const fn actor(&self) -> &ActorRef<M> {
         &self.actor
+    }
+
+    /// Returns the id of the spawned actor.
+    #[must_use]
+    pub const fn id(&self) -> ActorId {
+        self.actor.id()
     }
 
     /// Worker-thread placement assigned to the actor.

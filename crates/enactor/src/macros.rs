@@ -102,7 +102,7 @@ mod tests {
     use futures::executor::block_on;
 
     use crate::Reply;
-    use crate::actor::ActorRef;
+    use crate::actor::{ActorId, ActorRef};
     use crate::inbox::{Channel, Control};
 
     enum Message {
@@ -113,7 +113,7 @@ mod tests {
     fn ask_macro_accepts_constructor_syntax() {
         let (message_tx, message_rx) = Channel::<Message>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         let result = block_on(async {
             let receive = async {

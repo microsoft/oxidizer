@@ -6,11 +6,13 @@
 //! [`ActorRef`] sends messages and lifecycle requests to an actor that has
 //! already been spawned.
 
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use futures::TryFutureExt;
 use tick::{Clock, FutureExt};
 
+use super::ActorId;
 use crate::error::AskTimeoutError;
 use crate::inbox::{Control, Sender, TrySendFailure};
 use crate::{AskError, Message, Reply, TellError};
@@ -51,8 +53,15 @@ impl<M> From<TrySendFailure<M>> for TryTellFailure<M> {
 ///
 /// Cloning an [`ActorRef`] is cheap: clones share the same mailbox and control
 /// channels, and do not clone or duplicate the actor itself.
+///
+/// Two handles are equal when they target the same actor, and they hash by
+/// the [`ActorId`] of that actor. The id never changes, so a handle is a stable
+/// set or map key. Clippy's `mutable_key_type` lint still flags `ActorRef` as a
+/// key, because its channels use atomics. To avoid that warning, key the
+/// collection by [`ActorRef::id`] instead.
 #[derive(Debug)]
 pub struct ActorRef<M: Message> {
+    id: ActorId,
     message_tx: Sender<M>,
     control_tx: Sender<Control>,
 }
@@ -60,15 +69,40 @@ pub struct ActorRef<M: Message> {
 impl<M: Message> Clone for ActorRef<M> {
     fn clone(&self) -> Self {
         Self {
+            id: self.id,
             message_tx: self.message_tx.clone(),
             control_tx: self.control_tx.clone(),
         }
     }
 }
 
+impl<M: Message> PartialEq for ActorRef<M> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<M: Message> Eq for ActorRef<M> {}
+
+impl<M: Message> Hash for ActorRef<M> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
 impl<M: Message> ActorRef<M> {
-    pub(crate) const fn new(message_tx: Sender<M>, control_tx: Sender<Control>) -> Self {
-        Self { message_tx, control_tx }
+    pub(crate) const fn new(id: ActorId, message_tx: Sender<M>, control_tx: Sender<Control>) -> Self {
+        Self {
+            id,
+            message_tx,
+            control_tx,
+        }
+    }
+
+    /// Returns the id of the actor that this handle targets.
+    #[must_use]
+    pub const fn id(&self) -> ActorId {
+        self.id
     }
 }
 
@@ -224,7 +258,7 @@ mod tests {
 
     use futures::executor::block_on;
 
-    use super::{ActorRef, TryTellFailure};
+    use super::{ActorId, ActorRef, TryTellFailure};
     use crate::error::CanceledError;
     use crate::inbox::{Channel, Control, Signal, TryRecvError};
     use crate::{Reply, TellError};
@@ -265,7 +299,7 @@ mod tests {
     fn assert_waiting_send_race(action: CloseAction) {
         let (message_tx, message_rx) = Channel::<NonCloneMessage>::bounded(1);
         let (control_tx, control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         actor_ref
             .try_tell(NonCloneMessage::new(1))
@@ -310,7 +344,7 @@ mod tests {
 
         let (message_tx, _message_rx) = Channel::<LargeMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         let send = actor_ref.message_tx.send([0; 1024]);
         let tell = actor_ref.tell([0; 1024]);
@@ -331,7 +365,7 @@ mod tests {
     fn tell_owned_waits_for_capacity_without_requiring_clone() {
         let (message_tx, message_rx) = Channel::<NonCloneMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         actor_ref
             .try_tell(NonCloneMessage::new(1))
             .expect("first message should fill the inbox");
@@ -354,7 +388,7 @@ mod tests {
     fn tell_owned_returns_exact_message_when_closed_while_waiting() {
         let (message_tx, message_rx) = Channel::<NonCloneMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         actor_ref
             .try_tell(NonCloneMessage::new(1))
             .expect("first message should fill the inbox");
@@ -377,7 +411,7 @@ mod tests {
     fn try_tell_returns_exact_message_when_full() {
         let (message_tx, _message_rx) = Channel::<NonCloneMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         actor_ref
             .try_tell(NonCloneMessage::new(1))
             .expect("first message should fill the inbox");
@@ -396,7 +430,7 @@ mod tests {
     fn try_tell_returns_exact_message_when_closed() {
         let (message_tx, _message_rx) = Channel::<NonCloneMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         block_on(actor_ref.stop()).expect("stop should close the inbox");
 
         let message = NonCloneMessage::new(2);
@@ -428,7 +462,7 @@ mod tests {
     fn spammy_lifecycle_requests_all_queue() {
         let (message_tx, _message_rx) = Channel::<ControlOnlyMessage>::bounded(1);
         let (control_tx, control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         let waker = Waker::noop();
         let mut cx = TaskContext::from_waker(waker);
@@ -453,7 +487,7 @@ mod tests {
     fn test_ask_returns_tell_error_when_actor_is_closed() {
         let (message_tx, message_rx) = Channel::<TestMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         drop(message_rx);
 
         let result = block_on(actor_ref.ask(TestMessage::Ask)).unwrap_err();
@@ -465,7 +499,7 @@ mod tests {
     fn test_ask_returns_canceled_when_actor_drops_reply() {
         let (message_tx, message_rx) = Channel::<TestMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         let result = block_on(async {
             let receive = async {
@@ -493,7 +527,7 @@ mod tests {
     fn test_ask_with_sends_payload_and_receives_reply() {
         let (message_tx, message_rx) = Channel::<TestMessage>::bounded(1);
         let (control_tx, _control_rx) = Channel::<Control>::unbounded();
-        let actor_ref = ActorRef::new(message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
 
         let result = block_on(async {
             let receive = async {

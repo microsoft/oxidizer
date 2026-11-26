@@ -18,7 +18,7 @@ use tick::{Clock, Timer};
 use crate::exit::LoopExit;
 use crate::inbox::{Channel, MessageStream};
 use crate::spawn::{ActorSpawner, ActorWithPlacement};
-use crate::{Actor, ActorExit, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
+use crate::{Actor, ActorExit, ActorId, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
 
 /// Values moved into the task that runs one actor.
 pub(crate) type TaskData<A> = Unaware<(Inbox<<A as Actor>::Message>, A, ActorRef<<A as Actor>::Message>)>;
@@ -86,7 +86,7 @@ impl ActorRuntime {
     {
         let (message_tx, message_rx) = Channel::bounded(capacity);
         let (control_tx, control_rx) = Channel::unbounded();
-        let actor_ref: ActorRef<<A as Actor>::Message> = ActorRef::new(message_tx, control_tx);
+        let actor_ref: ActorRef<<A as Actor>::Message> = ActorRef::new(ActorId::next(), message_tx, control_tx);
         let inbox = Inbox::new(message_rx, control_rx, stream);
         let data: TaskData<A> = unaware((inbox, actor, actor_ref.clone()));
 
