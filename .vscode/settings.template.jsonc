@@ -62,13 +62,13 @@
     // with the regular toolchain. This enables those capabilities.
     //
     // The pinned nightly must match `rust_nightly` in
-    // `justfiles/anvil/versions.just`, which is what Anvil's format check runs;
+    // `.anvil/setup.just`, which is what Anvil's format check runs;
     // a different nightly can format the same file differently.
     //
     // Your own copy of this file does not move with an Anvil catalog update.
     // After an update, run `just anvil-fmt-setup`, then copy the updated
     // `rust-analyzer.rustfmt.extraArgs` value into `.vscode/settings.json`.
-    "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-05-30", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
+    "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-10-31", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 
     // Clippy is extremely slow when used on our large workspace, so you may want to use
     // `check` instead to run regular `cargo check`. To run Clippy, invoke it manually from the

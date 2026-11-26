@@ -182,7 +182,7 @@ exclude = true
 It does not expose supported package metadata for excluding individual test
 targets. Consequently, `--all-features --tests` may compile and replay empty
 Loom or Bolero executables whose source is disabled by `cfg(loom)` or
-`cfg(not(miri))`. Do not hand-edit generated `justfiles/anvil/**` to remove
+`cfg(not(miri))`. Do not hand-edit generated `.anvil/**` files to remove
 them. Target-level omission requires a cargo-anvil catalog enhancement.
 
 The Bolero recipe likewise has no supported manifest target-exclusion metadata.

@@ -36,28 +36,9 @@ skip_os_lookups = true
 # reproducibility guarantee above.
 use_builtin = true
 
-# Token-boundary characters. Override the upstream default to add
-# typographic punctuation we use in prose (em-dash, en-dash, arrows,
-# minus sign). Without these, cargo-spellcheck 0.15.7 tokenises text
-# like `runtime — it` as three tokens including the em-dash itself,
-# then fails its dictionary lookup and flags the em-dash as a
-# "possible spelling mistake". Upstream default keeps figure-dash
-# (U+2012) and the ASCII hyphen but omits the rest; this list is a
-# superset, so the only behavioural change is that the added chars
-# now act as token boundaries.
-#
-# Encoded as \uXXXX escapes for grep-ability and to keep the file
-# 7-bit ASCII:
-#   ASCII punctuation (default): ",;:.!?#(){}[]|/_-
-#   Dashes & minus  : \u2012 figure-dash       (default)
-#                     \u2013 en-dash           (added)
-#                     \u2014 em-dash           (added)
-#                     \u2015 horizontal-bar    (added)
-#                     \u2212 minus-sign        (added)
-#   Arrows          : \u2190 leftwards-arrow   (added)
-#                     \u2192 rightwards-arrow  (added)
-#   ASCII punctuation (default): ' ` & @
-#   Misc (default)              : \u00A7 section, \u00B6 pilcrow, \u2026 ellipsis
+# Treat common typographic dashes, arrows, and the minus sign as token
+# boundaries in addition to cargo-spellcheck's defaults. Unicode characters
+# use escapes so the generated configuration stays ASCII.
 tokenization_splitchars = "\",;:.!?#(){}[]|/_-\u2012\u2013\u2014\u2015\u2190\u2192\u2212'`&@\u00A7\u00B6\u2026"
 # <<< anvil-managed: anvil-spellcheck-hunspell
 

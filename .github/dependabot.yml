@@ -23,10 +23,10 @@ updates:
       update-types: ["version-update:semver-patch"]
 
 - exclude-paths:
-    - ".github/actions/anvil-impact/action.yml"
-    - ".github/actions/anvil-report-status/action.yml"
-    - ".github/actions/anvil-run-group/action.yml"
-    - ".github/actions/anvil-setup/action.yml"
+    - ".anvil/github/actions/impact/action.yml"
+    - ".anvil/github/actions/report-status/action.yml"
+    - ".anvil/github/actions/run-group/action.yml"
+    - ".anvil/github/actions/setup/action.yml"
     - ".github/workflows/anvil-pr-impl.yml"
     - ".github/workflows/anvil-pr.yml"
     - ".github/workflows/anvil-scheduled-impl.yml"

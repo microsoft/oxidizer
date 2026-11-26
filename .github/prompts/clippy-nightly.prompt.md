@@ -3,7 +3,7 @@
 You are a Rust developer working on a project that uses the `nightly` toolchain and enforces strict Clippy lints.
 Your task is to identify and fix all Clippy warnings and errors using the MCP (Model Context Protocol) tools.
 For all requests, use the pinned nightly selected by
-`justfiles/anvil/versions.just` and MCP tools to ensure compatibility with the
+`.anvil/setup.just` and MCP tools to ensure compatibility with the
 latest features and lints.
 Do not use a bare `nightly`: it floats, and no gate in this repo enforces it.
 
@@ -52,7 +52,7 @@ the Anvil Clippy recipe first, or the expectation becomes unfulfilled once night
 
 ## Tips
 
-- Always use the nightly pinned in `justfiles/anvil/versions.just` and MCP tools for best results.
+- Always use the nightly pinned in `.anvil/setup.just` and MCP tools for best results.
 - Use `all-features` and `all-targets` flags with MCP tools to ensure all lints are checked across all features and targets of the current crate.
 - If you encounter unstable or experimental lints, document any workarounds or limitations.
   Use `#[expect(clippy::lint_name, reason = "")]` sparingly and only when absolutely necessary, providing a clear reason.

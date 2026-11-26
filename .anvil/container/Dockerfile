@@ -40,8 +40,8 @@ RUN apt-get update \
         libssl-dev pkg-config tar \
     && rm -rf /var/lib/apt/lists/*
 
-# pwsh is not optional: every generated anvil recipe is a `script("pwsh",
-# "-NoProfile")` recipe.
+# pwsh remains required by container orchestration and selected multi-step
+# checks, even though ordinary generated recipes are direct tool invocations.
 RUN curl -fsSLo /tmp/powershell.tar.gz \
         "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" \
     && echo "${POWERSHELL_SHA256}  /tmp/powershell.tar.gz" | sha256sum -c - \
@@ -97,38 +97,33 @@ RUN curl -fsSLo /tmp/cargo-binstall.tgz \
 # volume over each, and an engine seeds a new volume from the image path it
 # covers; a path that does not exist seeds as root-owned 0755, which the
 # `--user` mapping cannot write, so the first cargo fetch fails with EACCES.
-# The root manifest is admitted for the MSRV, the one version `anvil-setup`
-# installs that is declared in repository source rather than pinned in
-# `versions.just`. `/opt/anvil` is the root the recipes already resolve against,
-# so the resolver reads it there with no container-specific path. The workspace
-# members it names are not admitted and are not needed: the one path that reads
-# them is workspace MSRV validation, which only
-# `anvil-tool-rustc-validate-prereqs` invokes, and nothing `anvil-setup`
-# reaches depends on it.
-#
-# It is deleted once the setup has read it, so it does not survive into the
-# finished image. The tag hashes the declared MSRV rather than the file, so an
-# unrelated dependency edit computes the same tag; a manifest left in place
-# would make that tag name two different filesystems, and a reused or published
-# image would carry a manifest that does not match any checkout.
-#
-# `rustup` was initialized with `--default-toolchain none`, so the image has no
-# default until something names one. Rustup sets it as a side effect of the
-# first `rustup toolchain install` that finds none set, which today is the
-# MSRV; that is an accident of the order `anvil-setup` reaches the install
-# recipes in, not something either side states. A checkout with a root
-# toolchain file never notices, because that file overrides the default. One
-# without has nothing else to select a compiler, so plain `cargo` in the
-# container would follow whichever toolchain the setup graph happened to
-# install first. The default is named here instead, from the same declared MSRV
-# the setup installs, while the manifest it is read from is still present.
+# The driver passes the declared root MSRV as ANVIL_ROOT_MSRV. Installing
+# and selecting it before setup gives Cargo a deterministic bootstrap without
+# copying workspace member manifests into the narrowed build context. When the
+# repository declares no MSRV, a copied root toolchain file remains responsible
+# for selecting Rust. If neither declaration exists, setup uses current stable
+# as an explicit bootstrap instead of asking cargo-each to inspect manifests
+# that are intentionally absent from the narrowed context.
 WORKDIR /opt/anvil
 COPY . ./
-RUN printf "import 'justfiles/anvil/mod.just'\n" > Justfile \
-    && just anvil-setup binstall \
-    && msrv="$(just _anvil-resolve-stable root-msrv)" \
-    && if [ "${msrv}" != "none" ]; then rustup default "${msrv}"; fi \
-    && rm -f Cargo.toml \
+ARG ANVIL_ROOT_MSRV
+RUN : "${ANVIL_ROOT_MSRV:?pass --build-arg ANVIL_ROOT_MSRV=<declared-rust-version>}" \
+    && setup_toolchain="${ANVIL_ROOT_MSRV}" \
+    && if [ "${setup_toolchain}" = "none" ] \
+        && [ ! -f rust-toolchain.toml ] \
+        && [ ! -f rust-toolchain ]; then \
+        setup_toolchain=stable; \
+    fi \
+    && if [ "${setup_toolchain}" != "none" ]; then \
+        rustup toolchain install "${setup_toolchain}" --profile minimal \
+        && rustup default "${setup_toolchain}"; \
+    fi \
+    && printf "import '.anvil/anvil.just'\n" > Justfile \
+    && if [ "${setup_toolchain}" = "none" ]; then \
+        just anvil-setup binstall; \
+    else \
+        RUSTUP_TOOLCHAIN="${setup_toolchain}" just anvil-setup binstall; \
+    fi \
     && rm -rf "${CARGO_HOME}/registry/cache" "${CARGO_HOME}/registry/src" \
     && rm -f "${CARGO_HOME}/credentials" "${CARGO_HOME}/credentials.toml" "${HOME:-/root}/.netrc" /root/.netrc \
     && mkdir -p "${CARGO_HOME}/registry" "${CARGO_HOME}/git" \

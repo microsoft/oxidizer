@@ -1,9 +1,14 @@
+# cargo-delta configuration file
+
+# Patterns for files and folders to exclude from analysis.
+
 # >>> anvil-managed: anvil-delta
 # Changes to these workspace-level inputs conservatively affect every package.
 trip_wire_patterns = [
     ".ado/**",
     ".cargo/**",
     ".delta.toml",
+    ".anvil/**",
     ".editorconfig",
     ".github/**",
     ".pipelines/**",
@@ -15,18 +20,13 @@ trip_wire_patterns = [
     "codecov.yml",
     "deny.toml",
     "justfile",
-    "justfiles/**",
     "rust-toolchain.toml",
     "rustfmt.toml",
     "scripts/**",
-    "spellcheck.toml",
     "unstable-rustfmt.toml",
 ]
 # <<< anvil-managed: anvil-delta
 
-# cargo-delta configuration file
-
-# Patterns for files and folders to exclude from analysis.
 file_exclude_patterns = [
      ".git*",
      ".markdownlint.json",

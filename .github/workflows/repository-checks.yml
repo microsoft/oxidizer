@@ -22,11 +22,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Install Pester
         shell: pwsh
         run: |
@@ -45,11 +43,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Test isolated AArch64 no_std configuration
         run: just test-http-headers-simd-no-std-arm
 
@@ -62,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
       - name: Install 32-bit linker and C runtime
@@ -80,13 +76,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust and 32-bit target
-        run: |
-          just anvil-toolchain-stable-install
-          rustup target add --toolchain 1.95 i686-pc-windows-msvc
+      - name: Install 32-bit target
+        run: rustup target add --toolchain 1.95 i686-pc-windows-msvc
       - name: Test cross-width handle restoration
         run: cargo +1.95 test --package internity --all-features --target i686-pc-windows-msvc --lib --test cross_width_handles --locked
 
@@ -95,11 +89,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
@@ -113,11 +105,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Test isolated feature combination
         run: just test-feature-regressions --package "${{ matrix.package }}"
 
@@ -133,11 +123,9 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "14.4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Check native macOS allocator, snapshots, and viewer
         run: |
           rustup component add --toolchain 1.95 clippy
@@ -154,12 +142,10 @@ jobs:
       METABENCH_REQUIRE_NATIVE_CONTRACTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/anvil-setup
+      - uses: ./.anvil/github/actions/setup
         with:
           group: none
           free-disk-space: "true"
-      - name: Install Rust
-        run: just anvil-toolchain-stable-install
       - name: Install native prerequisites
         run: |
           mkdir -p "$GITHUB_WORKSPACE/target/metabench-contract-scratch"
