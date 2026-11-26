@@ -17,6 +17,7 @@ use futures::future::{Either, select};
 use futures::pin_mut;
 
 use crate::Message;
+use crate::exit::LoopExit;
 
 pub(crate) use self::channel::{Channel, Receiver, RecvError, SendError, Sender, TryRecvError, TrySendFailure};
 pub(crate) use self::control::{Control, Signal};
@@ -100,6 +101,17 @@ impl<M: Message> Inbox<M> {
             State::Running => self.delivery.try_recv(),
             State::Draining => self.try_recv_while_draining(),
             State::Stopped => Err(TryRecvError::Closed),
+        }
+    }
+
+    /// Returns how the actor loop ended, from the delivery state.
+    ///
+    /// A loop that returns while the inbox still runs ended on its own, which
+    /// counts as a stop.
+    pub(crate) const fn exit(&self) -> LoopExit {
+        match self.state() {
+            State::Running | State::Stopped => LoopExit::Stopped,
+            State::Draining => LoopExit::Drained,
         }
     }
 

@@ -7,6 +7,7 @@
 
 mod basic;
 mod context;
+mod exit;
 mod lifecycle;
 mod periodic;
 mod pinning;

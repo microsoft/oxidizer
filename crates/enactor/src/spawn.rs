@@ -3,34 +3,87 @@
 
 //! Builder for actor spawn options.
 
+use std::any::Any;
 use std::fmt;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use arty::task::JoinHandle;
+use arty::task::{JoinError, JoinHandle};
 use futures::future::{BoxFuture, Either, Shared, select};
 use futures::{FutureExt, Stream};
+use thread_aware::Unaware;
 use tick::Clock;
 
+use crate::exit::LoopExit;
 use crate::inbox::MessageStream;
 use crate::runtime::{ActorRuntime, DEFAULT_CAPACITY};
-use crate::{Actor, ActorRef, CompletionTimeoutError, Message, PlacementToken, TaskMeta};
+use crate::{Actor, ActorExit, ActorRef, CompletionTimeoutError, Message, PlacementToken, TaskMeta};
 
 /// Completion of an actor task, shared by every clone of its handle.
-type Completion = Shared<BoxFuture<'static, ()>>;
+type Completion = Shared<BoxFuture<'static, Outcome>>;
 
-/// Converts an Arty join handle into a completion that resumes an actor panic.
-fn completion(task: JoinHandle<()>) -> Completion {
-    async move {
-        // A runtime that cancels or rejects the task still ends it. Only a panic
-        // is reported to waiters.
-        if let Err(error) = task.await
-            && let Some(panic) = error.into_panic()
-        {
-            std::panic::resume_unwind(panic);
+/// Converts an Arty join handle into a completion that every waiter can observe.
+fn completion(task: JoinHandle<Unaware<LoopExit>>) -> Completion {
+    task.map(Outcome::from_join).boxed().shared()
+}
+
+/// How an actor task ended, as seen by every waiter.
+#[derive(Debug, Clone)]
+enum Outcome {
+    /// The actor loop returned.
+    Returned(LoopExit),
+    /// The actor task panicked.
+    Panicked(PanicPayload),
+    /// The runtime canceled or rejected the actor task.
+    Aborted,
+}
+
+impl Outcome {
+    fn from_join(result: Result<Unaware<LoopExit>, JoinError>) -> Self {
+        match result {
+            Ok(exit) => Self::Returned(exit.into_inner()),
+            Err(error) => match error.into_panic() {
+                Some(payload) => Self::Panicked(PanicPayload::new(payload)),
+                // Arty reports a task that shutdown canceled, or that it rejected, without a payload.
+                None => Self::Aborted,
+            },
         }
     }
-    .boxed()
-    .shared()
+
+    fn exit(&self) -> ActorExit {
+        match self {
+            Self::Returned(exit) => ActorExit::from(*exit),
+            Self::Panicked(_) => ActorExit::Panicked,
+            Self::Aborted => ActorExit::Aborted,
+        }
+    }
+}
+
+/// The payload of an actor panic, kept for the first waiter that resumes it.
+#[derive(Debug, Clone)]
+struct PanicPayload(Arc<Mutex<Option<Box<dyn Any + Send>>>>);
+
+impl PanicPayload {
+    fn new(payload: Box<dyn Any + Send>) -> Self {
+        Self(Arc::new(Mutex::new(Some(payload))))
+    }
+
+    /// Resumes the actor panic in the first caller. Later callers get a new panic.
+    #[expect(
+        clippy::panic,
+        reason = "wait_for_completion documents that later waiters panic after an actor panic"
+    )]
+    fn resume(&self) -> ! {
+        let payload = self
+            .0
+            .lock()
+            .expect("the lock is held only to take the payload, which cannot panic")
+            .take();
+        match payload {
+            Some(payload) => std::panic::resume_unwind(payload),
+            None => panic!("the actor panicked, and another waiter received the panic payload"),
+        }
+    }
 }
 
 /// Spawner state: no stream is attached.
@@ -79,6 +132,9 @@ impl<M: Message> ActorWithPlacement<M> {
 
     /// Waits up to `timeout` for actor task exit without requesting stop or drain.
     ///
+    /// Any exit other than a panic returns `Ok(())`, including an abort by the
+    /// runtime. Use [`exit`](Self::exit) to learn how the actor ended.
+    ///
     /// Completion includes dropping actor state, but does not prove that
     /// external effects or detached child tasks have settled. Sender handles
     /// can retain buffered messages after a stop.
@@ -96,15 +152,31 @@ impl<M: Message> ActorWithPlacement<M> {
     ///
     /// # Panics
     ///
-    /// Resumes an actor task panic in the first waiter. Later waiters panic too.
+    /// Resumes an actor task panic in the first waiter, with the original panic
+    /// payload. Later waiters panic with a message that says another waiter
+    /// received the payload. [`exit`](Self::exit) never panics.
     pub async fn wait_for_completion(&self, clock: &Clock, timeout: Duration) -> Result<(), CompletionTimeoutError> {
         let completion = self.completion.clone();
         let deadline = clock.delay(timeout);
         futures::pin_mut!(completion, deadline);
         match select(completion, deadline).await {
-            Either::Left(_) => Ok(()),
+            Either::Left((outcome, _)) => match outcome {
+                Outcome::Returned(_) | Outcome::Aborted => Ok(()),
+                Outcome::Panicked(payload) => payload.resume(),
+            },
             Either::Right(_) => Err(CompletionTimeoutError::new(timeout)),
         }
+    }
+
+    /// Waits for the actor task to end and reports how it ended.
+    ///
+    /// This future never panics, not even after an actor panic, and it has no
+    /// timeout. It reports a panic as [`ActorExit::Panicked`] and leaves the
+    /// panic payload for [`wait_for_completion`](Self::wait_for_completion).
+    /// Every clone and every later call reports the same value. Waiting does not
+    /// stop the actor.
+    pub fn exit(&self) -> impl Future<Output = ActorExit> + Send + 'static {
+        self.completion.clone().map(|outcome| outcome.exit())
     }
 }
 

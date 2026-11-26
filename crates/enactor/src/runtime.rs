@@ -15,6 +15,7 @@ use arty::task::{Context as TaskContext, JoinHandle};
 use thread_aware::{Unaware, unaware};
 use tick::{Clock, Timer};
 
+use crate::exit::LoopExit;
 use crate::inbox::{Channel, MessageStream};
 use crate::spawn::{ActorSpawner, ActorWithPlacement};
 use crate::{Actor, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
@@ -79,7 +80,7 @@ impl ActorRuntime {
         capacity: usize,
         actor: A,
         stream: Option<MessageStream<A::Message>>,
-    ) -> (ActorRef<A::Message>, PlacementToken, JoinHandle<()>)
+    ) -> (ActorRef<A::Message>, PlacementToken, JoinHandle<Unaware<LoopExit>>)
     where
         A: Actor,
     {
@@ -167,7 +168,7 @@ impl ActorRuntime {
     }
 
     /// Runs the actor loop until the inbox closes or the actor requests stop.
-    pub(crate) async fn run<A>(data: TaskData<A>)
+    pub(crate) async fn run<A>(data: TaskData<A>) -> Unaware<LoopExit>
     where
         A: Actor,
     {
@@ -181,6 +182,8 @@ impl ActorRuntime {
                 break;
             }
         }
+
+        unaware(inbox.exit())
     }
 }
 

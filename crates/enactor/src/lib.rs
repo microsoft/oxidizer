@@ -80,6 +80,7 @@ extern crate self as enactor;
 #[doc(hidden)]
 pub mod actor;
 mod error;
+mod exit;
 mod inbox;
 mod macros;
 mod message;
@@ -93,6 +94,7 @@ pub use placement::{Placement, PlacementToken, TaskMeta};
 #[doc(inline)]
 pub use actor::{Actor, ActorRef, Context, TryTellFailure};
 pub use error::{AskError, CompletionTimeoutError, TellError};
+pub use exit::ActorExit;
 pub use inbox::Inbox;
 pub use spawn::{ActorSpawner, ActorWithPlacement, NoStream, WithStream};
 
