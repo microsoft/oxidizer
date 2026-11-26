@@ -18,9 +18,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_he
 
 [package.metadata.cargo_check_external_types]
 # Thread-aware handles.
-allowed_external_types = [
-    "thread_aware_core::thread_aware::ThreadAware",
-]
+allowed_external_types = ["thread_aware_core::thread_aware::ThreadAware"]
 
 [features]
 default = []
