@@ -13,6 +13,10 @@ use thread_aware::ThreadAware;
 ///
 /// Its private fields let later releases add configuration without changing
 /// [`ObservedExt::enable_observed`].
+///
+/// Clone this value when another owner needs it. It intentionally does not
+/// implement `Copy`, so later configuration fields do not inherit implicit
+/// copying without an explicit API decision.
 #[derive(Clone, Debug, ThreadAware)]
 pub struct ObservedOptions {
     sink: Sink,
