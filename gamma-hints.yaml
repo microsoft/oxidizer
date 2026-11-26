@@ -100620,13 +100620,19 @@ files:
     test: every_handle_has_its_own_cursor
   - package: oxidizer_health
     target: test:aggregation
-    test: last_component_handle_unregisters_during_an_in_flight_publish
+    test: publisher_keeps_registration_during_an_in_flight_publish
   - package: oxidizer_health
     target: test:aggregation
     test: readiness_fails_closed_when_a_consumer_panics_on_the_worker
   - package: oxidizer_health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
+  - package: oxidizer_health
+    target: lib:oxidizer_health
+    test: component::tests::component_shared_retains_its_registration_id
+  - package: oxidizer_health
+    target: lib:oxidizer_health
+    test: component::tests::publisher_registration_initializes_and_enqueues_its_slot
   mutants:
   - id: 06574d45e004
     killer: 3
@@ -101228,6 +101234,12 @@ files:
     killer: 4
   - id: ffc6aadbd68f
     killer: 2
+  - id: d681410156d6
+    killer: 13
+  - id: 6eb9382e2dd2
+    killer: 14
+  - id: c32ccbb1a652
+    killer: 14
 - path: crates/oxidizer_health/src/health.rs
   killers:
   - package: oxidizer_health
