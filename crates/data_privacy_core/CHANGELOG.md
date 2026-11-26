@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.4] - 2026-11-24
+
+- Update mutation-test configuration without changing data-class behavior.
+
 ## [0.1.3] - 2026-10-20
 
 - Refresh published documentation and optional-dependency test metadata; runtime behavior is unchanged.

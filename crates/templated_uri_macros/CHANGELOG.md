@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.2] - 2026-11-24
+
+- Update the private URI macro shim and implementation requirement.
+- Update the local requirement for `templated_uri_macros_impl` from `=0.7.1` to `=0.7.2`.
+
 ## [0.7.1] - 2026-11-02
 
 - Use version 0.7.1 to match the Templated URI packages. Macro behavior does not change.

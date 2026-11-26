@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.4] - 2026-11-24
+
+- Update the MSVC Spectre build-helper requirement.
+- Update the local build requirement for `msvc_spectre_libs_build` from `^0.1.3` to `^0.1.4`.
+
 ## [0.2.3] - 2026-11-02
 
 - Update the build-helper dependency. Library selection and public APIs do not change.

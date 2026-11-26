@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.5] - 2026-11-24
+
+- Add deterministic macro expansion and lifetime regression coverage.
+
 ## [0.2.4] - 2026-11-06
 
 - Keep mockall-dependent lifetime helpers in a private module gated on `mockall`.

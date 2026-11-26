@@ -48,7 +48,7 @@ whether a task panic starts executor shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbu5HIr_hkwHMbj8Df1tFe4NYb1rfELg-bwBMbrz-2IqTxakphZIGCbWFydHlfZXhlY3V0b3JlMC42LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbu5HIr_hkwHMbj8Df1tFe4NYb1rfELg-bwBMbrz-2IqTxakphZIGCbWFydHlfZXhlY3V0b3JlMC43LjA
  [__link0]: https://docs.rs/arty
- [__link1]: https://docs.rs/arty_executor/0.6.1/arty_executor/?search=TaskCompletion
- [__link2]: https://docs.rs/arty_executor/0.6.1/arty_executor/?search=ExecutorBuilder::panic_policy
+ [__link1]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskCompletion
+ [__link2]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=ExecutorBuilder::panic_policy

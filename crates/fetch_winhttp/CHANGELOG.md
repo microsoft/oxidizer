@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Breaking: Update the WinHTTP facade to the new HTTP, runtime, and telemetry contracts.
+- Expand backend integration coverage and update inherited dependencies.
+- Update the local requirement for `fetch_winhttp_impl` for `cfg(windows)` from `=0.6.0` to `=0.7.0`.
+
 ## [0.6.0] - 2026-11-06
 
 - The re-exported `WinHttpDeps::builder` accepts convertible memory providers such as

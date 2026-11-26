@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0] - 2026-11-24
+
+- Breaking: Update Azure HTTP adapters for the new Fetch and body contracts.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `fetch` from `^0.21.0` to `^0.22.0`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+
 ## [0.11.0] - 2026-11-06
 
 - Simplify documentation for the Azure SDK transport backed by Fetch.

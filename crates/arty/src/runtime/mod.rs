@@ -46,8 +46,8 @@
 //! - The clock follows real time.
 //! - [`policy::MonitorPolicy::default`] uses [`policy::MonitorPolicy::auto`]. It disables
 //!   monitoring for tests, doctests, documentation examples, and Miri. It
-//!   enables monitoring in other environments when the `monitor` feature is
-//!   present. The exact automatic selection can change in future releases.
+//!   enables monitoring in other environments. The exact automatic selection
+//!   can change in future releases.
 //!   Task collection runs on request. This does not enable event recording.
 //! - Without a [`TaskPanic`](hook::TaskPanic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.

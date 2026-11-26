@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0] - 2026-11-24
+
+- Breaking: Update HTTP resilience middleware to the new body and timing contracts.
+- Update the local requirement for `http_extensions` from `^0.15.0` to `^0.16.0`.
+- Update the local requirement for `seatbelt` from `^0.12.1` to `^0.13.0`.
+- Update the local requirement for `templated_uri` from `^0.7.1` to `^0.7.2`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+
 ## [0.13.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

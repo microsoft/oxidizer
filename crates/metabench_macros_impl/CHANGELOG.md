@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.1] - 2026-11-24
+
+- Expand benchmark arguments, generated names, registration, and complexity-limit regression coverage.
+
 ## [0.3.0] - 2026-11-02
 
 - Breaking: Generate native registration for Gungraun 0.20 and its changed callback requirements.
