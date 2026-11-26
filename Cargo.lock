@@ -177,7 +177,7 @@ dependencies = [
  "many_cpus",
  "observed",
  "observed_testing",
- "ohno 0.5.5",
+ "ohno",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -270,7 +270,7 @@ dependencies = [
  "metabench",
  "nonempty",
  "observed",
- "ohno 0.5.5",
+ "ohno",
  "performables",
  "pin-project",
  "plurality 0.2.5",
@@ -297,7 +297,7 @@ dependencies = [
  "gungraun",
  "metabench",
  "nm",
- "ohno 0.5.5",
+ "ohno",
  "performables",
  "pin-project",
  "plurality 0.2.5",
@@ -914,7 +914,7 @@ dependencies = [
  "futures",
  "futures-core",
  "new_zealand",
- "ohno 0.5.5",
+ "ohno",
  "testing_aids",
  "trait-variant",
 ]
@@ -961,7 +961,7 @@ dependencies = [
  "criterion",
  "foldhash 0.2.0",
  "moka",
- "ohno 0.5.5",
+ "ohno",
  "performables",
  "thread_aware",
  "tokio",
@@ -981,7 +981,7 @@ name = "cachet_tier"
 version = "0.6.2"
 dependencies = [
  "dynosaur",
- "ohno 0.5.5",
+ "ohno",
  "parking_lot 0.13.0",
  "recoverable",
  "tick",
@@ -1284,7 +1284,7 @@ checksum = "f5e1271b0cf819fdcb002ac5d2d60e1d6e2010ccc52c040541051d9c0bd1a43c"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.5.4",
+ "ohno",
 ]
 
 [[package]]
@@ -1800,7 +1800,7 @@ dependencies = [
  "native-tls",
  "observed_destination_core",
  "observed_destination_stdout",
- "ohno 0.5.5",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1865,7 +1865,7 @@ dependencies = [
  "insta",
  "layered",
  "native-tls",
- "ohno 0.5.5",
+ "ohno",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1901,7 +1901,7 @@ dependencies = [
  "http",
  "insta",
  "native-tls",
- "ohno 0.5.5",
+ "ohno",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1926,7 +1926,7 @@ dependencies = [
  "http-body-util",
  "http_extensions",
  "observed",
- "ohno 0.5.5",
+ "ohno",
  "tick",
  "tokio",
 ]
@@ -1954,7 +1954,7 @@ dependencies = [
  "mockall",
  "observed",
  "observed_testing",
- "ohno 0.5.5",
+ "ohno",
  "performables",
  "plurality 0.2.5",
  "quinn",
@@ -2517,7 +2517,7 @@ dependencies = [
  "http_extensions",
  "layered",
  "mime",
- "ohno 0.5.5",
+ "ohno",
  "seatbelt",
  "smallvec",
  "tokio",
@@ -2543,7 +2543,7 @@ dependencies = [
  "hyper-util",
  "jiff",
  "layered",
- "ohno 0.5.5",
+ "ohno",
  "pin-project",
  "recoverable",
  "serde",
@@ -2624,7 +2624,7 @@ dependencies = [
  "metabench",
  "observed",
  "observed_testing",
- "ohno 0.5.5",
+ "ohno",
  "parking_lot 0.13.0",
  "routerama",
  "smallvec",
@@ -3328,7 +3328,7 @@ dependencies = [
  "libc",
  "metabench_macros",
  "nix 0.32.0",
- "ohno 0.5.5",
+ "ohno",
  "regex",
  "serde",
  "serde_json",
@@ -3479,7 +3479,7 @@ name = "msvc_spectre_libs_build"
 version = "0.1.4"
 dependencies = [
  "cc",
- "ohno 0.5.5",
+ "ohno",
 ]
 
 [[package]]
@@ -3708,7 +3708,7 @@ dependencies = [
  "data_privacy",
  "metabench",
  "observed_macros",
- "ohno 0.5.5",
+ "ohno",
  "opentelemetry",
  "opentelemetry_sdk",
  "performables",
@@ -3808,21 +3808,11 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a800c5ce524851c4e46502ac6a27cbf8f33ea89fb23a35189af7be3a6394b221"
-dependencies = [
- "ohno_macros 0.5.4",
- "typeid",
-]
-
-[[package]]
-name = "ohno"
 version = "0.5.5"
 dependencies = [
  "futures",
  "insta",
- "ohno_macros 0.5.5",
+ "ohno_macros",
  "regex",
  "testing_aids",
  "tokio",
@@ -3832,29 +3822,9 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3eabdefe96ef313541d8b89ca4949b6d4279e755d026478dfb6959aabf01bd1"
-dependencies = [
- "ohno_macros_impl 0.5.4",
-]
-
-[[package]]
-name = "ohno_macros"
 version = "0.5.5"
 dependencies = [
- "ohno_macros_impl 0.5.5",
-]
-
-[[package]]
-name = "ohno_macros_impl"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99aff4f65c4403fac9a60f00d13dd66a9158dbbce9bbf7d6d42b4b92aed74bcf"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
+ "ohno_macros_impl",
 ]
 
 [[package]]
@@ -4751,7 +4721,7 @@ name = "recoverable"
 version = "0.3.1"
 dependencies = [
  "insta",
- "ohno 0.5.5",
+ "ohno",
  "static_assertions",
  "testing_aids",
 ]
@@ -5170,7 +5140,7 @@ dependencies = [
  "layered",
  "observed_destination_core",
  "observed_destination_stdout",
- "ohno 0.5.5",
+ "ohno",
  "opentelemetry",
  "opentelemetry_sdk",
  "recoverable",
@@ -5196,7 +5166,7 @@ dependencies = [
  "http",
  "http_extensions",
  "layered",
- "ohno 0.5.5",
+ "ohno",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -5684,7 +5654,7 @@ dependencies = [
  "data_privacy",
  "gungraun",
  "http",
- "ohno 0.5.5",
+ "ohno",
  "serde",
  "serde_json",
  "static_assertions",
@@ -5708,7 +5678,7 @@ dependencies = [
  "chumsky",
  "darling",
  "insta",
- "ohno 0.5.5",
+ "ohno",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -5842,7 +5812,7 @@ dependencies = [
  "jiff",
  "libc",
  "metabench",
- "ohno 0.5.5",
+ "ohno",
  "performables",
  "pin-project-lite",
  "static_assertions",

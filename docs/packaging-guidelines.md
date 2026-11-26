@@ -105,6 +105,19 @@ until someone remembered to exclude it.
    `Cargo.toml` opts in with `include = { workspace = true }`. The crate
    template (`scripts/crate-template`) should keep this line.
 
+## Dependency resolution before publication
+
+The root `[patch.crates-io]` table makes transitive dependencies on `ohno` use
+the workspace source. Without this patch, `cpulist` can keep an older registry
+version in `Cargo.lock` while `metabench` requires the prepared workspace version.
+Cargo replaces versioned path dependencies with registry dependencies during
+packaging, so those locked versions can conflict.
+
+After an `ohno` release version change, update the affected lockfile entries.
+Package the affected crates together with their workspace dependencies before
+publication. Cargo removes the patch from published manifests, so the resulting
+archives must resolve through the registry without it.
+
 ## How to verify
 
 List exactly what a crate would package and confirm no binary slips in:

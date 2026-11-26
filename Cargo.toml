@@ -326,6 +326,9 @@ zerocopy = { version = "0.8.26", default-features = false }
 zeroize = { version = "1.9.0", default-features = false }
 zstd-safe = { version = "8.2.0", default-features = false }
 
+[patch.crates-io]
+ohno = { path = "crates/ohno" }
+
 # >>> anvil-managed: anvil-workspace-rust-lints
 [workspace.lints.rust]
 # Rust compiler lint policy. Repository-specific Rust lints can follow this
