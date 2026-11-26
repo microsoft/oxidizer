@@ -97,9 +97,23 @@ fn attributes_accept_owned_text_and_expose_borrowed_values() {
 
 #[test]
 fn attribute_values_display_their_payload() {
+    assert_eq!(AttributeValue::from(7_i64).to_string(), "7");
     assert_eq!(AttributeValue::from(1.5).to_string(), "1.5");
     assert_eq!(AttributeValue::from(true).to_string(), "true");
     assert_eq!(AttributeValue::from("text").to_string(), "text");
+}
+
+#[test]
+fn attributes_preserve_each_typed_value() {
+    let typed = Attribute::from(("typed", AttributeValue::Int(7)));
+    let double = Attribute::new("double", AttributeValue::Double(1.5));
+    let text = Attribute::new("text", AttributeValue::String("value"));
+    let boolean = Attribute::from(("boolean", true));
+
+    assert_eq!(typed.value(), AttributeValue::Int(7));
+    assert_eq!(double.value(), AttributeValue::Double(1.5));
+    assert_eq!(text.value(), AttributeValue::String("value"));
+    assert_eq!(boolean.value(), AttributeValue::Boolean(true));
 }
 
 #[test]

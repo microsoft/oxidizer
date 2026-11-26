@@ -201,4 +201,15 @@ mod tests {
         assert_eq!(report.signals(Health::Healthy).count(), 1);
         assert_eq!(report.signals(Health::Unhealthy).len(), 1);
     }
+
+    #[test]
+    fn display_summarizes_state_and_publisher_counts() {
+        let signals = [signal(Health::Unhealthy, "down"), signal(Health::Healthy, "ok")];
+        let report = Report::new(Arc::from("db"), Arc::new(Snapshot::collect(&signals)));
+
+        assert_eq!(
+            report.to_string(),
+            "db: Unhealthy (healthy: 1, degraded: 0, unhealthy: 1)"
+        );
+    }
 }
