@@ -604,10 +604,11 @@ fn collection_truncates_an_oversized_provider_response() {
         .handle()
         .register_task_provider(|request| {
             let descriptor = allocate_type_descriptor_id();
-            request.respond(
-                vec![Task::new(allocate_task_id(), descriptor, TaskActivityState::Waiting); 2],
-                TaskCollection::Complete,
-            );
+            // Distinct IDs keep deduplication from hiding a missing response limit.
+            let tasks = (0..2)
+                .map(|_| Task::new(allocate_task_id(), descriptor, TaskActivityState::Waiting))
+                .collect();
+            request.respond(tasks, TaskCollection::Complete);
         })
         .unwrap();
 

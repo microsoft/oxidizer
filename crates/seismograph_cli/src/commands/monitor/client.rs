@@ -466,8 +466,15 @@ mod tests {
         clear_event_buffers(&MonitorIo::new_native(), &descriptor).unwrap();
         let requests = requests.recv_timeout(Duration::from_secs(3)).unwrap();
         worker.join().unwrap();
-        assert_eq!(requests[1], (2, Request::CaptureSnapshotAndStop));
-        assert_eq!(requests[3], (2, Request::ClearEventBuffers));
+        assert_eq!(
+            requests,
+            [
+                (1, Request::Hello),
+                (2, Request::CaptureSnapshotAndStop),
+                (1, Request::Hello),
+                (2, Request::ClearEventBuffers)
+            ]
+        );
     }
 
     #[test]

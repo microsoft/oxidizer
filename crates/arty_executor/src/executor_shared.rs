@@ -40,13 +40,11 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
-    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
+    pub(crate) fn inspect_new_tasks(&self, visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
         let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
-        for task in tasks.iter() {
-            if visit(task).is_break() {
-                break;
-            }
-        }
+        // The result only reports whether the borrow succeeded. The visitor records
+        // truncation if it stops the traversal at its work limit.
+        let _traversal = tasks.iter().try_for_each(visit);
         Ok(())
     }
 
@@ -125,8 +123,9 @@ impl ExecutorShared {
     }
 
     pub(crate) fn shutdown_complete(&self) -> bool {
-        debug_assert!(self.inner.new_tasks.borrow().is_empty());
-        self.shutdown().is_triggered() && self.inner.task_count.get() == 0
+        let shutdown_requested = self.shutdown().is_triggered();
+        debug_assert!(!shutdown_requested || self.inner.new_tasks.borrow().is_empty());
+        shutdown_requested && self.inner.task_count.get() == 0
     }
 
     pub(crate) fn add_task<F, T, I>(&self, identity: TaskIdentity, future: F, instrumentation: I, completion: T)

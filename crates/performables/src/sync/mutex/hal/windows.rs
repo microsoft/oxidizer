@@ -11,6 +11,9 @@ use windows_sys::Win32::Foundation::ERROR_TIMEOUT;
 use windows_sys::Win32::System::Threading::WaitOnAddress;
 use windows_sys::Win32::System::Threading::{INFINITE, WakeByAddressAll, WakeByAddressSingle};
 
+#[cfg(test)]
+use crate::sync::effects::record_wake_dispatch;
+
 pub(super) type AtomicLockWord = AtomicU8;
 pub(super) type LockWord = u8;
 
@@ -33,6 +36,8 @@ fn native_lock_wait(state: &AtomicLockWord, expected: LockWord) -> i32 {
 }
 
 pub(super) fn wake_lock(state: &AtomicLockWord) {
+    #[cfg(test)]
+    record_wake_dispatch();
     // SAFETY: the byte remains alive for this wake operation.
     unsafe { WakeByAddressSingle(state.as_ptr().cast()) };
 }
@@ -160,6 +165,8 @@ pub(super) fn wake_condition_one(state: &AtomicU32) {
 }
 
 pub(super) fn wake_condition_all(state: &AtomicU32) {
+    #[cfg(test)]
+    record_wake_dispatch();
     // SAFETY: the four-byte word remains alive for the call.
     unsafe { WakeByAddressAll(state.as_ptr().cast()) };
 }
