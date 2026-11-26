@@ -18,7 +18,7 @@ use tick::{Clock, Timer};
 use crate::exit::LoopExit;
 use crate::inbox::{Channel, MessageStream};
 use crate::spawn::{ActorSpawner, ActorWithPlacement};
-use crate::{Actor, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
+use crate::{Actor, ActorExit, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
 
 /// Values moved into the task that runs one actor.
 pub(crate) type TaskData<A> = Unaware<(Inbox<<A as Actor>::Message>, A, ActorRef<<A as Actor>::Message>)>;
@@ -113,6 +113,27 @@ impl ActorRuntime {
         );
     }
 
+    /// Tells `supervisor` how `actor` ended, once it ends.
+    ///
+    /// `notify` turns the [`ActorExit`] into a supervisor message. The notice
+    /// waits for mailbox capacity, so a full supervisor mailbox delays it but
+    /// does not drop it. If the supervisor mailbox is closed, the notice is
+    /// dropped, because no actor is left to receive it.
+    ///
+    /// Each call sends exactly one notice, even when `actor` has already ended.
+    /// Two calls on the same actor send two notices. The monitor is a task on
+    /// the worker of this runtime, and it ends after it sends its notice.
+    pub fn monitor<M, S, F>(&self, actor: &ActorWithPlacement<M>, supervisor: &ActorRef<S>, notify: F)
+    where
+        M: crate::Message,
+        S: crate::Message,
+        F: FnOnce(ActorExit) -> S + Send + 'static,
+    {
+        let data = unaware((actor.exit(), supervisor.clone(), notify));
+        // Dropping the join handle does not cancel the monitor task.
+        let _ = self.spawn_internal_task(None, data, Self::run_monitor);
+    }
+
     /// Spawns an internal runtime task with the same placement options as actors.
     pub(crate) fn spawn_internal_task<D, F, R>(
         &self,
@@ -164,6 +185,21 @@ impl ActorRuntime {
             if actor.tell(make_message()).await.is_err() {
                 break;
             }
+        }
+    }
+
+    async fn run_monitor<E, S, F>(data: Unaware<(E, ActorRef<S>, F)>)
+    where
+        E: Future<Output = ActorExit>,
+        S: crate::Message,
+        F: FnOnce(ActorExit) -> S,
+    {
+        let (exit, supervisor, notify) = data.into_inner();
+        let notice = notify(exit.await);
+
+        if let Err(closed) = supervisor.tell(notice).await {
+            // The supervisor mailbox is closed, so no actor is left to read the notice.
+            drop(closed);
         }
     }
 

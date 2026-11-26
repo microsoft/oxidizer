@@ -12,3 +12,4 @@ mod lifecycle;
 mod periodic;
 mod pinning;
 mod stream;
+mod supervision;
