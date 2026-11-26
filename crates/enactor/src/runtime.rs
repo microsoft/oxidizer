@@ -18,16 +18,18 @@ use tick::{Clock, Timer};
 use crate::exit::LoopExit;
 use crate::inbox::{Channel, MessageStream};
 use crate::spawn::{ActorSpawner, ActorWithPlacement};
-use crate::{Actor, ActorExit, ActorId, ActorRef, Context, Inbox, Placement, PlacementToken, TaskMeta};
+use crate::{Actor, ActorExit, ActorId, ActorRef, Context, Inbox, Message, Placement, PlacementToken, TaskMeta};
 
 /// Values moved into the task that runs one actor.
 ///
-/// When the actor runs on another worker, Arty relocates the runtime there, so
-/// the actor's own spawns with no placement stay on its worker.
-pub(crate) type TaskData<A> = (
-    ActorRuntime,
-    Unaware<(Inbox<<A as Actor>::Message>, A, ActorRef<<A as Actor>::Message>)>,
-);
+/// The task gets a runtime, the actor's inbox, its behavior, and a handle to
+/// itself. The behavior is an [`Actor`] or a receive-loop body. When the actor
+/// runs on another worker, Arty relocates the runtime there, so the actor's own
+/// spawns with no placement stay on its worker.
+pub(crate) type TaskData<M, B> = (ActorRuntime, Unaware<(Inbox<M>, B, ActorRef<M>)>);
+
+/// A spawned actor: its handle, its worker, and its task.
+pub(crate) type Dispatched<M> = (ActorRef<M>, PlacementToken, JoinHandle<Unaware<LoopExit>>);
 
 /// Default capacity for actor inboxes.
 pub(crate) const DEFAULT_CAPACITY: usize = 224;
@@ -62,6 +64,17 @@ impl ActorRuntime {
         self.dispatch(None, DEFAULT_CAPACITY, actor, None).0
     }
 
+    /// Spawns an actor written as a receive loop on the current core.
+    ///
+    /// [`ActorSpawner::spawn_with`] describes how the body runs and how it ends.
+    pub fn spawn_with<M, F>(&self, body: F) -> ActorRef<M>
+    where
+        M: Message,
+        F: AsyncFnOnce(&mut Inbox<M>, &Context<M>) + Send + 'static,
+    {
+        self.dispatch_with(None, DEFAULT_CAPACITY, body, None).0
+    }
+
     /// Spawns an actor on a runtime-selected core and returns its placement token.
     ///
     /// Use the token to co-locate related actors or Arty tasks on the same worker thread.
@@ -86,17 +99,48 @@ impl ActorRuntime {
         capacity: usize,
         actor: A,
         stream: Option<MessageStream<A::Message>>,
-    ) -> (ActorRef<A::Message>, PlacementToken, JoinHandle<Unaware<LoopExit>>)
+    ) -> Dispatched<A::Message>
     where
         A: Actor,
     {
+        self.dispatch_task(task_meta, capacity, stream, actor, Self::run::<A>)
+    }
+
+    /// Spawns a receive-loop body with the same options as [`dispatch`](Self::dispatch).
+    pub(crate) fn dispatch_with<M, F>(
+        &self,
+        task_meta: Option<TaskMeta>,
+        capacity: usize,
+        body: F,
+        stream: Option<MessageStream<M>>,
+    ) -> Dispatched<M>
+    where
+        M: Message,
+        F: AsyncFnOnce(&mut Inbox<M>, &Context<M>) + Send + 'static,
+    {
+        self.dispatch_task(task_meta, capacity, stream, body, Self::run_with::<M, F>)
+    }
+
+    fn dispatch_task<M, B, Fut>(
+        &self,
+        task_meta: Option<TaskMeta>,
+        capacity: usize,
+        stream: Option<MessageStream<M>>,
+        behavior: B,
+        run: fn(TaskData<M, B>) -> Fut,
+    ) -> Dispatched<M>
+    where
+        M: Message,
+        B: Send + 'static,
+        Fut: Future<Output = Unaware<LoopExit>> + 'static,
+    {
         let (message_tx, message_rx) = Channel::bounded(capacity);
         let (control_tx, control_rx) = Channel::unbounded();
-        let actor_ref: ActorRef<<A as Actor>::Message> = ActorRef::new(ActorId::next(), message_tx, control_tx);
+        let actor_ref = ActorRef::new(ActorId::next(), message_tx, control_tx);
         let inbox = Inbox::new(message_rx, control_rx, stream);
-        let data: TaskData<A> = (self.clone(), unaware((inbox, actor, actor_ref.clone())));
+        let data: TaskData<M, B> = (self.clone(), unaware((inbox, behavior, actor_ref.clone())));
 
-        let (placement, completion) = self.spawn_internal_task(task_meta, data, Self::run::<A>);
+        let (placement, completion) = self.spawn_internal_task(task_meta, data, run);
 
         (actor_ref, placement, completion)
     }
@@ -210,7 +254,7 @@ impl ActorRuntime {
     }
 
     /// Runs the actor loop until the inbox closes or the actor requests stop.
-    pub(crate) async fn run<A>(data: TaskData<A>) -> Unaware<LoopExit>
+    pub(crate) async fn run<A>(data: TaskData<A::Message, A>) -> Unaware<LoopExit>
     where
         A: Actor,
     {
@@ -227,6 +271,21 @@ impl ActorRuntime {
         }
 
         unaware(inbox.exit())
+    }
+
+    /// Runs a receive-loop body until it returns.
+    pub(crate) async fn run_with<M, F>(data: TaskData<M, F>) -> Unaware<LoopExit>
+    where
+        M: Message,
+        F: AsyncFnOnce(&mut Inbox<M>, &Context<M>),
+    {
+        let (runtime, local) = data;
+        let (mut inbox, body, actor_ref) = local.into_inner();
+        let ctx = Context::new(actor_ref, runtime);
+
+        body(&mut inbox, &ctx).await;
+
+        unaware(inbox.finish())
     }
 }
 

@@ -70,6 +70,9 @@ name = "enactor_worker_pool"
 [[example]]
 name = "enactor_supervisor"
 
+[[example]]
+name = "enactor_handshake"
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

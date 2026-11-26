@@ -13,10 +13,12 @@ use std::fmt;
 pub enum ActorExit {
     /// A stop was requested with [`ActorRef::stop`](crate::ActorRef::stop) or
     /// [`Context::stop`](crate::Context::stop), or the actor loop ended on its own.
+    /// A receive-loop body that returns while no drain is in progress also ends
+    /// with this exit.
     Stopped,
     /// A drain finished. The actor handled every buffered message, then stopped.
     Drained,
-    /// A message handler panicked.
+    /// A message handler or a receive-loop body panicked.
     ///
     /// The Arty `TaskPanic` policy decides whether the runtime also shuts down.
     Panicked,

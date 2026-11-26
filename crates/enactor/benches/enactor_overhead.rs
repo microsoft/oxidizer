@@ -9,6 +9,8 @@
 //! - `actor` uses [`ActorRef::ask_with`](enactor::ActorRef::ask_with).
 //! - `bounded_ask_timeout` uses [`ActorRef::ask_with_timeout`](enactor::ActorRef::ask_with_timeout)
 //!   with a deadline that never passes, so it shows the cost of the deadline.
+//! - `bounded_ask_receive_loop` uses `ActorRef::ask_with` on an actor written
+//!   as a receive loop with [`ActorSpawner::spawn_with`](enactor::ActorSpawner::spawn_with).
 //! - `plain_task` uses a task that reads a bounded `flume` channel and replies
 //!   through a `oneshot` channel. These are the same channels that the actor
 //!   uses, so the difference between `actor` and `plain_task` is the cost of
@@ -25,7 +27,7 @@ use arty::runtime::Runtime;
 use arty::task::RuntimeScheduler;
 use benchmarking::time_sample_async;
 use criterion::{Criterion, criterion_group, criterion_main};
-use enactor::{Actor, ActorRef, ActorRuntime, Context, Reply};
+use enactor::{Actor, ActorRef, ActorRuntime, Context, Inbox, Reply};
 
 const CAPACITY: usize = 10;
 
@@ -83,6 +85,28 @@ fn sample_actor_timeout(scheduler: &RuntimeScheduler, iters: u64) -> Duration {
         .unwrap()
 }
 
+fn sample_receive_loop(scheduler: &RuntimeScheduler, iters: u64) -> Duration {
+    scheduler
+        .block_on(async move |cx| {
+            let actor: ActorRef<Echo> = ActorRuntime::from_builtins(&cx)
+                .builder()
+                .with_capacity(CAPACITY)
+                .spawn_with(async |inbox: &mut Inbox<Echo>, _ctx: &Context<Echo>| {
+                    while let Ok(Echo::Ask(value, reply)) = inbox.recv().await {
+                        let _ = reply.send(value);
+                    }
+                })
+                .into();
+            actor.ask_with(Echo::Ask, 0).await.unwrap();
+
+            let elapsed = time_sample_async(iters, |_| actor.ask_with(Echo::Ask, 0)).await;
+
+            actor.stop().await.unwrap();
+            elapsed
+        })
+        .unwrap()
+}
+
 fn sample_plain_task(scheduler: &RuntimeScheduler, iters: u64) -> Duration {
     scheduler
         .block_on(async move |cx| {
@@ -112,6 +136,9 @@ fn overhead(c: &mut Criterion) {
     group.bench_function("actor", |b| b.iter_custom(|iters| sample_actor(scheduler, iters)));
     group.bench_function("bounded_ask_timeout", |b| {
         b.iter_custom(|iters| sample_actor_timeout(scheduler, iters));
+    });
+    group.bench_function("bounded_ask_receive_loop", |b| {
+        b.iter_custom(|iters| sample_receive_loop(scheduler, iters));
     });
     group.bench_function("plain_task", |b| b.iter_custom(|iters| sample_plain_task(scheduler, iters)));
     group.finish();

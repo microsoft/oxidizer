@@ -72,8 +72,34 @@
 //! [`ask!`](macro@ask) provides constructor-call syntax when the ask variant
 //! also carries caller-provided payload.
 //!
-//! The `examples` folder contains `enactor_ping_pong`, `enactor_counter`, and
-//! `enactor_worker_pool`.
+//! To limit how long an ask waits, use [`ActorRef::ask_timeout`],
+//! [`ActorRef::ask_with_timeout`], or [`ask_t!`](macro@ask_t). One deadline
+//! covers the wait for mailbox capacity and the wait for the reply. A request
+//! that timed out can still be handled, because the mailbox may already own it.
+//!
+//! # Lifecycle and supervision
+//!
+//! [`ActorWithPlacement::exit`] reports how an actor ended as an
+//! [`ActorExit`]: it stopped, it drained, it panicked, or the runtime aborted
+//! it. [`ActorRuntime::monitor`] sends that exit to a supervisor actor as a
+//! message, so the supervisor can start a new actor after a panic.
+//!
+//! Each actor has an [`ActorId`] that no other actor in the process has.
+//! [`ActorRef`] handles compare and hash by that id.
+//!
+//! Inside [`Actor::handle`], [`Context::runtime`] spawns child actors. A child
+//! spawned with no placement runs on the same worker as its parent.
+//!
+//! # Receive loops
+//!
+//! An actor can also be an async closure that reads its own [`Inbox`]. Spawn
+//! it with [`ActorSpawner::spawn_with`] or [`ActorRuntime::spawn_with`]. A
+//! protocol with several steps then reads as straight-line code, and the
+//! closure can keep worker-local state, such as an `Rc`, across an `.await`.
+//! The actor ends when the closure returns.
+//!
+//! The `examples` folder contains `enactor_ping_pong`, `enactor_counter`,
+//! `enactor_worker_pool`, `enactor_supervisor`, and `enactor_handshake`.
 
 extern crate self as enactor;
 

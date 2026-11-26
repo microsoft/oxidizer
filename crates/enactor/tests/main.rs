@@ -12,5 +12,6 @@ mod exit;
 mod lifecycle;
 mod periodic;
 mod pinning;
+mod receive_loop;
 mod stream;
 mod supervision;

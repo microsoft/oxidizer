@@ -29,7 +29,8 @@ use self::state::State;
 /// Mailbox for one actor.
 ///
 /// Actor messages and lifecycle requests arrive on separate queues so stop and
-/// drain can preempt delivery.
+/// drain can preempt delivery. An actor written as a receive loop reads its
+/// inbox directly. See [`ActorSpawner::spawn_with`](crate::ActorSpawner::spawn_with).
 #[derive(Debug)]
 pub struct Inbox<M: Message> {
     delivery: Delivery<M>,
@@ -167,6 +168,21 @@ impl<M: Message> Inbox<M> {
     /// Closes the message queue and stops delivery immediately.
     pub(crate) fn stop(&self) {
         self.request(Signal::Stop);
+    }
+
+    /// Ends delivery after a receive-loop body returns, and reports how the loop ended.
+    ///
+    /// Buffered messages are dropped now. Otherwise they would stay in the
+    /// channel until every sender drops, and an ask that waits for one of them
+    /// would wait forever. A drain that left messages unread did not finish, so
+    /// it counts as a stop.
+    pub(crate) fn finish(&self) -> LoopExit {
+        self.delivery.close();
+        let unread = std::iter::from_fn(|| self.delivery.try_recv().ok()).count();
+        match (self.exit(), unread) {
+            (LoopExit::Drained, 0) => LoopExit::Drained,
+            _ => LoopExit::Stopped,
+        }
     }
 }
 

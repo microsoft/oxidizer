@@ -16,8 +16,8 @@ use tick::Clock;
 
 use crate::exit::LoopExit;
 use crate::inbox::MessageStream;
-use crate::runtime::{ActorRuntime, DEFAULT_CAPACITY};
-use crate::{Actor, ActorExit, ActorId, ActorRef, CompletionTimeoutError, Message, PlacementToken, TaskMeta};
+use crate::runtime::{ActorRuntime, DEFAULT_CAPACITY, Dispatched};
+use crate::{Actor, ActorExit, ActorId, ActorRef, CompletionTimeoutError, Context, Inbox, Message, PlacementToken, TaskMeta};
 
 /// Completion of an actor task, shared by every clone of its handle.
 type Completion = Shared<BoxFuture<'static, Outcome>>;
@@ -118,6 +118,14 @@ impl<M: Message> Clone for ActorWithPlacement<M> {
 }
 
 impl<M: Message> ActorWithPlacement<M> {
+    fn new((actor, placement, task): Dispatched<M>) -> Self {
+        Self {
+            actor,
+            placement,
+            completion: completion(task),
+        }
+    }
+
     /// Reference to the spawned actor.
     #[must_use]
     pub const fn actor(&self) -> &ActorRef<M> {
@@ -247,13 +255,38 @@ impl<'rt> ActorSpawner<'rt, NoStream> {
     where
         A: Actor,
     {
-        let (actor_ref, placement, task) = self.runtime.dispatch(self.task_meta, self.capacity, actor, None);
+        ActorWithPlacement::new(self.runtime.dispatch(self.task_meta, self.capacity, actor, None))
+    }
 
-        ActorWithPlacement {
-            actor: actor_ref,
-            placement,
-            completion: completion(task),
-        }
+    /// Spawns an actor written as a receive loop.
+    ///
+    /// The actor runs `body` once. The body gets the actor's [`Inbox`] and
+    /// [`Context`], calls [`Inbox::recv`] for each message, and ends the actor
+    /// when it returns. A stop or drain from an [`ActorRef`] still works,
+    /// because `recv` returns an error after a stop, and after a drain delivers
+    /// the last buffered message.
+    ///
+    /// The body gets `&Context`, not `&mut Context`. [`Context::stop`] and
+    /// [`Context::drain`] take effect only between two calls of
+    /// [`Actor::handle`](crate::Actor::handle), and a receive loop has no such
+    /// point, so the body cannot call them. To end the actor, return from the
+    /// body.
+    ///
+    /// Arty creates the body's future on the actor's worker, so the future need
+    /// not be [`Send`]. It can keep an `Rc` or a `RefCell` across an `.await`.
+    /// The body itself, with everything it captures, must be `Send`.
+    ///
+    /// When the body returns, the inbox drops its buffered messages, so their
+    /// asks fail with [`AskError::is_canceled`](crate::AskError::is_canceled).
+    /// The exit is [`ActorExit::Drained`] if a drain was in progress and the
+    /// body read every buffered message. Otherwise the exit is
+    /// [`ActorExit::Stopped`].
+    pub fn spawn_with<M, F>(self, body: F) -> ActorWithPlacement<M>
+    where
+        M: Message,
+        F: AsyncFnOnce(&mut Inbox<M>, &Context<M>) + Send + 'static,
+    {
+        ActorWithPlacement::new(self.runtime.dispatch_with(self.task_meta, self.capacity, body, None))
     }
 }
 
@@ -263,13 +296,18 @@ impl<M: Message> ActorSpawner<'_, WithStream<M>> {
     where
         A: Actor<Message = M>,
     {
-        let (actor_ref, placement, task) = self.runtime.dispatch(self.task_meta, self.capacity, actor, Some(self.stream.0));
+        ActorWithPlacement::new(self.runtime.dispatch(self.task_meta, self.capacity, actor, Some(self.stream.0)))
+    }
 
-        ActorWithPlacement {
-            actor: actor_ref,
-            placement,
-            completion: completion(task),
-        }
+    /// Spawns an actor written as a receive loop.
+    ///
+    /// [`Inbox::recv`] returns stream items like channel messages. The body
+    /// runs as described in [`ActorSpawner::spawn_with`].
+    pub fn spawn_with<F>(self, body: F) -> ActorWithPlacement<M>
+    where
+        F: AsyncFnOnce(&mut Inbox<M>, &Context<M>) + Send + 'static,
+    {
+        ActorWithPlacement::new(self.runtime.dispatch_with(self.task_meta, self.capacity, body, Some(self.stream.0)))
     }
 }
 
