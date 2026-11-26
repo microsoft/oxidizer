@@ -39,7 +39,7 @@ impl TaskSet {
     /// ```
     /// # fn submit<F>(tasks: &arty_executor::TaskSet, future: F, completion: impl arty_executor::TaskCompletion<F::Output>)
     /// # where F: IntoFuture + 'static, F::Output: 'static {
-    /// let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+    /// let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
     /// tasks.task(identity, future).register(completion);
     /// # }
     /// ```

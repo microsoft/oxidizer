@@ -7,10 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 
 use crate::snapshot::{Task, TaskCollection, TaskMetrics};
-use crate::{WorkerControl, collection, lock};
+use crate::{TaskIdentity, WorkerControl, collection, lock};
 
 /// Task-event identities and backtrace policy that implement [`Copy`].
 ///
@@ -29,10 +29,8 @@ pub struct EventContext {
 /// timestamp is assigned. Keep the identity for inspection and later outcomes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TaskSpawn {
-    /// Process-wide task identity.
-    pub id: TaskId,
-    /// Task descriptor identity used by the event.
-    pub descriptor: TypeDescriptorId,
+    /// Caller-assigned task identity used by the event.
+    pub identity: TaskIdentity,
     /// Timestamp used by the task creation event.
     pub timestamp: EventTimestamp,
 }
@@ -58,7 +56,7 @@ impl EventContext {
     ///
     /// Panics if `body_size` cannot be encoded below `u64::MAX`.
     #[must_use]
-    pub fn spawned(&self, id: TaskId, descriptor: TypeDescriptorId, parent: Option<TaskId>, body_size: usize) -> Option<TaskSpawn> {
+    pub fn spawned(&self, identity: TaskIdentity, parent: Option<TaskId>, body_size: usize) -> Option<TaskSpawn> {
         let mut assigned = None;
         seismograph::record(EventClass::RuntimeTask, || {
             let size = u64::try_from(body_size)
@@ -66,16 +64,16 @@ impl EventContext {
                 .and_then(|size| size.checked_add(1))
                 .expect("a concrete task body must be smaller than u64::MAX");
             let timestamp = EventTimestamp::now();
-            assigned = Some(TaskSpawn { id, descriptor, timestamp });
+            assigned = Some(TaskSpawn { identity, timestamp });
             Some(Record::runtime(
                 timestamp,
                 EventKind::TaskSpawned,
                 RuntimeEvent {
                     runtime_id: self.runtime,
                     worker_id: self.worker,
-                    subject_id: id.get(),
+                    subject_id: identity.id().get(),
                     related_id: parent.map_or(0, TaskId::get),
-                    value_0: descriptor.get(),
+                    value_0: identity.descriptor().get(),
                     value_1: size,
                 },
                 self.backtrace,

@@ -12,9 +12,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload, TaskSet, discard_task_panic_payload,
-};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskSet, discard_task_panic_payload};
+use seismograph_runtime::TaskIdentity;
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();

@@ -798,8 +798,11 @@ mod tests {
             F: IntoFuture + 'static,
             F::Output: 'static,
         {
-            self.task(arty_executor::TaskIdentity::from_location(std::panic::Location::caller()), future)
-                .register(DiscardCompletion);
+            self.task(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                future,
+            )
+            .register(DiscardCompletion);
         }
     }
 
@@ -1373,7 +1376,7 @@ mod tests {
         let join = worker_context(&worker).dispatcher().spawn(
             |_| std::future::ready(()),
             crate::task::preparation::SpawnOptions::new(
-                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
                 None,
             ),
@@ -1484,7 +1487,7 @@ mod tests {
         );
         let polled = std::rc::Rc::new(std::cell::Cell::new(false));
         let completed = std::rc::Rc::clone(&polled);
-        let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+        let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
         let tasks = worker.tasks.clone();
         crate::task::preparation::SpawnOptions::new(identity, 0, None).register(
             worker_context(&worker).thread(),
@@ -2159,7 +2162,7 @@ mod tests {
                 }
             },
             crate::task::preparation::SpawnOptions::new(
-                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
                 None,
             ),

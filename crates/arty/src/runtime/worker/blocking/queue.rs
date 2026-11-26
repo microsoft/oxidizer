@@ -405,7 +405,7 @@ mod tests {
         queue.retire(2);
         let info = TaskInfo::new::<()>(
             queue.monitoring.events().unwrap(),
-            arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         );
         let id = info.id();
         assert!(queue.push(QueuedJob {
@@ -437,7 +437,7 @@ mod tests {
         queue.enable_monitoring(&runtime.handle());
         let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
             queue.monitoring.events().unwrap(),
-            arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
@@ -486,7 +486,7 @@ mod tests {
         queue.enable_monitoring(&runtime.handle());
         let info = TaskInfo::new::<()>(
             queue.monitoring.events().unwrap(),
-            arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         );
         let owner = runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].id;
 
@@ -514,7 +514,7 @@ mod tests {
         queue.enable_monitoring(&runtime.handle());
         let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
             queue.monitoring.events().unwrap(),
-            arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
@@ -586,7 +586,7 @@ mod tests {
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(
                 queue.monitoring.events().unwrap(),
-                arty_executor::TaskIdentity::from_location(std::panic::Location::caller())
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller())
             )))),
             shutdown: None,
         }));
@@ -624,7 +624,7 @@ mod tests {
             let (dropped, received) = std::sync::mpsc::channel();
             let capture = Capture(Arc::clone(&queue), dropped);
             let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-            let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+            let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
             let (body, handle) = crate::task::preparation::prepare_blocking(
                 &pool,
                 move || drop(capture),
@@ -674,7 +674,7 @@ mod tests {
         let (dropped, received) = std::sync::mpsc::channel();
         let capture = Capture(Arc::clone(&queue), dropped);
         let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+        let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
         let (body, handle) = crate::task::preparation::prepare_blocking(
             &pool,
             move || drop(capture),
@@ -722,7 +722,7 @@ mod tests {
             BlockingJob::Monitored(Arc::new(InspectedJob(
                 TaskInfo::new::<()>(
                     queue.monitoring.events().unwrap(),
-                    arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+                    seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 ),
                 Arc::clone(&inspections),
             ))),

@@ -301,7 +301,6 @@ dependencies = [
  "performables",
  "pin-project",
  "plurality 0.2.5",
- "seismograph",
  "seismograph_runtime",
  "static_assertions",
  "thread_aware",

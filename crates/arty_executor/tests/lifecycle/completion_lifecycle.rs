@@ -16,9 +16,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::{
-    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskIdentity,
-    TaskInstrumentation, TaskPanicPayload, TaskSet,
+    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskInstrumentation,
+    TaskPanicPayload, TaskSet,
 };
+use seismograph_runtime::TaskIdentity;
 
 use super::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
 

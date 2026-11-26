@@ -227,7 +227,7 @@ mod tests {
             &result_pool,
             |_| std::future::ready(42),
             crate::task::preparation::SpawnOptions::new(
-                arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<i32>>(),
                 None,
             ),

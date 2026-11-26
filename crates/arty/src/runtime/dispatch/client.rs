@@ -7,8 +7,9 @@ use std::any::type_name;
 use std::fmt::Debug;
 use std::thread::ThreadId;
 
-use arty_executor::{ShutdownCause, TaskIdentity};
+use arty_executor::ShutdownCause;
 use performables::arc::Arc;
+use seismograph_runtime::TaskIdentity;
 use thread_aware::ThreadAware;
 
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};

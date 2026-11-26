@@ -7,9 +7,10 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 use std::thread;
 
-use arty_executor::{TaskIdentity, discard_task_panic_payload};
+use arty_executor::discard_task_panic_payload;
 use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
+use seismograph_runtime::TaskIdentity;
 
 use crate::runtime::config::RuntimeName;
 #[cfg(test)]
@@ -353,10 +354,11 @@ mod tests {
     use std::sync::mpsc::channel;
     use std::thread;
 
-    use arty_executor::{ShutdownCause, TaskIdentity};
+    use arty_executor::ShutdownCause;
     use events_once::Event;
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
+    use seismograph_runtime::TaskIdentity;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
     use super::{JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};

@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty_executor::{CycleOutcome, Executor, TaskIdentity};
+use arty_executor::{CycleOutcome, Executor};
+use seismograph_runtime::TaskIdentity;
 
 use super::support::{TaskBuilderExt as _, TaskOutcome};
 

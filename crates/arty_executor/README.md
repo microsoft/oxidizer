@@ -52,9 +52,9 @@ whether a task panic starts executor shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbWSrx4_ES0WAbDakuDmXYRG4bZnxpbioefesbvzlvAIzj8-5hZIKCZ1Rhc2tTZXT2gm1hcnR5X2V4ZWN1dG9yZTAuNy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbWSrx4_ES0WAbDakuDmXYRG4bZnxpbioefesbvzlvAIzj8-5hZIOCZ1Rhc2tTZXT2gm1hcnR5X2V4ZWN1dG9yZTAuNy4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
  [__link0]: https://docs.rs/arty
  [__link1]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskCompletion
- [__link2]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=TaskIdentity
+ [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=TaskIdentity
  [__link3]: https://docs.rs/TaskSet/latest/TaskSet/?search=current
  [__link4]: https://docs.rs/arty_executor/0.7.0/arty_executor/?search=ExecutorBuilder::panic_policy

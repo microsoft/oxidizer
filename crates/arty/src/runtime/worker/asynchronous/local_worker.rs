@@ -4,7 +4,8 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskIdentity, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
+use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;

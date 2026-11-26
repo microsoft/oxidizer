@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::task::Poll;
 
-use arty_executor::TaskIdentity;
+use seismograph_runtime::TaskIdentity;
 use smallvec::SmallVec;
 use thread_aware::{Thread, ThreadAware};
 

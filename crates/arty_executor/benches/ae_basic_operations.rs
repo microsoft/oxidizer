@@ -22,11 +22,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload, TaskSet, discard_task_panic_payload,
-};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskSet, discard_task_panic_payload};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
+use seismograph_runtime::TaskIdentity;
 
 const CYCLE: &str = "ae_basic_operations/execute_cycle";
 const TASK: &str = "ae_basic_operations/task";

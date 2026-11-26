@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::{TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet};
+use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet};
+use seismograph_runtime::TaskIdentity;
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;

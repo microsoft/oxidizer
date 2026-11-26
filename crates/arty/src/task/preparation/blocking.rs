@@ -3,7 +3,8 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use arty_executor::{TaskCompletion, TaskIdentity};
+use arty_executor::TaskCompletion;
+use seismograph_runtime::TaskIdentity;
 
 use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};

@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::{ShutdownCause, TaskIdentity};
+use arty_executor::ShutdownCause;
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use performables::arc::Arc;
+use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::hook::{HookRegistration, RetainedHooks, TaskObservers, TaskSpawn};

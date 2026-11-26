@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 use seismograph::snapshot::{DecodedSnapshot, EventBufferDisposition, SnapshotOptions};
 use seismograph_runtime::snapshot::{
@@ -16,7 +16,7 @@ use seismograph_runtime::snapshot::{
     WorkerState,
 };
 use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
-use seismograph_runtime::{RuntimeMetadata, allocate_task_id, register_runtime};
+use seismograph_runtime::{RuntimeMetadata, TaskIdentity, register_runtime};
 
 fn capture(disposition: EventBufferDisposition) -> DecodedSnapshot {
     let bytes = seismograph::snapshot(SnapshotOptions {
@@ -72,28 +72,22 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
     let first_id = first.id();
     let second_id = second.id();
     let task_events = worker.task_events();
-    let parent = task_events
-        .spawned(allocate_task_id(), TypeDescriptorId::from_raw(11).unwrap(), None, 0)
-        .unwrap()
-        .id;
-    let child = task_events
-        .spawned(allocate_task_id(), TypeDescriptorId::from_raw(13).unwrap(), Some(parent), 0)
-        .unwrap()
-        .id;
-    let legacy = task_events
-        .spawned(allocate_task_id(), TypeDescriptorId::from_raw(17).unwrap(), Some(parent), 0)
-        .unwrap()
-        .id;
-    let sized = task_events
-        .spawned(allocate_task_id(), TypeDescriptorId::from_raw(19).unwrap(), Some(parent), 321)
-        .unwrap()
-        .id;
+    let identities = [
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        TaskIdentity::from_location(std::panic::Location::caller()),
+        TaskIdentity::from_location(std::panic::Location::caller()),
+    ];
+    let parent = task_events.spawned(identities[0], None, 0).unwrap().identity.id();
+    let child = task_events.spawned(identities[1], Some(parent), 0).unwrap().identity.id();
+    let legacy = task_events.spawned(identities[2], Some(parent), 0).unwrap().identity.id();
+    let sized = task_events.spawned(identities[3], Some(parent), 321).unwrap().identity.id();
     let tasks = Arc::new(Mutex::new(
-        [(parent, 11, 0), (child, 13, 0), (legacy, 17, 0), (sized, 19, 321)]
-            .map(|(id, descriptor, size)| Task {
-                id,
-                parent: (id != parent).then_some(parent),
-                type_descriptor: TypeDescriptorId::from_raw(descriptor).unwrap(),
+        [(identities[0], 0), (identities[1], 0), (identities[2], 0), (identities[3], 321)]
+            .map(|(identity, size)| Task {
+                id: identity.id(),
+                parent: (identity.id() != parent).then_some(parent),
+                type_descriptor: identity.descriptor(),
                 future_size_bytes: Some(size),
                 spawned_at: None,
                 last_worker_id: None,
@@ -209,10 +203,7 @@ fn gamma_round2_runtime_lifecycle_worker_transfers_and_terminal_payloads_are_exa
             (event.kind, value)
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        actual,
-        expected_events(runtime_id, [first_id, second_id], [parent, child, legacy, sized], transfer_id)
-    );
+    assert_eq!(actual, expected_events(runtime_id, [first_id, second_id], identities, transfer_id));
     assert_terminal_source(&snapshot);
 }
 
@@ -238,9 +229,15 @@ fn assert_initial_source(snapshot: &DecodedSnapshot, runtime_id: RuntimeId, work
     );
 }
 
-fn expected_events(runtime_id: RuntimeId, workers: [WorkerId; 2], tasks: [TaskId; 4], transfer_id: u64) -> [(EventKind, RuntimeEvent); 26] {
+fn expected_events(
+    runtime_id: RuntimeId,
+    workers: [WorkerId; 2],
+    tasks: [TaskIdentity; 4],
+    transfer_id: u64,
+) -> [(EventKind, RuntimeEvent); 26] {
     let [first_id, second_id] = workers;
-    let [parent, child, legacy, sized] = tasks;
+    let [parent, child, legacy, sized] = tasks.map(TaskIdentity::id);
+    let [parent_descriptor, child_descriptor, legacy_descriptor, sized_descriptor] = tasks.map(|task| task.descriptor().get());
     let p = |worker, subject, related, first, second| payload(runtime_id, worker, subject, related, first, second);
     [
         (EventKind::RuntimeCreated, p(None, 0, 0, 4, 0)),
@@ -249,10 +246,19 @@ fn expected_events(runtime_id: RuntimeId, workers: [WorkerId; 2], tasks: [TaskId
             EventKind::WorkerStarted,
             p(Some(second_id), second_id.get(), 0, 2, u64::from(u32::MAX)),
         ),
-        (EventKind::TaskSpawned, p(Some(first_id), parent.get(), 0, 11, 1)),
-        (EventKind::TaskSpawned, p(Some(first_id), child.get(), parent.get(), 13, 1)),
-        (EventKind::TaskSpawned, p(Some(first_id), legacy.get(), parent.get(), 17, 1)),
-        (EventKind::TaskSpawned, p(Some(first_id), sized.get(), parent.get(), 19, 322)),
+        (EventKind::TaskSpawned, p(Some(first_id), parent.get(), 0, parent_descriptor, 1)),
+        (
+            EventKind::TaskSpawned,
+            p(Some(first_id), child.get(), parent.get(), child_descriptor, 1),
+        ),
+        (
+            EventKind::TaskSpawned,
+            p(Some(first_id), legacy.get(), parent.get(), legacy_descriptor, 1),
+        ),
+        (
+            EventKind::TaskSpawned,
+            p(Some(first_id), sized.get(), parent.get(), sized_descriptor, 322),
+        ),
         (EventKind::WorkerParked, p(Some(first_id), first_id.get(), 0, 0, 0)),
         (EventKind::WorkerUnparked, p(Some(first_id), first_id.get(), 0, 0, 0)),
         (EventKind::TaskEnqueued, p(Some(first_id), child.get(), 0, 0, 0)),

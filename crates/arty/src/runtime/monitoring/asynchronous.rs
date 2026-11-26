@@ -4,11 +4,11 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 
-use arty_executor::{Executor, InspectionError, InspectionStatus, PollObserver, TaskIdentity};
-use seismograph_runtime::RuntimeHandle;
+use arty_executor::{Executor, InspectionError, InspectionStatus, PollObserver};
 use seismograph_runtime::snapshot::TaskCollection;
 use seismograph_runtime::task::{TaskPoll, TaskRequest};
 use seismograph_runtime::worker::{WorkerHandle, WorkerMetadata, WorkerRegistration, WorkerRole};
+use seismograph_runtime::{RuntimeHandle, TaskIdentity};
 
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::monitoring::task::set_events;

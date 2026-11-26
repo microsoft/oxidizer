@@ -10,9 +10,9 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::{
-    Executor, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload,
-    TaskState,
+    Executor, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskState,
 };
+use seismograph_runtime::TaskIdentity;
 
 #[derive(Debug)]
 struct Completion;

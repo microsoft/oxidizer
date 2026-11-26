@@ -23,21 +23,21 @@ between execution cycles. There is no separate diagnostic task registry.
 Workers check [`worker::WorkerHandle::is_observed`][__link1] once per execution cycle.
 Without collection or runtime-event recording, the normal poll loop needs no
 diagnostic callbacks, clocks, locks, counters, or reference-count operations.
-Allocate task identities and type descriptions only when first observed.
+[`TaskIdentity`][__link2] lets a runtime assign an identity before observation.
 
 Ordinary Seismograph snapshots request current task state. To measure polls,
-call [`RuntimeHandle::capture`][__link2] with a nonzero
-[`snapshot::CaptureOptions::measure_for`][__link3]. The diagnostic caller waits for that
+call [`RuntimeHandle::capture`][__link3] with a nonzero
+[`snapshot::CaptureOptions::measure_for`][__link4]. The diagnostic caller waits for that
 interval, not the workers. Private observation windows prevent a poll from a
 previous request from entering a new measurement window.
-[`snapshot::decode`][__link4] accepts only wire version 1 and source schema 9.
+[`snapshot::decode`][__link5] accepts only wire version 1 and source schema 9.
 Other versions are rejected.
 
 Runtime-event recording is separate from task inspection. It retains only
 events emitted after recording starts. Missing creation times, wake ages,
 earlier polls, and completed task history are not reconstructed.
 Stopping event recording does not freeze the actual runtime’s current state.
-[`worker::WorkerHandle::task_events`][__link5] supplies a [`Copy`][__link6] context for task
+[`worker::WorkerHandle::task_events`][__link6] supplies a [`Copy`][__link7] context for task
 creation and real outcomes, without per-task registration or shared ownership.
 
 ## Example
@@ -63,11 +63,12 @@ worker.handle().register_task_provider(|request| {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbd-Jt3Up-brQbiLCAdsiNEtEbZ47AiVrE3lMbLKLlDS1kJGNhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVO5KrNS6sQkbMDQNNSn8UoUbnUVAD0AZdq0bButZh2UETP9hZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
  [__link0]: https://crates.io/crates/seismograph/0.6.0
  [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::is_observed
- [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeHandle::capture
- [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
- [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::decode
- [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
- [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html
+ [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=TaskIdentity
+ [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeHandle::capture
+ [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
+ [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=snapshot::decode
+ [__link6]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
+ [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html

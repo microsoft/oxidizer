@@ -5,10 +5,10 @@ use std::panic::Location;
 use std::pin::Pin;
 use std::task::{Context as PollContext, Poll};
 
-use arty_executor::TaskIdentity;
 use futures::future::{FutureExt, LocalBoxFuture};
 use performables::sync::channel;
 use pin_project::pin_project;
+use seismograph_runtime::TaskIdentity;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;

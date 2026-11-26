@@ -7,7 +7,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::thread;
 
-use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskIdentity, TaskPanicPayload, discard_task_panic_payload};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
+use seismograph_runtime::TaskIdentity;
 
 /// Supplies completion callbacks without a result receiver.
 ///

@@ -32,7 +32,7 @@ where
     F::Output: Send + 'static,
 {
     let options = SpawnOptions::new(
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         size_of::<F>(),
         None,
     );
@@ -51,7 +51,7 @@ fn remote_factory_defers_future_creation_until_polling() {
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let identity = arty_executor::TaskIdentity::from_location(std::panic::Location::caller());
+    let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
     let options = SpawnOptions::new(identity, size_of_val(&future()), None);
     let (factory, handle) = prepare_remote(
         &result_pool,
@@ -68,7 +68,7 @@ fn remote_factory_defers_future_creation_until_polling() {
     factory.register(cx, &executor.tasks());
     let mut identities = Vec::new();
     executor
-        .inspect(1, |identity: &arty_executor::TaskIdentity| identities.push(*identity))
+        .inspect(1, |identity: &seismograph_runtime::TaskIdentity| identities.push(*identity))
         .unwrap();
     assert_eq!(identities, [identity]);
     let before_poll = invoked.load(Ordering::Relaxed);
@@ -98,7 +98,7 @@ fn blocking_task_delivers_its_result() {
         &result_pool,
         || 42,
         BlockingTaskMonitoring::default(),
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
     task.run();
 
@@ -113,7 +113,7 @@ fn blocking_panic_is_delivered_to_joiner() {
         &result_pool,
         || panic!("blocking task"),
         BlockingTaskMonitoring::default(),
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
     task.run();
 
@@ -144,7 +144,7 @@ fn discarded_preparation_reports_the_shutdown_cause() {
         &result_pool,
         || 42,
         BlockingTaskMonitoring::default(),
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
     drop(task);
     let mut handle = pin!(handle);
@@ -187,7 +187,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
         &result_pool,
         move || drop(capture),
         BlockingTaskMonitoring::default(),
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
     catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     assert!(block_on(handle).unwrap_err().is_shutdown());
@@ -200,7 +200,7 @@ fn discarded_blocking_task_contains_join_waker_panic() {
         &result_pool,
         || 42,
         BlockingTaskMonitoring::default(),
-        arty_executor::TaskIdentity::from_location(std::panic::Location::caller()),
+        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
     );
     let mut handle = pin!(handle);
     let waker = Waker::from(Arc::new(PanicWake));

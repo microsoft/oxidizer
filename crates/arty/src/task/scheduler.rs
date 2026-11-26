@@ -3,8 +3,8 @@
 
 use std::panic::Location;
 
-use arty_executor::TaskIdentity;
 use performables::arc::Arc;
+use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};

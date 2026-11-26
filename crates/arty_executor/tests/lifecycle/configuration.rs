@@ -13,9 +13,9 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 
 use arty_executor::{
-    ExecutorBuilder, PanicPolicy, ShutdownCause, TaskBuilder, TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet,
-    discard_task_panic_payload,
+    ExecutorBuilder, PanicPolicy, ShutdownCause, TaskBuilder, TaskCompletion, TaskInstrumentation, TaskSet, discard_task_panic_payload,
 };
+use seismograph_runtime::TaskIdentity;
 use static_assertions::assert_not_impl_any;
 
 use super::support::{DiscardCompletion, TaskBuilderExt as _};
@@ -27,20 +27,6 @@ assert_not_impl_any!(TaskBuilder<'static, std::future::Ready<()>>: UnwindSafe, R
 #[test]
 fn default_builder() {
     _ = ExecutorBuilder::default();
-}
-
-#[test]
-fn identities_preserve_locations_and_allocate_distinct_task_ids() {
-    let location = std::panic::Location::caller();
-    let first = TaskIdentity::from_location(location);
-    let second = TaskIdentity::from_location(location);
-    let other = TaskIdentity::from_location(std::panic::Location::caller());
-
-    assert_ne!(first.id(), second.id());
-    assert_eq!(first.descriptor(), second.descriptor());
-    assert_eq!(first.descriptor().get(), std::ptr::from_ref(location).addr() as u64);
-    assert!(std::ptr::eq(first.location(), location));
-    assert_ne!(first.descriptor(), other.descriptor());
 }
 
 #[test]

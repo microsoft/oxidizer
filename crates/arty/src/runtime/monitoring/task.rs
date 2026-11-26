@@ -4,9 +4,10 @@
 use std::cell::Cell;
 use std::sync::OnceLock;
 
-use arty_executor::{TaskCompletion, TaskIdentity, TaskInstrumentation, TaskSet, TaskState};
+use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet, TaskState};
 use seismograph::recorder::event::EventTimestamp;
 use seismograph::recorder::runtime::TaskId;
+use seismograph_runtime::TaskIdentity;
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
 use seismograph_runtime::task::EventContext;
 
@@ -43,7 +44,7 @@ impl TaskMetadata {
     fn record_spawn(&mut self, identity: TaskIdentity) {
         self.spawned_at = self
             .events
-            .spawned(identity.id(), identity.descriptor(), self.parent, self.body_size)
+            .spawned(identity, self.parent, self.body_size)
             .map(|spawn| spawn.timestamp);
     }
 
@@ -116,7 +117,7 @@ struct AsyncTaskInfo {
 
 impl AsyncTaskInfo {
     fn new(identity: TaskIdentity, events: Option<EventContext>, parent: Option<TaskId>, body_size: usize) -> Self {
-        let spawn = events.and_then(|events| events.spawned(identity.id(), identity.descriptor(), parent, body_size));
+        let spawn = events.and_then(|events| events.spawned(identity, parent, body_size));
         Self {
             events,
             parent,
@@ -218,9 +219,9 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use arty_executor::{TaskIdentity, TaskInstrumentation};
-    use seismograph_runtime::RuntimeMetadata;
+    use arty_executor::TaskInstrumentation;
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+    use seismograph_runtime::{RuntimeMetadata, TaskIdentity};
 
     use super::{AsyncTaskInfo, TaskInfo, TaskMonitor};
 

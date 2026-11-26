@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::TaskIdentity;
+use seismograph_runtime::TaskIdentity;
 
 use super::TaskInfo;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};

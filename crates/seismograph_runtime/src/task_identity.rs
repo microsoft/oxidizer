@@ -7,10 +7,8 @@ use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 
 /// Identifies one task and the source location used to create its identity.
 ///
-/// Pass this identity to [`TaskSet::task`](crate::TaskSet::task) when registering
-/// a task. The executor makes it available through [`TaskSet::current`](crate::TaskSet::current) during each
-/// poll, whether or not task monitoring is enabled.
-/// See [`TaskSet::task`](crate::TaskSet::task) for a registration example.
+/// A runtime can retain this identity independently of monitoring and use it
+/// for task inspection and lifecycle events.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TaskIdentity {
     id: TaskId,
@@ -30,7 +28,7 @@ impl TaskIdentity {
     #[must_use]
     pub fn from_location(location: &'static Location<'static>) -> Self {
         Self {
-            id: seismograph_runtime::allocate_task_id(),
+            id: crate::allocate_task_id(),
             descriptor: TypeDescriptorId::from_raw(std::ptr::from_ref(location).addr() as u64)
                 .expect("a static location reference has a nonzero address"),
             location,
