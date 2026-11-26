@@ -97,18 +97,17 @@ RUN curl -fsSLo /tmp/cargo-binstall.tgz \
 # volume over each, and an engine seeds a new volume from the image path it
 # covers; a path that does not exist seeds as root-owned 0755, which the
 # `--user` mapping cannot write, so the first cargo fetch fails with EACCES.
-# The driver passes the declared root MSRV as ANVIL_ROOT_MSRV. Installing
-# and selecting it before setup gives Cargo a deterministic bootstrap without
-# copying workspace member manifests into the narrowed build context. When the
-# repository declares no MSRV, a copied root toolchain file remains responsible
-# for selecting Rust. If neither declaration exists, setup uses current stable
-# as an explicit bootstrap instead of asking cargo-each to inspect manifests
-# that are intentionally absent from the narrowed context.
+# The driver passes the declared root MSRV as ANVIL_ROOT_MSRV. Installing and
+# selecting it provides a bootstrap without copying workspace member manifests.
+# A copied checkout toolchain file still selects runtime checks, so install that
+# toolchain and its components before running setup. If neither source selects
+# Rust, setup uses current stable as the explicit bootstrap.
 WORKDIR /opt/anvil
 COPY . ./
 ARG ANVIL_ROOT_MSRV
 RUN : "${ANVIL_ROOT_MSRV:?pass --build-arg ANVIL_ROOT_MSRV=<declared-rust-version>}" \
     && setup_toolchain="${ANVIL_ROOT_MSRV}" \
+    && checkout_toolchain=false \
     && if [ "${setup_toolchain}" = "none" ] \
         && [ ! -f rust-toolchain.toml ] \
         && [ ! -f rust-toolchain ]; then \
@@ -118,8 +117,14 @@ RUN : "${ANVIL_ROOT_MSRV:?pass --build-arg ANVIL_ROOT_MSRV=<declared-rust-versio
         rustup toolchain install "${setup_toolchain}" --profile minimal \
         && rustup default "${setup_toolchain}"; \
     fi \
-    && printf "import '.anvil/anvil.just'\n" > Justfile \
-    && if [ "${setup_toolchain}" = "none" ]; then \
+    && if [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then \
+        checkout_toolchain=true \
+        && rustup toolchain install --profile minimal \
+        && rustup component add clippy rustfmt; \
+    fi \
+    && printf "set unstable\nimport '.anvil/anvil.just'\n" > Justfile \
+    && if [ "${checkout_toolchain}" = "true" ] \
+        || [ "${setup_toolchain}" = "none" ]; then \
         just anvil-setup binstall; \
     else \
         RUSTUP_TOOLCHAIN="${setup_toolchain}" just anvil-setup binstall; \

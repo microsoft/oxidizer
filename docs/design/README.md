@@ -33,8 +33,9 @@ Local action and workflow references remain local paths.
 If an Anvil template still uses an external action tag, resolve that upstream.
 Do not claim complete SHA pinning while generated templates still contain tags.
 
-The `anvil-examples` recipe builds each example before its execution timeout
-starts. This keeps compilation outside the runtime limit.
+The `anvil-examples` recipe builds the selected examples before it runs them.
+Package-specific dependency compilation can still happen during `cargo run`.
+That compilation counts toward the execution timeout.
 
 ## Verification behavior
 

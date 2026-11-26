@@ -4,11 +4,12 @@
 # Update cargo-anvil and regenerate; repository-specific edits stop automatic updates.
 # Regenerate with cargo-anvil to update this file.
 
-# Used by scheduled and full wrappers to disable impact scoping before dependencies run.
+# Scheduled and full wrappers set both Just state and the child environment
+# because their check scripts read `ANVIL_IMPACT` directly.
 [private]
 [no-exit-message]
 _anvil-unscoped name:
-    {{ just_executable() }} --justfile {{ quote(justfile()) }} --set anvil_impact_override off _anvil-{{ name }}
+    {{ if os() == "windows" { "$env:ANVIL_IMPACT = 'off'; & " } else { "ANVIL_IMPACT=off " } }}{{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --set anvil_impact_override off _anvil-{{ name }}
 
 anvil_impact_override := ""
 anvil_impact_mode := if anvil_impact_override != "" {
