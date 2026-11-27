@@ -51,6 +51,7 @@ impl<'de, T: ?Sized, A: Allocator + Clone> DeserializeIn<'de, A> for PhantomData
                 formatter.write_str("unit")
             }
 
+            // #[gamma::skip(fn_value.ok_default, reason = "PhantomData::default returns the same marker")]
             fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
                 Ok(PhantomData)
             }

@@ -13,9 +13,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(all(test, feature = "test-util"))]
 use tests::ScriptedCondvar as Condvar;
 
-#[cfg(any(test, feature = "monitor"))]
-use crate::runtime::monitoring::MonitoredBlockingJob;
-use crate::runtime::monitoring::{BlockingJob, BlockingPoolMonitoring, BlockingWorkerMonitoring};
+use crate::runtime::monitoring::{BlockingJob, BlockingPoolMonitoring, BlockingWorkerMonitoring, MonitoredBlockingJob};
 
 pub(super) struct QueuedJob {
     pub(super) body: BlockingJob,
@@ -24,11 +22,8 @@ pub(super) struct QueuedJob {
 
 #[derive(Default)]
 struct WorkerSlot {
-    #[cfg(any(test, feature = "monitor"))]
     running: bool,
-    #[cfg(any(test, feature = "monitor"))]
     registration: Option<seismograph_runtime::worker::WorkerRegistration>,
-    #[cfg(any(test, feature = "monitor"))]
     current: Option<Arc<dyn MonitoredBlockingJob>>,
 }
 
@@ -37,7 +32,6 @@ struct State {
     jobs: VecDeque<QueuedJob>,
     workers: Vec<WorkerSlot>,
     stopped: bool,
-    #[cfg(any(test, feature = "monitor"))]
     runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
@@ -71,33 +65,22 @@ impl Queue {
             .lock()
             .expect("a blocking queue operation must not panic while holding its lock");
         let index = state.workers.len();
-        #[cfg(any(test, feature = "monitor"))]
         let registration = state.runtime.as_ref().map(|runtime| self.register_worker(runtime, index));
-        let slot = WorkerSlot::default();
-        #[cfg(any(test, feature = "monitor"))]
-        let slot = WorkerSlot { registration, ..slot };
+        let slot = WorkerSlot {
+            registration,
+            ..WorkerSlot::default()
+        };
         state.workers.push(slot);
         index
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(
-            clippy::needless_pass_by_ref_mut,
-            reason = "The worker handle is assigned only when monitoring is compiled in."
-        )
-    )]
     pub(super) fn pop(&self, index: usize, worker: &mut BlockingWorkerMonitoring) -> Option<QueuedJob> {
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = index;
         // Drop the previous job after the queue guard, including on early return.
-        #[cfg(any(test, feature = "monitor"))]
         let mut previous;
         let mut state = self
             .state
             .lock()
             .expect("a blocking queue operation must not panic while holding its lock");
-        #[cfg(any(test, feature = "monitor"))]
         {
             let slot = &mut state.workers[index];
             previous = slot.current.take();
@@ -106,7 +89,6 @@ impl Queue {
         loop {
             #[cfg(all(test, feature = "test-util"))]
             self.ready.check_progress();
-            #[cfg(any(test, feature = "monitor"))]
             if worker.handle.is_none()
                 && let Some(registration) = &state.workers[index].registration
             {
@@ -115,7 +97,6 @@ impl Queue {
                 worker.handle = Some(handle);
             }
             if let Some(job) = state.jobs.pop_front() {
-                #[cfg(any(test, feature = "monitor"))]
                 if worker.handle.is_some() {
                     state.workers[index].running = true;
                     state.workers[index].current = job.body.monitoring().cloned();
@@ -125,7 +106,6 @@ impl Queue {
             if state.stopped {
                 return None;
             }
-            #[cfg(any(test, feature = "monitor"))]
             if previous.is_some() {
                 drop(state);
                 drop(previous.take());
@@ -152,29 +132,16 @@ impl Queue {
         self.ready.notify_all();
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(
-            clippy::unused_self,
-            reason = "There is no worker registration to retire when monitoring is compiled out."
-        )
-    )]
     pub(super) fn retire(&self, index: usize) {
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = index;
-        #[cfg(any(test, feature = "monitor"))]
-        {
-            let mut state = self
-                .state
-                .lock()
-                .expect("a blocking queue operation must not panic while holding its lock");
-            let registration = state.workers[index].registration.take();
-            drop(state);
-            drop(registration);
-        }
+        let mut state = self
+            .state
+            .lock()
+            .expect("a blocking queue operation must not panic while holding its lock");
+        let registration = state.workers[index].registration.take();
+        drop(state);
+        drop(registration);
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     pub(super) fn enable_monitoring(self: &Arc<Self>, runtime: &seismograph_runtime::RuntimeHandle) {
         let mut state = self
             .state
@@ -199,7 +166,6 @@ impl Queue {
         self.ready.notify_all();
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     fn register_worker(
         self: &Arc<Self>,
         runtime: &seismograph_runtime::RuntimeHandle,
@@ -220,7 +186,6 @@ impl Queue {
         registration
     }
 
-    #[cfg(any(test, feature = "monitor"))]
     fn collect(&self, index: usize, request: seismograph_runtime::task::TaskRequest) {
         use seismograph_runtime::snapshot::{TaskActivityState, TaskCollection};
 
@@ -438,7 +403,10 @@ mod tests {
         queue.enable_monitoring(&runtime.handle());
         queue.retire(0);
         queue.retire(2);
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         let id = info.id();
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::new(TestJob(info))),
@@ -467,7 +435,10 @@ mod tests {
         let mut worker = BlockingWorkerMonitoring::default();
         let running = queue.pop(index, &mut worker).unwrap();
         queue.enable_monitoring(&runtime.handle());
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+        )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -513,7 +484,10 @@ mod tests {
         queue.add_worker();
         queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
-        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let info = TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+        );
         let owner = runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].id;
 
         let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
@@ -538,7 +512,10 @@ mod tests {
         let index = queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
         queue.enable_monitoring(&runtime.handle());
-        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())));
+        let body: Arc<dyn MonitoredBlockingJob> = Arc::new(TestJob(TaskInfo::new::<()>(
+            queue.monitoring.events().unwrap(),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+        )));
         assert!(queue.push(QueuedJob {
             body: BlockingJob::Monitored(Arc::clone(&body)),
             shutdown: None,
@@ -607,7 +584,10 @@ mod tests {
         queue.add_worker();
         queue.enable_monitoring(&runtime.handle());
         assert!(queue.push(QueuedJob {
-            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())))),
+            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(
+                queue.monitoring.events().unwrap(),
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller())
+            )))),
             shutdown: None,
         }));
 
@@ -644,10 +624,14 @@ mod tests {
             let (dropped, received) = std::sync::mpsc::channel();
             let capture = Capture(Arc::clone(&queue), dropped);
             let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+            let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
             let (body, handle) = crate::task::preparation::prepare_blocking(
                 &pool,
                 move || drop(capture),
-                queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
+                queue
+                    .monitoring
+                    .task::<()>(&crate::runtime::shutdown::Shutdown::default(), identity),
+                identity,
             );
             assert!(queue.push(QueuedJob { body, shutdown: None }));
             let mut worker = BlockingWorkerMonitoring::default();
@@ -690,10 +674,14 @@ mod tests {
         let (dropped, received) = std::sync::mpsc::channel();
         let capture = Capture(Arc::clone(&queue), dropped);
         let pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
         let (body, handle) = crate::task::preparation::prepare_blocking(
             &pool,
             move || drop(capture),
-            queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
+            queue
+                .monitoring
+                .task::<()>(&crate::runtime::shutdown::Shutdown::default(), identity),
+            identity,
         );
         assert!(queue.push(QueuedJob { body, shutdown: None }));
         let mut worker = BlockingWorkerMonitoring::default();
@@ -732,7 +720,10 @@ mod tests {
         for body in [
             BlockingJob::Plain(Box::new(|| {})),
             BlockingJob::Monitored(Arc::new(InspectedJob(
-                TaskInfo::new::<()>(queue.monitoring.events().unwrap()),
+                TaskInfo::new::<()>(
+                    queue.monitoring.events().unwrap(),
+                    seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                ),
                 Arc::clone(&inspections),
             ))),
         ] {

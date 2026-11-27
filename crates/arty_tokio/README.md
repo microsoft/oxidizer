@@ -81,11 +81,11 @@ integrated with Arty.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0rkTYYLkQgYb5Fhvnc5n5CUbsIjQx7CvPX0bfien_eMkqOFhZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
- [__link0]: https://crates.io/crates/arty/0.6.1
- [__link1]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
- [__link2]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
- [__link3]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
- [__link4]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
- [__link5]: https://docs.rs/arty/0.6.1/arty/?search=runtime::Runtime::stop
- [__link6]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0rkTYYLkQgYb5Fhvnc5n5CUbsIjQx7CvPX0bfien_eMkqOFhZIKCZGFydHllMC43LjCCamFydHlfdG9raW9lMC4zLjA
+ [__link0]: https://crates.io/crates/arty/0.7.0
+ [__link1]: https://docs.rs/arty_tokio/0.3.0/arty_tokio/?search=TokioCompatExt::tokio_compat
+ [__link2]: https://docs.rs/arty_tokio/0.3.0/arty_tokio/?search=TokioCompatExt::tokio_compat_with
+ [__link3]: https://docs.rs/arty_tokio/0.3.0/arty_tokio/?search=TokioCompatExt::tokio_compat_with
+ [__link4]: https://docs.rs/arty_tokio/0.3.0/arty_tokio/?search=TokioCompatExt::tokio_compat
+ [__link5]: https://docs.rs/arty/0.7.0/arty/?search=runtime::Runtime::stop
+ [__link6]: https://docs.rs/arty/0.7.0/arty/?search=task::Context

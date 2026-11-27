@@ -190,6 +190,47 @@ mod tests {
     }
 
     #[test]
+    fn fallback_notifications_release_timed_waiters() {
+        let timeout = if cfg!(miri) {
+            Duration::from_mins(2)
+        } else {
+            Duration::from_secs(5)
+        };
+        for (waiters, notify) in [(1, Condvar::notify_one as fn(&Condvar)), (3, Condvar::notify_all)] {
+            let mutex = Mutex::new();
+            let condition = Condvar::new();
+            let ready = AtomicBool::new(false);
+            let (started_tx, started_rx) = mpsc::channel();
+            std::thread::scope(|scope| {
+                for _ in 0..waiters {
+                    let (mutex, condition, ready) = (&mutex, &condition, &ready);
+                    let started_tx = started_tx.clone();
+                    scope.spawn(move || {
+                        let mut guard = mutex.lock();
+                        started_tx.send(()).unwrap();
+                        // The mutex protects the readiness check and update.
+                        while !ready.load(Ordering::Relaxed) {
+                            let (next, timed_out) = condition.wait(mutex, guard, Some(timeout));
+                            if timed_out {
+                                mutex.unlock(next);
+                                panic!("notification must wake a timed waiter");
+                            }
+                            guard = next;
+                        }
+                    });
+                }
+                for _ in 0..waiters {
+                    started_rx.recv().unwrap();
+                }
+                let guard = mutex.lock();
+                ready.store(true, Ordering::Relaxed);
+                notify(&condition);
+                mutex.unlock(guard);
+            });
+        }
+    }
+
+    #[test]
     fn fallback_notify_all_releases_every_waiter() {
         const WAITERS: usize = 3;
         let mutex = Arc::new(Mutex::new());

@@ -5,12 +5,13 @@
 
 #![cfg(feature = "rt")]
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 
 use arty::runtime::Runtime;
+use arty::runtime::policy::WorkersPolicy;
 use events_once::{BoxedReceiver, Event};
-use testing_aids::execute_or_abandon;
+use testing_aids::{TEST_TIMEOUT, execute_or_abandon, is_mutation_testing};
 use thread_aware::Unaware;
 
 fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>) {
@@ -27,20 +28,23 @@ fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>
 
 #[test]
 fn stop_via_runtime() {
-    execute_or_abandon(|| {
-        let runtime = Runtime::builder().build().unwrap();
-
+    let (done, completion) = mpsc::channel();
+    let owner = std::thread::spawn(move || {
+        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
         let (canary, started, observer) = canary();
-
         runtime.scheduler().spawn_anywhere(Unaware(canary), |_, Unaware(canary)| canary);
         futures::executor::block_on(started).unwrap();
-
         runtime.stop().unwrap();
-
-        // The runtime stopped only if it dropped the canary.
         assert!(observer.upgrade().is_none());
-    })
-    .unwrap();
+        done.send(()).unwrap();
+    });
+    if !is_mutation_testing() {
+        assert!(
+            !matches!(completion.recv_timeout(TEST_TIMEOUT), Err(mpsc::RecvTimeoutError::Timeout)),
+            "runtime did not stop and release pending work"
+        );
+    }
+    owner.join().unwrap();
 }
 
 #[test]

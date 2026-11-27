@@ -112,6 +112,7 @@ mod tests {
         signal.notify();
         signal.notify();
         assert_eq!(counter.0.load(Ordering::Relaxed), 2);
+        assert!(signal.is_notified());
         signal.wait_for_notification();
         assert!(wait_observer.try_recv().is_err());
         assert!(!signal.take_notification());
@@ -159,6 +160,7 @@ mod tests {
     fn notification_before_indefinite_wait_is_retained_and_consumed() {
         let signal = Arc::new(Signal::default());
         Signal::waker(&signal).wake_by_ref();
+        assert!(signal.is_notified());
 
         signal.wait_for_notification();
 

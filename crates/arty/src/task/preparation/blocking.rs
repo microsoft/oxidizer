@@ -4,6 +4,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::TaskCompletion;
+use seismograph_runtime::TaskIdentity;
 
 use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
@@ -13,6 +14,7 @@ pub(crate) fn prepare_blocking<F, R>(
     result_pool: &JoinHandlePool,
     body: F,
     monitoring: BlockingTaskMonitoring,
+    identity: TaskIdentity,
 ) -> (BlockingJob, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
@@ -21,12 +23,14 @@ where
     let (handle, result_tx) = result_pool.handle();
     let task = BlockingTask {
         pending: Some((body, result_tx)),
+        identity,
     };
     (monitoring.prepare(task), handle)
 }
 
 pub(crate) struct BlockingTask<F, R: Send + 'static> {
     pub(crate) pending: Option<(F, Sender<R>)>,
+    pub(crate) identity: TaskIdentity,
 }
 
 impl<F, R> BlockingTask<F, R>

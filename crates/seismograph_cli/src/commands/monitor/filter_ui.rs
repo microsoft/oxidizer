@@ -451,6 +451,8 @@ mod tests {
         assert_eq!(popup.includes, "a ");
         assert!(!popup.show_unknown);
         popup.edit(KeyCode::Down);
+        popup.edit(KeyCode::Right);
+        assert_eq!(popup.runtime_stack, RuntimeStackMode::Event);
         popup.edit(KeyCode::Char('b'));
         popup.error = Some("bad rule".into());
         popup.edit(KeyCode::Backspace);
@@ -1041,28 +1043,32 @@ mod tests {
         app.start_filter(include_app()).unwrap();
         wait_for_filter(&mut app);
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut rendered = String::new();
+        let read_terminal = |terminal: &Terminal<TestBackend>, text: &mut String| {
+            text.clear();
+            text.extend(terminal.backend().buffer().content().iter().map(ratatui::buffer::Cell::symbol));
+        };
         terminal.draw(|frame| app.draw(frame)).unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect::<String>();
+        read_terminal(&terminal, &mut rendered);
         assert!(rendered.contains("Events 1/2 (unknown 0)"));
         assert!(rendered.contains("Unfiltered: source accepted/overwritten counters, whole-process counters and heap topology."));
         app.handle_key(KeyCode::Char('F'));
         app.filters.popup.as_mut().unwrap().runtime_stack = RuntimeStackMode::Spawn;
         terminal.draw(|frame| app.draw(frame)).unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect::<String>();
+        read_terminal(&terminal, &mut rendered);
         assert!(rendered.contains("Include: crate:app|"));
+        assert!(rendered.contains("Stack filters - whole records"));
+        assert!(rendered.contains("Enter apply | Esc cancel"));
+        assert!(rendered.contains("Comma/space-separated: crate:name"));
+        assert!(rendered.contains("Edit text at end."));
+        assert!(rendered.contains("Exclude:"));
+        assert!(rendered.contains("Unknown stacks: hide"));
         assert!(rendered.contains("spawn provenance"));
+
+        app.filters.popup.as_mut().unwrap().show_unknown = true;
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        read_terminal(&terminal, &mut rendered);
+        assert!(rendered.contains("Unknown stacks: show"));
 
         let mut no_capture = offline();
         *offline_snapshot_mut(&mut no_capture) = None;
@@ -1071,13 +1077,7 @@ mod tests {
         terminal
             .draw(|frame| no_capture.draw_filter_banner(frame, Rect::new(0, 0, 100, 4)))
             .unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect::<String>();
+        read_terminal(&terminal, &mut rendered);
         assert!(rendered.contains("Latest filter queued"));
         assert!(rendered.contains("Waiting for an indexed snapshot."));
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Use snapshot container format 10 and reject earlier formats.
+- Resolve captured stack symbols inside the application for offline snapshots.
+- Record resize events and additional source metadata.
+- Update the local requirement for `seismograph_protocol` from `^0.3.0` to `^0.4.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Breaking: Rename `RecordingPolicy` to `Policy` and `CaptureSource` to `CaptureFn`.

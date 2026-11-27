@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2026-11-24
+
+- Update the private resolver shim for generated route-table support.
+- Update the local requirement for `routerama_build` from `=0.3.1` to `=0.3.2`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update the exact build-helper requirement. Use version 0.3.1 to match the Routerama packages.

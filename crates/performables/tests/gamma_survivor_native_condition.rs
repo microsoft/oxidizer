@@ -5,7 +5,7 @@
 
 #![cfg(feature = "seismograph")]
 
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use performables::sync::Sync;
 use performables::sync::condition::Condvar;
@@ -28,13 +28,20 @@ fn count(kind: EventKind) -> usize {
     .count()
 }
 
+fn enable_recording() {
+    static RECORDING: Once = Once::new();
+    RECORDING.call_once(|| {
+        seismograph::recorder(seismograph::recorder::Configuration {
+            general_events: seismograph::recorder::Policy::all(false),
+            event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(128),
+            ..Default::default()
+        });
+    });
+}
+
 #[test]
 fn gamma_survivor_native_condition_records_contention_before_release_and_access_after_notification() {
-    seismograph::recorder(seismograph::recorder::Configuration {
-        general_events: seismograph::recorder::Policy::all(false),
-        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(128),
-        ..Default::default()
-    });
+    enable_recording();
     let mutex = Arc::new(Mutex::<u32, Sync>::new(0));
     let condition = Arc::new(Condvar::<Sync>::new());
     let (ready, started) = std::sync::mpsc::channel();
@@ -57,4 +64,38 @@ fn gamma_survivor_native_condition_records_contention_before_release_and_access_
     drop(guard);
     worker.join().unwrap();
     assert_eq!(*mutex.try_lock().unwrap(), 7);
+}
+
+#[test]
+fn wait_while_records_contention_when_the_predicate_requests_one_wait() {
+    enable_recording();
+    let mutex = Mutex::<(), Sync>::new(());
+    let condition = Condvar::<Sync>::new();
+    let (ready, started) = std::sync::mpsc::channel();
+
+    std::thread::scope(|scope| {
+        let worker_mutex = &mutex;
+        let worker_condition = &condition;
+        let worker = scope.spawn(move || {
+            let before = count(EventKind::CondvarContention);
+            let mut first_check = true;
+            // Request one wait, then stop on the next predicate check.
+            let guard = worker_condition.wait_while(worker_mutex.lock(), |()| {
+                if std::mem::take(&mut first_check) {
+                    ready.send(()).unwrap();
+                    true
+                } else {
+                    false
+                }
+            });
+            drop(guard);
+            assert_eq!(count(EventKind::CondvarContention), before + 1);
+        });
+
+        started.recv().unwrap();
+        let guard = mutex.lock();
+        condition.notify_one();
+        drop(guard);
+        worker.join().unwrap();
+    });
 }

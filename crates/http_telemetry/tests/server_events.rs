@@ -8,6 +8,7 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::time::Duration;
 
 use common::{
@@ -254,6 +255,28 @@ fn interest_is_checked_for_each_request() {
         (uninterested.status(), probe.received()),
         (StatusCode::IM_A_TEAPOT, vec![ACTIVE, COMPLETE, ACTIVE])
     );
+}
+
+#[test]
+fn completion_interest_skips_error_and_abandonment_probes() {
+    std::thread_local! {
+        static OTHER_PROBES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    let capture = Capture::new(|name| {
+        if matches!(name, common::ERROR | ABANDONED) {
+            OTHER_PROBES.set(OTHER_PROBES.get() + 1);
+        }
+        name == COMPLETE
+    });
+    let service = server(common::sink_with(&capture)).layer(common::responding(StatusCode::OK));
+    let before = OTHER_PROBES.get();
+
+    let response = service.execute(common::get()).unwrap_ready().unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(capture.names(), vec![COMPLETE]);
+    assert_eq!(OTHER_PROBES.get(), before);
 }
 
 #[test]

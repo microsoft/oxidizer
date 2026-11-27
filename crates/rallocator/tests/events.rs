@@ -16,7 +16,7 @@ use seismograph::recorder::alloc::Allocation;
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::{Configuration, Policy, without_recording};
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
 static LOCK: Mutex<()> = Mutex::new(());
 

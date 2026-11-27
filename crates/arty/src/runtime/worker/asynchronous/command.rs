@@ -72,7 +72,6 @@ pub(crate) enum SystemCommand {
     AccessIo { access: QueuedIoAccess },
 
     /// Copies task descriptions from native executor storage between cycles.
-    #[cfg(any(test, feature = "monitor"))]
     #[debug("Inspect")]
     Inspect { request: seismograph_runtime::task::TaskRequest },
 
@@ -227,7 +226,11 @@ mod tests {
         let (factory, join) = prepare_remote(
             &result_pool,
             |_| std::future::ready(42),
-            crate::task::preparation::TaskSpawnOptions::new::<std::future::Ready<i32>>(),
+            crate::task::preparation::SpawnOptions::new(
+                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+                size_of::<std::future::Ready<i32>>(),
+                None,
+            ),
         );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));

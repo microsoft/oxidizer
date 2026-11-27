@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.0] - 2026-11-24
+
+- Update the private arena deserialization shim and aligned implementation requirement.
+- Update the local requirement for `multitude_macros_impl` from `=0.14.0` to `=0.15.0`.
+- Align the version with the `multitude` package group at `0.15.0`.
+
 ## [0.14.0] - 2026-11-06
 
 - Align the version with the `multitude` package group. No independent source

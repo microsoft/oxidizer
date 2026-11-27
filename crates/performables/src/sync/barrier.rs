@@ -302,6 +302,38 @@ impl BarrierWaitOutcome {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #[test]
+    fn native_barrier_last_arrival_notifies_the_waiting_participant() {
+        let barrier = Barrier::<Sync>::new(2);
+        let (ready, waiting) = std::sync::mpsc::channel();
+        let timeout = if cfg!(miri) {
+            Duration::from_mins(2)
+        } else {
+            Duration::from_secs(5)
+        };
+
+        std::thread::scope(|scope| {
+            let follower = scope.spawn(|| {
+                let mut ready = Some(ready);
+                barrier.wait_with(|phase| {
+                    if let Some(ready) = ready.take() {
+                        ready.send(()).unwrap();
+                    }
+                    let (guard, outcome) = barrier.raw.changed.wait_timeout(phase, timeout).unwrap();
+                    if outcome.timed_out() {
+                        drop(guard);
+                        panic!("the last arrival must notify the waiting participant");
+                    }
+                    guard
+                })
+            });
+
+            waiting.recv().unwrap();
+            assert!(barrier.wait().is_leader());
+            assert!(!follower.join().unwrap().is_leader());
+        });
+    }
+
+    #[test]
     fn nov4_blocking_async_barrier_cancels_the_arrival_when_its_injected_parker_unwinds() {
         let barrier = super::Barrier::<crate::sync::Async>::new(2);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

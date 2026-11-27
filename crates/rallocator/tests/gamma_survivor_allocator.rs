@@ -7,7 +7,7 @@
 
 use std::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc};
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
 struct GammaSurvivorAllocation {
     pointer: *mut u8,

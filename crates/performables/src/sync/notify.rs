@@ -307,9 +307,15 @@ impl<M: Mode> Notify<M> {
     // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cold]
     fn wait_contended(&self, deadline: Option<Timeout>) -> bool {
-        self.wait_contended_with(deadline, Timeout::elapsed, |remaining| match remaining {
-            Some(remaining) => park_timeout(remaining),
-            None => park(),
+        self.wait_contended_with(deadline, Timeout::elapsed, |remaining| {
+            #[cfg(test)]
+            if crate::sync::effects::injected_park() {
+                return;
+            }
+            match remaining {
+                Some(remaining) => park_timeout(remaining),
+                None => park(),
+            }
         })
     }
 
@@ -510,6 +516,34 @@ mod tests {
     }
 
     #[test]
+    fn blocking_wait_parks_only_when_no_notification_is_stored() {
+        let notify = Arc::new(Notify::<Sync>::new());
+        let parks = Rc::new(Cell::new(0));
+
+        with_park(
+            {
+                let parks = Rc::clone(&parks);
+                let notify = Arc::clone(&notify);
+                move || {
+                    parks.set(parks.get() + 1);
+                    assert_eq!(parks.get(), 1);
+                    notify.notify_one();
+                }
+            },
+            || {
+                notify.notify_one();
+                notify.wait();
+                assert_eq!(parks.get(), 0);
+                assert!(!notify.is_notified());
+
+                notify.wait();
+                assert_eq!(parks.get(), 1);
+                assert!(!notify.is_notified());
+            },
+        );
+    }
+
+    #[test]
     fn gamma_round2_notification_retries_waiter_delivery_instead_of_overwriting_a_new_waiting_registration() {
         let state = super::State::new();
         state.state.store(super::WAITING, Ordering::Relaxed);
@@ -569,9 +603,11 @@ mod tests {
     }
 
     use std::cell::Cell;
+    use std::rc::Rc;
     use std::time::Instant;
 
     use super::*;
+    use crate::sync::effects::with_park;
 
     #[test]
     fn gamma_survivor_notify_stale_cached_states_reload_after_cancel_and_failed_compare_exchange() {

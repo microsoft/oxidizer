@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2026-11-24
+
+- Update the SIMD scanner and benchmark requirements to their resolved releases.
+- Update the local requirement for `http_headers_simd` from `=0.1.2` to `=0.1.3`.
+- Update the local development requirement for `metabench` from `^0.3.0` to `^0.3.1`.
+
 ## [0.1.2] - 2026-11-02
 
 - Disable publication because the crate name is reserved.

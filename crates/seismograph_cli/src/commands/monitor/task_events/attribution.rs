@@ -79,6 +79,7 @@ pub(super) fn infer(events: &Events, source: Option<&Snapshot>) -> Vec<Evidence>
                 let current = &events.events[indices[position]];
                 let reversed = previous.timestamp > current.timestamp;
                 if reversed {
+                    // #[gamma::skip(assign_value.default, reason = "The bool default is false")]
                     ordered_time = false;
                 }
                 breaks[position] =

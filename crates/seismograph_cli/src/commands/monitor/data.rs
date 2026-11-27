@@ -2193,9 +2193,10 @@ fn histogram_bucket(size: u64) -> u32 {
 
 fn histogram_bounds(bucket: u64) -> (u64, u64) {
     if bucket == 0 {
+        // #[gamma::skip(return_value.default, reason = "The default pair gives the same empty bucket bounds")]
         return (0, 0);
     }
-    let shift = u32::try_from(bucket.saturating_sub(1)).unwrap_or(u32::MAX).min(63);
+    let shift = bucket.saturating_sub(1).min(63);
     let lower = 1_u64 << shift;
     let upper = if shift == 63 {
         u64::MAX

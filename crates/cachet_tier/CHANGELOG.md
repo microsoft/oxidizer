@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.2] - 2026-11-24
+
+- Expand dynamic-cache, error, and mock-cache regression coverage.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.6.1] - 2026-11-02
 
 - Update synchronization, recovery, and test dependencies. This release does not change the cache

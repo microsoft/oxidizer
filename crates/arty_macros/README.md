@@ -19,9 +19,10 @@ Enable the `macros` feature of Arty. Then use `#[arty::main]` for an
 application or `#[arty::test]` for a test. You do not need to add a direct
 dependency on this companion crate.
 
-Both attributes start an Arty runtime. They pass an
+Both attributes start an Arty runtime. They accept an optional
 [`arty::task::Context`][__link1]
-to the async function. The runtime stops when the function returns.
+argument. Omit it if the async function does not need the context.
+The runtime stops when the function returns.
 
 `workers = N` starts exactly `N` async workers. If `N` exceeds the available
 processor capacity, multiple workers share processors. `workers = all`

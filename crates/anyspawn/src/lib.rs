@@ -128,7 +128,6 @@
 //! - `tokio`: Enables the Tokio constructors on `Spawner`.
 //! - `observed`: Enables `SpawnerBuilder::observed`, which accepts an `observed::Sink`.
 //!   Combine it with `arty` or `tokio`. It does not select a runtime.
-//! - `seismograph`: Enables instrumentation in the optional `observed` dependency.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]

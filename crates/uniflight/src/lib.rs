@@ -248,6 +248,7 @@ where
     /// ```
     #[inline]
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "The return type infers the same Merger default")]
     pub fn new() -> Self {
         Self::default()
     }
@@ -272,6 +273,7 @@ where
     /// ```
     #[inline]
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "The return type preserves the PerProcess strategy and infers the same default")]
     pub fn new_per_process() -> Self {
         Self::default()
     }
@@ -296,6 +298,7 @@ where
     /// ```
     #[inline]
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "The return type preserves the PerNuma strategy and infers the same default")]
     pub fn new_per_numa() -> Self {
         Self::default()
     }
@@ -322,6 +325,7 @@ where
     /// ```
     #[inline]
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "The return type preserves the PerThread strategy and infers the same default")]
     pub fn new_per_thread() -> Self {
         Self::default()
     }

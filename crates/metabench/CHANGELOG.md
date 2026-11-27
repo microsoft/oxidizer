@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1] - 2026-11-24
+
+- Expand deterministic artifact, allocation, runner, profiler, and report-publication regression coverage.
+- Update Jiff and Nix requirements.
+- Update the local requirement for `metabench_macros` from `=0.3.0` to `=0.3.1`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.3.0] - 2026-11-02
 
 - Breaking: Replace temporary borrows with owned inputs in native benchmark cases. Gungraun and its

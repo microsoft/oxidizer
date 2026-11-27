@@ -11,7 +11,7 @@ use seismograph::recorder::event::{Event, EventKind};
 use seismograph::recorder::{Configuration, Policy, thread_id, without_recording};
 use seismograph_rallocator::native::{ObservationSource, Snapshot};
 
-rallocator::rallocator!();
+rallocator::rallocator!(backend = snmalloc);
 
 fn capture() -> (Snapshot, Vec<Event>) {
     let round = seismograph_rallocator::native::observation_round();
