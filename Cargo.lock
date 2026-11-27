@@ -274,6 +274,7 @@ dependencies = [
  "performables",
  "pin-project",
  "plurality 0.2.5",
+ "rallocator",
  "scopeguard",
  "seismograph",
  "seismograph_protocol",

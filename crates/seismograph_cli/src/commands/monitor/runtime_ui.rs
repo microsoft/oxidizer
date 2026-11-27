@@ -353,14 +353,19 @@ fn draw_task_statistics(
     window: Option<TimeWindow>,
     view: RuntimeViewState,
 ) {
-    let summary_height = inner.height.saturating_sub(5).min(5);
+    let location_rows = u16::from(task.spawned_at.is_some());
+    let summary_height = inner.height.saturating_sub(5).min(5 + location_rows);
     let [summary, distribution] = Layout::vertical([Constraint::Length(summary_height), Constraint::Min(0)]).areas(inner);
     let activity = &task.activity;
     let age = match (activity.running_for, activity.ready_for) {
         (Some(age), _) | (_, Some(age)) => format!("{} for {}", activity.state, histogram_duration(age)),
         _ => activity.state.clone(),
     };
-    let age = if summary_height < 4 { format!("{age} · global") } else { age };
+    let age = if summary_height < 4 + location_rows {
+        format!("{age} · global")
+    } else {
+        age
+    };
     let worker = activity.poll_worker_id.map_or_else(String::new, |id| format!(" · on w{id}"));
     let mut poll_line = timeline(
         &task.metrics.polls,
@@ -387,18 +392,21 @@ fn draw_task_statistics(
         age,
         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
     ))];
-    if summary_height >= 4 {
+    if let Some(spawned_at) = &task.spawned_at {
+        lines.push(Line::from(format!("Spawned at: {spawned_at}")));
+    }
+    if summary_height >= 4 + location_rows {
         lines.push(Line::from(format!(
             "State global{worker}{}",
             if activity.repoll_requested { " · repoll" } else { "" }
         )));
     }
-    if summary_height >= 3 {
+    if summary_height >= 3 + location_rows {
         lines.push(Line::from(axis(window)));
     }
-    if summary_height >= 5 {
+    if summary_height >= 5 + location_rows {
         lines.extend([poll_line, ready_line]);
-    } else {
+    } else if lines.len() < usize::from(summary_height) {
         lines.push(match view.task_histogram {
             TaskHistogram::Poll => poll_line,
             TaskHistogram::Ready => ready_line,
@@ -756,6 +764,22 @@ mod tests {
             draw_task_details(frame, mouse, area, Some(&task), worker.window, view);
         });
         assert!(text(&buffer).contains("Poll | Ready · t"));
+    }
+
+    #[test]
+    fn task_statistics_show_the_spawn_location() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let view = super::super::super::app::App::with_io(io).runtime_view;
+        let task = RuntimeTaskSummary {
+            spawned_at: Some("src/main.rs:12:34".into()),
+            ..RuntimeTaskSummary::default()
+        };
+
+        let (buffer, _) = render(100, 12, |frame, mouse, area| {
+            draw_task_statistics(frame, mouse, area, &task, None, view);
+        });
+
+        assert!(text(&buffer).contains("Spawned at: src/main.rs:12:34"));
     }
 
     #[test]

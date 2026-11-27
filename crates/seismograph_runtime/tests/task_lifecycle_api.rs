@@ -27,6 +27,46 @@ fn runtime_events(runtime: seismograph::recorder::runtime::RuntimeId) -> Vec<sei
         .collect()
 }
 
+fn async_task_identity() -> TaskIdentity {
+    TaskIdentity::from_location(std::panic::Location::caller())
+}
+
+fn blocking_task_identity() -> TaskIdentity {
+    TaskIdentity::from_location(std::panic::Location::caller())
+}
+
+#[test]
+fn runtime_capture_includes_registered_task_spawn_locations() {
+    let _recording = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+    let runtime = Runtime::builder("task-locations").build();
+    let async_identity = async_task_identity();
+    let blocking_identity = blocking_task_identity();
+
+    drop(runtime.async_task(async_identity, 0));
+    drop(runtime.async_task(async_task_identity(), 0));
+    drop(runtime.blocking_task(blocking_identity, 0));
+
+    let snapshot = runtime.capture();
+    seismograph::recorder(Configuration::default());
+
+    assert_eq!(snapshot.task_locations.len(), 2);
+    for identity in [async_identity, blocking_identity] {
+        let location = snapshot
+            .task_locations
+            .iter()
+            .find(|location| location.type_descriptor == identity.descriptor())
+            .unwrap();
+        assert_eq!(
+            (location.file.as_str(), location.line, location.column),
+            (identity.location().file(), identity.location().line(), identity.location().column(),)
+        );
+    }
+}
+
 #[test]
 fn async_queue_activation_poll_and_outcome_preserve_the_supplied_context() {
     let _recording = RECORDING.lock().unwrap();

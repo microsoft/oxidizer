@@ -3,15 +3,17 @@
 
 //! Runtime registration, lifecycle events, and snapshot collection.
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
+use std::panic::Location;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::without_recording;
 
-use crate::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot, Worker, WorkerState};
+use crate::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot, TaskLocation, Worker, WorkerState};
 use crate::{TaskIdentity, WorkerMetadata, WorkerRole, asynchronous, blocking, snapshot, worker};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
@@ -126,16 +128,24 @@ impl Runtime {
     /// Creates an asynchronous task handle before queue insertion.
     #[must_use]
     pub fn async_task(&self, identity: TaskIdentity, body_size: usize) -> Option<asynchronous::TaskHandle> {
-        asynchronous::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size)
+        let task = asynchronous::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size);
+        if task.is_some() {
+            self.owner.handle.register_task_identity(identity);
+        }
+        task
     }
 
     /// Creates a blocking task handle before queue insertion.
     #[must_use]
     pub fn blocking_task(&self, identity: TaskIdentity, body_size: usize) -> Option<blocking::TaskHandle> {
-        blocking::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size)
+        let task = blocking::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size);
+        if task.is_some() {
+            self.owner.handle.register_task_identity(identity);
+        }
+        task
     }
 
-    /// Captures the runtime and its registered workers.
+    /// Captures the runtime, its registered workers, and task spawn locations.
     #[must_use]
     pub fn capture(&self) -> RuntimeSnapshot {
         self.owner.handle.capture()
@@ -166,6 +176,14 @@ pub(crate) struct RuntimeHandle {
 impl RuntimeHandle {
     pub(crate) fn id(&self) -> RuntimeId {
         self.control.id
+    }
+
+    fn register_task_identity(&self, identity: TaskIdentity) {
+        without_recording(|| {
+            lock(&self.control.task_locations)
+                .entry(identity.descriptor())
+                .or_insert(identity.location());
+        });
     }
 
     #[expect(
@@ -282,6 +300,7 @@ fn build_runtime(metadata: RuntimeBuilder) -> RuntimeHandle {
             retired_at: AtomicU64::new(0),
             state: AtomicU8::new(RuntimeState::Running.wire_value()),
             workers: Mutex::new(Vec::new()),
+            task_locations: Mutex::new(BTreeMap::new()),
         });
         lock(&REGISTRY).push(Arc::clone(&control));
         control
@@ -310,6 +329,7 @@ pub(crate) struct RuntimeControl {
     pub(crate) retired_at: AtomicU64,
     pub(crate) state: AtomicU8,
     pub(crate) workers: Mutex<Vec<Arc<WorkerControl>>>,
+    pub(crate) task_locations: Mutex<BTreeMap<TypeDescriptorId, &'static Location<'static>>>,
 }
 
 pub(crate) struct WorkerControl {
@@ -353,6 +373,15 @@ fn snapshot_runtime(runtime: &Arc<RuntimeControl>) -> RuntimeSnapshot {
         created_at: runtime.created_at,
         retired_at: (state == RuntimeState::Stopped).then(|| EventTimestamp::from_ticks(runtime.retired_at.load(Ordering::Acquire))),
         workers: lock(&runtime.workers).iter().map(|worker| worker.snapshot()).collect(),
+        task_locations: lock(&runtime.task_locations)
+            .iter()
+            .map(|(type_descriptor, location)| TaskLocation {
+                type_descriptor: *type_descriptor,
+                file: location.file().into(),
+                line: location.line(),
+                column: location.column(),
+            })
+            .collect(),
     }
 }
 

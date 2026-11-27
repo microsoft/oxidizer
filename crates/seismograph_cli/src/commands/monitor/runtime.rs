@@ -101,6 +101,7 @@ pub(super) struct RuntimeTaskSummary {
     pub(super) future_size_bytes: Option<u64>,
     pub(super) state: String,
     pub(super) worker_ids: Vec<u64>,
+    pub(super) spawned_at: Option<String>,
     pub(super) spawn_stack: Vec<String>,
     pub(super) metrics: ExecutionMetrics,
     pub(super) activity: TaskActivitySummary,
@@ -370,6 +371,18 @@ struct RuntimeSeed {
 
 fn seed_runtime_model(events: &Events, source: Option<&Snapshot>) -> RuntimeSeed {
     let mut seed = RuntimeSeed::default();
+    let task_locations = source
+        .into_iter()
+        .flat_map(|source| &source.runtimes)
+        .flat_map(|runtime| {
+            runtime.task_locations.iter().map(|location| {
+                (
+                    (runtime.id.get(), location.type_descriptor.get()),
+                    format!("{}:{}:{}", location.file, location.line, location.column),
+                )
+            })
+        })
+        .collect::<HashMap<_, _>>();
     for runtime in RuntimeModel::from_events(events, source).runtimes {
         for worker in runtime.workers {
             seed.workers.insert(
@@ -405,6 +418,7 @@ fn seed_runtime_model(events: &Events, source: Option<&Snapshot>) -> RuntimeSeed
                     future_size_bytes: task.body_size,
                     state: task_state(task.state).into(),
                     worker_ids: task.workers.iter().map(|worker| worker.get()).collect(),
+                    spawned_at: descriptor.and_then(|descriptor| task_locations.get(&(task.runtime_id.get(), descriptor)).cloned()),
                     ..RuntimeTaskSummary::default()
                 },
                 ..TaskBuilder::default()

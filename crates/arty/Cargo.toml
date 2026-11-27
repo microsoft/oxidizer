@@ -105,6 +105,7 @@ ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
 plurality = { path = "../plurality", features = ["std"] }
+rallocator = { path = "../rallocator" }
 seismograph = { path = "../seismograph", features = ["monitor"] }
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 seismograph_runtime = { path = "../seismograph_runtime", features = ["test-util"] }
@@ -157,6 +158,10 @@ required-features = ["macros"]
 
 [[example]]
 name = "arty_hooks"
+required-features = ["macros"]
+
+[[example]]
+name = "arty_monitoring"
 required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints

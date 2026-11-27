@@ -432,6 +432,7 @@ const RUNTIME_TASK_GROUPS: &Section = section!("RUNTIME TASK TYPES";
 
 const RUNTIME_ACTIVITY: &Section = section!("RUNTIME ACTIVITY";
     "Running for / Ready for" => "Age at the coherent per-task source observation. Running is inside a poll; Ready is queued and eligible for a poll. Long ages are shown prominently even without a completed poll. '-' means unavailable, not zero.",
+    "Spawned at" => "Source file, line and column supplied by the runtime for the task descriptor. The label is absent when the runtime snapshot has no location.",
     "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Without that ID, an exact retained runtime/task/poll-start timestamp match is required to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Missing or raced observations have unknown activity rather than guessed ages.",
     "repoll" => "A wake during a running poll requests another poll. This is not yet queue waiting: for a self-wake, ready wait starts at poll finish, not at the raw wake timestamp.",
     "Poll (worker)" => "Observed execution intervals on this selected worker, including an open coherent source poll. The timeline shares the displayed per-runtime nanosecond window with worker charts.",

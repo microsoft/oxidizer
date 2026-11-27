@@ -1,20 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime and worker source snapshot model.
+//! Runtime, worker, and task-location source snapshot model.
 
 use seismograph::recorder::event::{BacktraceCapture, EventTimestamp};
-use seismograph::recorder::runtime::{RuntimeId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::thread::ThreadId;
 
 use crate::WorkerRole;
 
 const MAGIC: [u8; 8] = *b"SEISRUNT";
 const WIRE_VERSION: u16 = 1;
-const SCHEMA_VERSION: u16 = 10;
+const SCHEMA_VERSION: u16 = 11;
 const HEADER_LEN: usize = 16;
-const RUNTIME_FIXED_LEN: usize = 38;
+const RUNTIME_FIXED_LEN: usize = 42;
 const WORKER_FIXED_LEN: usize = 22;
+const TASK_LOCATION_FIXED_LEN: usize = 20;
 
 /// Stable identity and schema metadata for the process-wide runtime source.
 pub mod source {
@@ -103,6 +104,19 @@ pub struct Worker {
     pub thread_id: Option<ThreadId>,
 }
 
+/// Source location associated with one task descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskLocation {
+    /// Process-local task descriptor identity.
+    pub type_descriptor: TypeDescriptorId,
+    /// Source file that spawned the task.
+    pub file: String,
+    /// One-based source line that spawned the task.
+    pub line: u32,
+    /// One-based source column that spawned the task.
+    pub column: u32,
+}
+
 /// Point-in-time state of one logical runtime.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Runtime {
@@ -122,6 +136,8 @@ pub struct Runtime {
     pub retired_at: Option<EventTimestamp>,
     /// Workers registered by this runtime.
     pub workers: Vec<Worker>,
+    /// Spawn locations registered by this runtime.
+    pub task_locations: Vec<TaskLocation>,
 }
 
 /// Runtime source payload decoded from one snapshot.
@@ -207,6 +223,10 @@ pub(crate) fn encoded_len(snapshot: &Snapshot) -> Option<usize> {
     for runtime in &snapshot.runtimes {
         len = len.checked_add(RUNTIME_FIXED_LEN)?.checked_add(runtime.name.len())?;
         len = len.checked_add(runtime.workers.len().checked_mul(WORKER_FIXED_LEN)?)?;
+        for location in &runtime.task_locations {
+            len = len.checked_add(TASK_LOCATION_FIXED_LEN)?.checked_add(location.file.len())?;
+        }
+        u32::try_from(runtime.task_locations.len()).ok()?;
     }
     u32::try_from(snapshot.runtimes.len()).ok()?;
     Some(len)
@@ -236,6 +256,7 @@ fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
     writer.u64(runtime.created_at.ticks())?;
     writer.u64(runtime.retired_at.map_or(u64::MAX, EventTimestamp::ticks))?;
     writer.u32(u32::try_from(runtime.workers.len()).map_err(|_overflow| ())?)?;
+    writer.u32(u32::try_from(runtime.task_locations.len()).map_err(|_overflow| ())?)?;
     writer.write(runtime.name.as_bytes())?;
     for worker in &runtime.workers {
         writer.u64(worker.id.get())?;
@@ -243,6 +264,13 @@ fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
         writer.u8(worker.state.wire_value())?;
         writer.u32(worker.processor_index.unwrap_or(u32::MAX))?;
         writer.u64(worker.thread_id.map_or(u64::MAX, ThreadId::get))?;
+    }
+    for location in &runtime.task_locations {
+        writer.u64(location.type_descriptor.get())?;
+        writer.u32(u32::try_from(location.file.len()).map_err(|_overflow| ())?)?;
+        writer.u32(location.line)?;
+        writer.u32(location.column)?;
+        writer.write(location.file.as_bytes())?;
     }
     Ok(())
 }
@@ -256,6 +284,7 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
     let created_at = EventTimestamp::from_ticks(reader.u64()?);
     let retired_at = optional_timestamp(reader.u64()?);
     let worker_count = reader.u32()? as usize;
+    let task_location_count = reader.u32()? as usize;
     let name = std::str::from_utf8(reader.read(name_len)?)
         .map_err(|_invalid_utf8| malformed())?
         .to_owned();
@@ -274,6 +303,22 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
             thread_id,
         });
     }
+    let mut task_locations = Vec::with_capacity(task_location_count);
+    for _ in 0..task_location_count {
+        let type_descriptor = TypeDescriptorId::from_raw(reader.u64()?).ok_or_else(malformed)?;
+        let file_len = reader.u32()? as usize;
+        let line = reader.u32()?;
+        let column = reader.u32()?;
+        let file = std::str::from_utf8(reader.read(file_len)?)
+            .map_err(|_invalid_utf8| malformed())?
+            .to_owned();
+        task_locations.push(TaskLocation {
+            type_descriptor,
+            file,
+            line,
+            column,
+        });
+    }
     Ok(Runtime {
         id,
         name,
@@ -283,6 +328,7 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
         created_at,
         retired_at,
         workers,
+        task_locations,
     })
 }
 
@@ -415,6 +461,12 @@ mod tests {
                     state: WorkerState::Parked,
                     processor_index: Some(5),
                     thread_id: Some(ThreadId::new(6)),
+                }],
+                task_locations: vec![TaskLocation {
+                    type_descriptor: TypeDescriptorId::from_raw(7).unwrap(),
+                    file: "src/runtime.rs".into(),
+                    line: 8,
+                    column: 9,
                 }],
             }],
         }

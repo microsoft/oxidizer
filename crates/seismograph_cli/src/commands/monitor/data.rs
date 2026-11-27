@@ -2540,7 +2540,7 @@ mod tests {
         EventTimestamp, Events, NumericEvent, ObjectId,
     };
     use seismograph::recorder::io::{IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
-    use seismograph::recorder::runtime::{RuntimeEvent as RuntimeEventPayload, RuntimeId, WorkerId};
+    use seismograph::recorder::runtime::{RuntimeEvent as RuntimeEventPayload, RuntimeId, TypeDescriptorId, WorkerId};
     use seismograph::recorder::thread::{ThreadId, ThreadLog};
     use seismograph_rallocator::callers::{
         AddressLookup, AddressLookupFields, Callers, CallersFields, Event, EventFields, EventKind, HeapKind,
@@ -3512,6 +3512,58 @@ mod tests {
             },
             ..RuntimeTaskSummary::default()
         }
+    }
+
+    #[test]
+    fn runtime_tasks_resolve_spawn_locations_from_the_runtime_source() {
+        let runtime_id = RuntimeId::from_raw(1).unwrap();
+        let descriptor = TypeDescriptorId::from_raw(42).unwrap();
+        let events = Events {
+            events: vec![RuntimeEvent {
+                thread_id: ThreadId::new(1),
+                sequence: EventSequence::new(1),
+                timestamp: EventTimestamp::from_ticks(1),
+                kind: RuntimeEventKind::TaskSpawned,
+                payload: EventPayload::Runtime(RuntimeEventPayload {
+                    runtime_id,
+                    worker_id: None,
+                    subject_id: 10,
+                    related_id: 0,
+                    value_0: descriptor.get(),
+                    value_1: 1,
+                }),
+                call_stack: Vec::new(),
+            }],
+            ..Events::default()
+        };
+        let source = seismograph_runtime::snapshot::Snapshot {
+            runtimes: vec![seismograph_runtime::snapshot::Runtime {
+                id: runtime_id,
+                name: "runtime".into(),
+                configured_workers: 0,
+                lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
+                state: seismograph_runtime::snapshot::RuntimeState::Running,
+                created_at: EventTimestamp::from_ticks(1),
+                retired_at: None,
+                workers: Vec::new(),
+                task_locations: vec![seismograph_runtime::snapshot::TaskLocation {
+                    type_descriptor: descriptor,
+                    file: "src/main.rs".into(),
+                    line: 12,
+                    column: 34,
+                }],
+            }],
+        };
+
+        let snapshot = RuntimeMonitorSnapshot::from_events(&events, Some(&source), &[]);
+        let task = snapshot
+            .workers
+            .iter()
+            .flat_map(|worker| &worker.tasks)
+            .find(|task| task.task_id == 10)
+            .unwrap();
+
+        assert_eq!(task.spawned_at.as_deref(), Some("src/main.rs:12:34"));
     }
 
     #[test]
