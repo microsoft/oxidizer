@@ -101370,7 +101370,7 @@ files:
     test: signal::tests::equality_respects_state
   - package: process_health
     target: lib:health
-    test: signal::tests::nan_attributes_are_never_equal
+    test: signal::tests::equality_respects_duplicate_counts
   - package: process_health
     target: test:aggregation
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
@@ -101453,7 +101453,7 @@ files:
     test: worker::tests::shutdown_on_the_worker_requests_stop_without_returning_a_self_join
   - package: process_health
     target: lib:health
-    test: worker::tests::shutdown_joins_the_worker_and_reports_a_failed_join
+    test: worker::tests::drop_discards_join_panic_without_synthesizing_a_worker_event
   - package: process_health
     target: lib:health
     test: worker::tests::spawn_failure_marks_worker_unavailable_until_shutdown

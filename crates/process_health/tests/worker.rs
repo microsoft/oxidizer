@@ -57,7 +57,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let mut revision = 0_i64;
     let mut flush = || {
         revision += 1;
-        let ((), observed) = turn(&mut probe, || marker.publish(Health::Healthy, [("turn", revision)]));
+        let ((), observed) = turn(&mut probe, || marker.publish(Health::Healthy, [("turn", revision.to_string())]));
         assert_eq!(observed.id(), worker.id());
     };
     let mut clients = root.component("clients");
@@ -68,7 +68,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let writer = clients.clone();
     let (mut publisher, observed) = turn(&mut clients, || writer.publisher());
     assert_eq!(observed.id(), worker.id(), "both components must run on the same worker");
-    publisher.publish(Health::Degraded, [("load", 7)]);
+    publisher.publish(Health::Degraded, [("load", "7")]);
     let clone = publisher.clone();
     flush();
     assert_eq!(clients.state(), Health::Degraded);

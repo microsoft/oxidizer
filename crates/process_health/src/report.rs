@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
-use std::fmt::{self, Debug, Display, Formatter};
-use std::iter::FusedIterator;
+use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, OnceLock};
 
 use crate::{Health, Signal};
@@ -84,14 +82,14 @@ impl Snapshot {
 /// assert_eq!(report.name(), "database");
 /// assert_eq!(report.state(), Health::Degraded);
 /// assert_eq!(report.publisher_count(Health::Healthy), 1);
-/// assert_eq!(report.signals(Health::Healthy).len(), 1);
+/// assert_eq!(report.signals(Health::Healthy).count(), 1);
 ///
 /// let (signal, publishers) = report.signals(Health::Degraded).next().unwrap();
 /// assert_eq!(signal.to_string(), "Degraded (reason=high latency)");
 /// assert_eq!(publishers, 1);
 /// # });
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Report {
     name: Arc<str>,
     state: Health,
@@ -128,22 +126,11 @@ impl Report {
     }
 
     /// Returns the distinct signals in `state` with their publisher counts.
-    #[must_use]
-    pub fn signals(&self, state: Health) -> impl ExactSizeIterator<Item = (Signal, usize)> + FusedIterator + Clone + Debug + '_ {
+    pub fn signals(&self, state: Health) -> impl Iterator<Item = (Signal, usize)> + '_ {
         self.snapshot.signals[state.index()]
             .groups()
             .iter()
             .map(|(signal, count)| (Signal::clone(signal), *count))
-    }
-}
-
-impl Debug for Report {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("name", &self.name)
-            .field("state", &self.state)
-            .field("counts", &self.counts)
-            .finish_non_exhaustive()
     }
 }
 
@@ -199,7 +186,7 @@ mod tests {
 
         assert_eq!(report.publisher_count(Health::Healthy), 1);
         assert_eq!(report.signals(Health::Healthy).count(), 1);
-        assert_eq!(report.signals(Health::Unhealthy).len(), 1);
+        assert_eq!(report.signals(Health::Unhealthy).count(), 1);
     }
 
     #[test]
