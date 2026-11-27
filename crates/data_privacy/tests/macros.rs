@@ -24,6 +24,22 @@ struct Contact {
 }
 
 #[test]
+fn test_pascal_to_snake_case() {
+    #[taxonomy(test)]
+    enum TestTaxonomy {
+        PascalCase,
+        AnotherExample,
+        Simple,
+        WithNumbers123,
+    }
+
+    assert_eq!(TestTaxonomy::PascalCase.data_class().name(), "pascal_case");
+    assert_eq!(TestTaxonomy::AnotherExample.data_class().name(), "another_example");
+    assert_eq!(TestTaxonomy::Simple.data_class().name(), "simple");
+    assert_eq!(TestTaxonomy::WithNumbers123.data_class().name(), "with_numbers123");
+}
+
+#[test]
 fn can_create_instance() {
     let _ = Contact {
         name: "Alice".to_string(),

@@ -6,6 +6,10 @@
 //! Gzip-specific: interop fixtures produced by the system `gzip`, and the concatenated-stream
 //! behavior that only gzip enables by default. These tests drive crate-private mechanics when a
 //! transition has to be observed rather than inferred from the final bytes.
+// Every case uses gzip, exposed without features only under cfg(test) in lib.rs.
+// Some also inspect private push/pull outcomes and counts. The output-ceiling cases
+// use limits.rs's cfg(test) 1 MiB cap, not the public build's 64 MiB cap.
+// A downstream move changes the original no-feature selection or allocation workload.
 
 use std::num::NonZeroU64;
 

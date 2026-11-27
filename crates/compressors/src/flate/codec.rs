@@ -269,6 +269,8 @@ unsafe impl Codec for FlateDecompress {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+// These cases inspect private step outcomes, counts, limits and pool entries.
+// Public calls cannot reproduce the exact codec-step or retention assertions.
 mod tests {
     #[test]
     fn nov6_flush_completes_with_exactly_one_unused_output_byte() {
