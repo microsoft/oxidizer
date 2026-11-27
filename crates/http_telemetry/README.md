@@ -208,7 +208,7 @@ bodies as were once logged at the same time.
 ### When the server middleware emits no event
 
 * The URI path of the request matches one of the
-  [`excluded_paths`][__link19].
+  [`excluded_paths`][__link19]. The request is also left out of both metrics.
 * The request future or the response body is dropped while its thread panics.
 * There is no destination interested in processing the event further.
 
@@ -218,13 +218,16 @@ A client request ends when the handler returns. The middleware does not read the
 If it logs the response body, it wraps the body and emits the complete event when the caller
 drops the body. See [Bodies](#bodies).
 
+In [`fetch`][__link20], a custom pipeline emits request events only if it stacks the layer of
+`PipelineContext::client_telemetry()`.
+
 ### Client events
 
-When a request ends, the middleware emits one of these events to an [`observed::Sink`][__link20], except
+When a request ends, the middleware emits one of these events to an [`observed::Sink`][__link21], except
 in the cases listed under
 [When the client middleware emits no event](#when-the-client-middleware-emits-no-event). A
 layer emits the events of an attempt, or, with
-[`report_total_duration(true)`][__link21], the events of a whole
+[`report_total_duration(true)`][__link22], the events of a whole
 request.
 
 |Event|Severity|Message|When|
@@ -244,12 +247,12 @@ Each event has the [attributes](#metric-httpclientrequestduration) of its metric
 |`http.client.request.duration`|double|HTTP request duration in seconds.|`0.012`|In the events of an attempt.|
 |`http.client.request.total_duration`|double|HTTP request duration in seconds.|`0.012`|In the events of a whole request.|
 |`http.request.method_original`|string|The method of the request.|`PURGE`|If `http.request.method` is `_OTHER`.|
-|`url.path.redacted`|string|The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated][__link22] path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`][__link23].|`/books/1`|If the request URI has a path.|
+|`url.path.redacted`|string|The path and the query of the request URI, redacted by the redactor of each processor. Each part of a [templated][__link23] path is redacted according to its data class. A path without a template is redacted as a whole, with the data class [`Uri::DATA_CLASS`][__link24].|`/books/1`|If the request URI has a path.|
 |`exception.message`|string|The message of the error that the handler returned.|`the review has no text`|If the handler returned an error.|
-|`http.request.header.<name>`|string|The value of a [configured request header][__link24], as on the server.|`0f3a9c`|If the request has the header when it reaches the layer.|
-|`http.response.header.<name>`|string|The value of a [configured response header][__link25], as on the server.|`120`|If the handler returned a response with the header.|
-|`http.request.body.content`|string|The start of the request body, as on the server.|`{"stars":5}`|If the [request body media types][__link26] cover the `Content-Type` of the request.|
-|`http.response.body.content`|string|The start of the response body, up to the size limit, as text, as on the server. It holds only the bytes that the caller read before it dropped the body, unless the body is in memory. See [Bodies](#bodies).|`{"book":"1"}`|In the complete events, if the [response body media types][__link27] cover the `Content-Type` of the response.|
+|`http.request.header.<name>`|string|The value of a [configured request header][__link25], as on the server.|`0f3a9c`|If the request has the header when it reaches the layer.|
+|`http.response.header.<name>`|string|The value of a [configured response header][__link26], as on the server.|`120`|If the handler returned a response with the header.|
+|`http.request.body.content`|string|The start of the request body, as on the server.|`{"stars":5}`|If the [request body media types][__link27] cover the `Content-Type` of the request.|
+|`http.response.body.content`|string|The start of the response body, up to the size limit, as text, as on the server. It holds only the bytes that the caller read before it dropped the body, unless the body is in memory. See [Bodies](#bodies).|`{"book":"1"}`|In the complete events, if the [response body media types][__link28] cover the `Content-Type` of the response.|
 
 The middleware does not redact `exception.message`, so the logs can contain personal data from
 the message of an error.
@@ -274,15 +277,15 @@ Its bucket boundaries are those of `http.server.request.duration`.
 |`url.scheme`|string|The scheme of the request URI. `_OTHER` if the URI has no scheme.|`http`; `https`; `ftp`; `_OTHER`|Always|
 |`server.address`|string|Host of the request URI. An IPv6 address keeps its brackets.|`example.com`; `[2001:db8::1]`|If the request URI has a host.|
 |`server.port`|int|Port of the request URI, else 80 for `http` and 443 for `https`.|`443`; `8080`|If the request URI has a host, and the port is known.|
-|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link28] of the request, else the label or the template of its [templated][__link29] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
+|`url.template`|string|The template of the request URI: the [`UriTemplateLabel`][__link29] of the request, else the label or the template of its [templated][__link30] path, else `unknown`.|`/books/{book}`; `get_book`; `unknown`|Always|
 |`network.protocol.name`|string|The protocol of the response.|`http`|If the handler returned a response.|
 |`network.protocol.version`|string|Version of the HTTP protocol of the response. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|If the handler returned a response.|
 |`http.response.status_code`|int|HTTP response status code.|`200`; `503`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link30] and the kind of each I/O error, unless the layer has [its own function][__link31]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link31] and the kind of each I/O error, unless the layer has [its own function][__link32]. A panic of the handler gives `panic`. A request future that is dropped before the handler returned gives `abandoned`. A status never gives `error.type`.|`validation`; `io.connection_refused`; `panic`; `abandoned`|If the request ended with an error, a panic or a drop.|
 
 The `url.template` of a request whose URI is given as text is `unknown`, because its path has no
-template. To record a template, build the URI from a [templated][__link32] type, or
-add a [`UriTemplateLabel`][__link33] to the extensions of the request.
+template. To record a template, build the URI from a [templated][__link33] type, or
+add a [`UriTemplateLabel`][__link34] to the extensions of the request.
 
 #### Metric: `http.client.request.total_duration`
 
@@ -303,8 +306,9 @@ It has the attributes and the bucket boundaries of `http.client.request.duration
 If the handler panics, or a response body on the server panics while the server reads a frame
 from it, the middleware emits the error event and then resumes the panic with its payload. If a
 processor panics while the middleware emits an event, the processor panic reaches the caller,
-and the processors after it do not get the event. If this happens while the middleware reports a
-panic, the processor panic replaces that panic.
+the processors after it do not get the event, and the middleware emits no later event of the
+request. If this happens while the middleware reports a panic, the processor panic replaces that
+panic.
 
 ## Enrichment with custom dimensions
 
@@ -339,7 +343,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbp34T2F6iqIob4EChM47UblcbPa5tqTon-W0bQ9PcQO1ipkhhZIeCaGJ5dGVzYnVmZjAuMTUuMINpaHR0cC1ib2R5ZTEuMS4waWh0dHBfYm9keYJvaHR0cF9leHRlbnNpb25zZjAuMTYuMIJuaHR0cF90ZWxlbWV0cnllMC4yLjCCZ2xheWVyZWRmMC4zLjEwgmhvYnNlcnZlZGYwLjMxLjCCbXRlbXBsYXRlZF91cmllMC43LjI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6W-vg6eNlWEbOwht0U0GOe4byib42gzyoSUbQT3Erume0YNhZIeCaGJ5dGVzYnVmZjAuMTUuMINpaHR0cC1ib2R5ZTEuMS4waWh0dHBfYm9keYJvaHR0cF9leHRlbnNpb25zZjAuMTYuMIJuaHR0cF90ZWxlbWV0cnllMC4yLjCCZ2xheWVyZWRmMC4zLjEwgmhvYnNlcnZlZGYwLjMxLjCCbXRlbXBsYXRlZF91cmllMC43LjI
  [__link0]: https://crates.io/crates/observed/0.31.0
  [__link1]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry
  [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
@@ -353,21 +357,22 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link18]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=mem::GlobalPool
  [__link19]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::excluded_paths
  [__link2]: https://docs.rs/layered/0.3.10/layered/?search=Layer
- [__link20]: https://docs.rs/observed/0.31.0/observed/?search=Sink
- [__link21]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
- [__link22]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link23]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=Uri::DATA_CLASS
- [__link24]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link20]: https://docs.rs/fetch
+ [__link21]: https://docs.rs/observed/0.31.0/observed/?search=Sink
+ [__link22]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
+ [__link23]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link24]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=Uri::DATA_CLASS
  [__link25]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
  [__link26]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
  [__link27]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
- [__link28]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
- [__link29]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link28]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer
+ [__link29]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
  [__link3]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::server
- [__link30]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
- [__link31]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
- [__link32]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
- [__link33]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
+ [__link30]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link31]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
+ [__link32]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::error_labels_with
+ [__link33]: https://docs.rs/templated_uri/0.7.2/templated_uri/?search=templated
+ [__link34]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=UriTemplateLabel
  [__link4]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::client
  [__link5]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::report_total_duration
  [__link6]: https://docs.rs/observed/0.31.0/observed/?search=Sink

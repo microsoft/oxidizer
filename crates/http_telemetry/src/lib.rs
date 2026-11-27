@@ -205,7 +205,7 @@
 //! ## When the server middleware emits no event
 //!
 //! - The URI path of the request matches one of the
-//!   [`excluded_paths`](TelemetryLayer::excluded_paths).
+//!   [`excluded_paths`](TelemetryLayer::excluded_paths). The request is also left out of both metrics.
 //! - The request future or the response body is dropped while its thread panics.
 //! - There is no destination interested in processing the event further.
 //!
@@ -214,6 +214,9 @@
 //! A client request ends when the handler returns. The middleware does not read the response body.
 //! If it logs the response body, it wraps the body and emits the complete event when the caller
 //! drops the body. See [Bodies](#bodies).
+//!
+//! In [`fetch`](https://docs.rs/fetch), a custom pipeline emits request events only if it stacks the layer of
+//! `PipelineContext::client_telemetry()`.
 //!
 //! ## Client events
 //!
@@ -300,8 +303,9 @@
 //! If the handler panics, or a response body on the server panics while the server reads a frame
 //! from it, the middleware emits the error event and then resumes the panic with its payload. If a
 //! processor panics while the middleware emits an event, the processor panic reaches the caller,
-//! and the processors after it do not get the event. If this happens while the middleware reports a
-//! panic, the processor panic replaces that panic.
+//! the processors after it do not get the event, and the middleware emits no later event of the
+//! request. If this happens while the middleware reports a panic, the processor panic replaces that
+//! panic.
 //!
 //! # Enrichment with custom dimensions
 //!
