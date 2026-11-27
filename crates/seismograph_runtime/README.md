@@ -87,10 +87,7 @@ seismograph::recorder(seismograph::recorder::Configuration {
 let runtime = Runtime::builder("primary").configured_workers(1).build();
 let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 let identity = TaskIdentity::from_location(std::panic::Location::caller());
-let queued = runtime
-    .async_task(None, identity, None, 0)
-    .unwrap()
-    .enqueued(0);
+let queued = runtime.async_task(identity, 0).unwrap().enqueued(0);
 let task = queued.activated(&worker);
 let poll = task.poll_started(&worker);
 assert!(
@@ -105,7 +102,7 @@ assert!(
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbns29rhgbW24bkUJSgsxEytcb3YzA1Cqi4hMbHyplb0Wy-BBhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbt7obSAYNJssbmAlDB8tb2pgbjDyo-185-ZEblmcA-G2iyPFhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
  [__link0]: https://crates.io/crates/seismograph/0.6.0
  [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeBuilder
  [__link10]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=Runtime::async_task

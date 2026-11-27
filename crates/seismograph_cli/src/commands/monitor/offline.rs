@@ -352,7 +352,7 @@ mod tests {
         let mut app = super::super::app::App::offline(path);
         app.finish_offline_load(snapshot);
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(180, 60)).unwrap();
-        for tab in '1'..='8' {
+        for tab in '1'..='9' {
             app.handle_key(crossterm::event::KeyCode::Char(tab));
             let render_started = std::time::Instant::now();
             terminal.draw(|frame| app.draw(frame)).unwrap();

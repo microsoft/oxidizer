@@ -8,13 +8,14 @@ use ratatui::widgets::{Block, Borders};
 
 use super::app::{AllocatorBackend, App, MonitorTab, RuntimeFocus, Screen};
 
-pub(super) const TABS: [(MonitorTab, &str); 8] = [
+pub(super) const TABS: [(MonitorTab, &str); 9] = [
     (MonitorTab::Info, "  Info  "),
     (MonitorTab::Heaps, " Native v4 "),
     (MonitorTab::Allocations, "  Allocations  "),
     (MonitorTab::Primitives, "  Primitives  "),
     (MonitorTab::Threads, "  Threads  "),
     (MonitorTab::Runtime, "  Runtime  "),
+    (MonitorTab::Tasks, "  Tasks  "),
     (MonitorTab::Io, "  I/O  "),
     (MonitorTab::Cache, "  Cache  "),
 ];
@@ -54,6 +55,7 @@ enum Split {
     RuntimeColumns,
     RuntimeActivityRows,
     RuntimeStatistics,
+    RuntimeTaskGroups,
     Io,
     Cache,
 }
@@ -61,7 +63,7 @@ enum Split {
 #[derive(Default)]
 pub(super) struct Panels {
     pub(super) rows: super::mouse::MouseRows,
-    sizes: [Option<Constraint>; 19],
+    sizes: [Option<Constraint>; 20],
     dragging: Option<(MonitorTab, Split)>,
 }
 
@@ -160,6 +162,9 @@ impl Panels {
                 let [worker_activity, statistics] =
                     split(Split::RuntimeStatistics, Direction::Horizontal, charts, Constraint::Percentage(50));
                 areas = [workers, tasks, worker_activity, statistics, events];
+            }
+            MonitorTab::Tasks => {
+                [areas[0], areas[1]] = split(Split::RuntimeTaskGroups, Direction::Vertical, area, Constraint::Percentage(50));
             }
             MonitorTab::Io => {
                 [areas[0], areas[1]] = split(Split::Io, Direction::Horizontal, area, Constraint::Percentage(48));

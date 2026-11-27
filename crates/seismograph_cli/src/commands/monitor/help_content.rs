@@ -128,6 +128,7 @@ pub(super) const fn title(context: Context) -> &'static str {
         Context::ThreadObjects => "Thread objects and stacks",
         Context::RuntimeWorkers => "Runtime workers",
         Context::RuntimeTasks => "Runtime tasks",
+        Context::RuntimeTaskGroups => "Runtime task types",
         Context::RuntimeActivity => "Runtime task details",
         Context::RuntimeEvents => "Inferred task events",
         Context::IoResources => "I/O resources",
@@ -172,6 +173,7 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::ThreadObjects => &[THREAD_OBJECTS, STACK],
         Context::RuntimeWorkers => &[RUNTIME_WORKERS],
         Context::RuntimeTasks => &[RUNTIME_TASKS],
+        Context::RuntimeTaskGroups => &[RUNTIME_TASK_GROUPS],
         Context::RuntimeActivity => &[RUNTIME_ACTIVITY],
         Context::RuntimeEvents => &[RUNTIME_EVENTS],
         Context::IoResources => &[IO_RESOURCES],
@@ -407,6 +409,27 @@ const RUNTIME_TASKS: &Section = section!("RUNTIME TASKS";
     "[ / ] / r" => "Cycle Task, Future B, Polls, Observed %, Median poll and Max poll sorts / reverse direction. Unknown values stay last in either direction. Task selection and detail positions reset.",
 );
 
+const RUNTIME_TASK_GROUPS: &Section = section!("RUNTIME TASK TYPES";
+    "Descriptor" => "Task descriptor ID from the retained queue event. Unknown means that the queue event is not retained.",
+    "Async tasks" => "Groups are inferred from retained poll events. Poll totals include retained finished and unfinished polls.",
+    "Blocking tasks" => "Groups are inferred when a blocking worker starts execution. Queue-only tasks remain unclassified.",
+    "Tasks" => "Retained task count for this descriptor.",
+    "Active" => "Tasks in queued, running, or waiting state at the end of the capture.",
+    "Done" => "Tasks with a retained successful completion.",
+    "Canceled" => "Tasks with a retained cancellation.",
+    "Panicked" => "Tasks with a retained panic outcome.",
+    "Workers" => "Distinct workers that executed a retained poll or blocking execution.",
+    "Polls" => "Retained async polls. An unfinished poll is included but has no duration sample.",
+    "Runs" => "Blocking executions with a retained start event. A canceled queue entry has no run.",
+    "Avg poll" => "Mean duration from retained finished async polls.",
+    "Max poll" => "Maximum duration from retained finished async polls.",
+    "Avg queue" => "Mean retained blocking queue duration. The duration ends when a blocking worker starts the task.",
+    "Max queue" => "Maximum retained blocking queue duration.",
+    "Avg exec" => "Mean retained blocking execution duration.",
+    "Max exec" => "Maximum retained blocking execution duration. An unfinished execution has no duration sample.",
+    "a / b / Up / Down" => "Focus the async or blocking table, then select a descriptor group. Enter switches tables.",
+);
+
 const RUNTIME_ACTIVITY: &Section = section!("RUNTIME ACTIVITY";
     "Running for / Ready for" => "Age at the coherent per-task source observation. Running is inside a poll; Ready is queued and eligible for a poll. Long ages are shown prominently even without a completed poll. '-' means unavailable, not zero.",
     "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Without that ID, an exact retained runtime/task/poll-start timestamp match is required to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Missing or raced observations have unknown activity rather than guessed ages.",
@@ -582,7 +605,7 @@ const HELP_CONTROLS: &Section = section!("HELP CONTROLS";
 );
 
 const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
-    "1-8 / Tab / Shift-Tab" => "Select/cycle main tabs from every Runtime focus, including Activity.",
+    "1-9 / Tab / Shift-Tab" => "Select or cycle main tabs from every Runtime focus, including Activity.",
     "Click rows / drag borders" => "Select and enter a row's detail pane / resize panes.",
     "s" => "Run the selected Record and continue / Record and stop action. Analysis tables do not continuously refresh.",
     "c" => "Configure recording.",
@@ -595,7 +618,7 @@ const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
 
 const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
     "Read-only" => "Offline is read-only: no process connection, recording changes, capture, capture-mode changes or clearing server buffers.",
-    "1-8 / Tab / Shift-Tab" => "Select/cycle tabs. Sorting, stack presentation and F filters change only the saved-data view.",
+    "1-9 / Tab / Shift-Tab" => "Select or cycle tabs. Sorting, stack presentation, and F filters change only the saved-data view.",
     "q / Esc" => "Quit the offline viewer. With help open these keys close help instead.",
     "Missing data" => "A live-only 'press s' placeholder cannot create missing data in an offline file.",
 );
@@ -604,7 +627,7 @@ const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
 mod tests {
     use super::*;
 
-    const CONTEXTS: [Context; 34] = [
+    const CONTEXTS: [Context; 35] = [
         Context::Browser,
         Context::Info,
         Context::NativeMemory,
@@ -628,6 +651,7 @@ mod tests {
         Context::ThreadObjects,
         Context::RuntimeWorkers,
         Context::RuntimeTasks,
+        Context::RuntimeTaskGroups,
         Context::RuntimeActivity,
         Context::RuntimeEvents,
         Context::IoResources,
@@ -715,6 +739,7 @@ mod tests {
             (Context::ThreadObjects, vec![THREAD_OBJECTS, STACK]),
             (Context::RuntimeWorkers, vec![RUNTIME_WORKERS]),
             (Context::RuntimeTasks, vec![RUNTIME_TASKS, RUNTIME_STATES]),
+            (Context::RuntimeTaskGroups, vec![RUNTIME_TASK_GROUPS]),
             (Context::RuntimeActivity, vec![RUNTIME_ACTIVITY, RUNTIME_STATES]),
             (Context::RuntimeEvents, vec![RUNTIME_EVENTS]),
             (Context::IoResources, vec![IO_RESOURCES]),
@@ -797,6 +822,26 @@ mod tests {
         (
             Context::RuntimeTasks,
             &["Task", "State(global)", "Polls", "Observed %", "Median poll", "Max poll"],
+        ),
+        (
+            Context::RuntimeTaskGroups,
+            &[
+                "Descriptor",
+                "Tasks",
+                "Active",
+                "Done",
+                "Canceled",
+                "Panicked",
+                "Workers",
+                "Polls",
+                "Runs",
+                "Avg poll",
+                "Max poll",
+                "Avg queue",
+                "Max queue",
+                "Avg exec",
+                "Max exec",
+            ],
         ),
         (
             Context::RuntimeActivity,

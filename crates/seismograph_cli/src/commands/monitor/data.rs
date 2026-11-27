@@ -7,7 +7,10 @@ use std::time::{Instant, SystemTime};
 
 use seismograph::recorder::event::{Event, EventKind};
 
-pub(super) use super::runtime::{RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary, RuntimeWorkerSummary, runtime_task_id};
+pub(super) use super::runtime::{
+    AsynchronousTaskGroupSummary, BlockingTaskGroupSummary, RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary,
+    RuntimeWorkerSummary, runtime_task_id,
+};
 
 pub(super) struct CapturedSnapshot {
     pub(super) native: Option<Arc<seismograph_rallocator::native::Snapshot>>,
@@ -2543,6 +2546,7 @@ mod tests {
         AddressLookup, AddressLookupFields, Callers, CallersFields, Event, EventFields, EventKind, HeapKind,
     };
 
+    use super::super::runtime::{DurationSummary, TaskOutcomeSummary};
     use super::super::runtime_timeline::{ExecutionMetrics, Interval, median_nanos};
     use super::*;
 
@@ -5117,6 +5121,131 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![10, 11]
         );
+    }
+
+    #[test]
+    fn runtime_monitor_groups_async_and_blocking_tasks_by_descriptor() {
+        let event = |sequence, timestamp, kind, worker_id: Option<u64>, task_id, value_0, value_1| RuntimeEvent {
+            thread_id: ThreadId::new(worker_id.unwrap_or(1)),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEventPayload {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: worker_id.and_then(WorkerId::from_raw),
+                subject_id: task_id,
+                related_id: 0,
+                value_0,
+                value_1,
+            }),
+            call_stack: Vec::new(),
+        };
+        let events = vec![
+            event(1, 1, RuntimeEventKind::WorkerStarted, Some(4), 4, 2, u64::from(u32::MAX)),
+            event(2, 10, RuntimeEventKind::TaskSpawned, None, 10, 42, 9),
+            event(3, 20, RuntimeEventKind::TaskPollStarted, Some(2), 10, 0, 0),
+            event(4, 50, RuntimeEventKind::TaskPollFinished, Some(2), 10, 30, 1),
+            event(5, 60, RuntimeEventKind::TaskSpawned, None, 11, 42, 9),
+            event(6, 70, RuntimeEventKind::TaskPollStarted, Some(3), 11, 0, 0),
+            event(7, 120, RuntimeEventKind::TaskPollFinished, Some(3), 11, 50, 2),
+            event(8, 130, RuntimeEventKind::TaskEnqueued, None, 20, 77, 2),
+            event(9, 210, RuntimeEventKind::TaskMaterialized, Some(4), 20, 80, 17),
+            event(10, 410, RuntimeEventKind::TaskCompleted, Some(4), 20, 200, 0),
+            event(11, 420, RuntimeEventKind::TaskEnqueued, None, 21, 77, 3),
+            event(12, 520, RuntimeEventKind::TaskMaterialized, Some(4), 21, 100, 17),
+            event(13, 570, RuntimeEventKind::TaskCanceled, Some(4), 21, 50, 0),
+            event(14, 580, RuntimeEventKind::TaskEnqueued, None, 30, 88, 4),
+        ];
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events,
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(
+            snapshot.asynchronous_groups,
+            vec![AsynchronousTaskGroupSummary {
+                type_descriptor_id: Some(42),
+                outcomes: TaskOutcomeSummary {
+                    tasks: 2,
+                    completed: 1,
+                    canceled: 1,
+                    workers: 2,
+                    ..TaskOutcomeSummary::default()
+                },
+                polls: 2,
+                poll_time: DurationSummary {
+                    samples: 2,
+                    total_nanos: 80,
+                    max_nanos: Some(50),
+                },
+            }]
+        );
+        assert_eq!(
+            snapshot.blocking_groups,
+            vec![BlockingTaskGroupSummary {
+                type_descriptor_id: Some(77),
+                outcomes: TaskOutcomeSummary {
+                    tasks: 2,
+                    completed: 1,
+                    canceled: 1,
+                    workers: 1,
+                    ..TaskOutcomeSummary::default()
+                },
+                executions: 2,
+                queue_time: DurationSummary {
+                    samples: 2,
+                    total_nanos: 180,
+                    max_nanos: Some(100),
+                },
+                execution_time: DurationSummary {
+                    samples: 2,
+                    total_nanos: 250,
+                    max_nanos: Some(200),
+                },
+            }]
+        );
+        assert_eq!(snapshot.unclassified_tasks, 1);
+    }
+
+    #[test]
+    fn runtime_monitor_uses_model_state_for_out_of_order_cross_thread_events() {
+        let event = |sequence, timestamp, kind, value_0, value_1| RuntimeEvent {
+            thread_id: ThreadId::new(sequence),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Runtime(RuntimeEventPayload {
+                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                subject_id: 50,
+                related_id: 0,
+                value_0,
+                value_1,
+            }),
+            call_stack: Vec::new(),
+        };
+        let snapshot = RuntimeMonitorSnapshot::from_events(
+            &Events {
+                events: vec![
+                    event(5, 300, RuntimeEventKind::TaskPollFinished, 50, 1),
+                    event(2, 100, RuntimeEventKind::TaskPollStarted, 0, 0),
+                    event(4, 250, RuntimeEventKind::TaskPollStarted, 0, 0),
+                    event(3, 200, RuntimeEventKind::TaskPollFinished, 100, 0),
+                    event(1, 10, RuntimeEventKind::TaskSpawned, 99, 1),
+                ],
+                ..Events::default()
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(snapshot.workers[0].tasks[0].state, "Completed");
+        assert_eq!(snapshot.asynchronous_groups[0].polls, 2);
+        assert_eq!(snapshot.asynchronous_groups[0].outcomes.completed, 1);
     }
 
     #[test]

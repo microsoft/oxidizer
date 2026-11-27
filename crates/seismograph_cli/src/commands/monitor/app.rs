@@ -678,6 +678,35 @@ pub(super) struct RuntimeViewState {
     pub(super) events: TaskEventsViewState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct RuntimeTasksViewState {
+    pub(super) focus: RuntimeTasksFocus,
+    pub(super) asynchronous_selected: usize,
+    pub(super) blocking_selected: usize,
+}
+
+impl RuntimeTasksViewState {
+    const fn new() -> Self {
+        Self {
+            focus: RuntimeTasksFocus::Asynchronous,
+            asynchronous_selected: 0,
+            blocking_selected: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.focus = RuntimeTasksFocus::Asynchronous;
+        self.asynchronous_selected = 0;
+        self.blocking_selected = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeTasksFocus {
+    Asynchronous,
+    Blocking,
+}
+
 /// Fits readable duration buckets in the activity panes while keeping keyboard bounds stable.
 pub(super) const RUNTIME_HISTOGRAM_BINS: usize = super::runtime_timeline::HISTOGRAM_BINS;
 
@@ -871,6 +900,7 @@ pub(super) enum MonitorTab {
     Primitives,
     Threads,
     Runtime,
+    Tasks,
     Io,
     Cache,
 }
@@ -884,8 +914,9 @@ impl MonitorTab {
             Self::Primitives => 3,
             Self::Threads => 4,
             Self::Runtime => 5,
-            Self::Io => 6,
-            Self::Cache => 7,
+            Self::Tasks => 6,
+            Self::Io => 7,
+            Self::Cache => 8,
         }
     }
 
@@ -896,7 +927,8 @@ impl MonitorTab {
             Self::Allocations => Self::Primitives,
             Self::Primitives => Self::Threads,
             Self::Threads => Self::Runtime,
-            Self::Runtime => Self::Io,
+            Self::Runtime => Self::Tasks,
+            Self::Tasks => Self::Io,
             Self::Io => Self::Cache,
             Self::Cache => Self::Info,
         }
@@ -910,7 +942,8 @@ impl MonitorTab {
             Self::Primitives => Self::Allocations,
             Self::Threads => Self::Primitives,
             Self::Runtime => Self::Threads,
-            Self::Io => Self::Runtime,
+            Self::Tasks => Self::Runtime,
+            Self::Io => Self::Tasks,
             Self::Cache => Self::Io,
         }
     }
@@ -943,6 +976,7 @@ pub(super) struct App {
     pub(super) primitive_view: PrimitiveViewState,
     pub(super) thread_view: ThreadViewState,
     pub(super) runtime_view: RuntimeViewState,
+    pub(super) runtime_tasks_view: RuntimeTasksViewState,
     pub(super) io_view: IoViewState,
     pub(super) cache_view: CacheViewState,
     pub(super) panels: super::panels::Panels,
@@ -1063,6 +1097,7 @@ impl App {
             primitive_view: PrimitiveViewState::new(),
             thread_view: ThreadViewState::new(),
             runtime_view: RuntimeViewState::new(),
+            runtime_tasks_view: RuntimeTasksViewState::new(),
             io_view: IoViewState::new(),
             cache_view: CacheViewState::new(),
             panels: super::panels::Panels::default(),
@@ -1209,6 +1244,7 @@ impl App {
                     MonitorTab::Primitives => handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()),
                     MonitorTab::Threads => handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()),
                     MonitorTab::Runtime => handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()),
+                    MonitorTab::Tasks => handle_runtime_tasks_key(code, &mut self.runtime_tasks_view, snapshot.as_deref()),
                     MonitorTab::Io => handle_io_key(code, &mut self.io_view, snapshot.as_deref()),
                     MonitorTab::Cache => handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()),
                     MonitorTab::Info => handle_info_key(code, &mut self.info_thread_selected, self.live_activity.threads.len()),
@@ -1233,8 +1269,9 @@ impl App {
                     KeyCode::Char('4') => *tab = MonitorTab::Primitives,
                     KeyCode::Char('5') => *tab = MonitorTab::Threads,
                     KeyCode::Char('6') => *tab = MonitorTab::Runtime,
-                    KeyCode::Char('7') => *tab = MonitorTab::Io,
-                    KeyCode::Char('8') => *tab = MonitorTab::Cache,
+                    KeyCode::Char('7') => *tab = MonitorTab::Tasks,
+                    KeyCode::Char('8') => *tab = MonitorTab::Io,
+                    KeyCode::Char('9') => *tab = MonitorTab::Cache,
                     KeyCode::Char('d') => {
                         self.capture_mode = self.capture_mode.next();
                         self.status = format!("{} selected (s to capture)", self.capture_mode.label());
@@ -1472,6 +1509,7 @@ impl App {
                     self.allocation_view.reset_position();
                     self.thread_view.reset();
                     self.runtime_view.reset();
+                    self.runtime_tasks_view.reset();
                     self.io_view.reset();
                     self.cache_view.reset();
                     self.filter_snapshot_arrived();
@@ -1505,6 +1543,7 @@ impl App {
         self.primitive_view.reset_operations();
         self.thread_view.reset();
         self.runtime_view.reset();
+        self.runtime_tasks_view.reset();
         self.io_view.reset();
         self.cache_view.reset();
     }
@@ -2093,6 +2132,52 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
             view.task_sort_descending = !view.task_sort_descending;
             view.reset_task();
         }
+        _ => return false,
+    }
+    true
+}
+
+fn handle_runtime_tasks_key(code: KeyCode, view: &mut RuntimeTasksViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    let runtime = snapshot.map(|snapshot| &snapshot.runtime);
+    match code {
+        KeyCode::Char('a') => view.focus = RuntimeTasksFocus::Asynchronous,
+        KeyCode::Char('b') => view.focus = RuntimeTasksFocus::Blocking,
+        KeyCode::Enter => {
+            view.focus = match view.focus {
+                RuntimeTasksFocus::Asynchronous => RuntimeTasksFocus::Blocking,
+                RuntimeTasksFocus::Blocking => RuntimeTasksFocus::Asynchronous,
+            };
+        }
+        KeyCode::Up => match view.focus {
+            RuntimeTasksFocus::Asynchronous => {
+                view.asynchronous_selected = view.asynchronous_selected.saturating_sub(1);
+            }
+            RuntimeTasksFocus::Blocking => {
+                view.blocking_selected = view.blocking_selected.saturating_sub(1);
+            }
+        },
+        KeyCode::Down => match view.focus {
+            RuntimeTasksFocus::Asynchronous => {
+                let count = runtime.map_or(0, |runtime| runtime.asynchronous_groups.len());
+                view.asynchronous_selected = advance_selection(view.asynchronous_selected, count);
+            }
+            RuntimeTasksFocus::Blocking => {
+                let count = runtime.map_or(0, |runtime| runtime.blocking_groups.len());
+                view.blocking_selected = advance_selection(view.blocking_selected, count);
+            }
+        },
+        KeyCode::Home => match view.focus {
+            RuntimeTasksFocus::Asynchronous => view.asynchronous_selected = 0,
+            RuntimeTasksFocus::Blocking => view.blocking_selected = 0,
+        },
+        KeyCode::End => match view.focus {
+            RuntimeTasksFocus::Asynchronous => {
+                view.asynchronous_selected = runtime.map_or(0, |runtime| runtime.asynchronous_groups.len().saturating_sub(1));
+            }
+            RuntimeTasksFocus::Blocking => {
+                view.blocking_selected = runtime.map_or(0, |runtime| runtime.blocking_groups.len().saturating_sub(1));
+            }
+        },
         _ => return false,
     }
     true
@@ -3175,6 +3260,7 @@ mod tests {
                 MonitorTab::Primitives,
                 MonitorTab::Threads,
                 MonitorTab::Runtime,
+                MonitorTab::Tasks,
                 MonitorTab::Io,
                 MonitorTab::Cache,
             ]
@@ -3185,9 +3271,10 @@ mod tests {
                 (2, MonitorTab::Primitives, MonitorTab::Heaps),
                 (3, MonitorTab::Threads, MonitorTab::Allocations),
                 (4, MonitorTab::Runtime, MonitorTab::Primitives),
-                (5, MonitorTab::Io, MonitorTab::Threads),
-                (6, MonitorTab::Cache, MonitorTab::Runtime),
-                (7, MonitorTab::Info, MonitorTab::Io),
+                (5, MonitorTab::Tasks, MonitorTab::Threads),
+                (6, MonitorTab::Io, MonitorTab::Runtime),
+                (7, MonitorTab::Cache, MonitorTab::Tasks),
+                (8, MonitorTab::Info, MonitorTab::Io),
             ]
         );
     }
@@ -3462,8 +3549,9 @@ mod tests {
             (KeyCode::Char('4'), MonitorTab::Primitives),
             (KeyCode::Char('5'), MonitorTab::Threads),
             (KeyCode::Char('6'), MonitorTab::Runtime),
-            (KeyCode::Char('7'), MonitorTab::Io),
-            (KeyCode::Char('8'), MonitorTab::Cache),
+            (KeyCode::Char('7'), MonitorTab::Tasks),
+            (KeyCode::Char('8'), MonitorTab::Io),
+            (KeyCode::Char('9'), MonitorTab::Cache),
             (KeyCode::Char('1'), MonitorTab::Info),
             (KeyCode::Left, MonitorTab::Cache),
             (KeyCode::Right, MonitorTab::Info),
@@ -4799,7 +4887,13 @@ mod tests {
             }
             app.runtime_view.focus = focus;
             app.handle_key(KeyCode::Tab);
-            assert!(matches!(app.screen, Screen::Offline { tab: MonitorTab::Io, .. }));
+            assert!(matches!(
+                app.screen,
+                Screen::Offline {
+                    tab: MonitorTab::Tasks,
+                    ..
+                }
+            ));
             app.handle_key(KeyCode::BackTab);
             assert!(matches!(
                 app.screen,
@@ -4834,7 +4928,13 @@ mod tests {
             (AllocationStackFilter::All, 5, 8)
         );
         app.handle_key(KeyCode::Tab);
-        assert!(matches!(app.screen, Screen::Connected { tab: MonitorTab::Io, .. }));
+        assert!(matches!(
+            app.screen,
+            Screen::Connected {
+                tab: MonitorTab::Tasks,
+                ..
+            }
+        ));
         app.handle_key(KeyCode::BackTab);
         app.handle_key(KeyCode::Char('t'));
         assert_eq!(
@@ -5094,7 +5194,7 @@ mod tests {
     fn offline_navigation_never_starts_remote_actions() {
         let mut app = App::offline(PathBuf::from("capture.seismograph"));
         app.finish_offline_load(empty_capture());
-        for tab in ['1', '2', '3', '4', '5', '6', '7', '8'] {
+        for tab in ['1', '2', '3', '4', '5', '6', '7', '8', '9'] {
             app.handle_key(KeyCode::Char(tab));
             for key in ['s', 'r', 'c', 'd', 'C'] {
                 assert!(!app.handle_key(KeyCode::Char(key)));

@@ -45,7 +45,6 @@ impl TaskHandle {
     }
 
     /// Attaches queue context to this task.
-    #[must_use]
     pub fn with_context(mut self, origin: Option<crate::WorkerOrigin>, parent: Option<TaskId>) -> Self {
         self.origin = origin.and_then(|origin| origin.worker_for(self.data.runtime));
         self.data.parent = parent;
@@ -53,7 +52,6 @@ impl TaskHandle {
     }
 
     /// Records the task entering a queue.
-    #[must_use]
     pub fn enqueued(mut self, queue_len: u64) -> QueuedTask {
         seismograph::record(EventClass::RuntimeTask, || {
             let enqueued_at = EventTimestamp::now();
@@ -150,7 +148,6 @@ pub struct Task {
 
 impl Task {
     /// Creates a task with no retained queue lifecycle.
-    #[must_use]
     pub fn unrecorded(identity: TaskIdentity, worker: &super::Worker) -> Self {
         Self {
             data: TaskData {
@@ -239,11 +236,16 @@ impl Poll {
     /// # Panics
     ///
     /// Panics if `worker` belongs to another runtime or did not start this poll.
+    #[must_use = "a pending poll returns the task for its next poll"]
     pub fn finished(self, worker: &super::Worker, outcome: Option<TaskOutcome>) -> Option<Task> {
         self.finished_with::<true>(worker, outcome)
     }
 
     #[doc(hidden)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the affine poll transition consumes its optional terminal outcome"
+    )]
     pub fn finished_with<const RECORDING: bool>(self, worker: &super::Worker, outcome: Option<TaskOutcome>) -> Option<Task> {
         worker.validate_runtime(self.data.runtime);
         assert_eq!(

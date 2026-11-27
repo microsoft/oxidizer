@@ -47,6 +47,10 @@ impl Worker {
 
     /// Returns whether runtime-task events are currently enabled.
     #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "recording is selected through the worker that owns the executor cycle"
+    )]
     pub fn is_recording(&self) -> bool {
         is_enabled(EventClass::RuntimeTask)
     }

@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus,
-    TaskHistogram, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, RuntimeTasksFocus, Screen,
+    TaskEventsFocus, TaskHistogram, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +32,8 @@ pub(super) enum ListTarget {
     RuntimeTasks,
     RuntimeActivity,
     RuntimeHistogram(TaskHistogram),
+    AsynchronousTaskGroups,
+    BlockingTaskGroups,
     TaskOperations,
     TaskOccurrences,
     IoResources,
@@ -55,6 +57,7 @@ impl ListTarget {
             | Self::RuntimeHistogram(_)
             | Self::TaskOperations
             | Self::TaskOccurrences => Some(MonitorTab::Runtime),
+            Self::AsynchronousTaskGroups | Self::BlockingTaskGroups => Some(MonitorTab::Tasks),
             Self::IoResources | Self::IoOperations => Some(MonitorTab::Io),
             Self::CacheTiers | Self::CacheOperations => Some(MonitorTab::Cache),
         }
@@ -222,6 +225,14 @@ impl App {
             ListTarget::RuntimeTasks => {
                 self.runtime_view.focus = RuntimeFocus::Tasks;
                 &mut self.runtime_view.task_selected
+            }
+            ListTarget::AsynchronousTaskGroups => {
+                self.runtime_tasks_view.focus = RuntimeTasksFocus::Asynchronous;
+                &mut self.runtime_tasks_view.asynchronous_selected
+            }
+            ListTarget::BlockingTaskGroups => {
+                self.runtime_tasks_view.focus = RuntimeTasksFocus::Blocking;
+                &mut self.runtime_tasks_view.blocking_selected
             }
             ListTarget::TaskOperations | ListTarget::TaskOccurrences => {
                 self.runtime_view.focus = RuntimeFocus::Events;

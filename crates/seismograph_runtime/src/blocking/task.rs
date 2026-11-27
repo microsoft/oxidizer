@@ -43,7 +43,6 @@ impl TaskHandle {
     }
 
     /// Attaches queue context to this task.
-    #[must_use]
     pub fn with_context(mut self, origin: Option<crate::WorkerOrigin>, parent: Option<TaskId>) -> Self {
         self.origin = origin.and_then(|origin| origin.worker_for(self.data.runtime));
         self.data.parent = parent;
@@ -51,7 +50,6 @@ impl TaskHandle {
     }
 
     /// Records the task entering a queue.
-    #[must_use]
     pub fn enqueued(mut self, queue_len: u64) -> QueuedTask {
         seismograph::record(EventClass::RuntimeTask, || {
             let enqueued_at = EventTimestamp::now();
@@ -131,7 +129,7 @@ impl Drop for QueuedTask {
                 None,
                 EventTimestamp::now(),
                 0,
-                TaskOutcome::Cancelled,
+                &TaskOutcome::Cancelled,
                 BacktraceCapture::Never,
             );
         }
@@ -160,6 +158,10 @@ impl Execution {
     /// # Panics
     ///
     /// Panics if `worker` belongs to another runtime or did not start this task.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the affine execution transition consumes its terminal outcome"
+    )]
     pub fn finished(mut self, worker: &super::Worker, outcome: TaskOutcome) {
         worker.validate_runtime(self.data.runtime);
         assert_eq!(worker.id(), self.worker, "finish a blocking task on the worker that started it");
@@ -182,7 +184,7 @@ impl Execution {
             Some(worker.id()),
             finished_at,
             crate::runtime::duration_nanos(finished_at, started_at),
-            outcome,
+            &outcome,
             backtrace,
         );
         self.finish_on_drop = false;
@@ -204,7 +206,7 @@ impl Drop for Execution {
                 Some(self.worker),
                 finished_at,
                 crate::runtime::duration_nanos(finished_at, started_at),
-                TaskOutcome::Cancelled,
+                &TaskOutcome::Cancelled,
                 BacktraceCapture::Never,
             );
         }
@@ -216,7 +218,7 @@ fn record_finished(
     worker: Option<WorkerId>,
     at: EventTimestamp,
     duration: u64,
-    outcome: TaskOutcome,
+    outcome: &TaskOutcome,
     backtrace: BacktraceCapture,
 ) {
     if !data.recorded {

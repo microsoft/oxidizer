@@ -14,13 +14,13 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, Gauge, Graph
 use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, RecordingPolicy};
 use seismograph_protocol::monitor::MonitorDescriptor;
 
-#[cfg(test)]
-use super::app::HeapFocus;
 use super::app::{
     ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState,
-    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen,
-    ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
+    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeTasksViewState,
+    RuntimeViewState, Screen, ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
 };
+#[cfg(test)]
+use super::app::{HeapFocus, RuntimeTasksFocus};
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
     ThreadSnapshot, cache_event_label,
@@ -32,6 +32,8 @@ use super::mouse::{ListTarget, MouseRows};
 
 #[path = "info_ui.rs"]
 mod info_ui;
+#[path = "runtime_tasks_ui.rs"]
+mod runtime_tasks_ui;
 #[path = "runtime_ui.rs"]
 mod runtime_ui;
 #[path = "task_events_ui.rs"]
@@ -103,6 +105,7 @@ impl App {
                     primitive_view: self.primitive_view,
                     thread_view: self.thread_view,
                     runtime_view: self.runtime_view,
+                    runtime_tasks_view: self.runtime_tasks_view,
                     io_view: self.io_view,
                     cache_view: self.cache_view,
                     panels: &self.panels,
@@ -116,7 +119,7 @@ impl App {
         let line = match &self.screen {
             Screen::Browse => browse_footer(&self.status),
             Screen::Offline { .. } => Line::from(format!(
-                " F1 help · Offline · read-only · F filters · Tab/1–8 tabs · drag borders to resize · q/Esc quit · {}",
+                " F1 help · Offline · read-only · F filters · Tab/1–9 tabs · drag borders to resize · q/Esc quit · {}",
                 self.status
             )),
             Screen::Connected { recording, snapshot, .. } => {
@@ -243,6 +246,7 @@ struct ConnectedView<'a> {
     primitive_view: PrimitiveViewState,
     thread_view: ThreadViewState,
     runtime_view: RuntimeViewState,
+    runtime_tasks_view: RuntimeTasksViewState,
     io_view: IoViewState,
     cache_view: CacheViewState,
     panels: &'a super::panels::Panels,
@@ -273,6 +277,10 @@ fn row_is_selected(first: usize, index: usize, selected: usize) -> bool {
     first.checked_add(index) == Some(selected)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exhaustive dispatcher keeps every top-level monitor tab visible"
+)]
 fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, view: &ConnectedView<'_>) {
     let [tabs, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(area);
     let tabs_block = Block::default().borders(Borders::ALL);
@@ -349,6 +357,14 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot,
             view.snapshot_error,
             view.runtime_view,
+        ),
+        MonitorTab::Tasks => runtime_tasks_ui::draw(
+            frame,
+            &view.panels.rows,
+            [panels[0], panels[1]],
+            view.snapshot.map(|snapshot| &snapshot.runtime),
+            view.snapshot_error,
+            view.runtime_tasks_view,
         ),
         MonitorTab::Io => draw_io(
             frame,
@@ -2532,20 +2548,62 @@ mod tests {
                         subject_id: 10,
                         related_id: 0,
                         value_0: 200,
-                        value_1: 0,
+                        value_1: 1,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    3,
+                    10,
+                    EventKind::WorkerStarted,
+                    EventPayload::Runtime(RuntimeEvent {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(3).unwrap()),
+                        subject_id: 3,
+                        related_id: 0,
+                        value_0: 2,
+                        value_1: u64::from(u32::MAX),
                     }),
                     &[],
                 ),
                 runtime_event(
                     1,
-                    10,
+                    11,
+                    EventKind::TaskEnqueued,
+                    EventPayload::Runtime(RuntimeEvent {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: None,
+                        subject_id: 20,
+                        related_id: 10,
+                        value_0: 12,
+                        value_1: 0,
+                    }),
+                    &[0x1000],
+                ),
+                runtime_event(
+                    3,
+                    12,
+                    EventKind::TaskMaterialized,
+                    EventPayload::Runtime(RuntimeEvent {
+                        runtime_id: RuntimeId::from_raw(1).unwrap(),
+                        worker_id: Some(WorkerId::from_raw(3).unwrap()),
+                        subject_id: 20,
+                        related_id: 0,
+                        value_0: 50,
+                        value_1: 17,
+                    }),
+                    &[],
+                ),
+                runtime_event(
+                    3,
+                    13,
                     EventKind::TaskCompleted,
                     EventPayload::Runtime(RuntimeEvent {
                         runtime_id: RuntimeId::from_raw(1).unwrap(),
-                        worker_id: Some(WorkerId::from_raw(2).unwrap()),
-                        subject_id: 10,
+                        worker_id: Some(WorkerId::from_raw(3).unwrap()),
+                        subject_id: 20,
                         related_id: 0,
-                        value_0: 0,
+                        value_0: 300,
                         value_1: 0,
                     }),
                     &[],
@@ -3464,6 +3522,7 @@ mod tests {
             primitive_view: app.primitive_view,
             thread_view: app.thread_view,
             runtime_view: app.runtime_view,
+            runtime_tasks_view: app.runtime_tasks_view,
             io_view: app.io_view,
             cache_view: app.cache_view,
             panels: &app.panels,
@@ -5096,6 +5155,18 @@ mod tests {
                 app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
+        for focus in [RuntimeTasksFocus::Asynchronous, RuntimeTasksFocus::Blocking] {
+            app.runtime_tasks_view.focus = focus;
+            app.screen = Screen::Connected {
+                descriptor: descriptor(),
+                recording: RecordingConfiguration::default(),
+                tab: MonitorTab::Tasks,
+                snapshot: Some(representative_capture()),
+            };
+            output.push_str(&render_debug(|frame| {
+                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
+            }));
+        }
         for focus in [IoFocus::Resources, IoFocus::Operations] {
             app.io_view.focus = focus;
             app.screen = Screen::Connected {
@@ -5121,6 +5192,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (690_177, 572_185_320_965_532_488));
+        assert_eq!(stable_digest(&output), (737_895, 5_498_159_947_541_016_229));
     }
 }

@@ -37,6 +37,7 @@ pub(super) enum Context {
     ThreadObjects,
     RuntimeWorkers,
     RuntimeTasks,
+    RuntimeTaskGroups,
     RuntimeActivity,
     RuntimeEvents,
     IoResources,
@@ -127,6 +128,7 @@ impl App {
                 RuntimeFocus::Activity => Context::RuntimeActivity,
                 RuntimeFocus::Events => Context::RuntimeEvents,
             },
+            MonitorTab::Tasks => Context::RuntimeTaskGroups,
             MonitorTab::Io => match self.io_view.focus {
                 IoFocus::Resources => Context::IoResources,
                 IoFocus::Operations => Context::IoOperations,

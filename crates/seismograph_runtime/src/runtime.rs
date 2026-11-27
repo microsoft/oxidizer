@@ -172,6 +172,10 @@ impl RuntimeHandle {
         clippy::panic,
         reason = "registering a worker after runtime retirement violates the documented caller contract"
     )]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "worker registration consumes the metadata supplied for that new worker"
+    )]
     pub(crate) fn register_worker(&self, metadata: WorkerMetadata) -> worker::WorkerRegistration {
         let worker = without_recording(|| {
             let worker = Arc::new(WorkerControl {

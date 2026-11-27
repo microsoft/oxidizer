@@ -227,6 +227,8 @@ pub struct TaskPoll {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct BlockingTask {
+    /// Time spent in the blocking queue, when retained.
+    pub queue_duration_nanos: Option<u64>,
     /// Execution start, when retained.
     pub started_at: Option<EventTimestamp>,
     /// Execution finish, when retained.
@@ -397,6 +399,10 @@ impl TaskBuilder {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one task event carries a fixed timestamp, worker, relation, and two numeric values"
+    )]
     fn observe(
         &mut self,
         kind: EventKind,
@@ -422,6 +428,7 @@ impl TaskBuilder {
                 self.task.state = TaskState::Running;
                 if worker_role == Some(WorkerRole::Blocking) {
                     let task = self.blocking();
+                    task.queue_duration_nanos = Some(value_0);
                     task.worker = worker;
                     task.started_at = Some(timestamp);
                 }
@@ -544,9 +551,9 @@ fn task_id(kind: EventKind, subject: u64, related: u64) -> Option<TaskId> {
         | EventKind::TaskPollFinished
         | EventKind::TaskCompleted
         | EventKind::TaskCanceled
-        | EventKind::TaskPanicked => subject,
+        | EventKind::TaskPanicked
+        | EventKind::InstanceRelocated => subject,
         EventKind::TaskReady | EventKind::TransferStarted | EventKind::TransferFinished => related,
-        EventKind::InstanceRelocated => subject,
         _ => return None,
     };
     TaskId::from_raw(raw)
@@ -595,5 +602,27 @@ mod tests {
         };
         assert_eq!(task.polls[0].duration_nanos, Some(11));
         assert_eq!(model.runtimes[0].workers[0].current_task, None);
+    }
+
+    #[test]
+    fn blocking_history_retains_queue_and_execution_durations() {
+        let events = Events {
+            events: vec![
+                event(EventKind::WorkerStarted, 3, Some(3), 2, u64::from(u32::MAX)),
+                event(EventKind::TaskEnqueued, 7, None, 17, 0),
+                event(EventKind::TaskMaterialized, 7, Some(3), 41, 9),
+                event(EventKind::TaskCompleted, 7, Some(3), 83, 0),
+            ],
+            ..Events::default()
+        };
+
+        let model = RuntimeModel::from_events(&events, None);
+        let TaskKind::Blocking(task) = &model.runtimes[0].tasks[0].kind else {
+            panic!("blocking-worker materialization identifies a blocking task");
+        };
+        assert_eq!(
+            (task.queue_duration_nanos, task.duration_nanos, task.outcome.as_ref(),),
+            (Some(41), Some(83), Some(&TaskOutcome::Completed))
+        );
     }
 }

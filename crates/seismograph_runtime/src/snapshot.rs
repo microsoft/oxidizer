@@ -174,6 +174,10 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// Decodes one runtime source payload.
+///
+/// # Errors
+///
+/// Returns an error when the payload has an unsupported schema or malformed data.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     if reader.read(MAGIC.len())? != MAGIC {
@@ -216,7 +220,7 @@ pub(crate) fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<(), ()> {
     writer.write(&MAGIC)?;
     writer.u16(WIRE_VERSION)?;
     writer.u16(SCHEMA_VERSION)?;
-    writer.u32(u32::try_from(snapshot.runtimes.len()).map_err(|_| ())?)?;
+    writer.u32(u32::try_from(snapshot.runtimes.len()).map_err(|_overflow| ())?)?;
     for runtime in &snapshot.runtimes {
         write_runtime(&mut writer, runtime)?;
     }
@@ -225,13 +229,13 @@ pub(crate) fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<(), ()> {
 
 fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
     writer.u64(runtime.id.get())?;
-    writer.u32(u32::try_from(runtime.name.len()).map_err(|_| ())?)?;
+    writer.u32(u32::try_from(runtime.name.len()).map_err(|_overflow| ())?)?;
     writer.u32(runtime.configured_workers)?;
     writer.u8(backtrace_wire_value(runtime.lifecycle_backtraces))?;
     writer.u8(runtime.state.wire_value())?;
     writer.u64(runtime.created_at.ticks())?;
     writer.u64(runtime.retired_at.map_or(u64::MAX, EventTimestamp::ticks))?;
-    writer.u32(u32::try_from(runtime.workers.len()).map_err(|_| ())?)?;
+    writer.u32(u32::try_from(runtime.workers.len()).map_err(|_overflow| ())?)?;
     writer.write(runtime.name.as_bytes())?;
     for worker in &runtime.workers {
         writer.u64(worker.id.get())?;
@@ -252,7 +256,9 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
     let created_at = EventTimestamp::from_ticks(reader.u64()?);
     let retired_at = optional_timestamp(reader.u64()?);
     let worker_count = reader.u32()? as usize;
-    let name = std::str::from_utf8(reader.read(name_len)?).map_err(|_| malformed())?.to_owned();
+    let name = std::str::from_utf8(reader.read(name_len)?)
+        .map_err(|_invalid_utf8| malformed())?
+        .to_owned();
     let mut workers = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
         let id = WorkerId::from_raw(reader.u64()?).ok_or_else(malformed)?;
@@ -377,15 +383,15 @@ impl<'a> Reader<'a> {
     }
 
     fn u16(&mut self) -> Result<u16, Error> {
-        Ok(u16::from_le_bytes(self.read(2)?.try_into().map_err(|_| malformed())?))
+        Ok(u16::from_le_bytes(self.read(2)?.try_into().map_err(|_invalid_length| malformed())?))
     }
 
     fn u32(&mut self) -> Result<u32, Error> {
-        Ok(u32::from_le_bytes(self.read(4)?.try_into().map_err(|_| malformed())?))
+        Ok(u32::from_le_bytes(self.read(4)?.try_into().map_err(|_invalid_length| malformed())?))
     }
 
     fn u64(&mut self) -> Result<u64, Error> {
-        Ok(u64::from_le_bytes(self.read(8)?.try_into().map_err(|_| malformed())?))
+        Ok(u64::from_le_bytes(self.read(8)?.try_into().map_err(|_invalid_length| malformed())?))
     }
 }
 
