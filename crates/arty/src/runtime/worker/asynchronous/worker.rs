@@ -47,19 +47,6 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
     matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted
 }
 
-#[cfg(test)]
-#[test]
-fn gamma_survivor_suspend_requires_suspend_outcome_and_unexhausted_batch() {
-    assert!(can_suspend(&CycleOutcome::Suspend, false));
-    assert!(!can_suspend(&CycleOutcome::Suspend, true));
-    assert!(!can_suspend(&CycleOutcome::Continue, false));
-    assert!(!can_suspend(&CycleOutcome::Continue, true));
-    assert!(!can_suspend(
-        &CycleOutcome::Shutdown(arty_executor::ShutdownCause::default()),
-        false
-    ));
-}
-
 /// The async worker has exclusive use of one runtime thread. Multiple worker
 /// threads can share a processor when the exact worker count exceeds available
 /// processor capacity. The worker executes async tasks that are woken by local

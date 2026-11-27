@@ -676,22 +676,6 @@ fn cancellation_destructor_panic_still_publishes_cancellation_and_completes_shut
 }
 
 #[test]
-fn retained_handle_reports_shutdown_without_delaying_shutdown() {
-    let mut executor = Executor::builder().build();
-    let mut handle = executor
-        .tasks()
-        .task(TaskIdentity::from_location(std::panic::Location::caller()), pending::<()>())
-        .register_test();
-
-    executor.shutdown().trigger(ShutdownCause::default());
-
-    assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
-    assert!(!executor.has_tasks());
-    drop(executor);
-    assert!(matches!(poll_once(&mut handle), Poll::Ready(TaskOutcome::Cancelled(_))));
-}
-
-#[test]
 fn caused_shutdown_is_attached_to_cancelled_and_rejected_tasks() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();

@@ -65,14 +65,9 @@ fn first_trigger_publishes_the_cause_and_wakes_the_owner_once() {
 }
 
 #[test]
-fn default_cause_has_no_error() {
+fn default_cause_and_clone_have_no_error() {
     assert_impl_all!(ShutdownCause: Clone, Debug, Default, Send, Sync, UnwindSafe, RefUnwindSafe);
 
-    assert!(ShutdownCause::default().as_error().is_none());
-}
-
-#[test]
-fn default_cause_and_clone_have_no_error() {
     let cause = ShutdownCause::default();
     let clone = cause.clone();
 

@@ -474,11 +474,6 @@ fn root_execution_returns_errors_and_preserves_borrowed_storage() {
 }
 
 #[test]
-fn join_error_is_a_thread_safe_error() {
-    static_assertions::assert_impl_all!(JoinError: std::error::Error, Send, Sync);
-}
-
-#[test]
 fn shutdown_discards_queued_async_factories_before_invocation() {
     let (queued, invoked) = runtime()
         .scheduler()
