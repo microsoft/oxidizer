@@ -15,8 +15,9 @@ use futures::executor::block_on;
 use health::{Aggregator, Attribute, Component, Health, Monitor, Publisher, Report, Signal};
 use observed::Sink;
 use static_assertions::assert_impl_all;
-use testing_aids::is_mutation_testing;
 use thread_aware::{ThreadAware, ThreadBuilder};
+
+const RECEIVE_TIMEOUT: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 5 });
 
 assert_impl_all!(Aggregator: Send, Sync, Clone);
 assert_impl_all!(Monitor: Send, Sync, Clone);
@@ -47,11 +48,7 @@ impl Wake for BlockingWake {
 }
 
 fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
-    if is_mutation_testing() {
-        receiver.recv().map_err(Into::into)
-    } else {
-        receiver.recv_timeout(Duration::from_secs(5))
-    }
+    receiver.recv_timeout(RECEIVE_TIMEOUT)
 }
 
 fn wait_for_component(component: &mut Component, state: Health) {
@@ -619,7 +616,7 @@ fn a_burst_of_publishers_yields_to_another_component_and_converges() {
     let mut changed = pin!(blocker.changed());
     assert!(changed.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
     trigger.degraded("pause");
-    waiting.recv().unwrap();
+    receive(&waiting).unwrap();
 
     let mut component = aggregator.component("clients");
     let publishers: Vec<_> = (0..512).map(|_| component.publisher()).collect();
@@ -634,7 +631,7 @@ fn a_burst_of_publishers_yields_to_another_component_and_converges() {
     let mut probe_changed = pin!(probe.changed());
     assert!(probe_changed.as_mut().poll(&mut Context::from_waker(&probe_waker)).is_pending());
     release.send(()).unwrap();
-    probe_waiting.recv().unwrap();
+    receive(&probe_waiting).unwrap();
     let count_at_probe = block_on(component.report()).publisher_count(Health::Healthy);
     probe_release.send(()).unwrap();
     assert!(count_at_probe < publishers.len(), "a burst must yield to other pending components");
