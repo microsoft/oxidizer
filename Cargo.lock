@@ -4127,6 +4127,7 @@ version = "0.5.0"
 dependencies = [
  "alloc_tracker",
  "criterion",
+ "derive_more",
  "libc",
  "loom",
  "many_cpus",

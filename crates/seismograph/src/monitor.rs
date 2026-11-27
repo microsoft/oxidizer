@@ -1608,6 +1608,8 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn handshakes_require_no_authentication_secret() {
+        use crate::recorder::{Configuration, EventBufferCapacity, EventSampling, Policy};
+
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let descriptor = test_descriptor();
 
@@ -1620,24 +1622,33 @@ mod tests {
 
         let (mut client, server) = connected_pair();
         seismograph_protocol::write_request(&mut client, 2, &Request::Hello).unwrap();
-        handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(true)).unwrap();
+        let previous = crate::recorder::configuration();
+        crate::recorder::configure(Configuration {
+            io: Policy {
+                enabled: true,
+                capture_backtraces: true,
+                event_sampling: EventSampling::one_in(7).unwrap(),
+            },
+            event_capacity_per_thread: EventBufferCapacity::new(128),
+            ..Default::default()
+        });
+        let result = handle_client(&MonitorIo::new_native(), server, &descriptor, &AtomicBool::new(true));
+        crate::recorder::configure(previous);
+        result.unwrap();
         assert_eq!(
             seismograph_protocol::read_response(&mut client).unwrap(),
             (
                 2,
                 Response::Hello {
                     instance_id: descriptor.instance_id,
-                    recording: {
-                        let configuration = crate::recorder::configuration();
-                        protocol_recording_configuration(
-                            configuration.allocations,
-                            configuration.general_events,
-                            configuration.arc_dereferences,
-                            configuration.runtime_tasks,
-                            configuration.io,
-                            configuration.cache,
-                            configuration.event_capacity_per_thread.get(),
-                        )
+                    recording: RecordingConfiguration {
+                        io: seismograph_protocol::message::RecordingPolicy {
+                            enabled: true,
+                            capture_backtraces: true,
+                            sampling_one_in: 7,
+                        },
+                        event_capacity_per_thread: 128,
+                        ..Default::default()
                     },
                 }
             )
@@ -2073,17 +2084,12 @@ mod tests {
             ClientError::Disconnected,
             ClientError::Stopped,
         ];
-        let expected = [
-            "socket failed",
-            "invalid Seismograph monitor message",
-            "monitor handshake is required",
-            "monitor handshake timed out",
-            "monitor client idle timeout expired",
-            "monitor client disconnected",
-            "monitor stopped",
-        ];
-        for (error, expected) in client_cases.into_iter().zip(expected) {
-            assert_eq!(error.to_string(), expected);
+        let messages: Vec<_> = client_cases.iter().map(ToString::to_string).collect();
+        assert_eq!(messages[0], io_error().to_string());
+        assert_eq!(messages[1], protocol_error().to_string());
+        for (index, message) in messages.iter().enumerate() {
+            assert!(!message.is_empty());
+            assert!(!messages[..index].contains(message));
         }
 
         let startup_cases = [

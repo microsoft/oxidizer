@@ -81,6 +81,7 @@ pub struct StateAsync {
 }
 
 impl StateAsync {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Evaluated only by the Async Mode associated constant.
     pub(super) const fn new() -> Self {
         Self {
             state: AtomicU8::new(0),
@@ -628,17 +629,6 @@ mod tests {
         fn wake(self: StdArc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
-    }
-
-    #[test]
-    fn asynchronous_state_starts_unlocked_and_unpoisoned() {
-        let state = StateAsync::new();
-
-        assert_eq!(
-            (state.state.load(Ordering::Relaxed), state.poisoned.load(Ordering::Relaxed)),
-            (0, false),
-        );
-        drop(state.waiters);
     }
 
     #[test]

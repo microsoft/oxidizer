@@ -305,9 +305,9 @@ fn runtime_and_transfer_events_preserve_one_time_lifecycle_and_payloads() {
     let started = events[3].runtime().unwrap();
     let relocated = events[4].runtime().unwrap();
     let finished = events[5].runtime().unwrap();
+    assert_ne!(started.subject_id, 0);
     assert_eq!(
         (
-            started.subject_id,
             started.related_id,
             started.value_0,
             started.value_1,
@@ -320,7 +320,6 @@ fn runtime_and_transfer_events_preserve_one_time_lifecycle_and_payloads() {
             finished.value_1
         ),
         (
-            started.subject_id,
             id.get(),
             second.id().get(),
             first.id().get(),

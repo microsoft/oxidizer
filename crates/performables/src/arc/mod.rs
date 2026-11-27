@@ -204,9 +204,13 @@ pub struct Weak<T: ?Sized> {
 }
 
 #[doc(hidden)]
+#[derive(derive_more::Debug)]
 pub struct AffinityState<T: ?Sized, S: private::AffinityStrategy> {
+    #[debug(skip)]
     shared: StdArc<AffinityShared<T, S>>,
+    #[debug(skip)]
     current: StdArc<T>,
+    #[debug(skip)]
     current_owner: Option<Owner>,
 }
 
@@ -223,12 +227,6 @@ struct AffinityInner<T: ?Sized, S: private::AffinityStrategy> {
 struct AffinityStorage<T, S: private::AffinityStrategy> {
     owner: Option<Owner>,
     values: HashMap<S::Key, T>,
-}
-
-impl<T: ?Sized, S: private::AffinityStrategy> fmt::Debug for AffinityState<T, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AffinityState").finish_non_exhaustive()
-    }
 }
 
 impl<T, S: private::AffinityStrategy> AffinityStorage<T, S> {
@@ -1894,18 +1892,5 @@ mod tests {
         let value = Arc::<u64, PerThread>::new_with(|| 42);
 
         assert_eq!(*Arc::into_arc(value), 42);
-    }
-
-    #[test]
-    fn affinity_internal_state_and_factory_have_stable_debug_shapes() {
-        let value = Arc::<u64, PerThread>::new_with(|| 42);
-        let state_debug = format!("{:?}", value.state);
-        let inner = value.state.shared.inner.read().unwrap();
-        let factory_debug = format!("{:?}", inner.factory.as_ref().unwrap());
-
-        assert_eq!(
-            (state_debug, factory_debug),
-            ("AffinityState { .. }".to_owned(), "Factory { source: None, .. }".to_owned())
-        );
     }
 }

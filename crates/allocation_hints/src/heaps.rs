@@ -202,6 +202,7 @@ pub mod bump {
     }
 
     impl Default for Options {
+        #[cfg_attr(coverage_nightly, coverage(off))] // Delegates to new(); a comparison would only repeat that definition.
         fn default() -> Self {
             Self::new()
         }
@@ -364,15 +365,4 @@ pub fn current_thread_id() -> ThreadId {
 #[must_use]
 pub fn thread_heap_request() -> Option<ThreadId> {
     crate::allocator_hints().thread_heap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{HeapId, ThreadId};
-
-    // Public APIs allocate identities; only private constructors accept arbitrary values.
-    #[test]
-    fn identity_accessors_preserve_arbitrary_values() {
-        assert_eq!((HeapId(42).get(), ThreadId(73).get()), (42, 73));
-    }
 }

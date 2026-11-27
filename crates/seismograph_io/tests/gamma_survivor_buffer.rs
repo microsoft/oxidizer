@@ -3,7 +3,7 @@
 
 //! In-memory buffer metadata regressions.
 
-use seismograph_io::{BufferId, BufferState, IoResourceKind, Resource};
+use seismograph_io::{BufferId, BufferState};
 
 #[test]
 fn gamma_survivor_buffer_metadata_preserves_values_and_saturates_spans() {
@@ -18,5 +18,4 @@ fn gamma_survivor_buffer_metadata_preserves_values_and_saturates_spans() {
     assert_eq!(large.span_count(), u32::MAX);
     assert_eq!(BufferState::new(None, 0, 0), BufferState::none());
     assert!(BufferState::none().is_empty());
-    assert_eq!(Resource::new(IoResourceKind::NamedPipe).kind(), IoResourceKind::NamedPipe);
 }

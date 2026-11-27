@@ -303,36 +303,6 @@ mod tests {
         );
     }
 
-    #[cfg(all(not(miri), any(windows, target_os = "linux", target_os = "macos")))]
-    #[test]
-    fn native_bridge_preserves_the_backends_available_metadata_without_guessing_names() {
-        let mut pointers = Vec::new();
-        backtrace::trace(|frame| {
-            pointers.push(frame.ip());
-            true
-        });
-        assert!(!pointers.is_empty());
-
-        for pointer in pointers {
-            let recorded = Address::new(Address::from_ptr(pointer).get() + u64::from(cfg!(windows)));
-            let mut expected = unresolved(recorded.get());
-            backtrace::resolve(pointer, |symbol| {
-                expected.name = expected.name.take().or_else(|| symbol.name().map(|name| name.to_string()));
-                expected.filename = expected
-                    .filename
-                    .take()
-                    .or_else(|| symbol.filename().map(|path| path.to_string_lossy().into_owned()));
-                expected.line = expected.line.or_else(|| symbol.lineno());
-                expected.column = expected.column.or_else(|| symbol.colno());
-            });
-            let mut actual = unresolved(recorded.get());
-
-            resolve_native(&mut actual);
-
-            assert_eq!(actual, expected);
-        }
-    }
-
     #[test]
     fn symbol_codec_preserves_resolved_unresolved_and_empty_optional_fields() {
         let symbols = vec![

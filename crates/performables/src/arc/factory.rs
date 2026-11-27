@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use thread_aware_core::{Thread, ThreadAware};
 
+#[derive(derive_more::Debug)]
 pub(super) struct Factory<T: ?Sized> {
+    #[debug(skip)]
     materializer: Arc<dyn Materializer<T>>,
     source: Option<Thread>,
 }
@@ -106,12 +107,6 @@ impl<T: ?Sized> Factory<T> {
         let source = self.source.as_ref().or(source);
         let value = self.materializer.materialize(current, source, destination);
         Arc::from(value)
-    }
-}
-
-impl<T: ?Sized> fmt::Debug for Factory<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Factory").field("source", &self.source).finish_non_exhaustive()
     }
 }
 

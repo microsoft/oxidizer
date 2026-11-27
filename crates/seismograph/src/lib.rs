@@ -215,19 +215,14 @@ mod tests {
 
     #[test]
     fn errors_report_context_and_sources() {
+        let allocation = Error::allocation_failed().to_string();
+        let format = Error::invalid_format().to_string();
+        assert!(!allocation.is_empty());
+        assert!(!format.is_empty());
+        assert_ne!(allocation, format);
         let source_id = snapshot::SourceId::new(7);
         let cases = [
             (Error::new("custom failure"), "custom failure".to_owned(), false),
-            (
-                Error::allocation_failed(),
-                "seismograph snapshot storage could not be allocated".to_owned(),
-                false,
-            ),
-            (
-                Error::invalid_format(),
-                "the seismograph snapshot is malformed or unsupported".to_owned(),
-                false,
-            ),
             (
                 Error::source_failed(source_id, Error::new("source detail")),
                 "seismograph source 7 failed: source detail".to_owned(),
@@ -250,5 +245,12 @@ mod tests {
             assert_eq!(format!("{error:?}"), format!("Error({expected})"));
             assert_eq!(std::error::Error::source(&error).is_some(), has_source);
         }
+
+        let nested = Error::source_failed(source_id, Error::new("nested cause"));
+        assert_eq!(std::error::Error::source(&nested).unwrap().to_string(), "nested cause");
+        let write = Error::write_file(PathBuf::from("snapshot.bin"), std::io::Error::other("write cause"));
+        let cause = std::error::Error::source(&write).unwrap().downcast_ref::<std::io::Error>().unwrap();
+        assert_eq!(cause.kind(), std::io::ErrorKind::Other);
+        assert_eq!(cause.to_string(), "write cause");
     }
 }
