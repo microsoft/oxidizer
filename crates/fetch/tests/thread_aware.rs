@@ -5,7 +5,7 @@
 
 use std::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, OnceLock};
+use std::sync::{Arc, Barrier, LazyLock};
 
 use bytes::Bytes;
 use bytesbuf::mem::GlobalPool;
@@ -16,11 +16,7 @@ use thread_aware::{ThreadAware, ThreadBuilder};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -28,7 +24,7 @@ async fn not_isolated_on_tokio() {
     let counts = Arc::new(AtomicUsize::new(0));
     let clone = Arc::clone(&counts);
 
-    let client = HttpClient::builder_tokio(TokioDeps::new(&tick::Clock::new_tokio(), memory().clone()))
+    let client = HttpClient::builder_tokio(TokioDeps::new(&tick::Clock::new_tokio(), MEMORY.clone()))
         .custom_pipeline(move |dispatch, _| {
             clone.fetch_add(1, Ordering::Relaxed);
             dispatch
@@ -65,7 +61,7 @@ async fn not_isolated_on_tokio() {
 async fn tokio_client_relocated_ensure_works() {
     let server = serve(Bytes::from("Hello World!")).await;
     let url = server.uri() + "/hello-world";
-    let client = HttpClient::builder_tokio(TokioDeps::new(&tick::Clock::new_tokio(), memory().clone()))
+    let client = HttpClient::builder_tokio(TokioDeps::new(&tick::Clock::new_tokio(), MEMORY.clone()))
         .insecure_allow_http()
         .build();
 

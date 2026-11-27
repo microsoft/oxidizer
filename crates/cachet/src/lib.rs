@@ -321,10 +321,11 @@ pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEnco
 #[cfg(test)]
 testing_aids::init_tracing!();
 
+#[cfg(test)]
+use std::sync::LazyLock;
+
 /// Supplies the one general-purpose provider used by the unit-test binary.
 #[cfg(test)]
-fn test_memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+use bytesbuf::mem::GlobalPool;
+#[cfg(test)]
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);

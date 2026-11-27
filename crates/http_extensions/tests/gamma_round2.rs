@@ -3,18 +3,15 @@
 
 //! Round-two request and routing failure contracts.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
+use bytesbuf::mem::GlobalPool;
 use http_extensions::routing::{BaseUriConflict, Router, RouterContext};
 use http_extensions::{HttpBodyBuilder, HttpRequestBuilder, RequestExt};
 use ohno::{ErrorExt, Labeled};
 use templated_uri::{BaseUri, Uri, templated};
 
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: OnceLock<bytesbuf::mem::GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[templated(template = "/{+raw}", unredacted)]
 struct RawPath {
@@ -22,7 +19,7 @@ struct RawPath {
 }
 
 fn bodies() -> HttpBodyBuilder {
-    HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen())
+    HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen())
 }
 
 #[test]

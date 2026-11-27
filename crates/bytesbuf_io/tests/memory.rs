@@ -5,18 +5,17 @@
 
 #![cfg(feature = "test-util")]
 
+use std::sync::LazyLock;
+
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use bytesbuf_io::testing::{FakeRead, FakeWrite, Null, Pending};
 
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn stream_builders_accept_global_pools() {
-    let pool = memory().clone();
+    let pool = MEMORY.clone();
     let reader = FakeRead::builder().contents(BytesView::new()).memory(pool.clone()).build();
     let writer = FakeWrite::builder().memory(pool.clone()).build();
     let null = Null::builder().memory(pool.clone()).build();

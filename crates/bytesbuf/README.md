@@ -492,6 +492,7 @@ avoids allocating a separate pool for each test. Pass this provider to the code 
 
 ```rust
 use std::sync::LazyLock;
+
 use bytesbuf::mem::GlobalPool;
 
 static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
@@ -508,7 +509,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQba2PRxJoqKJobsAWAQOj68Ikb9EJpgVeqIVAbZJKGQSu97t9hZIGCaGJ5dGVzYnVmZjAuMTUuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbxNFnSaMx7SUbxa8YrPh5hXcbAOSCuL9Qs3kb3zVXh5ynji5hZIGCaGJ5dGVzYnVmZjAuMTUuMA
  [__link0]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.15.0/bytesbuf/?search=BytesView

@@ -36,9 +36,8 @@ use crate::pool::Pool;
 /// ```
 /// # #[cfg(feature = "gzip")]
 /// # {
-/// use compressors::{Resources, gzip};
-///
 /// use bytesbuf::mem::GlobalPool;
+/// use compressors::{Resources, gzip};
 ///
 /// // The application owns the provider and passes it to the library.
 /// let resources = Resources::new(GlobalPool::new());
@@ -128,10 +127,11 @@ impl ThreadAware for Resources {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MEMORY;
 
     #[test]
     fn recycling_is_on_by_default_and_its_capacity_is_adjustable() {
-        let recycling = Resources::new(crate::testing::memory().clone());
+        let recycling = Resources::new(MEMORY.clone());
         assert!(recycling.pool().capacity() > 0, "recycling must be the default");
 
         let plain = recycling.with_pool_capacity(0);

@@ -297,7 +297,7 @@ mod tests {
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
-            memory: crate::test_memory().clone().into(),
+            memory: crate::MEMORY.clone().into(),
             extras: (),
         }
     }
@@ -340,7 +340,7 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            memory: crate::test_memory().clone().into(),
+            memory: crate::MEMORY.clone().into(),
             extras: unaware(Arc::clone(&counter)),
         };
 

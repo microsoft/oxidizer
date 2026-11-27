@@ -82,8 +82,8 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
 //! use bytesbuf::mem::GlobalPool;
-//! use fetch::{HttpClient, HttpError};
 //! use fetch::tokio::TokioDeps;
+//! use fetch::{HttpClient, HttpError};
 //! use tick::Clock;
 //!
 //! #[tokio::main]
@@ -697,8 +697,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client =
-//!         HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
+//!     let client = HttpClient::new_tokio(TokioDeps::new(&Clock::new_tokio(), GlobalPool::new()));
 //!
 //!     // Send an HTTPS request.
 //!     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -890,13 +889,14 @@ pub mod documentation;
 // unit test in this crate runs. This keeps `tracing` emission paths executing
 // deterministically (never poisoned into the "disabled" state) and lets per-test
 // thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+#[cfg(test)]
+use std::sync::LazyLock;
+
 /// Supplies the one general-purpose provider used by the unit-test binary.
 #[cfg(test)]
-fn test_memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+use bytesbuf::mem::GlobalPool;
+#[cfg(test)]
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg(test)]
 testing_aids::init_tracing!();
