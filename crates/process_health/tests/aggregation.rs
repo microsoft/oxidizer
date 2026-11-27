@@ -553,10 +553,10 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
     // Both signals are healthy: the worker failure, not the published state, must close readiness.
     publisher.publish(Health::Healthy, [("revision", "2")]);
     let exited = receive(&panic_started).unwrap();
+    assert_eq!(receive(&states), Ok(Health::Unhealthy));
     assert_eq!(receive(&exited), Err(mpsc::RecvTimeoutError::Disconnected));
     assert_eq!(monitor.state(), Health::Unhealthy);
     assert_eq!(component.state(), Health::Unhealthy);
-    assert_eq!(states.try_recv(), Ok(Health::Unhealthy));
     assert!(pending.as_mut().poll(&mut Context::from_waker(&observer)).is_ready());
     drop(pending);
     cursor.changed().unwrap_pending();
