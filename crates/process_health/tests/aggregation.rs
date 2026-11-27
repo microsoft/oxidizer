@@ -452,6 +452,15 @@ fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
     }
     assert!(format!("{component:?}").contains("database"));
     assert!(format!("{publisher:?}").contains("slow replica"));
+
+    let report = block_on(component.report());
+    let (signal, publishers) = report.signals(Health::Degraded).next().unwrap();
+    assert_eq!(publishers, 1);
+    let mut attributes = signal.attributes();
+    let reason = attributes.next().expect("degraded shorthand must publish one reason");
+    assert!(attributes.next().is_none());
+    assert_eq!(reason.name(), "reason");
+    assert_eq!(reason.value(), "slow replica");
 }
 
 #[test]

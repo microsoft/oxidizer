@@ -277,6 +277,12 @@ mod tests {
     #[test]
     #[cfg_attr(panic = "abort", ignore = "requires worker unwinding")]
     fn worker_exit_preserves_the_original_panic_across_terminal_callbacks() {
+        struct Diagnostic;
+        impl Drop for Diagnostic {
+            fn drop(&mut self) {
+                panic_any(());
+            }
+        }
         struct PanickingProcessor;
         impl EventProcessor for PanickingProcessor {
             fn is_interested(&self, _description: &EventDescription) -> bool {
@@ -284,7 +290,7 @@ mod tests {
             }
 
             fn process(&self, _event: &EventView<'_>) {
-                panic_any(());
+                panic_any(Diagnostic);
             }
 
             fn flush(&self) -> Result<(), observed::FlushError> {

@@ -62,6 +62,7 @@ impl PartialEq for Signal {
     // Attributes compare as a multiset; signals carry few attributes, so the quadratic scan is
     // cheaper than allocating a sorted copy.
     fn eq(&self, other: &Self) -> bool {
+        // #[gamma::skip(relational.eq_to_ne, tag = "equivalent", reason = "For equal-length multisets, matching counts are equal exactly when nonmatching counts are equal.")]
         let count = |attributes: &[Attribute], attribute: &Attribute| attributes.iter().filter(|candidate| *candidate == attribute).count();
 
         self.state == other.state
