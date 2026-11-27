@@ -3759,6 +3759,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "performables",
+ "scopeguard",
  "static_assertions",
 ]
 
