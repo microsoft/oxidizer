@@ -169,7 +169,7 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::ThreadParticipants => &[THREAD_PARTICIPANTS],
         Context::ThreadObjects => &[THREAD_OBJECTS, STACK],
         Context::RuntimeWorkers => &[RUNTIME_WORKERS, RUNTIME_TASK_GROUPS],
-        Context::RuntimeTask => &[RUNTIME_TASK_GROUPS],
+        Context::RuntimeTask => &[RUNTIME_TASK_GROUPS, TASK_EVENTS],
         Context::IoResources => &[IO_RESOURCES],
         Context::IoOperations => &[IO_OPERATIONS],
         Context::CacheTiers => &[CACHE_TIERS],
@@ -418,6 +418,18 @@ const RUNTIME_TASK_GROUPS: &Section = section!("RUNTIME TASK TYPES";
     "Avg exec" => "Mean retained blocking execution duration.",
     "Max exec" => "Maximum retained blocking execution duration. An unfinished execution has no duration sample.",
     "a / b / Up / Down" => "Select the async or blocking task-type page, then move the descriptor selection.",
+);
+
+const TASK_EVENTS: &Section = section!("RUNTIME TASK EVENTS";
+    "Operations" => "Inferred operation categories attributed to the selected task.",
+    "Events" => "Retained occurrences attributed to that operation and task.",
+    "Time (ns)" => "Process-monotonic event timestamp in nanoseconds. It is not wall-clock time.",
+    "Thread" => "Recorder thread that emitted the retained event.",
+    "Sequence" => "Per-thread retained event sequence.",
+    "Object" => "Recorded object identity associated with the event.",
+    "unassigned / ambiguous" => "Retained events that could not be attributed to one task, or matched more than one task. They are excluded from task operation counts.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
+    "e / Up / Down / Enter / Backspace" => "Focus event analysis, move the selection, open occurrences, or return to operations.",
 );
 
 const IO_RESOURCES: &Section = section!("I/O RESOURCES";
@@ -683,7 +695,7 @@ mod tests {
             (Context::ThreadParticipants, vec![THREAD_PARTICIPANTS]),
             (Context::ThreadObjects, vec![THREAD_OBJECTS, STACK]),
             (Context::RuntimeWorkers, vec![RUNTIME_WORKERS, RUNTIME_TASK_GROUPS]),
-            (Context::RuntimeTask, vec![RUNTIME_TASK_GROUPS]),
+            (Context::RuntimeTask, vec![RUNTIME_TASK_GROUPS, TASK_EVENTS]),
             (Context::IoResources, vec![IO_RESOURCES]),
             (Context::IoOperations, vec![IO_OPERATIONS]),
             (Context::CacheTiers, vec![CACHE_TIERS]),

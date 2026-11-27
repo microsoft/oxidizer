@@ -47,7 +47,9 @@ pub(super) enum ListTarget {
     RuntimeGroupTasks,
     RuntimeTaskHeader(RuntimeTaskRowSort),
     TaskOperations,
+    TaskOperationHeader(super::app::TaskEventOperationSort),
     TaskOccurrences,
+    TaskOccurrenceHeader(super::app::TaskOccurrenceSort),
     IoResources,
     IoResourceHeader(super::app::IoResourceSort),
     IoOperations,
@@ -90,7 +92,9 @@ impl ListTarget {
                 Some(MonitorTab::Runtime)
             }
             Self::RuntimeTaskHeader(_) => Some(MonitorTab::Runtime),
-            Self::TaskOperations | Self::TaskOccurrences => Some(MonitorTab::RuntimeTask),
+            Self::TaskOperations | Self::TaskOperationHeader(_) | Self::TaskOccurrences | Self::TaskOccurrenceHeader(_) => {
+                Some(MonitorTab::RuntimeTask)
+            }
             Self::IoResources | Self::IoResourceHeader(_) | Self::IoOperations | Self::IoOperationHeader(_) => Some(MonitorTab::Io),
             Self::CacheTiers | Self::CacheTierHeader(_) | Self::CacheOperations | Self::CacheOperationHeader(_) => Some(MonitorTab::Cache),
         }
@@ -325,6 +329,31 @@ impl App {
             self.runtime_view.group_selected_explicitly = false;
             return;
         }
+        if let ListTarget::TaskOperationHeader(sort) = target {
+            let view = &mut self.runtime_view.events;
+            if view.operation_sort == sort {
+                view.operation_descending = !view.operation_descending;
+            } else {
+                view.operation_sort = sort;
+                view.operation_descending = sort == super::app::TaskEventOperationSort::Events;
+            }
+            view.operation_selected = 0;
+            view.event_selected = 0;
+            view.stack_scroll = 0;
+            return;
+        }
+        if let ListTarget::TaskOccurrenceHeader(sort) = target {
+            let view = &mut self.runtime_view.events;
+            if view.occurrence_sort == sort {
+                view.occurrence_descending = !view.occurrence_descending;
+            } else {
+                view.occurrence_sort = sort;
+                view.occurrence_descending = false;
+            }
+            view.event_selected = 0;
+            view.stack_scroll = 0;
+            return;
+        }
         if matches!(
             target,
             ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
@@ -513,6 +542,7 @@ impl App {
             | ListTarget::RuntimeTaskTypeHeader(_)
             | ListTarget::RuntimeGroupTasks => return,
             ListTarget::RuntimeTaskHeader(_) => return,
+            ListTarget::TaskOperationHeader(_) | ListTarget::TaskOccurrenceHeader(_) => return,
             ListTarget::TaskOperations | ListTarget::TaskOccurrences => {
                 self.runtime_view.detail_mode = RuntimeDetailMode::Events;
                 let view = &mut self.runtime_view.events;
@@ -774,6 +804,27 @@ mod tests {
             super::super::app::RuntimeWorkerSort::MaximumExecution
         );
         assert!(app.runtime_view.blocking_worker_descending);
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::RuntimeTask;
+        }
+        app.activate_mouse_row(
+            ListTarget::TaskOperationHeader(super::super::app::TaskEventOperationSort::Events),
+            0,
+        );
+        assert_eq!(
+            app.runtime_view.events.operation_sort,
+            super::super::app::TaskEventOperationSort::Events
+        );
+        assert!(app.runtime_view.events.operation_descending);
+        app.activate_mouse_row(
+            ListTarget::TaskOccurrenceHeader(super::super::app::TaskOccurrenceSort::Thread),
+            0,
+        );
+        assert_eq!(
+            app.runtime_view.events.occurrence_sort,
+            super::super::app::TaskOccurrenceSort::Thread
+        );
+        assert!(!app.runtime_view.events.occurrence_descending);
 
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Io;

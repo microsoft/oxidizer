@@ -910,7 +910,11 @@ impl TaskHistogram {
 pub(super) struct TaskEventsViewState {
     pub(super) focus: TaskEventsFocus,
     pub(super) operation_selected: usize,
+    pub(super) operation_sort: TaskEventOperationSort,
+    pub(super) operation_descending: bool,
     pub(super) event_selected: usize,
+    pub(super) occurrence_sort: TaskOccurrenceSort,
+    pub(super) occurrence_descending: bool,
     pub(super) stack_scroll: usize,
     pub(super) stack_horizontal_scroll: u16,
     pub(super) stack_filter: AllocationStackFilter,
@@ -921,7 +925,11 @@ impl TaskEventsViewState {
         Self {
             focus: TaskEventsFocus::Operations,
             operation_selected: 0,
+            operation_sort: TaskEventOperationSort::Operation,
+            operation_descending: false,
             event_selected: 0,
+            occurrence_sort: TaskOccurrenceSort::Time,
+            occurrence_descending: false,
             stack_scroll: 0,
             stack_horizontal_scroll: 0,
             stack_filter: AllocationStackFilter::Application,
@@ -941,6 +949,20 @@ impl TaskEventsViewState {
 pub(super) enum TaskEventsFocus {
     Operations,
     Occurrences,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TaskEventOperationSort {
+    Operation,
+    Events,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TaskOccurrenceSort {
+    Time,
+    Thread,
+    Sequence,
+    Object,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

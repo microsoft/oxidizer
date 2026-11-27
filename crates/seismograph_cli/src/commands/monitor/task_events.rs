@@ -68,6 +68,7 @@ impl TaskOperation {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn occurrence(&self, index: usize) -> Option<(&TaskObject, &TaskEvent)> {
         let occurrence = self.occurrences.get(index)?;
         let object = &self.objects[occurrence.object];

@@ -8,7 +8,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table, TableState};
 
-use super::super::app::{RuntimeDetailMode, RuntimeViewState, TaskEventsFocus, TaskEventsViewState};
+use super::super::app::{
+    RuntimeDetailMode, RuntimeViewState, TaskEventOperationSort, TaskEventsFocus, TaskEventsViewState, TaskOccurrenceSort,
+};
 use super::super::data::{AllocationStackFilter, RuntimeTaskSummary};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::task_events::{TaskEvent, TaskEventSummary, TaskEventsSnapshot, TaskObject, TaskOperation};
@@ -42,18 +44,66 @@ pub(super) fn draw(
     );
     frame.render_widget(Paragraph::new(caption), notice);
     let view = runtime_view.events;
-    let operation = events.and_then(|events| {
-        events
-            .operations
-            .get(view.operation_selected.min(events.operations.len().saturating_sub(1)))
-    });
-    let occurrence =
-        operation.and_then(|operation| operation.occurrence(view.event_selected.min(operation.occurrences().len().saturating_sub(1))));
-    let [operations, occurrences, stack] = areas(content, view.focus);
+    let operations = events.map(|events| sorted_operations(events, view));
+    let operation = operations
+        .as_ref()
+        .and_then(|operations| operations.get(view.operation_selected.min(operations.len().saturating_sub(1))))
+        .copied();
+    let occurrences = operation.map(|operation| sorted_occurrences(operation, view));
+    let occurrence = occurrences
+        .as_ref()
+        .and_then(|occurrences| occurrences.get(view.event_selected.min(occurrences.len().saturating_sub(1))))
+        .copied();
+    let [operations_area, occurrences_area, stack_area] = areas(content, view.focus);
     let focused = runtime_view.detail_mode == RuntimeDetailMode::Events;
-    draw_operations(frame, mouse, operations, events, view, focused);
-    draw_occurrences(frame, mouse, occurrences, operation, view, focused);
-    draw_stack(frame, stack, occurrence, view);
+    draw_operations(frame, mouse, operations_area, operations.as_deref(), view, focused);
+    draw_occurrences(
+        frame,
+        mouse,
+        occurrences_area,
+        operation,
+        occurrences.as_deref(),
+        view,
+        focused,
+    );
+    draw_stack(frame, stack_area, occurrence, view);
+}
+
+fn sorted_operations(task: &TaskEventSummary, view: TaskEventsViewState) -> Vec<&TaskOperation> {
+    let mut operations = task.operations.iter().collect::<Vec<_>>();
+    operations.sort_unstable_by(|left, right| {
+        let ordering = match view.operation_sort {
+            TaskEventOperationSort::Operation => left.kind.label().cmp(right.kind.label()),
+            TaskEventOperationSort::Events => left.events.cmp(&right.events),
+        };
+        let ordering = if view.operation_descending { ordering.reverse() } else { ordering };
+        ordering.then_with(|| left.kind.label().cmp(right.kind.label()))
+    });
+    operations
+}
+
+fn sorted_occurrences<'a>(
+    operation: &'a TaskOperation,
+    view: TaskEventsViewState,
+) -> Vec<(&'a TaskObject, &'a TaskEvent)> {
+    let mut occurrences = operation.occurrences().collect::<Vec<_>>();
+    occurrences.sort_unstable_by(|(left_object, left), (right_object, right)| {
+        let ordering = match view.occurrence_sort {
+            TaskOccurrenceSort::Time => left.timestamp.cmp(&right.timestamp),
+            TaskOccurrenceSort::Thread => left.thread_id.cmp(&right.thread_id),
+            TaskOccurrenceSort::Sequence => left.sequence.cmp(&right.sequence),
+            TaskOccurrenceSort::Object => left_object.object_id.cmp(&right_object.object_id),
+        };
+        let ordering = if view.occurrence_descending {
+            ordering.reverse()
+        } else {
+            ordering
+        };
+        ordering
+            .then_with(|| left.timestamp.cmp(&right.timestamp))
+            .then_with(|| left.sequence.cmp(&right.sequence))
+    });
+    occurrences
 }
 
 fn areas(area: Rect, focus: TaskEventsFocus) -> [Rect; 3] {
@@ -88,14 +138,14 @@ fn draw_operations(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
     area: Rect,
-    task: Option<&TaskEventSummary>,
+    operations: Option<&[&TaskOperation]>,
     view: TaskEventsViewState,
     focused: bool,
 ) {
     if area.is_empty() {
         return;
     }
-    let Some(task) = task.filter(|task| !task.operations.is_empty()) else {
+    let Some(operations) = operations.filter(|operations| !operations.is_empty()) else {
         draw_empty_panel_with_message(
             frame,
             area,
@@ -104,10 +154,10 @@ fn draw_operations(
         );
         return;
     };
-    let selected = view.operation_selected.min(task.operations.len().saturating_sub(1));
+    let selected = view.operation_selected.min(operations.len().saturating_sub(1));
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
-    let rows = task.operations.iter().skip(first).take(visible).map(|operation| {
+    let rows = operations.iter().skip(first).take(visible).map(|operation| {
         let row = Row::new([operation.kind.label().to_owned(), format_count(operation.events)]);
         if operation.kind.is_contention() {
             row.style(Style::default().fg(Color::Yellow))
@@ -115,8 +165,10 @@ fn draw_operations(
             row
         }
     });
-    let table = Table::new(rows, [Constraint::Min(12), Constraint::Length(6)])
-        .header(Row::new(["Operation", "Events"]).style(Style::default().add_modifier(Modifier::BOLD)))
+    let widths = [Constraint::Min(12), Constraint::Length(6)];
+    let sorts = [TaskEventOperationSort::Operation, TaskEventOperationSort::Events];
+    let table = Table::new(rows, widths)
+        .header(Row::new(operation_headers(view)).style(Style::default().add_modifier(Modifier::BOLD)))
         .row_highlight_style(selected_style(focused && view.focus == TaskEventsFocus::Operations))
         .block(block(" Operations ", focused && view.focus == TaskEventsFocus::Operations));
     let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
@@ -125,9 +177,10 @@ fn draw_operations(
         area,
         1,
         first.saturating_add(state.offset()),
-        task.operations.len(),
+        operations.len(),
         ListTarget::TaskOperations,
     );
+    register_operation_headers(mouse, area, &widths, &sorts);
 }
 
 fn draw_occurrences(
@@ -135,6 +188,7 @@ fn draw_occurrences(
     mouse: &MouseRows,
     area: Rect,
     operation: Option<&TaskOperation>,
+    occurrences: Option<&[(&TaskObject, &TaskEvent)]>,
     view: TaskEventsViewState,
     focused: bool,
 ) {
@@ -145,11 +199,12 @@ fn draw_occurrences(
         draw_empty_panel_with_message(frame, area, " Task occurrences ", Some("Select an operation."));
         return;
     };
-    let count = operation.occurrences().len();
+    let occurrences = occurrences.unwrap_or_default();
+    let count = occurrences.len();
     let selected = view.event_selected.min(count.saturating_sub(1));
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
-    let rows = operation.occurrences().skip(first).take(visible).map(|(object, event)| {
+    let rows = occurrences.iter().skip(first).take(visible).map(|(object, event)| {
         Row::new([
             event.timestamp.to_string(),
             event.thread_id.to_string(),
@@ -158,21 +213,125 @@ fn draw_occurrences(
         ])
     });
     let title = format!(" Task occurrences | {} ", operation.kind.label());
+    let widths = [
+        Constraint::Min(12),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(18),
+    ];
+    let sorts = [
+        TaskOccurrenceSort::Time,
+        TaskOccurrenceSort::Thread,
+        TaskOccurrenceSort::Sequence,
+        TaskOccurrenceSort::Object,
+    ];
     let table = Table::new(
         rows,
-        [
-            Constraint::Min(12),
-            Constraint::Length(8),
-            Constraint::Length(8),
-            Constraint::Length(18),
-        ],
+        widths,
     )
-    .header(Row::new(["Time (ns)", "Thread", "Sequence", "Object"]).style(Style::default().add_modifier(Modifier::BOLD)))
+    .header(Row::new(occurrence_headers(view)).style(Style::default().add_modifier(Modifier::BOLD)))
     .row_highlight_style(selected_style(focused && view.focus == TaskEventsFocus::Occurrences))
     .block(block(&title, focused && view.focus == TaskEventsFocus::Occurrences));
     let mut state = TableState::default().with_selected((count > 0).then_some(selected.saturating_sub(first)));
     frame.render_stateful_widget(table, area, &mut state);
     mouse.register(area, 1, first.saturating_add(state.offset()), count, ListTarget::TaskOccurrences);
+    register_occurrence_headers(mouse, area, &widths, &sorts);
+}
+
+fn operation_headers(view: TaskEventsViewState) -> [String; 2] {
+    [
+        sort_heading(
+            "Operation",
+            view.operation_sort == TaskEventOperationSort::Operation,
+            view.operation_descending,
+        ),
+        sort_heading(
+            "Events",
+            view.operation_sort == TaskEventOperationSort::Events,
+            view.operation_descending,
+        ),
+    ]
+}
+
+fn occurrence_headers(view: TaskEventsViewState) -> [String; 4] {
+    [
+        sort_heading(
+            "Time (ns)",
+            view.occurrence_sort == TaskOccurrenceSort::Time,
+            view.occurrence_descending,
+        ),
+        sort_heading(
+            "Thread",
+            view.occurrence_sort == TaskOccurrenceSort::Thread,
+            view.occurrence_descending,
+        ),
+        sort_heading(
+            "Sequence",
+            view.occurrence_sort == TaskOccurrenceSort::Sequence,
+            view.occurrence_descending,
+        ),
+        sort_heading(
+            "Object",
+            view.occurrence_sort == TaskOccurrenceSort::Object,
+            view.occurrence_descending,
+        ),
+    ]
+}
+
+fn sort_heading(label: &str, selected: bool, descending: bool) -> String {
+    if selected {
+        format!("{label} {}", if descending { "▼" } else { "▲" })
+    } else {
+        label.into()
+    }
+}
+
+fn register_operation_headers(
+    mouse: &MouseRows,
+    area: Rect,
+    widths: &[Constraint],
+    sorts: &[TaskEventOperationSort],
+) {
+    register_headers(area, widths, |rect, index| {
+        mouse.register_item(rect, ListTarget::TaskOperationHeader(sorts[index]), 0);
+    });
+}
+
+fn register_occurrence_headers(
+    mouse: &MouseRows,
+    area: Rect,
+    widths: &[Constraint],
+    sorts: &[TaskOccurrenceSort],
+) {
+    register_headers(area, widths, |rect, index| {
+        mouse.register_item(rect, ListTarget::TaskOccurrenceHeader(sorts[index]), 0);
+    });
+}
+
+fn register_headers(area: Rect, widths: &[Constraint], mut register: impl FnMut(Rect, usize)) {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    if inner.is_empty() {
+        return;
+    }
+    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
+    let fixed = widths.iter().fold(0_u16, |total, width| {
+        total.saturating_add(match width {
+            Constraint::Length(width) => *width,
+            _ => 0,
+        })
+    });
+    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
+    let mut x = inner.x;
+    for (index, width) in widths.iter().enumerate() {
+        let width = match width {
+            Constraint::Length(width) => *width,
+            Constraint::Min(minimum) => flexible.max(*minimum),
+            _ => 0,
+        }
+        .min(inner.right().saturating_sub(x));
+        register(Rect::new(x, inner.y, width, 1), index);
+        x = x.saturating_add(width).saturating_add(1);
+    }
 }
 
 fn draw_stack(frame: &mut ratatui::Frame<'_>, area: Rect, occurrence: Option<(&TaskObject, &TaskEvent)>, view: TaskEventsViewState) {
@@ -309,10 +468,11 @@ mod tests {
         view.operation_selected = 1;
         let mouse = MouseRows::default();
         let mut terminal = Terminal::new(TestBackend::new(100, 5)).unwrap();
+        let operations = sorted_operations(task, view);
         terminal
             .draw(|frame| {
                 mouse.begin(frame.area());
-                draw_operations(frame, &mouse, frame.area(), Some(task), view, true);
+                draw_operations(frame, &mouse, frame.area(), Some(&operations), view, true);
             })
             .unwrap();
         assert_eq!(
@@ -331,10 +491,11 @@ mod tests {
             .iter()
             .find(|operation| operation.kind == super::super::super::data::ThreadOperationKind::MutexAccess)
             .unwrap();
+        let occurrences = sorted_occurrences(operation, view);
         terminal
             .draw(|frame| {
                 mouse.begin(frame.area());
-                draw_occurrences(frame, &mouse, frame.area(), Some(operation), view, true);
+                draw_occurrences(frame, &mouse, frame.area(), Some(operation), Some(&occurrences), view, true);
             })
             .unwrap();
         assert_eq!(terminal.backend().buffer()[(1, 3)].bg, Color::Cyan);
