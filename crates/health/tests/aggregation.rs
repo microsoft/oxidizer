@@ -11,12 +11,11 @@ use std::thread;
 use std::time::Duration;
 
 use futures::executor::block_on;
-use oxidizer_health::{Aggregator, Attribute, AttributeValue, Component, Health, Monitor, Publisher, Report, Signal};
+use health::{Aggregator, Attribute, AttributeValue, Component, Health, Monitor, Publisher, Report, Signal};
+use observed::Sink;
 use static_assertions::assert_impl_all;
 use testing_aids::is_mutation_testing;
 use thread_aware::{ThreadAware, ThreadBuilder};
-
-testing_aids::init_tracing!();
 
 assert_impl_all!(Aggregator: Send, Sync, Clone);
 assert_impl_all!(Monitor: Send, Sync, Clone);
@@ -78,7 +77,7 @@ fn wait_for_monitor(monitor: &mut Monitor, state: Health) {
 
 #[test]
 fn empty_aggregator_and_component_are_unhealthy() {
-    let aggregator = Aggregator::default();
+    let aggregator = Aggregator::new(Sink::noop());
     let monitor = aggregator.monitor();
     assert_eq!(monitor.state(), Health::Unhealthy);
 
@@ -122,7 +121,7 @@ fn attributes_preserve_each_typed_value() {
 
 #[test]
 fn worst_publisher_and_component_win() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let database = aggregator.component("database");
     let cache = aggregator.component("cache");
@@ -149,7 +148,7 @@ fn worst_publisher_and_component_win() {
 
 #[test]
 fn dropping_publishers_and_components_converges() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let healthy = aggregator.component("healthy");
     let _healthy_publisher = healthy.publisher();
@@ -169,7 +168,7 @@ fn dropping_publishers_and_components_converges() {
 
 #[test]
 fn dropping_a_publisher_does_not_wait_for_a_notification_consumer() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let publisher = component.publisher();
     block_on(component.changed());
@@ -199,7 +198,7 @@ fn dropping_a_publisher_does_not_wait_for_a_notification_consumer() {
 
 #[test]
 fn publishing_does_not_wait_for_a_notification_consumer() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let mut publisher = component.publisher();
     block_on(component.changed());
@@ -229,7 +228,7 @@ fn publishing_does_not_wait_for_a_notification_consumer() {
 
 #[test]
 fn registering_a_component_does_not_wait_for_a_monitor() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let (entered, waiting) = mpsc::channel();
     let (release, resume) = mpsc::channel();
@@ -253,7 +252,7 @@ fn registering_a_component_does_not_wait_for_a_monitor() {
 
 #[test]
 fn publisher_keeps_registration_during_an_in_flight_publish() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let mut publisher = component.publisher();
     block_on(component.changed());
@@ -290,7 +289,7 @@ fn publisher_keeps_registration_during_an_in_flight_publish() {
 
 #[test]
 fn chained_publisher_keeps_component_registered() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let mut publisher = aggregator.component("database").publisher();
 
@@ -306,7 +305,7 @@ fn chained_publisher_keeps_component_registered() {
 
 #[test]
 fn component_is_idempotent_by_name() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let monitor = aggregator.monitor();
     let mut first = aggregator.component("database");
     let mut publisher = aggregator.component(String::from("database")).publisher();
@@ -318,12 +317,12 @@ fn component_is_idempotent_by_name() {
 #[test]
 #[should_panic(expected = "empty")]
 fn empty_component_name_panics() {
-    let _component = Aggregator::new().component("");
+    let _component = Aggregator::new(Sink::noop()).component("");
 }
 
 #[test]
 fn cloned_publisher_is_independent_and_healthy() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let mut original = component.publisher();
     original.degraded("slow");
@@ -340,7 +339,7 @@ fn cloned_publisher_is_independent_and_healthy() {
 
 #[test]
 fn publisher_with_starts_with_the_requested_signal() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let publisher = component.publisher_with(Health::Unhealthy, [("reason", "starting")]);
 
@@ -373,7 +372,7 @@ fn publisher_with_starts_with_the_requested_signal() {
 
 #[test]
 fn component_remains_live_after_aggregator_is_dropped() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     drop(aggregator);
 
@@ -393,7 +392,7 @@ fn cancelling_a_pending_change_releases_its_last_waker() {
             panic!("an idle monitor should not wake the cancelled task");
         }
     }
-    let root = Aggregator::new();
+    let root = Aggregator::new(Sink::noop());
     let mut monitor = root.monitor();
     let task = Arc::new(Task);
     let weak = Arc::downgrade(&task);
@@ -407,7 +406,7 @@ fn cancelling_a_pending_change_releases_its_last_waker() {
 
 #[test]
 fn equal_signal_does_not_notify() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut component = aggregator.component("database");
     let mut publisher = component.publisher();
     block_on(component.changed());
@@ -420,7 +419,7 @@ fn equal_signal_does_not_notify() {
 
 #[test]
 fn every_handle_has_its_own_cursor() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let mut monitor_clone = monitor.clone();
     assert!(!is_ready(monitor.changed()));
@@ -441,7 +440,7 @@ fn every_handle_has_its_own_cursor() {
 
 #[test]
 fn relocated_handles_observe_updates_from_the_original_publisher() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
     let mut root = aggregator.clone();
@@ -468,7 +467,7 @@ fn relocated_handles_observe_updates_from_the_original_publisher() {
 
 #[test]
 fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let component = aggregator.component("database");
     let mut monitor = aggregator.monitor();
     let mut publisher = component.publisher();
@@ -495,7 +494,7 @@ fn diagnostics_identify_the_degraded_component_and_publisher_reason() {
 
 #[test]
 fn monitor_keeps_reading_reports_after_the_aggregator_handle_drops() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
@@ -549,7 +548,7 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
         }
     }
 
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let startup_monitor = aggregator.monitor();
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
@@ -587,7 +586,7 @@ fn readiness_fails_closed_when_a_consumer_panics_on_the_worker() {
 
 #[test]
 fn reports_select_signals_by_state() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let monitor = aggregator.monitor();
     let mut database = aggregator.component("database");
     let mut cache = aggregator.component("cache");
@@ -628,7 +627,7 @@ fn reports_select_signals_by_state() {
 
 #[test]
 fn a_burst_of_publishers_yields_to_another_component_and_converges() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut blocker = aggregator.component("observer");
     let mut trigger = blocker.publisher();
     block_on(blocker.changed());
@@ -669,7 +668,7 @@ fn a_burst_of_publishers_yields_to_another_component_and_converges() {
 
 #[test]
 fn concurrent_publishers_converge_to_latest_signals() {
-    let aggregator = Aggregator::new();
+    let aggregator = Aggregator::new(Sink::noop());
     let mut monitor = aggregator.monitor();
     let mut component = aggregator.component("database");
     let workers: Vec<_> = (0..4)

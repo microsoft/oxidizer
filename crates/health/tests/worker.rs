@@ -10,10 +10,9 @@ use std::thread::{self, Thread};
 use std::time::Duration;
 
 use futures::executor::block_on;
-use oxidizer_health::{Aggregator, Component, Health};
+use health::{Aggregator, Component, Health};
+use observed::Sink;
 use testing_aids::is_mutation_testing;
-
-testing_aids::init_tracing!();
 
 struct Notify(mpsc::Sender<Thread>);
 
@@ -45,7 +44,7 @@ fn turn<T>(probe: &mut Component, publish: impl FnOnce() -> T) -> (T, Thread) {
 
 #[test]
 fn process_and_component_snapshots_follow_registration_publication_and_removal() {
-    let root = Aggregator::new();
+    let root = Aggregator::new(Sink::noop());
     let reader = root.monitor();
     let mut probe = root.component("probe");
     let producer = probe.clone();

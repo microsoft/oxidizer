@@ -13,12 +13,15 @@ use std::thread::{self, JoinHandle};
 use std::{io, mem, ptr};
 
 use foldhash::HashMap;
+use observed::{Sink, emit};
 use performables::sync::channel::{WatchReceiver, WatchSender};
-use tracing::{Level, event};
 
 use crate::Health;
 use crate::aggregator::ProcessAggregate;
 use crate::component::{ComponentActor, ComponentShared};
+use crate::telemetry::{WorkerErrorMessage, WorkerName, WorkerStartFailed, WorkerTerminated};
+
+const WORKER_NAME: &str = "health";
 
 pub(crate) enum Work {
     Register(u64, ComponentActor),
@@ -31,15 +34,16 @@ pub(crate) enum Work {
 pub(crate) struct Worker {
     pub(crate) sender: Sender<Work>,
     thread: Option<JoinHandle<()>>,
+    sink: Sink,
     status: Arc<Status>,
 }
 
 impl Worker {
-    pub(crate) fn new(aggregate: ProcessAggregate) -> Arc<Self> {
+    pub(crate) fn new(aggregate: ProcessAggregate, sink: Sink) -> Arc<Self> {
         let (sender, receiver) = mpsc::channel();
         let status = Arc::new(Status::new());
         let worker_status = Arc::clone(&status);
-        let spawned = thread::Builder::new().name(String::from("oxidizer-health")).spawn(move || {
+        let spawned = thread::Builder::new().name(String::from(WORKER_NAME)).spawn(move || {
             // Disconnect all work queues before invoking terminal wakers, outside any unwind.
             let outcome = catch_unwind(AssertUnwindSafe(move || run(receiver, aggregate)));
             worker_status.stop();
@@ -47,25 +51,30 @@ impl Worker {
                 resume_unwind(cause);
             }
         });
-        Arc::new(Self::from_spawn(sender, status, spawned))
+        Arc::new(Self::from_spawn(sender, status, spawned, sink))
     }
 
-    fn from_spawn(sender: Sender<Work>, status: Arc<Status>, spawned: io::Result<JoinHandle<()>>) -> Self {
+    fn from_spawn(sender: Sender<Work>, status: Arc<Status>, spawned: io::Result<JoinHandle<()>>, sink: Sink) -> Self {
         let thread = match spawned {
             Ok(thread) => Some(thread),
             Err(error) => {
                 status.stop();
-                event!(
-                    name: "oxidizer_health.worker.start_failed",
-                    Level::ERROR,
-                    error.message = %error,
-                    worker.name = "oxidizer-health",
-                    "health worker {{worker.name}} failed to start: {{error.message}}"
+                emit!(
+                    &sink,
+                    WorkerStartFailed {
+                        worker: WorkerName(WORKER_NAME),
+                        error: WorkerErrorMessage::from(&error),
+                    }
                 );
                 None
             }
         };
-        Self { sender, thread, status }
+        Self {
+            sender,
+            thread,
+            sink,
+            status,
+        }
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -92,11 +101,11 @@ impl Drop for Worker {
         if let Some(thread) = self.request_stop()
             && thread.join().map_err(discard_panic).is_err()
         {
-            event!(
-                name: "oxidizer_health.worker.terminated",
-                Level::ERROR,
-                worker.name = "oxidizer-health",
-                "health worker {{worker.name}} terminated unexpectedly"
+            emit!(
+                &self.sink,
+                WorkerTerminated {
+                    worker: WorkerName(WORKER_NAME),
+                }
             );
         }
     }
@@ -215,8 +224,9 @@ mod tests {
     use std::task::{Context, Wake};
 
     use futures::FutureExt;
+    use observed::Severity;
+    use observed_testing::{TEST_ID, test_emitter};
     use performables::sync::channel::watch;
-    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::Component;
@@ -224,7 +234,7 @@ mod tests {
 
     #[test]
     fn shutdown_finishes_preceding_publications() {
-        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
+        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop())).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
         assert!(worker.is_running());
@@ -244,7 +254,7 @@ mod tests {
 
     #[test]
     fn change_cursor_delivers_separate_completed_turns() {
-        let worker = Worker::new(ProcessAggregate::new(Weak::new()));
+        let worker = Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop());
         let (updates, _) = watch(());
         let mut changes = worker.subscribe(&updates);
         for _ in 0..2 {
@@ -279,7 +289,7 @@ mod tests {
                 panic_any(Secondary);
             }
         }
-        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()))).unwrap();
+        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop())).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
         let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender.clone(), Arc::default());
@@ -297,9 +307,14 @@ mod tests {
 
     #[test]
     fn spawn_failure_marks_worker_unavailable_until_shutdown() {
+        let (sink, processor) = test_emitter(TEST_ID);
         let (sender, receiver) = mpsc::channel();
-        let worker = Worker::from_spawn(sender, Arc::new(Status::new()), Err(io::ErrorKind::WouldBlock.into()));
+        let worker = Worker::from_spawn(sender, Arc::new(Status::new()), Err(io::ErrorKind::WouldBlock.into()), sink);
         assert!(!worker.is_running());
+        let event = processor.single_event();
+        assert_eq!(event.name(), "health.worker.start_failed");
+        assert_eq!(event.severity(), Some(Severity::Error));
+        assert!(event.dimensions().into_iter().any(|(name, _value)| name == "error.message"));
         drop(worker);
         assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected)));
     }
@@ -308,7 +323,7 @@ mod tests {
     fn request_stop_sends_stop_and_returns_the_worker_thread() {
         let (sender, receiver) = mpsc::channel();
         let spawned = thread::spawn(|| {});
-        let mut worker = Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned));
+        let mut worker = Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned), Sink::noop());
 
         let thread = worker.request_stop().unwrap();
 
@@ -325,16 +340,20 @@ mod tests {
             }
         }
         for &fail in if cfg!(panic = "unwind") { &[false, true][..] } else { &[false][..] } {
-            let capture = Capture::new();
-            let _guard = tracing::subscriber::set_default(capture.subscriber());
+            let (sink, processor) = test_emitter(TEST_ID);
             let (sender, _receiver) = mpsc::channel();
             let spawned = thread::spawn(move || {
                 if fail {
                     panic_any(FailedJoin);
                 }
             });
-            drop(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned)));
-            assert_eq!(capture.output().contains("terminated unexpectedly"), fail);
+            drop(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned), sink));
+            let events = processor.events();
+            assert_eq!(events.len(), usize::from(fail));
+            if let Some(event) = events.first() {
+                assert_eq!(event.name(), "health.worker.terminated");
+                assert_eq!(event.severity(), Some(Severity::Error));
+            }
         }
     }
 
@@ -350,7 +369,7 @@ mod tests {
             done.send(()).unwrap();
         });
         owner
-            .send(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned)))
+            .send(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned), Sink::noop()))
             .unwrap();
         finished.recv().unwrap();
     }

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::vec;
 
 use foldhash::HashMap;
+use observed::Sink;
 use performables::sync::channel::{WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
@@ -24,11 +25,11 @@ use crate::{Component, Health, Report};
 /// # Examples
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
 /// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let mut monitor = aggregator.monitor();
 /// assert_eq!(monitor.state(), Health::Unhealthy);
 ///
@@ -54,10 +55,10 @@ pub struct Aggregator {
 }
 
 impl Aggregator {
-    /// Starts in `Unhealthy` state with no registered components.
+    /// Starts in `Unhealthy` state with no registered components and emits diagnostics to `sink`.
     #[must_use]
-    pub fn new() -> Self {
-        let shared = AggregatorShared::new();
+    pub fn new(sink: Sink) -> Self {
+        let shared = AggregatorShared::new(sink);
         Self { shared }
     }
 
@@ -80,12 +81,6 @@ impl Aggregator {
             shared: Arc::clone(&self.shared),
             changes: self.shared.worker.subscribe(&self.shared.changes),
         }
-    }
-}
-
-impl Default for Aggregator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -117,11 +112,11 @@ impl ThreadAware for Aggregator {
 /// # Examples
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
 /// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let database = aggregator.component("database");
 /// let mut monitor = aggregator.monitor();
 /// let _publisher = database.publisher();
@@ -231,12 +226,12 @@ pub(crate) struct ProcessAggregate {
 }
 
 impl AggregatorShared {
-    fn new() -> Arc<Self> {
+    fn new(sink: Sink) -> Arc<Self> {
         let (changes, _) = watch(());
         Arc::new_cyclic(|root| Self {
             next_component: AtomicU64::default(),
             registry: Mutex::new(HashMap::default()),
-            worker: Worker::new(ProcessAggregate::new(Weak::clone(root))),
+            worker: Worker::new(ProcessAggregate::new(Weak::clone(root)), sink),
             blockers: Arc::default(),
             // #[gamma::skip(expr.increment, tag = "equivalent", reason = "Both 2 and 3 decode to Unhealthy; the raw byte is private and subsequent writes replace it.")]
             health: AtomicU8::new(health_bits(Health::Unhealthy)),
@@ -357,7 +352,7 @@ mod tests {
     #[test]
     fn worker_shutdown_finishes_the_last_registered_components_report() {
         execute_or_terminate_process(|| {
-            let root = Aggregator::new();
+            let root = Aggregator::new(Sink::noop());
             let mut idle = root.component("idle");
             let component = root.component("live");
             let _publisher = component.publisher();
@@ -370,7 +365,7 @@ mod tests {
 
     #[test]
     fn overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns() {
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let mut monitor = root.monitor();
         let (work, pending) = mpsc::channel();
         let component = |id, name| {
@@ -417,7 +412,7 @@ mod tests {
 
     #[test]
     fn process_transitions_publish_the_worst_remaining_state() {
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let mut monitor = root.monitor();
         let mut model = ProcessAggregate::new(Arc::downgrade(&root.shared));
         for (id, state, expected) in [
@@ -445,7 +440,7 @@ mod tests {
     #[test]
     fn a_degraded_component_cannot_replace_another_components_empty_registration() {
         execute_or_terminate_process(|| {
-            let root = Aggregator::new();
+            let root = Aggregator::new(Sink::noop());
             let monitor = root.monitor();
             let empty = root.component("required");
             let mut reporting = root.component("optional");
@@ -467,7 +462,7 @@ mod tests {
 
     #[test]
     fn reports_skip_retired_components_whose_snapshots_are_still_referenced() {
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let component = root.component("retired");
         let shared = root
             .shared
@@ -498,7 +493,7 @@ mod tests {
 
     #[test]
     fn registration_reclaims_retired_names() {
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         drop(root.component("retired"));
         let _live = root.component("live");
         assert!(!root.shared.registry.lock().unwrap().contains_key("retired"));

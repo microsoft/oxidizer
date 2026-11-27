@@ -94,7 +94,7 @@ impl<'a> From<&'a str> for AttributeValue<'a> {
 /// # Examples
 ///
 /// ```
-/// use oxidizer_health::{Attribute, AttributeValue};
+/// use health::{Attribute, AttributeValue};
 ///
 /// let attribute = Attribute::from(("latency_ms", 250_i64));
 ///

@@ -100589,49 +100589,49 @@ files:
     killer: 0
   - id: fce8d14065fa
     killer: 0
-- path: crates/oxidizer_health/src/aggregator.rs
+- path: crates/health/src/aggregator.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::a_degraded_component_cannot_replace_another_components_empty_registration
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::last_registration_id_can_be_allocated_once_without_wrapping
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::process_transitions_publish_the_worst_remaining_state
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::registration_reclaims_retired_names
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::worker_shutdown_finishes_the_last_registered_components_report
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: dropping_publishers_and_components_converges
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: empty_aggregator_and_component_are_unhealthy
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: every_handle_has_its_own_cursor
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: publisher_keeps_registration_during_an_in_flight_publish
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: readiness_fails_closed_when_a_consumer_panics_on_the_worker
-  - package: oxidizer_health
+  - package: health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::component_shared_retains_its_registration_id
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::publisher_registration_initializes_and_enqueues_its_slot
   mutants:
   - id: 06574d45e004
@@ -100788,27 +100788,27 @@ files:
     killer: 0
   - id: fe06ce0d9fd3
     killer: 0
-- path: crates/oxidizer_health/src/attribute.rs
+- path: crates/health/src/attribute.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: attribute::tests::static_and_shared_strings_compare_and_hash_by_text
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: attribute::tests::values_display_their_payload
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: report::tests::collect_groups_equal_signals
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::display_lists_attributes
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: diagnostics_identify_the_degraded_component_and_publisher_reason
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
   mutants:
@@ -100864,45 +100864,45 @@ files:
     killer: 2
   - id: f4793a991bc7
     killer: 2
-- path: crates/oxidizer_health/src/component.rs
+- path: crates/health/src/component.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::worker_shutdown_finishes_the_last_registered_components_report
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::empty_live_set_does_not_publish_a_ready_snapshot_between_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::enqueue_racing_receiver_teardown_does_not_wake_the_worker
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::overlapping_failures_do_not_publish_a_ready_snapshot_between_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::publisher_removed_before_first_snapshot_does_not_notify
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::queued_bursts_coalesce_and_resume_without_another_publish
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::retired_publishers_operate_locally_even_while_a_pass_owns_the_component
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::shutdown_finishes_preceding_publications
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: a_burst_of_publishers_yields_to_another_component_and_converges
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: last_component_handle_unregisters_during_an_in_flight_publish
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: readiness_fails_closed_when_a_consumer_panics_on_the_worker
-  - package: oxidizer_health
+  - package: health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
   mutants:
@@ -101240,18 +101240,18 @@ files:
     killer: 14
   - id: c32ccbb1a652
     killer: 14
-- path: crates/oxidizer_health/src/health.rs
+- path: crates/health/src/health.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: report::tests::collect_groups_equal_signals
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: report::tests::report_keeps_all_signal_groups_and_counts
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::display_lists_attributes
-  - package: oxidizer_health
+  - package: health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
   mutants:
@@ -101277,21 +101277,21 @@ files:
     killer: 3
   - id: fbe6c9deab6a
     killer: 3
-- path: crates/oxidizer_health/src/report.rs
+- path: crates/health/src/report.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: report::tests::report_keeps_all_signal_groups_and_counts
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: component_is_idempotent_by_name
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: reports_select_signals_by_state
-  - package: oxidizer_health
+  - package: health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
   mutants:
@@ -101357,30 +101357,30 @@ files:
     killer: 2
   - id: f9e96be0ceb7
     killer: 3
-- path: crates/oxidizer_health/src/signal.rs
+- path: crates/health/src/signal.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::queued_bursts_coalesce_and_resume_without_another_publish
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: report::tests::collect_groups_equal_signals
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::display_propagates_short_writes
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::equality_respects_duplicate_counts
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::equality_respects_state
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: signal::tests::nan_attributes_are_never_equal
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: monitor_keeps_reading_reports_after_the_aggregator_handle_drops
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: reports_select_signals_by_state
   mutants:
@@ -101440,39 +101440,39 @@ files:
     killer: 6
   - id: f34c34131ad6
     killer: 3
-- path: crates/oxidizer_health/src/worker.rs
+- path: crates/health/src/worker.rs
   killers:
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: aggregator::tests::a_degraded_component_cannot_replace_another_components_empty_registration
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: component::tests::retiring_a_component_discards_in_flight_slots_while_the_worker_stays_live
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::change_cursor_delivers_separate_completed_turns
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::shutdown_finishes_preceding_publications
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::shutdown_on_the_worker_requests_stop_without_returning_a_self_join
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::shutdown_stops_and_joins_the_worker_and_reports_a_failed_join
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::spawn_failure_marks_worker_unavailable_until_shutdown
-  - package: oxidizer_health
-    target: lib:oxidizer_health
+  - package: health
+    target: lib:health
     test: worker::tests::worker_exit_preserves_the_original_panic_across_terminal_callbacks
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: cancelling_a_pending_change_releases_its_last_waker
-  - package: oxidizer_health
+  - package: health
     target: test:aggregation
     test: readiness_fails_closed_when_a_consumer_panics_on_the_worker
-  - package: oxidizer_health
+  - package: health
     target: test:worker
     test: process_and_component_snapshots_follow_registration_publication_and_removal
   mutants:

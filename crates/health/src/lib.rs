@@ -19,11 +19,11 @@
 //! same name return a handle to that component. The name identifies a subsystem, not a built-in check.
 //!
 //! ```
-//! # testing_aids::init_tracing!();
-//! use oxidizer_health::{Aggregator, Health};
+//! use health::{Aggregator, Health};
+//! use observed::Sink;
 //!
 //! # futures::executor::block_on(async {
-//! let aggregator = Aggregator::new();
+//! let aggregator = Aggregator::new(Sink::noop());
 //! let backend = aggregator.component("backend");
 //! let mut monitor = aggregator.monitor();
 //! let mut publisher = backend.publisher();
@@ -54,11 +54,11 @@
 //! This example publishes a problem, waits for aggregation, and prints its diagnostic signal:
 //!
 //! ```
-//! # testing_aids::init_tracing!();
-//! use oxidizer_health::{Aggregator, Health};
+//! use health::{Aggregator, Health};
+//! use observed::Sink;
 //!
 //! # futures::executor::block_on(async {
-//! let aggregator = Aggregator::new();
+//! let aggregator = Aggregator::new(Sink::noop());
 //! let backend = aggregator.component("backend");
 //! let mut monitor = aggregator.monitor();
 //! let mut publisher = backend.publisher();
@@ -95,6 +95,7 @@ mod component;
 mod health;
 mod report;
 mod signal;
+mod telemetry;
 mod worker;
 
 pub use aggregator::{Aggregator, Monitor};
@@ -103,6 +104,3 @@ pub use component::{Component, Publisher};
 pub use health::Health;
 pub use report::Report;
 pub use signal::Signal;
-
-#[cfg(test)]
-testing_aids::init_tracing!();

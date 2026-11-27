@@ -62,11 +62,11 @@ impl Snapshot {
 /// # Examples
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
 /// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let mut database = aggregator.component("database");
 /// let mut primary = database.publisher();
 /// let _replica = database.publisher();

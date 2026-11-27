@@ -2448,6 +2448,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "health"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "data_privacy",
+ "foldhash 0.2.0",
+ "futures",
+ "observed",
+ "observed_testing",
+ "performables",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
+]
+
+[[package]]
 name = "heapless"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3979,21 +3995,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdd40b720b302b5aa0c78879e2ee393cda363b8cbca87ab59539c9a64146afaa"
 dependencies = [
  "crossbeam-queue",
-]
-
-[[package]]
-name = "oxidizer_health"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "ctor",
- "foldhash 0.2.0",
- "futures",
- "performables",
- "static_assertions",
- "testing_aids",
- "thread_aware",
- "tracing",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@ use std::fmt::{self, Display, Formatter};
 /// # Examples
 ///
 /// ```
-/// use oxidizer_health::Health;
+/// use health::Health;
 ///
 /// let worst = [Health::Healthy, Health::Unhealthy, Health::Degraded]
 ///     .into_iter()

@@ -30,11 +30,11 @@ const MAX_BATCH: usize = 256;
 /// # Examples
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
 /// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let mut database = aggregator.component("database");
 /// assert_eq!(database.state(), Health::Unhealthy);
 ///
@@ -75,17 +75,17 @@ impl Component {
 
     /// Creates an independently owned publisher with its initial signal.
     ///
-    /// The publisher stores the signal before its first aggregation turn. A nonhealthy signal
+    /// The publisher stores the signal before its first aggregation turn. An unhealthy signal
     /// reserves readiness so another worker turn cannot publish a premature recovery before this
     /// signal is processed. Component state, process state, and reports still change asynchronously.
     ///
     /// # Examples
     ///
     /// ```
-    /// # testing_aids::init_tracing!();
-    /// use oxidizer_health::{Aggregator, Health};
+    /// use health::{Aggregator, Health};
+    /// use observed::Sink;
     ///
-    /// let aggregator = Aggregator::new();
+    /// let aggregator = Aggregator::new(Sink::noop());
     /// let database = aggregator.component("database");
     /// let publisher = database.publisher_with(Health::Degraded, [("reason", "warming")]);
     ///
@@ -411,11 +411,11 @@ struct Slot {
 /// signal and its readiness reservation together. Aggregation still runs in the background.
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
 /// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let monitor = aggregator.monitor();
 /// let mut startup = aggregator.component("startup");
 /// assert_eq!(monitor.state(), Health::Unhealthy);
@@ -541,6 +541,7 @@ impl Drop for Publisher {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
+    use observed::Sink;
 
     use super::*;
 
@@ -558,7 +559,7 @@ mod tests {
     fn component_publishers_retain_the_component_owner() {
         use crate::Aggregator;
 
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let component = root.component("clients");
         let publisher = component.publisher();
 
@@ -569,7 +570,7 @@ mod tests {
     fn aggregator_clones_share_component_owners() {
         use crate::Aggregator;
 
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let clone = root.clone();
         let first = root.component("clients");
         let second = clone.component("clients");
@@ -589,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_nonhealthy_publisher_keeps_readiness_reserved_before_its_turn() {
+    fn initial_unhealthy_publisher_keeps_readiness_reserved_before_its_turn() {
         let process_blockers = Arc::new(AtomicUsize::new(0));
         let (work, pending) = mpsc::channel();
         let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::clone(&process_blockers));
@@ -646,7 +647,7 @@ mod tests {
             }
         }
 
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let mut component = root.component("database");
         let mut writer = component.publisher();
         futures::executor::block_on(component.changed());
@@ -769,7 +770,7 @@ mod tests {
     fn retired_publishers_operate_locally_even_while_a_pass_owns_the_component() {
         let (work, pending) = mpsc::channel();
         let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
-        let worker = Worker::new(ProcessAggregate::new(Weak::new()));
+        let worker = Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop());
         let handle = Component::new(ComponentOwner::new(Arc::clone(&clients), worker));
         let mut publisher = Publisher::register(&clients).unwrap();
         publisher.degraded("retiring");
@@ -824,7 +825,7 @@ mod tests {
 
         use crate::Aggregator;
 
-        let root = Aggregator::new();
+        let root = Aggregator::new(Sink::noop());
         let mut component = root.component("retiring");
         let publisher = Publisher::register(&component.owner.shared).unwrap();
         block_on(component.changed());

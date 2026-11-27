@@ -1,11 +1,11 @@
 <div align="center">
- <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Oxidizer Health Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Health Logo" width="96">
 
-# Oxidizer Health
+# Health
 
-[![crate.io](https://img.shields.io/crates/v/oxidizer_health.svg)](https://crates.io/crates/oxidizer_health)
-[![docs.rs](https://docs.rs/oxidizer_health/badge.svg)](https://docs.rs/oxidizer_health)
-[![MSRV](https://img.shields.io/crates/msrv/oxidizer_health)](https://crates.io/crates/oxidizer_health)
+[![crate.io](https://img.shields.io/crates/v/health.svg)](https://crates.io/crates/health)
+[![docs.rs](https://docs.rs/health/badge.svg)](https://docs.rs/health)
+[![MSRV](https://img.shields.io/crates/msrv/health)](https://crates.io/crates/health)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
@@ -28,9 +28,10 @@ Create an [`Aggregator`][__link7], register an application-defined component, an
 same name return a handle to that component. The name identifies a subsystem, not a built-in check.
 
 ```rust
-use oxidizer_health::{Aggregator, Health};
+use health::{Aggregator, Health};
+use observed::Sink;
 
-let aggregator = Aggregator::new();
+let aggregator = Aggregator::new(Sink::noop());
 let backend = aggregator.component("backend");
 let mut monitor = aggregator.monitor();
 let mut publisher = backend.publisher();
@@ -60,9 +61,10 @@ A read-only [`Monitor`][__link13] provides component reports independently of pu
 This example publishes a problem, waits for aggregation, and prints its diagnostic signal:
 
 ```rust
-use oxidizer_health::{Aggregator, Health};
+use health::{Aggregator, Health};
+use observed::Sink;
 
-let aggregator = Aggregator::new();
+let aggregator = Aggregator::new(Sink::noop());
 let backend = aggregator.component("backend");
 let mut monitor = aggregator.monitor();
 let mut publisher = backend.publisher();
@@ -95,30 +97,30 @@ read the reports, await [`Monitor::changed`][__link15], and repeat.
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/oxidizer_health">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbSX6wJo1Ap_4bWaAmdlZIPP8bVKDzQuyx5WAbhQusGn3q2FphZIGCb294aWRpemVyX2hlYWx0aGUwLjEuMA
- [__link0]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher
- [__link1]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link10]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
- [__link11]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link12]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
- [__link13]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
- [__link14]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
- [__link15]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor::changed
- [__link16]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Component
- [__link17]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
- [__link18]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Publisher::publish
- [__link19]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Monitor
- [__link2]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
- [__link20]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::monitor
- [__link21]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health
- [__link22]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report::signals
- [__link3]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Healthy
- [__link4]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Degraded
- [__link5]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Health::Unhealthy
- [__link6]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Report
- [__link7]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator
- [__link8]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Aggregator::component
- [__link9]: https://docs.rs/oxidizer_health/0.1.0/oxidizer_health/?search=Signal
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbX_4VzDhABZgbJ8ZXfu_ETgEbKOKR4xiqBGIbY88hYsWFXpZhZIGCZmhlYWx0aGUwLjEuMA
+ [__link0]: https://docs.rs/health/0.1.0/health/?search=Publisher
+ [__link1]: https://docs.rs/health/0.1.0/health/?search=Component
+ [__link10]: https://docs.rs/health/0.1.0/health/?search=Monitor::changed
+ [__link11]: https://docs.rs/health/0.1.0/health/?search=Component
+ [__link12]: https://docs.rs/health/0.1.0/health/?search=Aggregator
+ [__link13]: https://docs.rs/health/0.1.0/health/?search=Monitor
+ [__link14]: https://docs.rs/health/0.1.0/health/?search=Report::signals
+ [__link15]: https://docs.rs/health/0.1.0/health/?search=Monitor::changed
+ [__link16]: https://docs.rs/health/0.1.0/health/?search=Component
+ [__link17]: https://docs.rs/health/0.1.0/health/?search=Aggregator::component
+ [__link18]: https://docs.rs/health/0.1.0/health/?search=Publisher::publish
+ [__link19]: https://docs.rs/health/0.1.0/health/?search=Monitor
+ [__link2]: https://docs.rs/health/0.1.0/health/?search=Aggregator
+ [__link20]: https://docs.rs/health/0.1.0/health/?search=Aggregator::monitor
+ [__link21]: https://docs.rs/health/0.1.0/health/?search=Health
+ [__link22]: https://docs.rs/health/0.1.0/health/?search=Report::signals
+ [__link3]: https://docs.rs/health/0.1.0/health/?search=Health::Healthy
+ [__link4]: https://docs.rs/health/0.1.0/health/?search=Health::Degraded
+ [__link5]: https://docs.rs/health/0.1.0/health/?search=Health::Unhealthy
+ [__link6]: https://docs.rs/health/0.1.0/health/?search=Report
+ [__link7]: https://docs.rs/health/0.1.0/health/?search=Aggregator
+ [__link8]: https://docs.rs/health/0.1.0/health/?search=Aggregator::component
+ [__link9]: https://docs.rs/health/0.1.0/health/?search=Signal

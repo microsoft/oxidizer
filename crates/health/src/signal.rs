@@ -15,10 +15,10 @@ use crate::{Attribute, Health};
 /// # Examples
 ///
 /// ```
-/// # testing_aids::init_tracing!();
-/// use oxidizer_health::{Aggregator, Health};
+/// use health::{Aggregator, Health};
+/// use observed::Sink;
 ///
-/// let aggregator = Aggregator::new();
+/// let aggregator = Aggregator::new(Sink::noop());
 /// let database = aggregator.component("database");
 /// let mut publisher = database.publisher();
 /// publisher.degraded("high latency");
