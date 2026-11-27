@@ -34,7 +34,7 @@ foreach ($path in $InputPath) {
         if ($line.StartsWith('SF:', [System.StringComparison]::Ordinal)) {
             $sourcePath = $line.Substring(3)
             if (-not $sources.ContainsKey($sourcePath)) {
-                $sources[$sourcePath] = [System.Collections.Generic.SortedDictionary[int, long]]::new()
+                $sources[$sourcePath] = [System.Collections.Generic.SortedDictionary[int, ulong]]::new()
             }
             $lineCounts = $sources[$sourcePath]
             continue
@@ -50,9 +50,9 @@ foreach ($path in $InputPath) {
         }
 
         $lineNumber = [int]$parts[0]
-        $hitCount = [long]$parts[1]
+        $hitCount = [ulong]$parts[1]
         $lineCounts[$lineNumber] = if ($lineCounts.ContainsKey($lineNumber)) {
-            [long]::Max($lineCounts[$lineNumber], $hitCount)
+            [Math]::Max($lineCounts[$lineNumber], $hitCount)
         } else {
             $hitCount
         }

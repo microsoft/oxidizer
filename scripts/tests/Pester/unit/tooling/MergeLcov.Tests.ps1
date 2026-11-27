@@ -82,4 +82,31 @@ Describe 'Merge LCOV reports' {
         $actual | Should -Match 'LH:1'
         $actual | Should -Match 'LH:0'
     }
+
+    It 'retains unsigned LCOV hit counts' {
+        $first = Join-Path $TestDrive 'first.info'
+        $second = Join-Path $TestDrive 'second.info'
+        $output = Join-Path $TestDrive 'merged.info'
+        @(
+            'TN:'
+            'SF:src/lib.rs'
+            'DA:1,18446744073709510882'
+            'LF:1'
+            'LH:1'
+            'end_of_record'
+        ) | Set-Content -LiteralPath $first
+        @(
+            'TN:'
+            'SF:src/lib.rs'
+            'DA:1,9223372036854775808'
+            'LF:1'
+            'LH:1'
+            'end_of_record'
+        ) | Set-Content -LiteralPath $second
+
+        & $script:MergeLcov -InputPath @($first, $second) -OutputPath $output
+
+        Get-Content -Raw -LiteralPath $output |
+            Should -Match 'DA:1,18446744073709510882'
+    }
 }
