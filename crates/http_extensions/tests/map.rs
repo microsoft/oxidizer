@@ -7,7 +7,7 @@
 
 use std::cell::Cell;
 use std::pin::Pin;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -22,11 +22,15 @@ use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpError};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 #[test]
 fn maps_buffered_and_streaming_content() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
 
     let buffered = builder
         .text("buffered")
@@ -60,7 +64,7 @@ fn maps_buffered_and_streaming_content() {
 
 #[test]
 fn propagates_callback_and_consumed_body_errors() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let error = builder
         .text("source")
         .map(|_| Err(HttpError::validation("map failed")))
@@ -85,7 +89,7 @@ fn propagates_callback_and_consumed_body_errors() {
 
 #[test]
 fn preserves_the_buffer_limit_for_streaming_output() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(3));
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(3));
     let transformed = builder
         .text("abc")
         .map(|content| {
@@ -106,7 +110,7 @@ fn preserves_the_buffer_limit_for_streaming_output() {
 fn preserves_the_active_timeout_and_clock() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let mut source = builder
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .stream(stream::pending());

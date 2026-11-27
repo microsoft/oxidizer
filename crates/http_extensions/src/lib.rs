@@ -206,13 +206,13 @@ pub type HttpRequest = Request<HttpBody>;
 /// This is a type alias for [`Response<HttpBody>`].
 pub type HttpResponse = Response<HttpBody>;
 
-#[cfg(any(feature = "test-util", test))]
-use bytesbuf::mem::GlobalPool;
 /// Supplies the one general-purpose provider used by test-support code.
 #[cfg(any(feature = "test-util", test))]
-use std::sync::LazyLock;
-#[cfg(any(feature = "test-util", test))]
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn test_memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
 
 mod error;
 pub use error::{HttpError, Result};

@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
-use std::sync::{LazyLock, Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
@@ -26,14 +26,18 @@ testing_aids::init_tracing!();
 
 const URL: &str = "https://example.com/resource";
 
-static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(fetch::HttpBodyBuilder::new_fake()));
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(fetch::HttpBodyBuilder::new_fake()))
+}
 
 fn payload() -> String {
     "the quick brown fox jumps over the lazy dog. ".repeat(64)
 }
 
 fn compress(format: Format, data: &[u8]) -> BytesView {
-    compressors::format::compress(format, data, &RESOURCES).unwrap()
+    compressors::format::compress(format, data, resources()).unwrap()
 }
 
 fn compress_zeroes(format: Format, len: usize) -> BytesView {
@@ -44,7 +48,7 @@ fn compress_zeroes(format: Format, len: usize) -> BytesView {
         BytesView::from_views(std::iter::repeat_n(chunk.clone(), len / CHUNK_SIZE).chain(std::iter::once(chunk.range(..len % CHUNK_SIZE))));
     let compressor = compressors::CompressorBuilder::new()
         .level(compressors::Level::FAST)
-        .build_format(format, &RESOURCES)
+        .build_format(format, resources())
         .unwrap();
     compressors::compress(input, compressor).unwrap()
 }

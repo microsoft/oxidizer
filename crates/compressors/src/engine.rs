@@ -640,7 +640,7 @@ mod tests {
             }
         }
         let mut codec = ObservesBudget { calls: Vec::new() };
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(3));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(3));
         assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_need_input());
         assert_eq!(codec.calls, [(Operation::Process, 3)]);
         codec.calls.clear();
@@ -658,7 +658,7 @@ mod tests {
                 Ok((Step::Continue, input.len() + 1, 0))
             }
         }
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(3));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(3));
         pump.push(view(b"x")).unwrap();
         let error = pump.pull(&mut Overconsumes, Destination::Stream).unwrap_err();
         assert_eq!(error.to_string(), "the compression engine reported invalid byte counts");
@@ -670,7 +670,7 @@ mod tests {
     use bytesbuf::mem::testing::FixedBlockMemory;
 
     use super::*;
-    use crate::testing::{MEMORY, chunk, view};
+    use crate::testing::{chunk, view};
 
     #[derive(Debug)]
     struct SpuriousFlush;
@@ -694,25 +694,25 @@ mod tests {
 
     #[test]
     fn gamma_survivor_pump_protocol_error_diagnostics_and_flushing_stall() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"input")).unwrap();
         assert_eq!(
             pump.pull(&mut Overreports, Destination::Stream).unwrap_err().to_string(),
             "the compression engine reported invalid byte counts"
         );
         assert_eq!(pump.total_out(), 0);
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(3));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(3));
         assert_eq!(
             pump.pull(&mut SpuriousFlush, Destination::Stream).unwrap_err().to_string(),
             "the compression engine completed an unrequested flush"
         );
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(3));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(3));
         pump.push(view(b"input")).unwrap();
         assert_eq!(
             pump.pull(&mut Stalled, Destination::Stream).unwrap_err().to_string(),
             "the compression engine could not make progress"
         );
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(3));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(3));
         pump.flush().unwrap();
         assert_eq!(
             pump.pull(&mut Stalled, Destination::Stream).unwrap_err().to_string(),
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn gamma_survivor_pump_state_errors_and_flush_completion() {
-        let memory = || MEMORY.clone().into();
+        let memory = || crate::testing::memory().clone().into();
         let mut maximum = ceiling(Pump::new(memory(), chunk(3)), u64::MAX);
         maximum.push(view(b"ab")).unwrap();
         maximum.end_input();
@@ -819,7 +819,7 @@ mod tests {
 
     #[test]
     fn reports_need_input_when_empty() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         let output = pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap();
 
         assert!(output.is_need_input());
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn round_trips_data_through_the_codec() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"hello world")).unwrap();
 
         let data = pump
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn bounds_each_chunk_to_the_configured_size() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(4));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(4));
         pump.push(view(b"abcdefghij")).unwrap();
 
         let data = pump
@@ -879,7 +879,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(10));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(10));
         pump.push(view(&[0_u8; 10])).unwrap();
 
         let data = pump
@@ -921,7 +921,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(100));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(100));
         pump.push(view(&[0_u8; 150])).unwrap();
 
         let output = pump.pull(&mut OneByteEcho, Destination::Stream).unwrap();
@@ -948,7 +948,7 @@ mod tests {
 
         // Hardcoded literals (rather than `MAX_INPUT_PER_PULL`) so this test actually pins the
         // budget's numeric value instead of trivially matching whatever the constant is set to.
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(&vec![0_u8; 1_048_577])).unwrap();
 
         assert!(pump.pull(&mut SilentConsumer, Destination::Stream).unwrap().is_progress());
@@ -987,7 +987,7 @@ mod tests {
         let large_block = NonZeroU32::new(2_000_000).unwrap();
         let single_block_memory = FixedBlockMemory::new(large_block);
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(BytesView::copied_from_slice(&vec![0_u8; 1_048_578], &single_block_memory))
             .unwrap();
 
@@ -1005,7 +1005,7 @@ mod tests {
 
     #[test]
     fn flush_returns_to_the_open_state() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"flush me")).unwrap();
         pump.flush().unwrap();
 
@@ -1020,7 +1020,7 @@ mod tests {
 
     #[test]
     fn flush_is_idempotent_while_still_pending() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.flush().unwrap();
         pump.flush().unwrap();
 
@@ -1029,7 +1029,7 @@ mod tests {
 
     #[test]
     fn empty_flush_completes_without_output() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.flush().unwrap();
 
         assert!(pump.pull(&mut Passthrough::default(), Destination::Stream).unwrap().is_need_input());
@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn flush_with_queued_end_input_continues_to_finishing() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.flush().unwrap();
         pump.end_input();
 
@@ -1070,7 +1070,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(4));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(4));
         pump.push(view(b"x")).unwrap();
         pump.flush().unwrap();
 
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn rejects_input_and_final_flush_while_flushing() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.flush().unwrap();
 
         assert!(pump.push(view(b"late")).unwrap_err().is_invalid_state());
@@ -1107,7 +1107,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         assert!(pump.pull(&mut Fails, Destination::Stream).unwrap_err().is_corrupt_data());
         pump.end_input();
 
@@ -1118,7 +1118,7 @@ mod tests {
 
     #[test]
     fn rejects_an_unrequested_flush_completion() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         assert!(pump.pull(&mut SpuriousFlush, Destination::Stream).unwrap_err().is_invalid_state());
     }
 
@@ -1139,7 +1139,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"input")).unwrap();
         assert!(pump.pull(&mut BadEnd, Destination::Stream).unwrap_err().is_invalid_state());
     }
@@ -1161,7 +1161,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"input")).unwrap();
         pump.end_input();
 
@@ -1187,7 +1187,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"member")).unwrap();
 
         assert!(pump.pull(&mut Recyclable, Destination::Stream).unwrap().is_need_input());
@@ -1222,7 +1222,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"firstsecond")).unwrap();
 
         assert!(pump.pull(&mut FixedFrame, Destination::Stream).unwrap().is_need_input());
@@ -1256,7 +1256,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"member")).unwrap();
         pump.end_input();
 
@@ -1286,7 +1286,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"member")).unwrap();
 
         let error = pump.pull(&mut RejectsAnotherStream, Destination::Stream).unwrap_err();
@@ -1295,8 +1295,7 @@ mod tests {
 
     #[test]
     fn violating_the_input_invariant_panics_before_stepping() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
-        // Bypass the public API (which never leaves input pending in a non-driving state) to
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64)); // Bypass the public API (which never leaves input pending in a non-driving state) to
         // exercise the engine's internal defensive check directly.
         pump.input = view(b"stray input");
         pump.state = State::BetweenStreams;
@@ -1313,7 +1312,7 @@ mod tests {
 
     #[test]
     fn no_progress_with_pending_input_is_terminal() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"input")).unwrap();
 
         assert!(pump.pull(&mut Stalled, Destination::Stream).unwrap_err().is_invalid_state());
@@ -1321,7 +1320,7 @@ mod tests {
 
     #[test]
     fn rejects_a_second_push_while_input_is_pending() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"first")).unwrap();
 
         let error = pump.push(view(b"second")).unwrap_err();
@@ -1330,7 +1329,7 @@ mod tests {
 
     #[test]
     fn rejects_push_after_end_input() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.end_input();
 
         let error = pump.push(view(b"late")).unwrap_err();
@@ -1339,7 +1338,7 @@ mod tests {
 
     #[test]
     fn end_input_is_idempotent() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.end_input();
         pump.end_input();
 
@@ -1349,7 +1348,7 @@ mod tests {
 
     #[test]
     fn reports_done_after_the_stream_ends() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"tail")).unwrap();
         pump.end_input();
 
@@ -1375,7 +1374,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.end_input();
 
         let error = pump.pull(&mut NeverEnds, Destination::Stream).unwrap_err();
@@ -1404,7 +1403,7 @@ mod tests {
             }
         }
 
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"seed")).unwrap();
 
         let error = pump.pull(&mut Expanding, Destination::Stream).unwrap_err();
@@ -1433,7 +1432,7 @@ mod tests {
 
     #[test]
     fn rejects_output_counts_beyond_the_provided_slice() {
-        let mut pump = Pump::new(MEMORY.clone().into(), chunk(64));
+        let mut pump = Pump::new(crate::testing::memory().clone().into(), chunk(64));
         pump.push(view(b"input")).unwrap();
 
         let error = pump.pull(&mut Overreports, Destination::Stream).unwrap_err();
@@ -1470,7 +1469,7 @@ mod tests {
 
     #[test]
     fn the_buffering_ceiling_rejects_output_past_the_bound() {
-        let mut pump = ceiling(Pump::new(MEMORY.clone().into(), chunk(64)), 4);
+        let mut pump = ceiling(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 4);
         pump.push(view(b"too much")).unwrap();
         pump.end_input();
 
@@ -1483,7 +1482,7 @@ mod tests {
     fn the_buffering_ceiling_does_not_bound_a_streaming_destination() {
         // The same pump and the same over-long input as above: only the destination differs, which
         // is what makes this the proof that the ceiling is not a property of the engine's config.
-        let mut pump = ceiling(Pump::new(MEMORY.clone().into(), chunk(64)), 4);
+        let mut pump = ceiling(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 4);
         pump.push(view(b"too much")).unwrap();
         pump.end_input();
 
@@ -1493,7 +1492,7 @@ mod tests {
 
     #[test]
     fn the_buffering_ceiling_admits_output_ending_exactly_at_the_bound() {
-        let mut pump = ceiling(Pump::new(MEMORY.clone().into(), chunk(64)), 8);
+        let mut pump = ceiling(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 8);
         pump.push(view(b"exactly!")).unwrap();
         pump.end_input();
 
@@ -1530,16 +1529,14 @@ mod tests {
 
     #[test]
     fn the_buffered_stream_cap_rejects_more_members_than_the_bound() {
-        let mut pump = stream_cap(Pump::new(MEMORY.clone().into(), chunk(64)), 2);
-
+        let mut pump = stream_cap(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 2);
         let error = feed_members(&mut pump, 3, Destination::Buffer).unwrap_err();
         assert!(error.is_limit_exceeded(), "got {error}");
     }
 
     #[test]
     fn the_buffered_stream_cap_admits_exactly_the_bound() {
-        let mut pump = stream_cap(Pump::new(MEMORY.clone().into(), chunk(64)), 2);
-
+        let mut pump = stream_cap(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 2);
         feed_members(&mut pump, 2, Destination::Buffer).unwrap();
     }
 
@@ -1548,8 +1545,7 @@ mod tests {
         // The same pump and a higher member count than the rejecting case above: only the
         // destination differs, which is what makes this the proof that the cap is not a property
         // of the engine.
-        let mut pump = stream_cap(Pump::new(MEMORY.clone().into(), chunk(64)), 2);
-
+        let mut pump = stream_cap(Pump::new(crate::testing::memory().clone().into(), chunk(64)), 2);
         feed_members(&mut pump, 5, Destination::Stream).unwrap();
     }
 
@@ -1577,7 +1573,7 @@ mod tests {
 
         // Whichever side is tighter must be the one that stops it at two members.
         for (engine, buffered) in [(2_u64, 4_u64), (4, 2)] {
-            let mut pump = stream_cap(Pump::new(MEMORY.clone().into(), chunk(64)), buffered);
+            let mut pump = stream_cap(Pump::new(crate::testing::memory().clone().into(), chunk(64)), buffered);
             let mut codec = BoundedMembers(engine);
 
             pump.push(view(b"member")).unwrap();
@@ -1622,7 +1618,7 @@ mod tests {
         // Whichever side is tighter, the pump must stop at four bytes plus the probe byte. Reading
         // a looser bound lets the engine produce past the tighter one before detection.
         for (maximum, buffered) in [(4, 8), (8, 4)] {
-            let mut pump = ceiling(Pump::new(MEMORY.clone().into(), chunk(64)), buffered);
+            let mut pump = ceiling(Pump::new(crate::testing::memory().clone().into(), chunk(64)), buffered);
             pump.push(view(b"far too much")).unwrap();
             pump.end_input();
 

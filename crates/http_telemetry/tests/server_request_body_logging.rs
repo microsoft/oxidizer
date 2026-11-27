@@ -8,7 +8,7 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{LazyLock, Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -24,7 +24,11 @@ use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, Htt
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 use observed::{Severity, Sink, Value};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
@@ -227,7 +231,7 @@ fn handler_receives_every_frame_and_error_in_order() {
 #[test]
 fn size_hint_and_body_options_are_kept() {
     let clock = ClockControl::new();
-    let bodies = HttpBodyBuilder::new(MEMORY.clone(), &clock.to_clock())
+    let bodies = HttpBodyBuilder::new(memory().clone(), &clock.to_clock())
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(10)).buffer_limit(8));
     let chunk = |text: &str| Ok::<_, HttpError>(BytesView::copied_from_slice(text.as_bytes(), &bodies));
     let kept = Arc::default();

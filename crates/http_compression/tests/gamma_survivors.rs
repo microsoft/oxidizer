@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::num::NonZeroU64;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -20,9 +20,17 @@ use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponseBui
 use layered::{Layer as _, Service as _};
 use ohno::Labeled as _;
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
 
-static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(MEMORY.clone()));
+    MEMORY.get_or_init(GlobalPool::new)
+}
+
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(memory().clone()))
+}
 
 fn request(method: Method, accept: Option<&str>) -> HttpRequest {
     let mut request = http::Request::builder()
@@ -41,7 +49,7 @@ fn request(method: Method, accept: Option<&str>) -> HttpRequest {
 #[test]
 fn gamma_round2_implicit_identity_accepts_existing_identity_coding() {
     block_on(async {
-        let handler = Compression::server(RESOURCES.clone())
+        let handler = Compression::server(resources().clone())
             .compress_responses(&[Format::Gzip])
             .layer(FakeHandler::from_fn(|_| {
                 HttpResponseBuilder::new_fake()
@@ -60,7 +68,7 @@ fn gamma_round2_implicit_identity_accepts_existing_identity_coding() {
 #[test]
 fn gamma_round2_disabled_request_decompression_ignores_fail_policy() {
     block_on(async {
-        let handler = Compression::server(RESOURCES.clone())
+        let handler = Compression::server(resources().clone())
             .decompress_requests(&[])
             .on_unsupported(http_compression::UnsupportedCompression::Fail)
             .layer(FakeHandler::from_fn(|request: HttpRequest| {
@@ -86,7 +94,7 @@ fn gamma_afternoon_connect_and_disabled_compression_preserve_origin_responses() 
             (Method::CONNECT, StatusCode::OK, true, false),
             (Method::GET, StatusCode::OK, false, false),
         ] {
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(if enabled { &[Format::Gzip] } else { &[] })
                 .layer(FakeHandler::from_fn(move |_| {
                     HttpResponseBuilder::new_fake().status(status).text("payload").build()
@@ -98,7 +106,7 @@ fn gamma_afternoon_connect_and_disabled_compression_preserve_origin_responses() 
             assert_eq!(response.headers().contains_key(VARY), expected);
             let body = response.into_body().into_bytes().await.unwrap();
             let plain = if expected {
-                compressors::format::decompress(Format::Gzip, body, &RESOURCES).unwrap()
+                compressors::format::decompress(Format::Gzip, body, resources()).unwrap()
             } else {
                 body
             };
@@ -122,7 +130,7 @@ fn gamma_survivor_negotiation_quality_invalid_members_and_existing_codings() {
             ("gzip;q=0, br;q=0", None),
             ("gzip;q=1.001, br;q=0.999", Some("br")),
         ] {
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip, Format::Brotli])
                 .layer(FakeHandler::from_fn(|_| {
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).text("payload").build()
@@ -136,8 +144,8 @@ fn gamma_survivor_negotiation_quality_invalid_members_and_existing_codings() {
             assert_eq!(response.headers().get(VARY).unwrap(), "accept-encoding");
             let bytes = response.into_body().into_bytes().await.unwrap();
             let plain = match expected {
-                Some("gzip") => compressors::format::decompress(Format::Gzip, bytes, &RESOURCES).unwrap(),
-                Some("br") => compressors::format::decompress(Format::Brotli, bytes, &RESOURCES).unwrap(),
+                Some("gzip") => compressors::format::decompress(Format::Gzip, bytes, resources()).unwrap(),
+                Some("br") => compressors::format::decompress(Format::Brotli, bytes, resources()).unwrap(),
                 None => bytes,
                 _ => unreachable!(),
             };
@@ -152,7 +160,7 @@ fn gamma_survivor_negotiation_quality_invalid_members_and_existing_codings() {
             "gzip, , identity",
         ] {
             let coding = HeaderValue::from_str(coding).unwrap();
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(move |_| {
                     HttpResponseBuilder::new_fake()
@@ -197,7 +205,7 @@ fn gamma_survivor_type_patterns_and_builtin_exclusions() {
             ("*/*", "text/gzip", true),
             ("*/*", "text/grpc", true),
         ] {
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip])
                 .compressible_types([pattern])
                 .unwrap()
@@ -226,7 +234,7 @@ fn gamma_survivor_response_metadata_vary_members_and_sensitive_etag() {
         ] {
             let mut etag = HeaderValue::from_static("\"private\"");
             etag.set_sensitive(true);
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(move |_| {
                     HttpResponseBuilder::new_fake()
@@ -246,7 +254,7 @@ fn gamma_survivor_response_metadata_vary_members_and_sensitive_etag() {
             assert_eq!(length, HeaderValue::from(wire.len()));
         }
         for method in [Method::HEAD, Method::CONNECT] {
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(|_| {
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).text("payload").build()
@@ -263,7 +271,7 @@ fn gamma_survivor_response_metadata_vary_members_and_sensitive_etag() {
 fn gamma_survivor_client_advertising_toggle_and_quality_floor() {
     block_on(async {
         for advertised in [false, true] {
-            let handler = Compression::client(RESOURCES.clone())
+            let handler = Compression::client(resources().clone())
                 .decompress_responses(&[Format::Gzip])
                 .advertise(false)
                 .advertise(advertised)
@@ -274,7 +282,7 @@ fn gamma_survivor_client_advertising_toggle_and_quality_floor() {
             handler.execute(request(Method::GET, None)).await.unwrap();
         }
         let formats = [Format::Gzip; 12];
-        let handler = Compression::client(RESOURCES.clone())
+        let handler = Compression::client(resources().clone())
             .decompress_responses(&formats)
             .layer(FakeHandler::from_fn(|request: HttpRequest| {
                 let expected = "gzip, gzip;q=0.9, gzip;q=0.8, gzip;q=0.7, gzip;q=0.6, gzip;q=0.5, gzip;q=0.4, gzip;q=0.3, gzip;q=0.2, gzip;q=0.1, gzip;q=0.1, gzip;q=0.1";
@@ -290,9 +298,9 @@ fn gamma_survivor_client_advertising_toggle_and_quality_floor() {
 fn gamma_survivor_decompression_skips_empty_identity_and_preserves_original_metadata() {
     block_on(async {
         for coding in [", gzip", "identity, gzip", "gzip,identity", "gzip,,identity"] {
-            let wire = compressors::format::compress(Format::Gzip, b"payload", &RESOURCES).unwrap();
+            let wire = compressors::format::compress(Format::Gzip, b"payload", resources()).unwrap();
             let length = wire.len() as u64;
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .decompress_requests(&[Format::Gzip])
                 .layer(FakeHandler::from_async_fn(move |request: HttpRequest| async move {
                     assert!(!request.headers().contains_key(CONTENT_ENCODING));
@@ -322,11 +330,11 @@ fn gamma_survivor_corrupt_and_over_limit_body_labels() {
     block_on(async {
         for limited in [false, true] {
             let wire = if limited {
-                compressors::format::compress(Format::Gzip, b"payload", &RESOURCES).unwrap()
+                compressors::format::compress(Format::Gzip, b"payload", resources()).unwrap()
             } else {
-                BytesView::copied_from_slice(b"invalid gzip", RESOURCES.memory())
+                BytesView::copied_from_slice(b"invalid gzip", resources().memory())
             };
-            let handler = Compression::client(RESOURCES.clone())
+            let handler = Compression::client(resources().clone())
                 .decompress_responses(&[Format::Gzip])
                 .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1).unwrap()))
                 .layer(FakeHandler::from_fn(move |_| {
@@ -347,7 +355,7 @@ fn gamma_survivor_corrupt_and_over_limit_body_labels() {
                 }
             );
         }
-        let handler = Compression::server(RESOURCES.clone())
+        let handler = Compression::server(resources().clone())
             .decompress_requests(&[Format::Gzip])
             .layer(FakeHandler::from_fn(|_| {
                 panic!("too many layers must fail before calling the inner handler")
@@ -378,7 +386,7 @@ fn gamma_survivor_layer_uses_injected_resource_memory() {
         memory.reserve(size)
     }
     block_on(async {
-        let resources = Resources::new(CallbackMemory::new(MEMORY.clone(), reserve));
+        let resources = Resources::new(CallbackMemory::new(memory().clone(), reserve));
         let before = RESERVATIONS.load(Ordering::Relaxed);
         let handler = Compression::server(resources.clone())
             .compress_responses(&[Format::Gzip])
@@ -401,7 +409,7 @@ fn gamma_survivor_layer_uses_injected_resource_memory() {
 #[cfg_attr(miri, ignore = "native tests cover gzip decompression; zlib-rs teardown violates Stacked Borrows")]
 fn gamma_survivor_bodyless_statuses_and_failed_connect_metadata() {
     block_on(async {
-        let wire = compressors::format::compress(Format::Gzip, b"payload", &RESOURCES).unwrap();
+        let wire = compressors::format::compress(Format::Gzip, b"payload", resources()).unwrap();
         for status in [
             StatusCode::CONTINUE,
             StatusCode::SWITCHING_PROTOCOLS,
@@ -412,7 +420,7 @@ fn gamma_survivor_bodyless_statuses_and_failed_connect_metadata() {
         ] {
             let wire = wire.clone();
             let expected = wire.clone();
-            let handler = Compression::client(RESOURCES.clone())
+            let handler = Compression::client(resources().clone())
                 .decompress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(move |_| {
                     HttpResponseBuilder::new_fake()
@@ -427,7 +435,7 @@ fn gamma_survivor_bodyless_statuses_and_failed_connect_metadata() {
             assert!(response.extensions().get::<OriginalBody>().is_none());
             assert_eq!(response.into_body().into_bytes().await.unwrap(), expected);
         }
-        let handler = Compression::client(RESOURCES.clone())
+        let handler = Compression::client(resources().clone())
             .decompress_responses(&[Format::Gzip])
             .layer(FakeHandler::from_fn(move |_| {
                 HttpResponseBuilder::new_fake()
@@ -445,7 +453,7 @@ fn gamma_survivor_bodyless_statuses_and_failed_connect_metadata() {
 
 #[test]
 fn gamma_survivor_client_forwards_inner_service_error() {
-    let handler = Compression::client(RESOURCES.clone())
+    let handler = Compression::client(resources().clone())
         .decompress_responses(&[Format::Gzip])
         .layer(FakeHandler::from_fn(|_| {
             Err(http_extensions::HttpError::other(
@@ -463,7 +471,7 @@ fn gamma_survivor_client_forwards_inner_service_error() {
 fn gamma_survivor_wildcard_rejection_does_not_match_unknown_or_empty_tokens() {
     block_on(async {
         for accept in ["xyzzy;q=1,*;q=0", ",;q=1,*;q=0"] {
-            let handler = Compression::server(RESOURCES.clone())
+            let handler = Compression::server(resources().clone())
                 .compress_responses(&[Format::Gzip])
                 .layer(FakeHandler::from_fn(|_| {
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).text("payload").build()
@@ -478,7 +486,7 @@ fn gamma_survivor_wildcard_rejection_does_not_match_unknown_or_empty_tokens() {
 fn gamma_survivor_empty_and_raw_format_configuration_is_disabled() {
     block_on(async {
         for formats in [&[][..], &[Format::Deflate][..]] {
-            let client = Compression::client(RESOURCES.clone())
+            let client = Compression::client(resources().clone())
                 .decompress_responses(formats)
                 .advertise(true)
                 .layer(FakeHandler::from_fn(|request: HttpRequest| {
@@ -486,7 +494,7 @@ fn gamma_survivor_empty_and_raw_format_configuration_is_disabled() {
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).text("payload").build()
                 }));
             client.execute(request(Method::GET, None)).await.unwrap();
-            let server = Compression::server(RESOURCES.clone())
+            let server = Compression::server(resources().clone())
                 .compress_responses(formats)
                 .layer(FakeHandler::from_fn(|_| {
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).text("payload").build()
@@ -504,7 +512,7 @@ fn gamma_survivor_empty_and_raw_format_configuration_is_disabled() {
 #[cfg_attr(miri, ignore = "native tests cover gzip compression; zlib-rs teardown violates Stacked Borrows")]
 fn gamma_survivor_empty_etag_and_rejected_wire_metadata() {
     block_on(async {
-        let handler = Compression::server(RESOURCES.clone())
+        let handler = Compression::server(resources().clone())
             .compress_responses(&[Format::Gzip])
             .layer(FakeHandler::from_fn(|_| {
                 HttpResponseBuilder::new_fake()
@@ -515,8 +523,8 @@ fn gamma_survivor_empty_etag_and_rejected_wire_metadata() {
             }));
         let response = handler.execute(request(Method::GET, Some("gzip"))).await.unwrap();
         assert_eq!(response.headers().get(ETAG).unwrap(), "W/");
-        let wire = compressors::format::compress(Format::Gzip, b"payload", &RESOURCES).unwrap();
-        let handler = Compression::server(RESOURCES.clone())
+        let wire = compressors::format::compress(Format::Gzip, b"payload", resources()).unwrap();
+        let handler = Compression::server(resources().clone())
             .compress_responses(&[Format::Gzip])
             .layer(FakeHandler::from_fn(move |_| {
                 HttpResponseBuilder::new_fake()

@@ -14,7 +14,7 @@ use bytesbuf::{BytesBuf, BytesView};
 use crate::core::{CompressionInternal as _, Destination, Output};
 use crate::format::Format;
 use crate::limits::{DEFAULT_MAX_OUTPUT_LEN, DEFAULT_MAX_STREAMS};
-use crate::testing::{RESOURCES, chunk, fragmented, view};
+use crate::testing::{chunk, fragmented, view};
 use crate::{DecompressorLimits, Resources, gzip};
 
 /// Caps every drain loop in this file.
@@ -75,9 +75,11 @@ fn drive_decompressor(mut decompressor: gzip::Decompressor, input: &BytesView, f
 #[test]
 fn round_trips_when_input_arrives_one_byte_at_a_time() {
     let payload = b"trickled in".repeat(50);
-    let compressed = gzip::compress(view(&payload), &RESOURCES).unwrap();
+    let compressed = gzip::compress(view(&payload), crate::testing::resources()).unwrap();
 
-    let decompressor = gzip::Decompressor::builder().output_chunk_size(chunk(1)).build(&RESOURCES);
+    let decompressor = gzip::Decompressor::builder()
+        .output_chunk_size(chunk(1))
+        .build(crate::testing::resources());
     let plain = drive_decompressor(decompressor, &compressed, 1).unwrap();
 
     assert_eq!(plain.to_vec(), payload);
@@ -92,7 +94,9 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     let payload = b"large streamed payload, compressible but not trivially so; ".repeat(20_000);
     assert!(payload.len() > 1024 * 1024, "the payload must exceed one mebibyte");
 
-    let mut compressor = gzip::Compressor::builder().output_chunk_size(chunk(CHUNK)).build(&RESOURCES);
+    let mut compressor = gzip::Compressor::builder()
+        .output_chunk_size(chunk(CHUNK))
+        .build(crate::testing::resources());
     compressor.push(fragmented(&payload, 4096)).unwrap();
     compressor.end_input();
 
@@ -121,7 +125,9 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
         "the compressed payload must be less than one tenth of the input"
     );
 
-    let decompressor = gzip::Decompressor::builder().output_chunk_size(chunk(CHUNK)).build(&RESOURCES);
+    let decompressor = gzip::Decompressor::builder()
+        .output_chunk_size(chunk(CHUNK))
+        .build(crate::testing::resources());
     let plain = drive_decompressor(decompressor, &gz, 8192).unwrap();
 
     assert_eq!(plain.len(), payload.len());
@@ -136,7 +142,7 @@ fn rejects_a_bomb_before_materialising_it() {
     // The cap is set explicitly rather than relying on the default: deflate cannot expand by more
     // than about `1032x`, so its default ratio never fires on data that the format can produce.
     // An absolute cap is what actually protects a caller that buffers the output.
-    let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), &RESOURCES).unwrap();
+    let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), crate::testing::resources()).unwrap();
     assert!(
         bomb.len() < 16 * 1024,
         "the compressed bomb must be less than 16 KiB: {} bytes",
@@ -145,7 +151,7 @@ fn rejects_a_bomb_before_materialising_it() {
 
     let mut decompressor = gzip::Decompressor::builder()
         .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024).unwrap()))
-        .build(&RESOURCES);
+        .build(crate::testing::resources());
     decompressor.push(bomb).unwrap();
     decompressor.end_input();
 
@@ -196,13 +202,13 @@ fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limi
     // that crosses the boundary, whatever the boundary currently is.
     let members = usize::try_from(crate::limits::DEFAULT_MAX_STREAMS).unwrap() + 1;
 
-    let member = gzip::compress(BytesView::new(), &RESOURCES).unwrap().to_vec();
+    let member = gzip::compress(BytesView::new(), crate::testing::resources()).unwrap().to_vec();
     let mut many = Vec::with_capacity(member.len() * members);
     for _ in 0..members {
         many.extend_from_slice(&member);
     }
 
-    let error = gzip::decompress(view(&many), &RESOURCES).unwrap_err();
+    let error = gzip::decompress(view(&many), crate::testing::resources()).unwrap_err();
 
     assert!(error.is_limit_exceeded(), "expected a limit failure, got: {error}");
     assert!(
@@ -217,10 +223,14 @@ fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_deci
     // bounded only by the decompressor settings. Brotli declares no defaults, so one hundred
     // compressed bytes can expand without a limit.
     let over_the_cap = vec![0_u8; usize::try_from(DEFAULT_MAX_OUTPUT_LEN).unwrap() + 1];
-    let compressed = gzip::compress(&*over_the_cap, &RESOURCES).unwrap();
+    let compressed = gzip::compress(&*over_the_cap, crate::testing::resources()).unwrap();
 
-    let decompress_with =
-        |limits: DecompressorLimits| crate::decompress(compressed.clone(), gzip::Decompressor::builder().limits(limits).build(&RESOURCES));
+    let decompress_with = |limits: DecompressorLimits| {
+        crate::decompress(
+            compressed.clone(),
+            gzip::Decompressor::builder().limits(limits).build(crate::testing::resources()),
+        )
+    };
 
     // Bound left unset: our 64 MiB stands in, so this is refused.
     let error = decompress_with(DecompressorLimits::new()).unwrap_err();
@@ -246,7 +256,7 @@ fn the_crate_level_decompress_applies_the_default_stream_cap_unless_the_caller_d
     // pay a full engine setup while producing almost no output, so no output bound ever trips.
     // gzip decompresses concatenated members by default, so a default-built decompressor handed to
     // `decompress` is exactly the exposed shape.
-    let member = gzip::compress(b"".as_slice(), &RESOURCES).unwrap();
+    let member = gzip::compress(b"".as_slice(), crate::testing::resources()).unwrap();
     let mut concatenated = BytesBuf::new();
     for _ in 0..=DEFAULT_MAX_STREAMS {
         concatenated.put_bytes(member.clone());
@@ -254,7 +264,10 @@ fn the_crate_level_decompress_applies_the_default_stream_cap_unless_the_caller_d
     let over_the_cap = concatenated.consume_all();
 
     let decompress_with = |limits: DecompressorLimits| {
-        crate::decompress(over_the_cap.clone(), gzip::Decompressor::builder().limits(limits).build(&RESOURCES))
+        crate::decompress(
+            over_the_cap.clone(),
+            gzip::Decompressor::builder().limits(limits).build(crate::testing::resources()),
+        )
     };
 
     // Bound left unset: our 1024 stands in, so this is refused.
@@ -282,14 +295,14 @@ fn the_crate_level_decompress_applies_the_default_ceiling_to_runtime_formats_too
     // makes this observable: it declares no bounds of its own, so nothing but the ceiling can
     // refuse this.
     let over_the_cap = vec![0_u8; usize::try_from(DEFAULT_MAX_OUTPUT_LEN).unwrap() + 1];
-    let compressed = crate::format::compress(Format::Brotli, &*over_the_cap, &RESOURCES).unwrap();
+    let compressed = crate::format::compress(Format::Brotli, &*over_the_cap, crate::testing::resources()).unwrap();
 
     let decompress_with = |limits: DecompressorLimits| {
         crate::decompress(
             compressed.clone(),
             crate::format::Decompressor::builder()
                 .limits(limits)
-                .build_format(Format::Brotli, &RESOURCES)
+                .build_format(Format::Brotli, crate::testing::resources())
                 .unwrap(),
         )
     };

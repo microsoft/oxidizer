@@ -5,9 +5,8 @@
 
 #![cfg(feature = "serialize")]
 
-use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
@@ -15,7 +14,11 @@ use cachet::{Cache, CacheOp, CacheTier, MockCache};
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 #[tokio::test]
 async fn serialization_builders_accept_global_pools() {
@@ -26,7 +29,7 @@ async fn serialization_builders_accept_global_pools() {
     let cache = Cache::builder(clock.clone())
         .storage(primary.clone())
         .fallback(Cache::builder(clock.clone()).storage(fallback.clone()))
-        .serialize(MEMORY.clone())
+        .serialize(memory().clone())
         .fallback(Cache::builder(clock.clone()).storage(serialized.clone()))
         .build();
 
@@ -38,7 +41,7 @@ async fn serialization_builders_accept_global_pools() {
 
     let reader = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
-        .serialize(MEMORY.clone())
+        .serialize(memory().clone())
         .fallback(Cache::builder(clock).storage(serialized))
         .build();
     assert_eq!(reader.get(&key).await.unwrap().unwrap().value(), "value");
@@ -85,7 +88,7 @@ fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let clones = Arc::new(AtomicUsize::new(0));
     let provider = CallbackMemory::new(
         CountingMemoryData {
-            inner: MEMORY.clone(),
+            inner: memory().clone(),
             reservations: Arc::clone(&reservations),
             clones: Arc::clone(&clones),
         },
@@ -189,7 +192,7 @@ async fn concurrent_serialize_from_multiple_tasks() {
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(MockCache::<String, String>::new())
-            .serialize(MEMORY.clone())
+            .serialize(memory().clone())
             .fallback(Cache::builder(Clock::new_frozen()).storage(mock_after.clone()))
             .build(),
     );
@@ -239,7 +242,7 @@ async fn serialize_on_one_thread_deserialize_on_another() {
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(mock_before.clone())
-            .serialize(MEMORY.clone())
+            .serialize(memory().clone())
             .fallback(Cache::builder(Clock::new_frozen()).storage(MockCache::<BytesView, BytesView>::new()))
             .build(),
     );

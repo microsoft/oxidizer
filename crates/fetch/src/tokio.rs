@@ -367,7 +367,7 @@ mod tests {
             SocketOptions::default().no_delay(true).send_buffer_size(31).receive_buffer_size(47),
         ] {
             let _client = crate::HttpClient::builder_tokio_with_options(
-                super::TokioDeps::new(&Clock::new_frozen(), crate::MEMORY.clone()),
+                super::TokioDeps::new(&Clock::new_frozen(), crate::test_memory().clone()),
                 super::TokioTransportOptions::default().socket(socket),
             )
             .minimal_pipeline()
@@ -425,7 +425,7 @@ mod tests {
         let options =
             super::TokioTransportOptions::default().socket(SocketOptions::default().send_buffer_size(123).receive_buffer_size(456));
         let _client = super::create_tokio_builder_with_options(
-            TokioDeps::new(&Clock::new_frozen(), crate::MEMORY.clone()),
+            TokioDeps::new(&Clock::new_frozen(), crate::test_memory().clone()),
             options,
             move |_, actual| {
                 observed
@@ -446,7 +446,7 @@ mod tests {
         let reservations = Arc::new(Mutex::new(Vec::new()));
         let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
             reservations.lock().unwrap().push(min_bytes);
-            crate::MEMORY.reserve(min_bytes)
+            crate::test_memory().reserve(min_bytes)
         });
         let client = create_tokio_builder(
             TokioDeps {
@@ -475,7 +475,7 @@ mod tests {
     #[tokio::test]
     async fn test_builder_tokio() {
         let clock = Clock::new_tokio();
-        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::MEMORY.clone()))
+        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone()))
             .minimal_pipeline()
             .build();
 
@@ -524,7 +524,7 @@ mod tests {
     #[tokio::test]
     async fn test_new_tokio() {
         let clock = Clock::new_tokio();
-        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::MEMORY.clone())).build();
+        let client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone())).build();
 
         assert!(client.pipeline().is_standard());
     }
@@ -532,7 +532,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn new_tokio_uses_supplied_deps() {
-        let deps = TokioDeps::new(&Clock::new_tokio(), crate::MEMORY.clone());
+        let deps = TokioDeps::new(&Clock::new_tokio(), crate::test_memory().clone());
         let client = HttpClient::new_tokio(deps);
 
         assert!(client.pipeline().is_standard());
@@ -543,7 +543,7 @@ mod tests {
     async fn tokio_client_works_after_relocation() {
         let clock = Clock::new_tokio();
 
-        let mut client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::MEMORY.clone()))
+        let mut client = HttpClient::builder_tokio(TokioDeps::new(&clock, crate::test_memory().clone()))
             .custom_pipeline(|_root, _ctx| FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).build()))
             .build();
 

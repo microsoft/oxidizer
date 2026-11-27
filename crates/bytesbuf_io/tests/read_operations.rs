@@ -5,9 +5,11 @@
 
 #![cfg(test)]
 
-use bytesbuf::mem::GlobalPool;
-use std::sync::LazyLock;
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
 
 mod read_fixture;
 
@@ -28,7 +30,7 @@ mod read_ext {
     #[test]
     fn read_at_most_fully_satisfied() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
             let mut stream = FakeRead::new(contents);
 
@@ -40,7 +42,7 @@ mod read_ext {
     #[test]
     fn read_at_most_eof_is_partial_read() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
             let mut stream = FakeRead::new(contents);
 
@@ -52,7 +54,7 @@ mod read_ext {
     #[test]
     fn read_exactly_fully_satisfied() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
             let mut stream = FakeRead::new(contents);
 
@@ -64,7 +66,7 @@ mod read_ext {
     #[test]
     fn read_exactly_eof_is_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
             let mut stream = FakeRead::new(contents);
 
@@ -75,7 +77,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_immediate_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -97,7 +99,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_immediate_complete_zero() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -113,7 +115,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_immediate_complete_partial() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -129,7 +131,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_immediate_complete_all() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -145,7 +147,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_deferred_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -173,7 +175,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_deferred_complete_zero() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -204,7 +206,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_deferred_complete_partial() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -235,7 +237,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_deferred_complete_all() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -266,7 +268,7 @@ mod read_ext {
     #[test]
     fn read_at_most_while_eof_is_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -282,7 +284,7 @@ mod read_ext {
     #[test]
     fn read_at_most_out_of_budget_is_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -306,7 +308,7 @@ mod read_ext {
     #[test]
     fn read_at_most_into_while_nonempty_immediate_error() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -325,7 +327,7 @@ mod read_ext {
     #[test]
     fn read_at_most_into_while_nonempty_immediate_complete_zero() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -351,7 +353,7 @@ mod read_ext {
     #[test]
     fn read_at_most_into_while_nonempty_immediate_complete_all() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             // Read up to 2 bytes at a time, to force read_at_most_while() to loop (if appropriate).
@@ -378,7 +380,7 @@ mod read_ext {
     #[should_panic]
     fn read_at_most_into_while_panics_when_buffer_already_at_len() {
         async_test(async || {
-            let memory = crate::MEMORY.clone();
+            let memory = crate::memory().clone();
             let contents = BytesView::copied_from_slice(TEST_DATA, &memory);
 
             let mut stream = FakeRead::builder().contents(contents.clone()).build();

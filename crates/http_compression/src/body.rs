@@ -202,7 +202,8 @@ mod tests {
     #[test]
     fn gamma_survivor_failed_body_releases_chain_and_becomes_terminal() {
         let body = http_extensions::HttpBodyBuilder::new_fake().text("invalid gzip");
-        let chain = CompressionChain::new(StreamingBody::new(body)).decompress(compressors::gzip::Decompressor::new(&crate::RESOURCES));
+        let chain =
+            CompressionChain::new(StreamingBody::new(body)).decompress(compressors::gzip::Decompressor::new(crate::test_resources()));
         let mut body = CompressionBody::new(chain);
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);

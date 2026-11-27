@@ -9,7 +9,6 @@
 #![cfg(windows)]
 
 use std::future::Future as _;
-use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -25,7 +24,11 @@ use http::Version;
 use observed::Sink;
 use tick::Clock;
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: std::sync::OnceLock<GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 #[cfg_attr(miri, ignore)]
 #[test]
@@ -157,7 +160,7 @@ fn mixed_completion_cancellation_and_body_drops_remain_usable() {
 fn full_fetch_pipeline_uses_the_winhttp_transport() {
     let server = TestServer::http([ResponsePlan::ok("full pipeline")]);
     let clock = Clock::new_frozen();
-    let memory = MEMORY.clone();
+    let memory = memory().clone();
     let deps = WinHttpDeps::builder(clock, memory, Sink::noop()).build();
     let client = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()

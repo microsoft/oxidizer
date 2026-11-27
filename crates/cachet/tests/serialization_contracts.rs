@@ -5,12 +5,14 @@
 
 #![cfg(test)]
 
-use bytesbuf::mem::GlobalPool;
-use std::sync::LazyLock;
 testing_aids::init_tracing!();
 
 #[cfg(feature = "serialize")]
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static bytesbuf::mem::GlobalPool {
+    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
+
+    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
+}
 
 #[cfg(feature = "serialize")]
 mod serialization {
@@ -38,7 +40,7 @@ mod serialization {
         let reservations = Arc::new(AtomicUsize::new(0));
         let provider = CallbackMemory::new(unaware(Arc::clone(&reservations)), |counter, min_bytes| {
             counter.fetch_add(1, Ordering::SeqCst);
-            crate::MEMORY.reserve(min_bytes)
+            crate::memory().reserve(min_bytes)
         });
         (OpaqueMemory::new(provider), reservations)
     }
@@ -73,7 +75,7 @@ mod serialization {
             storage.insert(BytesView::from(key), CacheEntry::new(value)).await.unwrap();
             let cache = Cache::builder::<u32, String>(clock.clone())
                 .storage(MockCache::new())
-                .serialize(crate::MEMORY.clone())
+                .serialize(crate::memory().clone())
                 .fallback(Cache::builder(clock).storage(storage))
                 .build();
             cache.get(&1).await.unwrap().unwrap().into_value()
@@ -82,13 +84,13 @@ mod serialization {
 
     #[test]
     fn encode_serialization_failure_returns_err() {
-        encode(FailSerialize, crate::MEMORY.clone().into()).unwrap_err();
+        encode(FailSerialize, crate::memory().clone().into()).unwrap_err();
     }
 
     #[test]
     fn encode_decode_roundtrip() {
         let original = "hello, world!".to_string();
-        let encoded = encode(original.clone(), crate::MEMORY.clone().into()).unwrap();
+        let encoded = encode(original.clone(), crate::memory().clone().into()).unwrap();
         assert_eq!(decode(encoded), original);
     }
 
@@ -98,7 +100,7 @@ mod serialization {
         let storage = MockCache::<BytesView, BytesView>::new();
         let cache = Cache::builder::<u32, u32>(clock.clone())
             .storage(MockCache::new())
-            .serialize(crate::MEMORY.clone())
+            .serialize(crate::memory().clone())
             .fallback(Cache::builder(clock).storage(storage.clone()))
             .build();
         assert!(futures::executor::block_on(cache.get(&42)).unwrap().is_none());
@@ -144,7 +146,7 @@ mod serialization {
     #[test]
     fn decode_multi_span_view() {
         let original = "multi-span test".to_string();
-        let bytes = encode(original.clone(), crate::MEMORY.clone().into()).unwrap().to_vec();
+        let bytes = encode(original.clone(), crate::memory().clone().into()).unwrap().to_vec();
         let mid = bytes.len() / 2;
         let mut first_half = BytesView::from(bytes[..mid].to_vec());
         first_half.append(BytesView::from(bytes[mid..].to_vec()));

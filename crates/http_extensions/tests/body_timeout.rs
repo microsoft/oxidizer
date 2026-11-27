@@ -8,9 +8,8 @@
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -26,7 +25,11 @@ use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
-static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 #[test]
 fn body_size_fits_the_storage_and_policy_budget() {
@@ -36,7 +39,7 @@ fn body_size_fits_the_storage_and_policy_budget() {
 
 #[test]
 fn body_debug_hides_payload_and_stream_implementation() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let bytes = BytesView::copied_from_slice(b"sensitive payload", &builder);
 
     let debug = format!("{:?}", builder.bytes(bytes.clone()));
@@ -52,7 +55,7 @@ fn body_debug_hides_payload_and_stream_implementation() {
 
 #[test]
 fn transform_buffered_and_empty_bodies() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
 
     for (body, expected) in [
         (builder.empty(), b"" as &[u8]),
@@ -83,7 +86,7 @@ fn transform_buffered_and_empty_bodies() {
 
 #[test]
 fn transform_rejects_a_consumed_buffered_body() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let mut body = builder.text("source");
     let frame = body.frame().now_or_never().unwrap().unwrap().unwrap();
     assert_eq!(frame.into_data().unwrap(), b"source");
@@ -104,7 +107,7 @@ fn transform_rejects_a_consumed_buffered_body() {
 
 #[test]
 fn transform_propagates_callback_errors() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     for body in [builder.empty(), builder.text("source"), builder.body(PendingBody)] {
         let expected: HttpError = std::io::Error::other("map failed").into();
         let expected_label = expected.label().to_string();
@@ -118,7 +121,7 @@ fn transform_propagates_callback_errors() {
 
 #[test]
 fn transform_accepts_an_empty_streaming_body() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder.body(http_body_util::Empty::new());
     assert!(body.is_end_stream());
     let called = Cell::new(false);
@@ -141,7 +144,7 @@ fn transform_accepts_an_empty_streaming_body() {
 #[test]
 fn mapping_preserves_the_active_idle_period() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let mut source = builder.with_options(HttpBodyOptions::new().timeout(timeout)).body(PendingBody);
     let waker = futures::task::noop_waker();
@@ -162,7 +165,7 @@ fn mapping_preserves_the_active_idle_period() {
 #[test]
 fn body_transform_does_not_time_out_after_the_source_finishes() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder
         .clone()
@@ -186,7 +189,7 @@ fn body_transform_does_not_time_out_after_the_source_finishes() {
 
 #[test]
 fn body_transform_preserves_the_buffer_limit() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(99));
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(99));
     let options = HttpBodyOptions::new().buffer_limit(3);
     let body = builder
         .clone()
@@ -212,7 +215,7 @@ fn transform_does_not_apply_builder_defaults() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let builder =
-        HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(1));
+        HttpBodyBuilder::new(memory().clone(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(1));
     let body = builder.text("source").map(Ok).unwrap();
     assert_eq!(block_on(body.into_text()).unwrap(), "source");
 
@@ -229,7 +232,7 @@ fn transform_does_not_apply_builder_defaults() {
 
 #[test]
 fn buffer_limit_survives_buffering_cloning_and_buffered_transformations() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(3));
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(3));
     let source = builder.stream(stream::iter([Ok(BytesView::copied_from_slice(b"abc", &builder))]));
     let buffered = block_on(source.into_buffered()).unwrap();
     let buffered = buffered.map(Ok).unwrap();
@@ -252,7 +255,7 @@ fn buffered_bodies_do_not_activate_timeout_after_conversion_to_streaming() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let builder =
-        HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
+        HttpBodyBuilder::new(memory().clone(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
     let source = builder.text("abc");
     let mut stalled = source
         .map(|content| {
@@ -272,7 +275,7 @@ fn buffered_bodies_do_not_activate_timeout_after_conversion_to_streaming() {
 
 #[test]
 fn transform_can_turn_buffered_bytes_into_streaming_content() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder
         .text("source")
         .map(|content| {
@@ -291,7 +294,7 @@ fn transform_can_turn_buffered_bytes_into_streaming_content() {
 #[test]
 fn transform_can_complete_streaming_content_and_release_its_source() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let dropped = Arc::new(AtomicBool::new(false));
     let mut source = builder
         .clone()
@@ -318,7 +321,7 @@ fn transform_can_complete_streaming_content_and_release_its_source() {
 
 #[test]
 fn streaming_body_pins_a_non_unpin_source_and_delegates_its_state() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let mut body = StreamingBody::new(PinnedBody {
         bytes: BytesView::copied_from_slice(b"pinned", &builder),
         yielded: Cell::new(false),
@@ -348,7 +351,7 @@ fn streaming_body_converts_source_errors() {
 #[test]
 fn stream_body_returns_data_before_timeout() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let chunks = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
@@ -360,7 +363,7 @@ fn stream_body_returns_data_before_timeout() {
 #[test]
 fn stream_body_times_out_when_pending() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &clock);
+    let builder = HttpBodyBuilder::new(memory().clone(), &clock);
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
         .stream(stream::pending());
@@ -373,7 +376,7 @@ fn stream_body_times_out_when_pending() {
 #[test]
 fn body_timeout_chains_with_buffer_limit() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &clock).with_options(HttpBodyOptions::new().buffer_limit(1024));
+    let builder = HttpBodyBuilder::new(memory().clone(), &clock).with_options(HttpBodyOptions::new().buffer_limit(1024));
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
         .body(PendingBody);
@@ -384,7 +387,7 @@ fn body_timeout_chains_with_buffer_limit() {
 
 #[test]
 fn size_hint_delegates_to_inner() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let chunks = vec![Ok(BytesView::copied_from_slice(b"hello", &builder))];
     let body = builder.stream(stream::iter(chunks));
 
@@ -393,7 +396,7 @@ fn size_hint_delegates_to_inner() {
 
 #[test]
 fn size_hint_delegates_through_body_timeout() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder
         .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
@@ -405,7 +408,7 @@ fn size_hint_delegates_through_body_timeout() {
 
 #[test]
 fn is_end_stream_true_when_inner_is_empty() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)))
         .body(http_body_util::Empty::new());
@@ -415,7 +418,7 @@ fn is_end_stream_true_when_inner_is_empty() {
 
 #[test]
 fn is_end_stream_false_when_inner_has_data() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder
         .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)))
@@ -426,7 +429,7 @@ fn is_end_stream_false_when_inner_has_data() {
 
 #[test]
 fn poll_frame_returns_data_through_body_timeout() {
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen());
+    let builder = HttpBodyBuilder::new(memory().clone(), &tick::Clock::new_frozen());
     let body = builder
         .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
@@ -438,7 +441,7 @@ fn poll_frame_returns_data_through_body_timeout() {
 #[test]
 fn poll_frame_times_out_when_pending_with_short_timeout() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &clock);
+    let builder = HttpBodyBuilder::new(memory().clone(), &clock);
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(1)))
         .body(PendingBody);
@@ -450,7 +453,7 @@ fn poll_frame_times_out_when_pending_with_short_timeout() {
 #[test]
 fn poll_frame_returns_data_even_when_clock_advanced_past_timeout() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let body = builder
         .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(1)))
@@ -464,7 +467,7 @@ fn poll_frame_returns_data_even_when_clock_advanced_past_timeout() {
 #[test]
 fn poll_frame_times_out_via_delay_when_inner_body_advances_clock() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let body = builder
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
         .body(ClockAdvancingBody { control, poll_count: 0 });
@@ -476,7 +479,7 @@ fn poll_frame_times_out_via_delay_when_inner_body_advances_clock() {
 #[test]
 fn poll_frame_returns_error_after_timeout() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(50);
     let dropped = Arc::new(AtomicBool::new(false));
     let mut body = builder
@@ -501,7 +504,7 @@ fn poll_frame_returns_error_after_timeout() {
 #[test]
 fn transformed_body_observes_the_source_timeout() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder.with_options(HttpBodyOptions::new().timeout(timeout)).body(PendingBody);
     let mut body = map_stream(source, |body| body);
@@ -522,7 +525,7 @@ fn transformed_body_observes_the_source_timeout() {
 #[test]
 fn source_frames_reset_the_timeout_inside_the_mapper() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
     let (sender, receiver) = mpsc::unbounded();
     let source = builder.clone().with_options(options).stream(receiver);
@@ -564,7 +567,7 @@ fn source_frames_reset_the_timeout_inside_the_mapper() {
 #[test]
 fn source_progress_allows_a_coalescing_mapper_to_finish() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
     let (sender, receiver) = mpsc::unbounded();
     let source = builder.clone().with_options(options).stream(receiver);
@@ -605,7 +608,7 @@ fn source_progress_allows_a_coalescing_mapper_to_finish() {
 #[test]
 fn timeout_only_override_keeps_the_buffer_limit() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock())
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock())
         .with_options(HttpBodyOptions::new().buffer_limit(3))
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)));
 
@@ -629,7 +632,7 @@ fn timeout_only_override_keeps_the_buffer_limit() {
 fn body_options_then_mapping_use_the_body_clock() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let mut body = builder
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .body(PendingBody)
@@ -650,7 +653,7 @@ fn body_options_then_mapping_use_the_body_clock() {
 #[test]
 fn body_options_then_mapping_override_builder_defaults() {
     let source_control = ClockControl::new();
-    let source_builder = HttpBodyBuilder::new(MEMORY.clone(), &source_control.to_clock())
+    let source_builder = HttpBodyBuilder::new(memory().clone(), &source_control.to_clock())
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)));
     let timeout = Duration::from_millis(100);
     let source = source_builder
@@ -672,7 +675,7 @@ fn body_options_then_mapping_override_builder_defaults() {
 #[test]
 fn buffering_a_transformed_body_enforces_its_timeout() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder
         .with_options(HttpBodyOptions::new().timeout(timeout))
@@ -694,7 +697,7 @@ fn buffering_a_transformed_body_enforces_its_timeout() {
 #[test]
 fn mapping_preserves_the_source_clock_across_multiple_maps() {
     let source_control = ClockControl::new();
-    let source_builder = HttpBodyBuilder::new(MEMORY.clone(), &source_control.to_clock());
+    let source_builder = HttpBodyBuilder::new(memory().clone(), &source_control.to_clock());
     let wrapper_control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let source = source_builder
@@ -720,7 +723,7 @@ fn mapping_preserves_the_source_clock_across_multiple_maps() {
 #[test]
 fn transformed_output_does_not_reset_the_source_timer() {
     let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(MEMORY.clone(), &control.to_clock());
+    let builder = HttpBodyBuilder::new(memory().clone(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder
         .clone()

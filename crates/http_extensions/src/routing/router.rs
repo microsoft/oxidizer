@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn november4_routing_retains_the_built_path_cache_for_every_attempt() {
-        let bodies = crate::HttpBodyBuilder::new(crate::MEMORY.clone(), &tick::Clock::new_frozen());
+        let bodies = crate::HttpBodyBuilder::new(crate::test_memory().clone(), &tick::Clock::new_frozen());
         let mut request = crate::HttpRequestBuilder::new(&bodies).uri("/items?x=7").build().unwrap();
         for prefix in ["first", "second"] {
             let router =

@@ -7,9 +7,8 @@
 //! production code. Module-local helpers stay where they are used.
 
 use std::num::NonZeroUsize;
-use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use bytesbuf::mem::{CallbackMemory, GlobalPool};
 use bytesbuf::{BytesBuf, BytesView};
@@ -19,10 +18,18 @@ use crate::core::{Compress, Compression, CompressionInternal, Destination, Outpu
 use crate::{Error, Resources, Result};
 
 /// The general-purpose provider owned by the unit-test binary.
-pub(crate) static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
+pub(crate) fn memory() -> &'static GlobalPool {
+    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
+
+    MEMORY.get_or_init(GlobalPool::new)
+}
 
 /// The general-purpose compression resources owned by the unit-test binary.
-pub(crate) static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(MEMORY.clone()));
+pub(crate) fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(memory().clone()))
+}
 
 /// Operations requested from a [`counting_memory`] provider.
 ///
@@ -76,7 +83,7 @@ fn count_reserve(data: &CountingData, min_bytes: usize) -> BytesBuf {
 pub(crate) fn counting_memory() -> (CallbackMemory<CountingData>, MemoryActivity) {
     let activity = MemoryActivity::default();
     let data = CountingData {
-        inner: MEMORY.clone(),
+        inner: memory().clone(),
         activity: activity.clone(),
     };
 
@@ -85,12 +92,12 @@ pub(crate) fn counting_memory() -> (CallbackMemory<CountingData>, MemoryActivity
 
 /// A view over `bytes`, allocated from the unit-test binary's provider.
 pub(crate) fn view(bytes: &[u8]) -> BytesView {
-    BytesView::copied_from_slice(bytes, &*MEMORY)
+    BytesView::copied_from_slice(bytes, memory())
 }
 
 /// A view over `bytes` split into `segment`-sized spans, exercising the multi-segment paths.
 pub(crate) fn fragmented(bytes: &[u8], segment: usize) -> BytesView {
-    BytesView::from_views(bytes.chunks(segment).map(|chunk| BytesView::copied_from_slice(chunk, &*MEMORY)))
+    BytesView::from_views(bytes.chunks(segment).map(|chunk| BytesView::copied_from_slice(chunk, memory())))
 }
 
 /// A chunk size, for the builders and pumps that require a non-zero one.

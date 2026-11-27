@@ -7,7 +7,7 @@
 
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::num::{NonZeroU32, NonZeroU64};
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use bytesbuf::mem::GlobalPool;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
@@ -15,12 +15,16 @@ use compressors::DecompressorLimits;
 use compressors::format::Format;
 use compressors::{Level, Resources};
 
-static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
+}
 
 #[cfg(all(feature = "deflate", not(feature = "zlib")))]
 #[test]
 fn afternoon_raw_deflate_pool_restores_raw_headers_without_the_zlib_feature() {
-    let resources = RESOURCES.clone().with_pool_capacity(1);
+    let resources = resources().clone().with_pool_capacity(1);
     let plain = b"raw deflate must retain its framing when a pooled decompressor is reset";
     let compressed = compressors::format::compress(Format::Deflate, plain.as_slice(), &resources).unwrap();
     for _ in 0..3 {
@@ -97,7 +101,7 @@ fn decompressor_limit_fallbacks_fill_an_unset_output_bound() {
 
 #[test]
 fn resources_expose_usable_memory() {
-    let resources = &RESOURCES;
+    let resources = resources();
     assert!(
         resources.memory().reserve(16).remaining_capacity() >= 16,
         "the memory provider must be reachable"
@@ -110,8 +114,8 @@ fn every_enabled_runtime_format_round_trips() {
     let payload = b"runtime selected format ".repeat(200);
 
     for &format in Format::ALL {
-        let compressed = compressors::format::compress(format, payload.as_slice(), &RESOURCES).unwrap();
-        let plain = compressors::format::decompress(format, compressed, &RESOURCES).unwrap();
+        let compressed = compressors::format::compress(format, payload.as_slice(), resources()).unwrap();
+        let plain = compressors::format::decompress(format, compressed, resources()).unwrap();
 
         assert_eq!(plain.to_vec(), payload, "{format:?} failed to round trip");
     }

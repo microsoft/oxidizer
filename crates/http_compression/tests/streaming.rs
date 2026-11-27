@@ -7,7 +7,7 @@
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::pin::Pin;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
@@ -28,7 +28,11 @@ use seatbelt::RecoveryInfo;
 
 const FORMATS: &[Format] = &[Format::Gzip, Format::Brotli, Format::Zstd, Format::Zlib];
 
-static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
+fn resources() -> &'static Resources {
+    static RESOURCES: OnceLock<Resources> = OnceLock::new();
+
+    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
+}
 
 struct ChannelBody(UnboundedReceiver<Result<Frame<BytesView>>>);
 
@@ -43,7 +47,7 @@ impl Body for ChannelBody {
 
 async fn streaming_response(format: Format) -> (UnboundedSender<Result<Frame<BytesView>>>, HttpResponse) {
     let builder = HttpBodyBuilder::new_fake();
-    let server = Compression::server(RESOURCES.clone())
+    let server = Compression::server(resources().clone())
         .compress_responses(&[format])
         .layer(FakeHandler::from_fn(|request: HttpRequest| {
             HttpResponseBuilder::new_fake()
@@ -53,7 +57,9 @@ async fn streaming_response(format: Format) -> (UnboundedSender<Result<Frame<Byt
                 .body(request.into_body())
                 .build()
         }));
-    let client = Compression::client(RESOURCES.clone()).decompress_responses(&[format]).layer(server);
+    let client = Compression::client(resources().clone())
+        .decompress_responses(&[format])
+        .layer(server);
     let (sender, receiver) = unbounded();
     let request = http::Request::get("https://example.com/stream")
         .body(builder.body(ChannelBody(receiver)))
