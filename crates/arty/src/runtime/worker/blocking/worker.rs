@@ -14,7 +14,6 @@ use performables::sync::mutex::Mutex;
 use crate::runtime::config::RuntimeName;
 #[cfg(test)]
 use crate::runtime::monitoring::BlockingJob;
-use crate::runtime::monitoring::MonitorHandle;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::blocking::queue::{Queue, QueuedJob};
 use crate::runtime::worker::blocking::{LocalWorker, PoolIdentity};
@@ -23,7 +22,7 @@ use crate::task::preparation::prepare_blocking;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
-fn attach_thread(pool: PoolIdentity, monitoring: Option<seismograph_runtime::blocking::Worker>) {
+fn attach_thread(pool: PoolIdentity, monitoring: seismograph_runtime::blocking::Worker) {
     LocalWorker::attach(pool, monitoring);
 }
 
@@ -60,7 +59,10 @@ impl JoinableThreadPool {
             queued_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             active_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
-        pool.set_num_threads_with_monitoring(thread_count, None);
+        if thread_count != 0 {
+            let monitoring = seismograph_runtime::Runtime::builder("").build();
+            pool.set_num_threads_with_monitoring(thread_count, &monitoring);
+        }
         pool
     }
 
@@ -87,21 +89,20 @@ impl JoinableThreadPool {
         true
     }
 
-    fn set_num_threads_with_monitoring(&mut self, thread_count: usize, monitoring: MonitorHandle<'_>) {
+    fn set_num_threads_with_monitoring(&mut self, thread_count: usize, monitoring: &seismograph_runtime::Runtime) {
         while self.workers.len() < thread_count {
             let receiver = std::sync::Arc::clone(&self.receiver);
             let queued_count = Arc::clone(&self.queued_count);
             let active_count = Arc::clone(&self.active_count);
             let identity = Arc::clone(&self.identity);
-            let monitoring = monitoring.cloned();
+            let monitoring = monitoring.clone();
             let (attached_tx, attached_rx) = std::sync::mpsc::sync_channel(0);
             let name = self.name.blocking_worker(self.async_worker_index, self.workers.len());
             let worker = thread::Builder::new()
                 .name(name)
                 .spawn(move || {
-                    let monitoring = monitoring.map(|runtime| {
-                        runtime.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking))
-                    });
+                    let monitoring =
+                        monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
                     // #[gamma::skip(call_result.default, reason = "attach_thread returns unit; default_after preserves its side effects and unit result.")]
                     attach_thread(identity, monitoring);
                     attached_tx.send(()).expect("the blocking pool owns the worker startup receiver");
@@ -181,7 +182,7 @@ impl Worker {
         })
     }
 
-    pub(crate) fn start(&self, monitoring: MonitorHandle<'_>) {
+    pub(crate) fn start(&self, monitoring: &seismograph_runtime::Runtime) {
         self.pool.start(monitoring);
     }
 
@@ -191,15 +192,15 @@ impl Worker {
     pub(crate) fn spawn_blocking<F, R>(
         &self,
         body: F,
-        monitoring: Option<seismograph_runtime::blocking::TaskHandle>,
-        runtime: MonitorHandle<'_>,
+        monitoring: impl Into<Option<seismograph_runtime::blocking::TaskHandle>>,
+        runtime: &seismograph_runtime::Runtime,
     ) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         let runtime_shutdown = self.remote_results.shutdown().clone();
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring.into());
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -266,7 +267,7 @@ impl Pool {
         }
     }
 
-    fn start(&self, monitoring: MonitorHandle<'_>) {
+    fn start(&self, monitoring: &seismograph_runtime::Runtime) {
         let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
         if let Some(pool) = pool.as_mut()
             && pool.max_count() == 0
@@ -305,41 +306,7 @@ impl Pool {
         }
     }
 
-    /// Grows the pool by one thread if possible, returning whether it grew.
-    ///
-    /// Returns `false` when the pool is already at its maximum permitted size.
-    #[cfg(test)]
-    fn grow_with_monitoring(&self, monitoring: MonitorHandle<'_>) -> bool {
-        let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
-        let Some(pool) = pool.as_mut() else {
-            return false;
-        };
-        let new_thread_count = pool.max_count().saturating_add(1);
-
-        if new_thread_count > self.max_thread_count.get() {
-            return false;
-        }
-        pool.set_num_threads_with_monitoring(new_thread_count, monitoring);
-        true
-    }
-
-    #[cfg(test)]
-    fn grow(&self) -> bool {
-        self.grow_with_monitoring(None)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn max_thread_count(&self) -> usize {
-        self.max_thread_count.get()
-    }
-
-    #[cfg(test)]
-    fn is_overloaded(&self) -> bool {
-        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
-        pool.as_ref().is_some_and(Self::thread_pool_is_overloaded)
-    }
-
-    fn grow_if_overloaded_with_monitoring(&self, monitoring: MonitorHandle<'_>) {
+    fn grow_if_overloaded_with_monitoring(&self, monitoring: &seismograph_runtime::Runtime) {
         let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
         let Some(pool) = pool.as_mut() else {
             return;
@@ -352,11 +319,6 @@ impl Pool {
         if new_thread_count <= self.max_thread_count.get() {
             pool.set_num_threads_with_monitoring(new_thread_count, monitoring);
         }
-    }
-
-    #[cfg(test)]
-    fn grow_if_overloaded(&self) {
-        self.grow_if_overloaded_with_monitoring(None);
     }
 
     fn thread_pool_is_overloaded(pool: &JoinableThreadPool) -> bool {
@@ -419,8 +381,37 @@ mod tests {
 
     fn pool(max_thread_count: Option<NonZeroUsize>) -> Pool {
         let pool = Pool::new(RuntimeName::default(), None, max_thread_count);
-        pool.start(None);
+        let monitoring = monitoring();
+        pool.start(&monitoring);
         pool
+    }
+
+    fn monitoring() -> seismograph_runtime::Runtime {
+        seismograph_runtime::Runtime::builder("").build()
+    }
+
+    fn grow(pool: &Pool) -> bool {
+        let monitoring = seismograph_runtime::Runtime::builder("").build();
+        let mut inner = pool.inner.lock_result().unwrap();
+        let Some(inner) = inner.as_mut() else {
+            return false;
+        };
+        let new_thread_count = inner.max_count().saturating_add(1);
+        if new_thread_count > pool.max_thread_count.get() {
+            return false;
+        }
+        inner.set_num_threads_with_monitoring(new_thread_count, &monitoring);
+        true
+    }
+
+    fn grow_if_overloaded(pool: &Pool) {
+        let monitoring = seismograph_runtime::Runtime::builder("").build();
+        pool.grow_if_overloaded_with_monitoring(&monitoring);
+    }
+
+    fn is_overloaded(pool: &Pool) -> bool {
+        let inner = pool.inner.lock_result().unwrap();
+        inner.as_ref().is_some_and(Pool::thread_pool_is_overloaded)
     }
 
     #[test]
@@ -518,7 +509,7 @@ mod tests {
     #[test]
     fn gamma_survivor_private_blocking_pool_grows_only_under_queued_pressure() {
         let pool = pool(Some(limit(2)));
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
         assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
         pool.inner
             .lock_result()
@@ -527,7 +518,7 @@ mod tests {
             .unwrap()
             .queued_count
             .store(Pool::MAX_TASKS_PER_THREAD * 2 + 1, Ordering::SeqCst);
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
         assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
         pool.inner
             .lock_result()
@@ -536,14 +527,14 @@ mod tests {
             .unwrap()
             .queued_count
             .store(0, Ordering::SeqCst);
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
         assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
     }
 
     #[test]
     fn blocking_pool_grow_increases_thread_count() {
         let blocking_pool = pool(None);
-        assert!(blocking_pool.grow());
+        assert!(grow(&blocking_pool));
         assert_eq!(
             blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(),
             Pool::INITIAL_THREAD_COUNT + 1,
@@ -557,11 +548,11 @@ mod tests {
 
         // Despite its name, max_count reports the current worker count.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
-        assert!(blocking_pool.grow()); // 2
-        assert!(blocking_pool.grow()); // 3
-        assert!(blocking_pool.grow()); // 4
-        assert!(blocking_pool.grow()); // 5
-        assert!(!blocking_pool.grow()); // The pool reached its configured limit of five threads.
+        assert!(grow(&blocking_pool)); // 2
+        assert!(grow(&blocking_pool)); // 3
+        assert!(grow(&blocking_pool)); // 4
+        assert!(grow(&blocking_pool)); // 5
+        assert!(!grow(&blocking_pool)); // The pool reached its configured limit of five threads.
 
         // Despite its name, max_count reports the current worker count.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 5);
@@ -579,10 +570,10 @@ mod tests {
             .queued_count
             .store(queued_task_count, Ordering::SeqCst);
 
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
         assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
 
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
         assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
     }
 
@@ -590,9 +581,9 @@ mod tests {
     fn blocking_pool_reports_configured_max_thread_count() {
         // The configured maximum differs from the initial count and the crate
         // default. The getter must return it without substituting either.
-        assert_eq!(Pool::new(RuntimeName::default(), None, Some(limit(7))).max_thread_count(), 7);
+        assert_eq!(Pool::new(RuntimeName::default(), None, Some(limit(7))).max_thread_count.get(), 7);
         assert_eq!(
-            Pool::new(RuntimeName::default(), None, None).max_thread_count(),
+            Pool::new(RuntimeName::default(), None, None).max_thread_count.get(),
             Pool::MAX_THREAD_COUNT_DEFAULT.get()
         );
     }
@@ -607,8 +598,8 @@ mod tests {
             move || invoked.store(true, Ordering::Relaxed)
         }));
         assert!(!invoked.load(Ordering::Relaxed));
-        assert!(!pool.grow());
-        assert!(!pool.is_overloaded());
+        assert!(!grow(&pool));
+        assert!(!is_overloaded(&pool));
     }
 
     #[cfg(not(miri))]
@@ -649,6 +640,7 @@ mod tests {
     fn closed_pool_rejects_worker_submission_after_admission() {
         let pool = Pool::new(RuntimeName::default(), None, NonZeroUsize::new(1));
         let worker = Worker::new(pool.clone(), Shutdown::default());
+        let monitoring = monitoring();
         pool.join();
 
         let invoked = Arc::new(AtomicBool::new(false));
@@ -658,12 +650,12 @@ mod tests {
                 move || invoked.store(true, Ordering::Relaxed)
             },
             None,
-            None,
+            &monitoring,
         );
 
         assert!(join.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Relaxed));
-        pool.grow_if_overloaded();
+        grow_if_overloaded(&pool);
     }
 
     #[test]
@@ -730,15 +722,15 @@ mod tests {
     #[test]
     fn joined_workers_stop_while_the_queue_is_still_owned() {
         use seismograph_runtime::Runtime;
-        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+        use seismograph_runtime::snapshot::WorkerState;
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = Runtime::builder("joined-blocking-workers").configured_workers(2).build();
         let mut pool = JoinableThreadPool::new(RuntimeName::default(), None, 0, Arc::new(()));
-        pool.set_num_threads_with_monitoring(2, Some(&runtime));
+        pool.set_num_threads_with_monitoring(2, &runtime);
 
         pool.shutdown_and_join();
-        let snapshot = runtime.capture(CaptureOptions::default()).unwrap();
+        let snapshot = runtime.capture();
 
         assert_eq!(snapshot.workers.len(), 2);
         assert!(snapshot.workers.iter().all(|worker| worker.state == WorkerState::Stopped));
@@ -749,13 +741,12 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::Runtime::builder("closed-pool").configured_workers(1).build();
         let pool = Pool::new(RuntimeName::default(), None, Some(limit(1)));
-        pool.start(Some(&runtime));
+        pool.start(&runtime);
         pool.join();
 
         assert!(
             runtime
-                .capture(seismograph_runtime::snapshot::CaptureOptions::default())
-                .unwrap()
+                .capture()
                 .workers
                 .iter()
                 .all(|worker| worker.state == seismograph_runtime::snapshot::WorkerState::Stopped)
@@ -845,14 +836,14 @@ mod tests {
             worker_thread_started_rx.recv().expect("the worker pool must start the first task");
 
             assert!(
-                !blocking_pool.is_overloaded(),
+                !is_overloaded(&blocking_pool),
                 "worker pool must be at the task limit but not overloaded"
             );
 
             // The blocked thread pool cannot start this task before the assertion.
             blocking_pool.execute(move || {});
 
-            assert!(blocking_pool.is_overloaded(), "worker pool must be overloaded");
+            assert!(is_overloaded(&blocking_pool), "worker pool must be overloaded");
 
             // Now we can release the second barrier and clean up
             worker_thread_finished_tx.send(());
@@ -870,6 +861,7 @@ mod tests {
             let events = Arc::clone(&events);
             move || {
                 let worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+                let monitoring = monitoring();
 
                 drop(worker.spawn_blocking(
                     {
@@ -881,7 +873,7 @@ mod tests {
                         }
                     },
                     None,
-                    None,
+                    &monitoring,
                 ));
 
                 // The sender exists only in the blocking task. If the worker
@@ -928,6 +920,7 @@ mod tests {
         let work_done = Arc::new(AtomicBool::new(false));
 
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
+        let monitoring = monitoring();
 
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
@@ -941,7 +934,7 @@ mod tests {
                 work_item.do_work();
             },
             None,
-            None,
+            &monitoring,
         );
 
         assert!(dropped.load(Ordering::Acquire));
@@ -953,6 +946,7 @@ mod tests {
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), runtime_shutdown.clone());
+        let monitoring = monitoring();
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
@@ -962,7 +956,7 @@ mod tests {
                 futures::executor::block_on(release_rx).unwrap();
             },
             None,
-            None,
+            &monitoring,
         );
         started_rx.recv().unwrap();
 
@@ -973,7 +967,7 @@ mod tests {
                 move || invoked.store(true, Ordering::Release)
             },
             None,
-            None,
+            &monitoring,
         );
         runtime_shutdown.begin(ShutdownCause::default());
         release_tx.send(());
@@ -990,6 +984,7 @@ mod tests {
         let runtime_shutdown = Shutdown::default();
         runtime_shutdown.begin(ShutdownCause::default());
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), runtime_shutdown);
+        let monitoring = monitoring();
         let invoked = Arc::new(AtomicBool::new(false));
 
         let rejected = worker.spawn_blocking(
@@ -998,7 +993,7 @@ mod tests {
                 move || invoked.store(true, Ordering::Release)
             },
             None,
-            None,
+            &monitoring,
         );
 
         assert!(rejected.join().unwrap_err().is_shutdown());
@@ -1010,10 +1005,14 @@ mod tests {
     #[test]
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), Shutdown::default());
-        attach_thread(Arc::clone(&worker.pool.identity), None);
+        let monitoring = monitoring();
+        let blocking = monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(
+            seismograph_runtime::WorkerRole::Blocking,
+        ));
+        attach_thread(Arc::clone(&worker.pool.identity), blocking);
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
-        let rejected = worker.spawn_blocking(|| 7, None, None).join().unwrap_err();
+        let rejected = worker.spawn_blocking(|| 7, None, &monitoring).join().unwrap_err();
 
         assert!(rejected.is_shutdown());
         worker.join();

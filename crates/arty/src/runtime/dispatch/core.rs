@@ -16,7 +16,7 @@ use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::hook::{HookRegistration, RetainedHooks, TaskObservers, TaskSpawn};
-use crate::runtime::monitoring::{MonitorHandle, Monitoring};
+use crate::runtime::monitoring::Monitoring;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
@@ -73,7 +73,7 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
-    monitoring: Option<Monitoring>,
+    monitoring: Monitoring,
 }
 
 impl DispatcherCore {
@@ -112,40 +112,21 @@ impl DispatcherCore {
             retained_hooks: RetainedHooks::new(hook_registrations),
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
-            monitoring,
+            monitoring: monitoring.unwrap_or_else(Monitoring::disabled),
         })
     }
 
-    pub(crate) fn register_task_provider(&self, thread: ThreadId, worker: &seismograph_runtime::asynchronous::Worker) {
-        let index = self
-            .worker_index(thread)
-            .expect("worker monitoring uses a registered runtime thread");
-        let endpoint = &self.worker_endpoints[usize::from(index)];
-        let commands = endpoint.commands.system_sender().clone();
-        let waker = endpoint.waker.clone();
-        worker
-            .register_task_provider(move |request| {
-                if commands.send(SystemCommand::Inspect { request }).is_ok() {
-                    waker.wake_by_ref();
-                }
-                // A failed send drops the request and reports collection failure.
-            })
-            .expect("bootstrap registers providers before their workers can stop");
-    }
-
-    pub(crate) fn monitoring(&self) -> MonitorHandle<'_> {
-        self.monitoring.as_ref().map(Monitoring::runtime)
+    pub(crate) fn monitoring(&self) -> &seismograph_runtime::Runtime {
+        self.monitoring.runtime()
     }
 
     pub(crate) fn finish_monitoring(&self) -> Result<(), Error> {
-        self.monitoring.as_ref().map_or(Ok(()), Monitoring::finish)
+        self.monitoring.finish()
     }
 
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
-        if let Some(runtime) = self.monitoring() {
-            runtime.stopping();
-        }
+        self.monitoring().stopping();
         let cause = self.shutdown().cause().unwrap_or_default();
         // Shutdown stores the cause independently. This atomic only elects the
         // broadcaster. Observing `true` does not mean notification is complete.
@@ -340,14 +321,12 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         let runtime = self.monitoring();
-        let monitoring = runtime.map(|runtime| {
-            runtime.blocking_task(
-                crate::runtime::monitoring::current_origin(),
-                identity,
-                LocalWorker::current_task().map(TaskIdentity::id),
-                std::mem::size_of::<F>(),
-            )
-        });
+        let monitoring = runtime.blocking_task(
+            crate::runtime::monitoring::current_origin(),
+            identity,
+            LocalWorker::current_task().map(TaskIdentity::id),
+            std::mem::size_of::<F>(),
+        );
         worker.spawn_blocking(body, monitoring, runtime)
     }
 
@@ -796,7 +775,7 @@ mod tests {
 
     #[test]
     fn dispatcher_stop_updates_its_registered_runtime() {
-        use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
+        use seismograph_runtime::snapshot::RuntimeState;
 
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::Runtime::builder("dispatcher-stop")
@@ -814,28 +793,7 @@ mod tests {
 
         client.stop(ShutdownCause::default());
 
-        assert_eq!(runtime.capture(CaptureOptions::default()).unwrap().state, RuntimeState::Stopping);
-    }
-
-    #[test]
-    fn a_closed_worker_command_channel_reports_collection_failure() {
-        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
-        use seismograph_runtime::{WorkerMetadata, WorkerRole};
-
-        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
-        let runtime = seismograph_runtime::Runtime::builder("closed-worker-channel")
-            .configured_workers(1)
-            .build();
-        let threads = test_threads(1);
-        let (endpoint, receiver) = endpoint(&threads[0]);
-        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default(), Vec::new(), None);
-        let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
-        dispatcher.register_task_provider(threads[0].id(), &worker);
-        drop(receiver);
-
-        let snapshot = runtime.capture(CaptureOptions::default()).unwrap();
-        assert!(snapshot.tasks.is_empty());
-        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+        assert_eq!(runtime.capture().state, RuntimeState::Stopping);
     }
 
     #[test]

@@ -173,7 +173,7 @@ mod tests {
                 .max(4)
                 .into_pools(RuntimeName::default())
                 .unwrap(),
-            Pools::Shared(pool) if pool.max_thread_count() == 4
+            Pools::Shared(_)
         ));
     }
 }

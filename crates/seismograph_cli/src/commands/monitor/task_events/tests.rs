@@ -3,12 +3,11 @@
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClock, EventSequence, EventTimestamp, NumericEvent, ObjectId};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
 use seismograph::recorder::thread::{ThreadId, ThreadLog};
 use seismograph::recorder::{Policies, Policy};
 use seismograph::snapshot::DecodedSnapshot;
 use seismograph_rallocator::callers::AddressLookupFields;
-use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics};
 
 use super::super::filter::{FilterSpec, RuntimeStackMode};
 use super::super::filter_index::FilterIndex;
@@ -482,157 +481,6 @@ fn simultaneous_polls_of_one_task_on_distinct_threads_are_ambiguous() {
     assert_eq!((snapshot.tasks.len(), snapshot.ambiguous_events), (0, 2));
 }
 
-fn active_source() -> Snapshot {
-    Snapshot {
-        runtimes: vec![Runtime {
-            id: RuntimeId::from_raw(1).unwrap(),
-            name: "runtime".into(),
-            configured_workers: 1,
-            lifecycle_backtraces: seismograph::recorder::event::BacktraceCapture::Never,
-            state: RuntimeState::Running,
-            created_at: EventTimestamp::from_ticks(0),
-            retired_at: None,
-            counters: Counters::default(),
-            counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
-            workers: Vec::new(),
-            tasks: vec![Task {
-                id: TaskId::from_raw(1).unwrap(),
-                parent: None,
-                type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                spawned_at: None,
-                metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
-                last_worker_id: None,
-                metrics: TaskMetrics::default(),
-                activity: Some(TaskActivity {
-                    observed_at: EventTimestamp::from_ticks(10),
-                    state: TaskActivityState::Running,
-                    ready_since: None,
-                    poll_started_at: Some(EventTimestamp::from_ticks(1)),
-                    poll_worker_id: WorkerId::from_raw(101),
-                    queued_since: None,
-                }),
-                future_size_bytes: None,
-            }],
-        }],
-        addresses: Vec::new(),
-    }
-}
-
-#[test]
-fn coherent_activity_bounds_an_open_poll_using_the_retained_start_thread() {
-    let raw = events(vec![
-        start(1, 1, 1, (1, 1)),
-        operation(1, 2, 2, EventKind::MutexAccess, 7),
-        operation(1, 3, 10, EventKind::MutexRelease, 7),
-        operation(1, 4, 12, EventKind::MutexAccess, 7),
-        operation(2, 1, 3, EventKind::MutexAccess, 7),
-    ]);
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
-    assert_eq!(
-        actors(&snapshot),
-        vec![
-            (1, 2, Some((1, 1)), false),
-            (1, 3, None, false),
-            (1, 4, None, false),
-            (2, 1, None, false)
-        ]
-    );
-}
-
-#[test]
-fn open_poll_accepts_repolls_at_or_before_observation_but_not_after_it() {
-    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
-    for (ready_at, expected) in [(5, Some((1, 1))), (10, Some((1, 1))), (11, None)] {
-        let mut source = active_source();
-        source.runtimes[0].tasks[0].activity.as_mut().unwrap().ready_since = Some(EventTimestamp::from_ticks(ready_at));
-        let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
-        assert_eq!(actors(&snapshot)[0].2, expected);
-    }
-}
-
-#[test]
-fn activity_without_a_retained_start_never_invents_the_recorder_thread() {
-    let snapshot = TaskEventsSnapshot::from_events(
-        &events(vec![operation(1, 2, 2, EventKind::MutexAccess, 7)]),
-        &[],
-        Some(&active_source()),
-    );
-    assert_eq!((snapshot.tasks.len(), snapshot.unassigned_events), (0, 1));
-}
-
-#[test]
-fn stopped_runtime_without_task_metadata_uses_the_retained_recording_policy() {
-    let raw = events(vec![
-        start(1, 1, 1, (1, 1)),
-        operation(1, 2, 2, EventKind::MutexAccess, 7),
-        finish(1, 3, 3, (1, 1), 2),
-    ]);
-    let mut source = active_source();
-    source.runtimes[0].state = RuntimeState::Stopped;
-    source.runtimes[0].retired_at = Some(EventTimestamp::from_ticks(3));
-    source.runtimes[0].tasks.clear();
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
-    assert_eq!(actors(&snapshot), vec![(1, 2, Some((1, 1)), false)]);
-}
-
-#[test]
-fn open_poll_requires_a_complete_retained_tail_at_the_source_observation() {
-    let mut raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
-    raw.threads[0].total_events = 3;
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
-    assert_eq!((snapshot.tasks.len(), snapshot.unassigned_events), (0, 1));
-}
-
-#[test]
-fn queued_activity_cannot_extend_a_retained_open_poll() {
-    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
-    let mut source = active_source();
-    source.runtimes[0].tasks[0].activity.as_mut().unwrap().queued_since = Some(EventTimestamp::from_ticks(2));
-
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
-
-    assert_eq!(actors(&snapshot), vec![(1, 2, None, false)]);
-}
-
-#[test]
-fn open_poll_requires_monotonic_thread_timestamps() {
-    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 0, EventKind::MutexAccess, 7)]);
-
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
-
-    assert_eq!(actors(&snapshot), vec![(1, 2, None, false)]);
-}
-
-#[test]
-fn sampled_runtime_boundaries_cannot_prove_an_open_poll_actor() {
-    let mut raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
-    raw.recording.runtime_tasks.event_sampling = seismograph::recorder::EventSampling::one_in(2).unwrap();
-
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[], Some(&active_source()));
-
-    assert_eq!(actors(&snapshot), vec![(1, 2, None, true)]);
-}
-
-#[test]
-fn incoherent_activity_or_unknown_poll_worker_cannot_extend_a_start() {
-    let raw = events(vec![start(1, 1, 1, (1, 1)), operation(1, 2, 2, EventKind::MutexAccess, 7)]);
-    let mut source = active_source();
-    source.runtimes[0].tasks[0].activity.as_mut().unwrap().state = TaskActivityState::Unknown;
-    let unknown = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
-    source.runtimes[0].tasks[0].activity.as_mut().unwrap().state = TaskActivityState::Running;
-    source.runtimes[0].tasks[0].activity.as_mut().unwrap().poll_worker_id = None;
-    let worker = TaskEventsSnapshot::from_events(&raw, &[], Some(&source));
-    assert_eq!(
-        (
-            unknown.tasks.len(),
-            unknown.unassigned_events,
-            worker.tasks.len(),
-            worker.unassigned_events
-        ),
-        (0, 1, 0, 1)
-    );
-}
-
 #[test]
 fn allocation_history_keeps_origin_free_actor_and_outside_work_distinct() {
     let snapshot = summarize(vec![
@@ -1039,7 +887,7 @@ fn missing_poll_stack_is_explicitly_untrimmed_and_never_uses_spawn_stack() {
         with_stack(operation(1, 2, 2, EventKind::ArcClone, 7), &[1, 900]),
         finish(1, 3, 3, (1, 1), 2),
     ]);
-    let snapshot = TaskEventsSnapshot::from_events(&raw, &[lookup(1, "app::work"), lookup(900, "app::spawn")], Some(&active_source()));
+    let snapshot = TaskEventsSnapshot::from_events(&raw, &[lookup(1, "app::work"), lookup(900, "app::spawn")], None);
     let event = &snapshot.histories[0].events[0];
     assert_eq!(
         (

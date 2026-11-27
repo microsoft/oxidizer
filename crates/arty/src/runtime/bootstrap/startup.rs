@@ -41,7 +41,7 @@ fn build_with_processors(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         prepared.shutdown,
         prepared.hook_registrations,
-        prepared.monitoring,
+        Some(prepared.monitoring),
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
     let mut join_handles = Vec::with_capacity(workers.len());
@@ -56,7 +56,7 @@ struct PreparedWorkers<W> {
     workers: Vec<W>,
     shutdown: Shutdown,
     hook_registrations: Vec<crate::runtime::hook::HookRegistration>,
-    monitoring: Option<Monitoring>,
+    monitoring: Monitoring,
 }
 
 fn prepare_workers<W>(

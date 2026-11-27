@@ -78,9 +78,6 @@ pub(super) fn prepare_with_progress(
     progress(Phase::Symbols);
     let addresses = crate::snapshot_symbols::merge(
         allocator.as_mut().map_or_else(Vec::new, |view| std::mem::take(&mut view.addresses)),
-        runtime_source
-            .as_mut()
-            .map_or_else(Vec::new, |source| std::mem::take(&mut source.addresses)),
         std::mem::take(&mut decoded.symbols),
     );
     if let Some(view) = &mut allocator {
@@ -162,10 +159,9 @@ fn release_chunks<T>(chunks: impl Iterator<Item = T>, mut release: impl FnMut(T)
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
+    use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp, Events};
     use seismograph::recorder::thread::ThreadId;
     use seismograph::snapshot::{DecodedSnapshot, SourceSnapshot};
-    use seismograph_rallocator::callers::AddressLookup;
 
     use super::{prepare, release_chunks, release_stacks};
 
@@ -323,62 +319,16 @@ mod tests {
     }
 
     fn runtime_source() -> SourceSnapshot {
-        // Current runtime schema: no runtimes and one symbol lookup.
-        let symbol = b"application::runtime";
         let mut data = b"SEISRUNT".to_vec();
         data.extend_from_slice(&1_u16.to_le_bytes());
         data.extend_from_slice(&seismograph_runtime::snapshot::source::SCHEMA_VERSION.to_le_bytes());
         data.extend_from_slice(&0_u32.to_le_bytes());
-        data.extend_from_slice(&1_u32.to_le_bytes());
-        data.extend_from_slice(&16_u64.to_le_bytes());
-        data.extend_from_slice(&u32::try_from(symbol.len()).unwrap().to_le_bytes());
-        data.extend_from_slice(&0_u32.to_le_bytes());
-        data.extend_from_slice(&u32::MAX.to_le_bytes());
-        data.extend_from_slice(&u32::MAX.to_le_bytes());
-        data.extend_from_slice(symbol);
         SourceSnapshot {
             id: seismograph_runtime::snapshot::source::ID,
             name: "runtime".into(),
             schema_version: seismograph_runtime::snapshot::source::SCHEMA_VERSION,
             data,
         }
-    }
-
-    #[test]
-    fn preparation_uses_container_events_and_runtime_source_symbols() {
-        let allocator = seismograph_rallocator::native::Snapshot::default();
-        let mut lookup = AddressLookup::default();
-        lookup.address = 16;
-        lookup.symbol = Some("application::allocator".into());
-        let decoded = DecodedSnapshot {
-            events: Events {
-                total_events: 1,
-                events: vec![Event {
-                    thread_id: ThreadId::new(1),
-                    sequence: EventSequence::new(1),
-                    timestamp: EventTimestamp::from_ticks(1),
-                    kind: EventKind::ArcClone,
-                    payload: EventPayload::Object(ObjectId::new(7)),
-                    call_stack: vec![Address::new(16)],
-                }],
-                ..Default::default()
-            },
-            sources: vec![allocator_source(&allocator), runtime_source()],
-            ..Default::default()
-        };
-        lookup.symbol = Some("application::runtime".into());
-        let expected = super::RuntimeSnapshot::from_events(&decoded, &[lookup], None);
-        let snapshot = prepare(decoded).unwrap();
-        assert_eq!(
-            (
-                snapshot.primitives,
-                snapshot.threads,
-                snapshot.heap_error,
-                snapshot.captured_at,
-                snapshot.captured_instant
-            ),
-            (expected.primitives, expected.threads, None, None, None),
-        );
     }
 
     #[test]
@@ -435,23 +385,6 @@ mod tests {
         assert_eq!(filtered.native, snapshot.native);
     }
 
-    #[test]
-    fn runtime_only_source_keeps_symbols_without_inventing_heap_data() {
-        let snapshot = prepare(DecodedSnapshot {
-            sources: vec![runtime_source()],
-            ..Default::default()
-        })
-        .unwrap();
-        assert_eq!(
-            (snapshot.memory.is_none(), snapshot.allocations.is_none(), snapshot.heap_error),
-            (
-                true,
-                false,
-                Some("Native allocator source unavailable; container allocation events remain available.".into()),
-            ),
-        );
-    }
-
     fn allocation_capture() -> DecodedSnapshot {
         use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
         let operations = [
@@ -463,6 +396,13 @@ mod tests {
             (EventKind::Allocation, 1, 0x100, 16),
         ];
         DecodedSnapshot {
+            symbols: vec![seismograph::snapshot::Symbol {
+                address: Address::new(16),
+                name: Some("application::runtime".into()),
+                filename: None,
+                line: None,
+                column: None,
+            }],
             events: Events {
                 total_events: 6,
                 threads: vec![

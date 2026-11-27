@@ -142,8 +142,8 @@ impl Runtime {
     /// This does not change the process-wide recorder.
     #[cfg(all(test, not(miri)))]
     #[must_use]
-    pub(crate) fn monitoring(&self) -> Option<seismograph_runtime::Runtime> {
-        self.scheduler.dispatcher.monitoring().cloned()
+    pub(crate) fn monitoring(&self) -> seismograph_runtime::Runtime {
+        self.scheduler.dispatcher.monitoring().clone()
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.

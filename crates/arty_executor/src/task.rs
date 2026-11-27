@@ -166,18 +166,6 @@ where
     T: TaskCompletion<F::Output>,
     I: TaskObserver,
 {
-    fn snapshot(&self, state: seismograph_runtime::snapshot::TaskActivityState) -> Option<seismograph_runtime::snapshot::Task> {
-        // SAFETY: Inspection runs on the owner between cycles.
-        let payload = unsafe { &*self.payload.get() };
-        payload
-            .as_ref()
-            .and_then(|payload| payload.monitoring.as_ref().and_then(|monitoring| monitoring.describe(state)))
-    }
-
-    fn is_notified(&self) -> bool {
-        self.wake_signal.get().is_some_and(WakeSignal::has_queued_notification)
-    }
-
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
@@ -195,7 +183,7 @@ where
         if let Some(worker) = shared.monitoring()
             && let Some(monitoring) = payload.monitoring.take()
         {
-            payload.monitoring = Some(monitoring.poll_started(worker));
+            payload.monitoring = Some(monitoring.poll_started(payload.identity, worker));
         }
 
         let wake_signal = self.pinned_wake_signal();
@@ -410,13 +398,6 @@ impl<P> PayloadSlot<P> {
         }
     }
 
-    fn as_ref(&self) -> Option<&P> {
-        self.occupied.then(|| {
-            // SAFETY: occupied is true only while payload is initialized.
-            unsafe { self.payload.assume_init_ref() }
-        })
-    }
-
     fn as_mut(&mut self) -> Option<&mut P> {
         self.occupied.then(|| {
             // SAFETY: occupied is true only while payload is initialized, and
@@ -572,9 +553,6 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
 
     // Keep diagnostics last so they do not shift ordinary hot-path vtable entries.
-    fn snapshot(&self, state: seismograph_runtime::snapshot::TaskActivityState) -> Option<seismograph_runtime::snapshot::Task>;
-
-    fn is_notified(&self) -> bool;
 }
 
 #[cfg(test)]
@@ -621,7 +599,8 @@ mod tests {
     fn polling_after_completion_panics() {
         let pool = MultiPool::new();
         let handle = initialized_task(&pool, std::future::ready(()));
-        let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), crate::PanicPolicy::IGNORE);
+        let shared =
+            ExecutorShared::new_with_monitoring(Waker::noop().clone(), std::thread::current().id(), crate::PanicPolicy::IGNORE, None);
         // SAFETY: The handle owns the task on its creating thread.
         let task = unsafe { handle.as_task() };
 

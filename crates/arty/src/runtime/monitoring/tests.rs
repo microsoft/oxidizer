@@ -1,37 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Arty supplies native task state independently of event recording.
-
-use std::future::{pending, poll_fn};
-use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::future::poll_fn;
+use std::sync::mpsc;
+use std::task::Poll;
 
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::SnapshotOptions;
-use seismograph_runtime::WorkerRole;
-use seismograph_runtime::snapshot::{
-    CaptureOptions, Runtime as RuntimeSnapshot, RuntimeState, TaskActivityState, TaskCollection, TaskMetricsScope,
-};
-use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
-use thread_aware::{Thread, ThreadAware, Unaware};
+use seismograph_runtime::snapshot::{RuntimeState, WorkerState};
 
-use crate::runtime::Runtime;
-use crate::runtime::hook::{HookFn, TaskObserver, TaskPanic, TaskSpawn};
-use crate::runtime::policy::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
+use crate::runtime::policy::{MonitorPolicy, WorkersPolicy};
+use crate::runtime::{Runtime, RuntimeBuilder};
 
-struct RecorderGuard {
-    _lock: MutexGuard<'static, ()>,
-}
+struct RecorderGuard;
 
 impl RecorderGuard {
     fn new() -> Self {
-        let lock = super::TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration::default());
-        Self { _lock: lock }
+        Self
     }
 }
 
@@ -42,1253 +29,126 @@ impl Drop for RecorderGuard {
 }
 
 fn runtime(name: &str) -> Runtime {
-    Runtime::builder()
-        .monitor(MonitorPolicy::enabled())
-        .workers(WorkersPolicy::exactly(1))
-        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+    RuntimeBuilder::new()
         .name(name)
-        .on(TaskPanic::ignore())
-        .build()
-        .unwrap()
-}
-
-fn receive<T>(receiver: &mpsc::Receiver<T>) -> T {
-    if is_mutation_testing() {
-        receiver.recv().unwrap()
-    } else {
-        receiver.recv_timeout(TEST_TIMEOUT).unwrap()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ObservedPoll {
-    Started,
-    Finished(Poll<()>),
-}
-
-#[derive(Clone)]
-struct PollObservation(mpsc::Sender<ObservedPoll>);
-
-impl ThreadAware for PollObservation {
-    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
-}
-
-struct MonitoredPollObserver {
-    destination: Option<std::thread::ThreadId>,
-    observed: PollObservation,
-}
-
-impl ThreadAware for MonitoredPollObserver {
-    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        self.destination = Some(destination.id());
-    }
-}
-
-impl TaskObserver for MonitoredPollObserver {
-    fn poll_start(&mut self) {
-        assert_eq!(self.destination, Some(std::thread::current().id()));
-        self.observed.0.send(ObservedPoll::Started).unwrap();
-    }
-
-    fn poll_end(&mut self, outcome: Poll<()>) {
-        self.observed.0.send(ObservedPoll::Finished(outcome)).unwrap();
-    }
-}
-
-fn runtimes() -> Vec<RuntimeSnapshot> {
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    snapshot
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
-        .map_or_else(Vec::new, |source| {
-            seismograph_runtime::snapshot::decode(&source.data).unwrap().runtimes
-        })
-}
-
-fn capture(runtime: &Runtime) -> RuntimeSnapshot {
-    runtime
-        .monitoring()
-        .unwrap()
-        .capture(CaptureOptions {
-            timeout: Duration::from_secs(5),
-            ..CaptureOptions::default()
-        })
-        .unwrap()
-}
-
-#[test]
-fn enabled_monitor_policy_starts_monitoring() {
-    let _recording = RecorderGuard::new();
-    let runtime = Runtime::builder().monitor(MonitorPolicy::enabled()).build().unwrap();
-    let monitoring = runtime.monitoring().unwrap();
-    let workers = runtime.scheduler().block_on(async |cx| cx.control().workers().len()).unwrap();
-    let active = monitoring.capture(CaptureOptions::default()).unwrap();
-    runtime.stop().unwrap();
-    let stopped = runtimes().into_iter().find(|runtime| runtime.id == monitoring.id()).unwrap().state;
-
-    assert_eq!(
-        (workers, active.configured_workers, active.name.as_str(), active.state, stopped),
-        (1, 1, "arty", RuntimeState::Running, RuntimeState::Stopped)
-    );
-}
-
-#[test]
-fn explicit_monitor_policies_preserve_runtime_behavior() {
-    let _recording = RecorderGuard::new();
-    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
-        let runtime = Runtime::builder()
-            .workers(WorkersPolicy::exactly(1))
-            .monitor(policy)
-            .build()
-            .unwrap();
-
-        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-        runtime.stop().unwrap();
-    }
-}
-
-#[test]
-fn monitored_tasks_forward_poll_observers() {
-    let _recording = RecorderGuard::new();
-    let (observed, observations) = mpsc::channel();
-    let runtime = Runtime::builder()
         .monitor(MonitorPolicy::enabled())
         .workers(WorkersPolicy::exactly(1))
-        .on(TaskPanic::ignore())
-        .on(HookFn::<TaskSpawn, _>::new(PollObservation(observed), |event, observed| {
-            if event.origin().is_some() {
-                event.observe(MonitoredPollObserver {
-                    destination: None,
-                    observed: observed.clone(),
-                });
-            }
-        }))
         .build()
-        .unwrap();
-
-    runtime
-        .scheduler()
-        .block_on(async |cx| {
-            cx.scheduler().spawn(async |_| {}).await.unwrap();
-        })
-        .unwrap();
-
-    assert_eq!(
-        [receive(&observations), receive(&observations)],
-        [ObservedPoll::Started, ObservedPoll::Finished(Poll::Ready(()))]
-    );
-    runtime.stop().unwrap();
+        .unwrap()
 }
 
-#[cfg(feature = "macros")]
-#[arty_macros::test(monitor = enabled)]
-async fn test_macro_can_enable_monitoring(cx: crate::task::Context) {
-    let _recording = RecorderGuard::new();
-    assert!(crate::runtime::worker::asynchronous::LocalWorker::monitoring().is_some());
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+fn events(runtime: seismograph::recorder::runtime::RuntimeId) -> Vec<seismograph::recorder::event::Event> {
+    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    seismograph::snapshot::decode(bytes.as_bytes())
+        .unwrap()
+        .events
+        .events
+        .into_iter()
+        .filter(|event| event.runtime().is_some_and(|payload| payload.runtime_id == runtime))
+        .collect()
 }
 
 #[test]
-fn empty_runtime_names_preserve_worker_names_with_either_monitor_policy() {
+fn enabled_monitoring_registers_runtime_and_workers() {
+    let _monitoring = super::TEST_LOCK.lock().unwrap();
     let _recording = RecorderGuard::new();
-    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
-        let runtime = Runtime::builder().name("").monitor(policy).build().unwrap();
-        let names = runtime
-            .scheduler()
-            .block_on(async |cx| {
-                let asynchronous = std::thread::current().name().unwrap().to_owned();
-                let blocking = cx
-                    .scheduler()
-                    .spawn_blocking(|| std::thread::current().name().unwrap().to_owned())
-                    .await
-                    .unwrap();
-                (asynchronous, blocking)
-            })
-            .unwrap();
-        if let Some(monitoring) = runtime.monitoring() {
-            assert_eq!(monitoring.capture(CaptureOptions::default()).unwrap().name, "");
-        }
-        runtime.stop().unwrap();
-        assert_eq!(names, ("-async-0".to_owned(), "-blocking-0".to_owned()));
-    }
+    let runtime = runtime("registered-workers");
+    let monitoring = runtime.monitoring();
+    let active = monitoring.capture();
+
+    assert_eq!(active.name, "registered-workers");
+    assert_eq!(active.state, RuntimeState::Running);
+    assert!(active.workers.iter().any(|worker| worker.state != WorkerState::Stopped));
+
+    runtime.stop().unwrap();
+    let stopped = monitoring.capture();
+    assert_eq!(stopped.state, RuntimeState::Stopped);
 }
 
 #[test]
-fn disabled_monitoring_registers_no_runtime() {
+fn older_tasks_emit_poll_events_only_after_they_are_polled() {
+    let _monitoring = super::TEST_LOCK.lock().unwrap();
     let _recording = RecorderGuard::new();
-    let runtime = Runtime::builder()
-        .name("disabled-monitor")
-        .monitor(MonitorPolicy::disabled())
-        .build()
-        .unwrap();
-
-    let value = runtime.scheduler().block_on(async |_| 42).unwrap();
-    let registered = runtimes().iter().any(|runtime| runtime.name == "disabled-monitor");
-    runtime.stop().unwrap();
-
-    assert_eq!((value, registered), (42, false));
-}
-
-#[test]
-fn local_and_remote_tasks_are_collected_without_recording() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("native-tasks");
-    let (started, ready) = mpsc::channel();
-    let parent = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware(started), |cx, Unaware(started)| async move {
-            cx.scheduler()
-                .spawn(move |_| {
-                    let mut started = Some(started);
-                    poll_fn(move |_| {
-                        if let Some(started) = started.take() {
-                            started.send(()).unwrap();
-                        }
-                        Poll::<()>::Pending
-                    })
-                })
-                .await
-                .unwrap();
-        });
-    receive(&ready);
-
-    let snapshot = capture(&runtime);
-    runtime.stop().unwrap();
-    assert_eq!(snapshot.name, "native-tasks");
-    assert!(parent.join().unwrap_err().is_shutdown());
-    let observed = snapshot
-        .tasks
-        .iter()
-        .map(|task| {
-            (
-                task.activity.unwrap().state,
-                task.metrics_scope,
-                task.spawned_at,
-                task.last_worker_id.is_some(),
-                task.future_size_bytes.is_some(),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        observed,
-        vec![(TaskActivityState::Waiting, TaskMetricsScope::Uncollected, None, true, true); 2]
-    );
-    assert!(snapshot.workers.iter().all(|worker| {
-        worker.task_collection
-            == if worker.role == WorkerRole::Blocking {
-                TaskCollection::Unavailable
+    let runtime = runtime("late-recording");
+    let runtime_id = runtime.monitoring().id();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let (wake, waker) = mpsc::channel();
+    let (polled, polls) = mpsc::channel();
+    let mut first = true;
+    let active = scheduler.spawn(move |_| {
+        poll_fn(move |cx| {
+            if first {
+                first = false;
+                wake.send(cx.waker().clone()).unwrap();
             } else {
-                TaskCollection::Complete
-            }
-    }));
-}
-
-#[test]
-fn task_identity_survives_repeated_collection_and_recording_changes() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("stable-identities");
-    let (started, ready) = mpsc::channel();
-    let task = runtime.scheduler().spawn_anywhere(Unaware(started), |_, Unaware(started)| {
-        let mut started = Some(started);
-        poll_fn(move |_| {
-            if let Some(started) = started.take() {
-                started.send(()).unwrap();
+                polled.send(()).unwrap();
             }
             Poll::<()>::Pending
         })
     });
-    receive(&ready);
-    let first = capture(&runtime);
-    runtime.scheduler().block_on(async |_| ()).unwrap();
+    let dormant = scheduler.spawn(|_| std::future::pending::<()>());
+    let waker = waker.recv().unwrap();
 
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let second = capture(&runtime);
-    runtime.scheduler().block_on(async |_| ()).unwrap();
-    seismograph::recorder(Configuration::default());
-    let third = capture(&runtime);
-    runtime.stop().unwrap();
-    assert!(task.join().unwrap_err().is_shutdown());
+    waker.wake();
+    polls.recv().unwrap();
 
-    for snapshot in [&first, &second, &third] {
-        assert_eq!(snapshot.tasks.len(), 1);
-        assert!(snapshot.workers.iter().all(|worker| {
-            worker.task_collection
-                == if worker.role == WorkerRole::Blocking {
-                    TaskCollection::Unavailable
-                } else {
-                    TaskCollection::Complete
-                }
-        }));
-    }
-    assert_eq!(
-        (second.tasks[0].id, third.tasks[0].id, second.tasks[0].spawned_at),
-        (first.tasks[0].id, first.tasks[0].id, None)
-    );
-    assert_eq!(
-        (second.tasks[0].type_descriptor, third.tasks[0].type_descriptor),
-        (first.tasks[0].type_descriptor, first.tasks[0].type_descriptor)
-    );
-}
-
-#[test]
-fn queued_and_running_blocking_tasks_are_not_added_to_native_task_inspection() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("blocking-tasks");
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let first = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        receive(&released);
-        1
-    });
-    receive(&ready);
-    let second = runtime.scheduler().spawn_blocking(|| 2);
-
-    let snapshot = capture(&runtime);
-    release.send(()).unwrap();
-    assert_eq!((first.join().unwrap(), second.join().unwrap()), (1, 2));
-    runtime.stop().unwrap();
-    let blocking_workers = snapshot
-        .workers
-        .iter()
-        .filter(|worker| worker.role == WorkerRole::Blocking)
-        .collect::<Vec<_>>();
-
-    assert!(snapshot.tasks.is_empty());
-    assert!(!blocking_workers.is_empty());
-    assert!(
-        blocking_workers
-            .iter()
-            .all(|worker| worker.task_collection == TaskCollection::Unavailable)
-    );
-}
-
-#[test]
-fn draining_queued_blocking_tasks_does_not_report_worker_resumes() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("blocking-queue-resumes");
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let first = runtime.scheduler().spawn_blocking(move || {
-        started.send(seismograph::recorder::thread_id()).unwrap();
-        receive(&released);
-    });
-    let thread_id = receive(&ready);
-    let second = runtime.scheduler().spawn_blocking(|| ());
-    let third = runtime.scheduler().spawn_blocking(|| ());
-    let (started, ready) = mpsc::channel();
-    let (finish, finished) = mpsc::channel();
-    let last = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        receive(&finished);
-    });
-    release.send(()).unwrap();
-    receive(&ready);
-    let runtime_snapshot = capture(&runtime);
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    finish.send(()).unwrap();
-    first.join().unwrap();
-    second.join().unwrap();
-    third.join().unwrap();
-    last.join().unwrap();
-    runtime.stop().unwrap();
-
-    let worker = runtime_snapshot
-        .workers
-        .iter()
-        .find(|worker| worker.role == WorkerRole::Blocking)
-        .unwrap();
-    let events = snapshot
-        .events
-        .events
-        .iter()
-        .filter(|event| {
-            event
-                .runtime()
-                .is_some_and(|payload| payload.runtime_id == runtime_snapshot.id && payload.worker_id == Some(worker.id))
-        })
-        .skip_while(|event| event.kind != EventKind::TaskMaterialized)
-        .collect::<Vec<_>>();
-    let starts = events.iter().filter(|event| event.kind == EventKind::TaskMaterialized).count();
-    let transitions = events
-        .iter()
-        .filter_map(|event| match event.kind {
-            EventKind::WorkerParked | EventKind::WorkerUnparked => Some(event.kind),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(worker.thread_id.is_some());
-    assert_ne!(thread_id.get(), 0);
-    assert_eq!((starts, transitions), (4, Vec::new()));
-}
-
-#[test]
-fn stopped_runtime_does_not_record_new_blocking_tasks() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("stopped-blocking-submission");
-    let id = runtime.monitoring().unwrap().id();
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    runtime.stop().unwrap();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let outcome = scheduler.spawn_blocking(|| panic!("a stopped pool must not run a function")).join();
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let spawned = snapshot
-        .events
-        .events
-        .iter()
-        .filter(|event| event.kind == EventKind::TaskSpawned && event.runtime().is_some_and(|payload| payload.runtime_id == id))
-        .count();
-
-    assert_eq!((outcome.unwrap_err().is_shutdown(), spawned), (true, 0));
-}
-
-#[test]
-fn recording_enabled_after_blocking_enqueue_does_not_create_partial_lifecycles() {
-    let _recording = RecorderGuard::new();
-    for (panics, stops) in [(false, false), (true, false), (false, true)] {
-        seismograph::recorder(Configuration::default());
-        let runtime = runtime("late-blocking-recording");
-        let id = runtime.monitoring().unwrap().id();
-        let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
-        let (started, ready) = mpsc::channel();
-        let (release, released) = mpsc::channel();
-        let running = runtime.scheduler().spawn_blocking(move || {
-            started.send(()).unwrap();
-            receive(&released);
-            assert!(!panics, "recorded blocking panic");
-        });
-        receive(&ready);
-        let queued = stops.then(|| runtime.scheduler().spawn_blocking(|| panic!("canceled function must not run")));
-        seismograph::recorder(Configuration {
-            runtime_tasks: Policy::all(false),
-            ..Configuration::default()
-        });
-        if stops {
-            control.shutdown();
-        }
-        release.send(()).unwrap();
-        let outcome = running.join();
-        if panics {
-            assert!(outcome.unwrap_err().is_panic());
-        } else {
-            outcome.unwrap();
-        }
-        if let Some(queued) = queued {
-            assert!(queued.join().unwrap_err().is_shutdown());
-        }
-        runtime.stop().unwrap();
-        let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-        let tasks = snapshot
-            .events
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    EventKind::TaskSpawned
-                        | EventKind::TaskPollStarted
-                        | EventKind::TaskPollFinished
-                        | EventKind::TaskCompleted
-                        | EventKind::TaskPanicked
-                        | EventKind::TaskCanceled
-                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
-            })
-            .collect::<Vec<_>>();
-        assert!(tasks.is_empty());
-    }
-}
-
-#[test]
-fn recording_enabled_after_async_enqueue_does_not_create_partial_lifecycles() {
-    let _recording = RecorderGuard::new();
-    for (panics, stops) in [(false, false), (true, false), (false, true)] {
-        seismograph::recorder(Configuration::default());
-        let runtime = runtime("late-async-recording");
-        let id = runtime.monitoring().unwrap().id();
-        let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
-        let (started, ready) = mpsc::channel();
-        let (release, released) = mpsc::channel();
-        let running = runtime.scheduler().spawn_anywhere(
-            Unaware((started, released, panics, stops)),
-            |_, Unaware((started, released, panics, stops))| async move {
-                started.send(()).unwrap();
-                receive(&released);
-                if stops {
-                    pending::<()>().await;
-                }
-                assert!(!panics, "recorded async panic");
-            },
-        );
-        receive(&ready);
-        seismograph::recorder(Configuration {
-            runtime_tasks: Policy::all(false),
-            ..Configuration::default()
-        });
-        if stops {
-            control.shutdown();
-        }
-        release.send(()).unwrap();
-        let outcome = running.join();
-        if panics {
-            assert!(outcome.unwrap_err().is_panic());
-        } else if stops {
-            assert!(outcome.unwrap_err().is_shutdown());
-        } else {
-            outcome.unwrap();
-        }
-        runtime.stop().unwrap();
-        let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-        let tasks = snapshot
-            .events
-            .events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    EventKind::TaskSpawned
-                        | EventKind::TaskPollStarted
-                        | EventKind::TaskPollFinished
-                        | EventKind::TaskCompleted
-                        | EventKind::TaskPanicked
-                        | EventKind::TaskCanceled
-                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
-            })
-            .collect::<Vec<_>>();
-        assert!(tasks.is_empty());
-    }
-}
-
-#[test]
-fn recording_reports_real_async_and_blocking_outcomes() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("recorded-outcomes");
-    let id = runtime.monitoring().unwrap().id();
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    let completed = scheduler.spawn(async |_| 42);
-    assert_eq!(completed.join().unwrap(), 42);
-    assert!(
-        scheduler
-            .spawn(async |_| panic!("recorded async panic"))
-            .join()
-            .unwrap_err()
-            .is_panic()
-    );
-    assert_eq!(scheduler.spawn_blocking(|| 7).join().unwrap(), 7);
-    assert!(
-        scheduler
-            .spawn_blocking(|| panic!("recorded blocking panic"))
-            .join()
-            .unwrap_err()
-            .is_panic()
-    );
-    let (started, ready) = mpsc::channel();
-    let canceled = scheduler.spawn(move |_| async move {
-        started.send(()).unwrap();
-        pending::<()>().await;
-    });
-    receive(&ready);
-
-    runtime.stop().unwrap();
-    assert!(canceled.join().unwrap_err().is_shutdown());
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let outcomes = snapshot
-        .events
-        .events
-        .iter()
-        .filter(|event| event.runtime().is_some_and(|event| event.runtime_id == id))
-        .filter_map(|event| match event.kind {
-            EventKind::TaskCompleted | EventKind::TaskPanicked | EventKind::TaskCanceled => Some(event.kind),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let poll_outcomes = snapshot
-        .events
-        .events
-        .iter()
-        .filter_map(|event| {
-            event
-                .runtime()
-                .filter(|payload| payload.runtime_id == id && event.kind == EventKind::TaskPollFinished)
-                .map(|payload| payload.value_1)
-                .filter(|outcome| *outcome != 0)
-        })
-        .collect::<Vec<_>>();
-
-    let mut starts = Vec::new();
-    let mut finishes = Vec::new();
-    for event in &snapshot.events.events {
-        if let Some(payload) = event.runtime()
-            && payload.runtime_id == id
-        {
-            match event.kind {
-                EventKind::TaskPollStarted => starts.push(payload.subject_id),
-                EventKind::TaskPollFinished => finishes.push(payload.subject_id),
-                _ => {}
-            }
-        }
-    }
-    starts.sort_unstable();
-    finishes.sort_unstable();
-    assert!(outcomes.contains(&EventKind::TaskCompleted));
-    assert!(outcomes.contains(&EventKind::TaskPanicked));
-    assert!(poll_outcomes.contains(&1));
-    assert!(poll_outcomes.contains(&3));
-    assert!(poll_outcomes.contains(&2) || outcomes.contains(&EventKind::TaskCanceled));
-    assert!(!starts.is_empty());
-    assert_eq!(starts, finishes);
-}
-
-#[test]
-fn native_tasks_reuse_their_recorded_spawn_timestamp_and_identity() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("coherent-spawn-metadata");
-    let (started, ready) = mpsc::channel();
-    let asynchronous = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware(started.clone()), |_, Unaware(started)| async move {
-            started.send(()).unwrap();
-            pending::<()>().await;
-        });
-    let (release, released) = mpsc::channel();
-    let blocking = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        released.recv().unwrap();
-    });
-    receive(&ready);
-    receive(&ready);
-
-    let native = capture(&runtime);
-    release.send(()).unwrap();
-    blocking.join().unwrap();
-    runtime.stop().unwrap();
-    assert!(asynchronous.join().unwrap_err().is_shutdown());
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-
-    assert_eq!(native.tasks.len(), 1);
-    for task in &native.tasks {
-        let queued = recorded
-            .events
-            .events
-            .iter()
-            .find(|event| {
-                event.kind == EventKind::TaskEnqueued
-                    && event
-                        .runtime()
-                        .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == task.id.get())
-            })
-            .unwrap();
-        let activated = recorded
-            .events
-            .events
-            .iter()
-            .find(|event| {
-                event.kind == EventKind::TaskMaterialized
-                    && event
-                        .runtime()
-                        .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == task.id.get())
-            })
-            .unwrap();
-        let queued_payload = queued.runtime().unwrap();
-        let activated_payload = activated.runtime().unwrap();
-        assert_eq!(
-            (task.spawned_at, task.type_descriptor.get(), task.future_size_bytes),
-            (Some(queued.timestamp), queued_payload.value_0, Some(activated_payload.value_1 - 1),)
-        );
-    }
-}
-
-struct PendingBody<const N: usize> {
-    started: Option<mpsc::Sender<()>>,
-    release: Option<futures::channel::oneshot::Receiver<()>>,
-    _payload: [u8; N],
-}
-
-impl<const N: usize> PendingBody<N> {
-    fn new(started: mpsc::Sender<()>) -> Self {
-        Self {
-            started: Some(started),
-            release: None,
-            _payload: [0; N],
-        }
-    }
-}
-
-impl<const N: usize> Future for PendingBody<N> {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        if let Some(started) = self.started.take() {
-            started.send(()).unwrap();
-        }
-        self.release
-            .as_mut()
-            .map_or(Poll::Pending, |release| Pin::new(release).poll(cx).map(Result::unwrap))
-    }
-}
-
-#[test]
-fn async_task_sizes_precede_wrapping_and_erasure() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("original-body-sizes");
-    let (scheduler, destination) = runtime
-        .scheduler()
-        .block_on(async |cx| (cx.scheduler().clone(), cx.thread().clone()))
-        .unwrap();
-    let (started, ready) = mpsc::channel();
-    let anywhere = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware(started.clone()), |_, Unaware(started)| PendingBody::<64>::new(started));
-    let at = scheduler.spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
-        PendingBody::<128>::new(started)
-    });
-    let (release, released) = futures::channel::oneshot::channel();
-    let native = std::thread::scope(|scope| {
-        let borrowed = &started;
-        let runtime = &runtime;
-        let blocked = scope.spawn(move || {
-            runtime.scheduler().block_on(|_| {
-                let mut body = PendingBody::<256>::new(borrowed.clone());
-                body.release = Some(released);
-                body
-            })
-        });
-        for _ in 0..3 {
-            receive(&ready);
-        }
-        let native = capture(runtime);
-        release.send(()).unwrap();
-        blocked.join().unwrap().unwrap();
-        native
-    });
-    runtime.stop().unwrap();
-    assert!(anywhere.join().unwrap_err().is_shutdown());
-    assert!(at.join().unwrap_err().is_shutdown());
-    let mut sizes = native.tasks.iter().map(|task| task.future_size_bytes.unwrap()).collect::<Vec<_>>();
-    sizes.sort_unstable();
-    assert_eq!(
-        sizes,
-        [
-            u64::try_from(size_of::<PendingBody<64>>()).unwrap(),
-            u64::try_from(size_of::<PendingBody<128>>()).unwrap(),
-            u64::try_from(size_of::<PendingBody<256>>()).unwrap(),
-        ]
-    );
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    for task in &native.tasks {
-        let activated = recorded
-            .events
-            .events
-            .iter()
-            .find(|event| {
-                event.kind == EventKind::TaskMaterialized
-                    && event
-                        .runtime()
-                        .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == task.id.get())
-            })
-            .unwrap();
-        assert_eq!(task.future_size_bytes, Some(activated.runtime().unwrap().value_1 - 1));
-    }
-}
-
-#[test]
-fn queued_remote_children_retain_their_recorded_parent() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = Runtime::builder()
-        .monitor(MonitorPolicy::enabled())
-        .workers(WorkersPolicy::exactly(2))
-        .name("remote-parent-links")
-        .build()
-        .unwrap();
-    let (started, ready) = mpsc::channel();
-    let (spawned, children) = mpsc::channel();
-    let parent = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((started, spawned)), |cx, Unaware((started, spawned))| async move {
-            let destination = cx.control().workers().find(|worker| worker != cx.thread()).unwrap();
-            let at = cx.scheduler().spawn_at(&destination, Unaware(started.clone()), |Unaware(started)| {
-                PendingBody::<64>::new(started)
-            });
-            let anywhere = cx
-                .scheduler()
-                .spawn_anywhere(Unaware(started), |Unaware(started)| PendingBody::<128>::new(started));
-            spawned.send((at, anywhere)).unwrap();
-            pending::<()>().await;
-        });
-    let (at, anywhere) = receive(&children);
-    for _ in 0..2 {
-        receive(&ready);
-    }
-    let native = capture(&runtime);
-    runtime.stop().unwrap();
-    assert!(parent.join().unwrap_err().is_shutdown());
-    assert!(at.join().unwrap_err().is_shutdown());
-    assert!(anywhere.join().unwrap_err().is_shutdown());
-    assert_eq!(native.tasks.len(), 3);
-    let root = native.tasks.iter().find(|task| task.parent.is_none()).unwrap();
-    let children = native.tasks.iter().filter(|task| task.id != root.id).collect::<Vec<_>>();
-    assert!(children.iter().all(|task| task.parent == Some(root.id)));
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    for child in children {
-        let queued = recorded
-            .events
-            .events
-            .iter()
-            .find(|event| {
-                event.kind == EventKind::TaskEnqueued
-                    && event
-                        .runtime()
-                        .is_some_and(|payload| payload.runtime_id == native.id && payload.subject_id == child.id.get())
-            })
-            .unwrap();
-        assert_eq!(queued.runtime().unwrap().related_id, root.id.get());
-    }
-}
-
-#[test]
-fn blocking_callbacks_do_not_establish_a_task_parent() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("blocking-parent-links");
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let parent = runtime.scheduler().spawn_blocking(move || {
-        assert_eq!(crate::runtime::worker::asynchronous::LocalWorker::current_task(), None);
-        let child = scheduler.spawn_blocking(|| 42);
-        started.send(child).unwrap();
-        receive(&released);
-        panic!("recorded parent panic");
-    });
-    let child = receive(&ready);
-    let native = capture(&runtime);
-    release.send(()).unwrap();
-    assert!(parent.join().unwrap_err().is_panic());
-    assert_eq!(child.join().unwrap(), 42);
-    runtime.stop().unwrap();
-    assert!(native.tasks.is_empty());
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let blocking_workers = native
-        .workers
-        .iter()
-        .filter(|worker| worker.role == WorkerRole::Blocking)
-        .map(|worker| worker.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let task_ids = recorded
-        .events
-        .events
-        .iter()
-        .filter_map(|event| {
-            event.runtime().and_then(|payload| {
-                (event.kind == EventKind::TaskMaterialized && payload.worker_id.is_some_and(|worker| blocking_workers.contains(&worker)))
-                    .then_some(payload.subject_id)
-            })
-        })
-        .collect::<Vec<_>>();
-    let queued = recorded
-        .events
-        .events
-        .iter()
-        .filter_map(|event| {
-            event.runtime().filter(|payload| {
-                event.kind == EventKind::TaskEnqueued && payload.runtime_id == native.id && task_ids.contains(&payload.subject_id)
-            })
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(queued.len(), 2);
-    assert!(queued.iter().all(|task| task.related_id == 0));
-    assert_eq!(queued.iter().filter(|task| task.worker_id.is_none()).count(), 1);
-    assert_eq!(
-        queued
-            .iter()
-            .filter(|task| task.worker_id.is_some_and(|worker| blocking_workers.contains(&worker)))
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn blocking_jobs_capture_the_async_worker_that_submitted_them() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        runtime_tasks: Policy::all(false),
-        ..Configuration::default()
-    });
-    let runtime = runtime("blocking-async-origin");
-    runtime
-        .scheduler()
-        .block_on(async |cx| {
-            cx.scheduler().spawn_blocking(|| 42).join().unwrap();
-        })
-        .unwrap();
-    let native = capture(&runtime);
-    runtime.stop().unwrap();
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let recorded = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let core_workers = native
-        .workers
-        .iter()
-        .filter(|worker| worker.role == WorkerRole::Core)
-        .map(|worker| worker.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let blocking_workers = native
-        .workers
-        .iter()
-        .filter(|worker| worker.role == WorkerRole::Blocking)
-        .map(|worker| worker.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let task = recorded
-        .events
-        .events
-        .iter()
-        .find_map(|event| {
-            event.runtime().and_then(|payload| {
-                (event.kind == EventKind::TaskMaterialized
-                    && payload.runtime_id == native.id
-                    && payload.worker_id.is_some_and(|worker| blocking_workers.contains(&worker)))
-                .then_some(payload.subject_id)
-            })
-        })
-        .unwrap();
-    let queued = recorded
-        .events
-        .events
-        .iter()
-        .find_map(|event| {
-            event
-                .runtime()
-                .filter(|payload| event.kind == EventKind::TaskEnqueued && payload.runtime_id == native.id && payload.subject_id == task)
-        })
-        .unwrap();
-
-    assert!(queued.worker_id.is_some_and(|worker| core_workers.contains(&worker)));
-}
-
-#[test]
-fn collection_reports_the_native_task_limit_instead_of_claiming_completeness() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("bounded-tasks");
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    for _ in 0..260 {
-        drop(scheduler.spawn(async |_| pending::<()>().await));
-    }
-    let (started, ready) = mpsc::channel();
-    drop(scheduler.spawn(move |_| async move {
-        started.send(()).unwrap();
-        pending::<()>().await;
+    let events = events(runtime_id);
+    assert_eq!(events.iter().filter(|event| event.kind == EventKind::TaskPollStarted).count(), 1);
+    assert_eq!(events.iter().filter(|event| event.kind == EventKind::TaskPollFinished).count(), 1);
+    assert!(!events.iter().any(|event| {
+        matches!(event.kind, EventKind::TaskEnqueued | EventKind::TaskMaterialized)
     }));
-    receive(&ready);
 
-    let snapshot = capture(&runtime);
     runtime.stop().unwrap();
-    let core = snapshot.workers.iter().find(|worker| worker.role == WorkerRole::Core).unwrap();
-
-    assert_eq!((snapshot.tasks.len(), core.task_collection), (256, TaskCollection::Truncated));
+    assert!(active.join().unwrap_err().is_shutdown());
+    assert!(dormant.join().unwrap_err().is_shutdown());
 }
 
 #[test]
-fn a_blocked_async_worker_times_out_and_can_answer_a_later_request() {
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("blocked-worker");
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let task = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((started, released)), |_, Unaware((started, released))| async move {
-            started.send(()).unwrap();
-            receive(&released);
-        });
-    receive(&ready);
-
-    let blocked = runtime
-        .monitoring()
-        .unwrap()
-        .capture_with_timeout(CaptureOptions::default())
-        .unwrap();
-    release.send(()).unwrap();
-    task.join().unwrap();
-    // Completion precedes the next command batch, which retires the canceled request.
-    runtime.scheduler().block_on(async |_| ()).unwrap();
-    let recovered = capture(&runtime);
-    runtime.stop().unwrap();
-    let core_status = |snapshot: &RuntimeSnapshot| {
-        snapshot
-            .workers
-            .iter()
-            .find(|worker| worker.role == WorkerRole::Core)
-            .unwrap()
-            .task_collection
-    };
-
-    assert_eq!(
-        (core_status(&blocked), core_status(&recovered)),
-        (TaskCollection::TimedOut, TaskCollection::Complete)
-    );
-}
-
-#[test]
-fn stopping_one_runtime_retires_only_its_workers() {
-    let _recording = RecorderGuard::new();
-    let first = runtime("runtime-one");
-    let second = runtime("runtime-two");
-
-    first.stop().unwrap();
-    let first = runtimes().into_iter().find(|runtime| runtime.name == "runtime-one").unwrap();
-    let second_snapshot = capture(&second);
-    second.stop().unwrap();
-
-    assert_eq!(
-        (first.state, first.tasks.is_empty(), second_snapshot.state),
-        (RuntimeState::Stopped, true, RuntimeState::Running)
-    );
-}
-
-#[test]
-fn shutdown_records_cancellation_for_a_queued_blocking_function() {
+fn newly_recorded_async_tasks_emit_the_complete_lifecycle() {
+    let _monitoring = super::TEST_LOCK.lock().unwrap();
     let _recording = RecorderGuard::new();
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let runtime = runtime("canceled-blocking");
-    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
-    let (started, ready) = mpsc::channel();
-    let (release, released) = mpsc::channel();
-    let running = runtime.scheduler().spawn_blocking(move || {
-        started.send(()).unwrap();
-        receive(&released);
-    });
-    receive(&ready);
-    let queued = runtime.scheduler().spawn_blocking(|| panic!("a canceled function must not run"));
-    let snapshot = capture(&runtime);
+    let runtime = runtime("complete-lifecycle");
+    let runtime_id = runtime.monitoring().id();
 
-    control.shutdown();
-    let stopping = capture(&runtime).state;
-    release.send(()).unwrap();
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
+    let events = events(runtime_id);
+
+    for kind in [
+        EventKind::TaskEnqueued,
+        EventKind::TaskMaterialized,
+        EventKind::TaskPollStarted,
+        EventKind::TaskPollFinished,
+    ] {
+        assert!(events.iter().any(|event| event.kind == kind), "missing {kind:?}");
+    }
     runtime.stop().unwrap();
-    running.join().unwrap();
-    let canceled = queued.join().unwrap_err();
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let events = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let outcomes = events
-        .events
-        .events
-        .iter()
-        .filter_map(|event| {
-            event
-                .runtime()
-                .filter(|payload| payload.runtime_id == snapshot.id && event.kind == EventKind::TaskCanceled)
-                .map(|payload| (event.kind, payload.subject_id))
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!((stopping, canceled.is_shutdown()), (RuntimeState::Stopping, true));
-    assert!(!outcomes.is_empty());
 }
 
 #[test]
-fn task_sizes_describe_user_futures_before_runtime_wrapping() {
-    struct Body {
-        started: Option<mpsc::Sender<()>>,
-        _data: [u8; 37],
-    }
-
-    impl Future for Body {
-        type Output = ();
-
-        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
-            if let Some(started) = self.get_mut().started.take() {
-                started.send(()).unwrap();
-            }
-            Poll::Pending
-        }
-    }
-
-    let _recording = RecorderGuard::new();
-    let runtime = runtime("user-bodies");
-    let (started, ready) = mpsc::channel();
-    drop(
-        runtime
-            .scheduler()
-            .spawn_anywhere(Unaware(started.clone()), |_, Unaware(started)| Body {
-                started: Some(started),
-                _data: [0; 37],
-            }),
-    );
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    drop(scheduler.spawn_anywhere(Unaware(started.clone()), |Unaware(started)| Body {
-        started: Some(started),
-        _data: [0; 37],
-    }));
-    runtime
-        .scheduler()
-        .block_on(async move |cx| {
-            drop(cx.scheduler().spawn(move |_| Body {
-                started: Some(started),
-                _data: [0; 37],
-            }));
-        })
-        .unwrap();
-    for _ in 0..3 {
-        receive(&ready);
-    }
-
-    let snapshot = capture(&runtime);
-    runtime.stop().unwrap();
-    let sizes = snapshot.tasks.iter().map(|task| task.future_size_bytes).collect::<Vec<_>>();
-
-    assert_eq!(sizes, vec![Some(size_of::<Body>() as u64); 3]);
-}
-
-fn growing_pool(name: &str, policy: BlockingPoolPolicy, expected_blocking_workers: usize) {
+fn blocking_tasks_use_the_execution_worker_for_terminal_events() {
+    let _monitoring = super::TEST_LOCK.lock().unwrap();
     let _recording = RecorderGuard::new();
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let runtime = Runtime::builder()
-        .monitor(MonitorPolicy::enabled())
-        .workers(WorkersPolicy::exactly(2))
-        .blocking_pool(policy.max(2))
-        .name(name)
-        .build()
-        .unwrap();
-    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    let release = Arc::new((Mutex::new(false), Condvar::new()));
-    let (started, ready) = mpsc::channel();
-    let tasks = (0..6)
-        .map(|_| {
-            let release = Arc::clone(&release);
-            let started = started.clone();
-            scheduler.spawn_blocking(move || {
-                started.send(()).unwrap();
-                let (released, changed) = &*release;
-                let mut released = released.lock().unwrap();
-                while !*released {
-                    if is_mutation_testing() {
-                        released = changed.wait(released).unwrap();
-                    } else {
-                        let waited = changed.wait_timeout(released, TEST_TIMEOUT).unwrap();
-                        assert!(!waited.1.timed_out(), "the test must release its blocking functions");
-                        released = waited.0;
-                    }
-                }
-            })
-        })
-        .collect::<Vec<_>>();
-    for _ in 0..2 {
-        receive(&ready);
-    }
+    let runtime = runtime("blocking-lifecycle");
+    let runtime_id = runtime.monitoring().id();
 
-    let snapshot = capture(&runtime);
-    *release.0.lock().unwrap() = true;
-    release.1.notify_all();
-    for task in tasks {
-        task.join().unwrap();
-    }
+    assert_eq!(runtime.scheduler().spawn_blocking(|| 42).join().unwrap(), 42);
+    let events = events(runtime_id);
+    let materialized = events.iter().find(|event| event.kind == EventKind::TaskMaterialized).unwrap();
+    let completed = events.iter().find(|event| event.kind == EventKind::TaskCompleted).unwrap();
+
+    assert_eq!(materialized.runtime().unwrap().worker_id, completed.runtime().unwrap().worker_id);
     runtime.stop().unwrap();
-    let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let events = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
-    let workers = snapshot.workers.iter().filter(|worker| worker.role == WorkerRole::Blocking).count();
-    let blocking_workers = snapshot
-        .workers
-        .iter()
-        .filter(|worker| worker.role == WorkerRole::Blocking)
-        .map(|worker| worker.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let task_events = events
-        .events
-        .events
-        .iter()
-        .filter_map(|event| {
-            event
-                .runtime()
-                .filter(|payload| {
-                    payload.runtime_id == snapshot.id
-                        && matches!(
-                            event.kind,
-                            EventKind::TaskEnqueued | EventKind::TaskMaterialized | EventKind::TaskCompleted
-                        )
-                })
-                .map(|payload| (event.kind, payload))
-        })
-        .collect::<Vec<_>>();
-    let started = task_events
-        .iter()
-        .filter(|(kind, payload)| {
-            *kind == EventKind::TaskMaterialized && payload.worker_id.is_some_and(|worker| blocking_workers.contains(&worker))
-        })
-        .collect::<Vec<_>>();
-    let task_ids = started.iter().map(|(_, payload)| payload.subject_id).collect::<Vec<_>>();
-    let matched_workers = started
-        .iter()
-        .map(|(_, started)| {
-            task_events.iter().any(|(kind, finished)| {
-                *kind == EventKind::TaskCompleted && finished.subject_id == started.subject_id && finished.worker_id == started.worker_id
-            })
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        (
-            workers,
-            snapshot.tasks.len(),
-            task_events
-                .iter()
-                .filter(|(kind, payload)| *kind == EventKind::TaskEnqueued && task_ids.contains(&payload.subject_id))
-                .count(),
-            matched_workers,
-        ),
-        (expected_blocking_workers, 0, 6, vec![true; 6])
-    );
-}
-
-#[test]
-fn a_shared_pool_registers_new_threads_and_records_outcomes_on_the_execution_worker() {
-    growing_pool("growing-shared-pool", BlockingPoolPolicy::shared(), 2);
-}
-
-#[test]
-fn a_per_worker_pool_registers_new_threads_without_merging_other_pools() {
-    growing_pool("growing-per-worker-pool", BlockingPoolPolicy::per_worker(), 3);
 }

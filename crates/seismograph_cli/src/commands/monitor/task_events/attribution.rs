@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use seismograph::recorder::event::{Address, Event, EventClock, EventKind, Events};
-use seismograph_runtime::snapshot::{Snapshot, TaskActivityState};
+use seismograph_runtime::snapshot::Snapshot;
 
 use super::TaskKey;
 
@@ -126,33 +126,8 @@ pub(super) fn infer(events: &Events, source: Option<&Snapshot>) -> Vec<Evidence>
 
 type ObservationKey = (TaskKey, u64, u64);
 
-fn open_observations(source: Option<&Snapshot>) -> HashMap<ObservationKey, u64> {
-    source
-        .into_iter()
-        .flat_map(|source| &source.runtimes)
-        .flat_map(|runtime| {
-            runtime.tasks.iter().filter_map(|task| {
-                let activity = task.activity?;
-                if activity.state != TaskActivityState::Running {
-                    return None;
-                }
-                if activity.queued_since.is_some() {
-                    return None;
-                }
-                if activity.ready_since.is_some_and(|ready| ready > activity.observed_at) {
-                    return None;
-                }
-                Some((
-                    (
-                        (runtime.id.get(), task.id.get()),
-                        activity.poll_started_at?.ticks(),
-                        activity.poll_worker_id?.get(),
-                    ),
-                    activity.observed_at.ticks(),
-                ))
-            })
-        })
-        .collect()
+fn open_observations(_source: Option<&Snapshot>) -> HashMap<ObservationKey, u64> {
+    HashMap::new()
 }
 
 fn collect_polls(

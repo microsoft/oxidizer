@@ -4,7 +4,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
-use std::ops::ControlFlow;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -41,21 +40,6 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
-    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), ()> {
-        let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| ())?;
-        for task in tasks.iter() {
-            if visit(task).is_break() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new(owner_waker: Waker, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
-        Self::new_with_monitoring(owner_waker, thread_id, panic_policy, None)
-    }
-
     pub(crate) fn new_with_monitoring(
         owner_waker: Waker,
         thread_id: ThreadId,
@@ -154,7 +138,7 @@ impl ExecutorShared {
         identity: TaskIdentity,
         future: F,
         observer: I,
-        monitoring: Option<seismograph_runtime::asynchronous::QueuedTask>,
+        monitoring: Option<TaskMonitoring>,
         completion: T,
     ) where
         F: IntoFuture + 'static,
@@ -175,7 +159,6 @@ impl ExecutorShared {
             monitoring.is_none() || self.monitoring().is_some(),
             "a monitored task requires an executor monitoring worker"
         );
-        let monitoring = monitoring.map(TaskMonitoring::new);
         self.register_task(allocate_task(
             &self.inner.task_storage,
             identity,
@@ -235,20 +218,3 @@ impl Drop for CurrentTask<'_> {
     }
 }
 
-#[cfg(test)]
-// Public submission does not expose a mutable borrow of the pending-task queue.
-mod tests {
-    use super::*;
-
-    #[test]
-    fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
-        let shared = ExecutorShared::new(Waker::noop().clone(), std::thread::current().id(), PanicPolicy::default());
-        let borrowed = shared.inner.new_tasks.borrow_mut();
-
-        let busy = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
-        drop(borrowed);
-        let released = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
-
-        assert_eq!((busy, released), (Err(()), Ok(())));
-    }
-}

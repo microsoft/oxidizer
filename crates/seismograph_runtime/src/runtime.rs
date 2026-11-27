@@ -4,7 +4,7 @@
 //! Runtime registration, lifecycle events, and snapshot collection.
 
 use std::num::NonZeroU64;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
@@ -12,7 +12,7 @@ use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::without_recording;
 
 use crate::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot, Worker, WorkerState};
-use crate::{TaskIdentity, WorkerMetadata, WorkerOrigin, WorkerRole, asynchronous, blocking, collection, snapshot, task, worker};
+use crate::{TaskIdentity, WorkerMetadata, WorkerOrigin, WorkerRole, asynchronous, blocking, snapshot, worker};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
@@ -131,7 +131,7 @@ impl Runtime {
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-    ) -> asynchronous::TaskHandle {
+    ) -> Option<asynchronous::TaskHandle> {
         asynchronous::TaskHandle::new(
             self.id(),
             self.owner.handle.control.lifecycle_backtraces,
@@ -150,7 +150,7 @@ impl Runtime {
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-    ) -> blocking::TaskHandle {
+    ) -> Option<blocking::TaskHandle> {
         blocking::TaskHandle::new(
             self.id(),
             self.owner.handle.control.lifecycle_backtraces,
@@ -161,13 +161,10 @@ impl Runtime {
         )
     }
 
-    /// Requests bounded descriptions, optionally measuring polls first.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid limits or a runtime that already stopped.
-    pub fn capture(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
-        self.owner.handle.capture(options)
+    /// Captures the runtime and its registered workers.
+    #[must_use]
+    pub fn capture(&self) -> RuntimeSnapshot {
+        self.owner.handle.capture()
     }
 
     /// Marks the runtime as stopping.
@@ -180,15 +177,6 @@ impl Runtime {
         self.owner.handle.stopped();
     }
 
-    /// Dispatches a capture and simulates a response timeout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid limits or a runtime that already stopped.
-    #[cfg(feature = "test-util")]
-    pub fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
-        self.owner.handle.capture_with_timeout(options)
-    }
 }
 
 impl Drop for RuntimeOwner {
@@ -219,10 +207,6 @@ impl RuntimeHandle {
                 processor_index: metadata.processor_index,
                 state: AtomicU8::new(WorkerState::Running.wire_value()),
                 thread_id: AtomicU64::new(0),
-                current_task: AtomicU64::new(0),
-                provider: Mutex::new(None),
-                request_pending: AtomicBool::new(false),
-                measurements: Mutex::new(collection::Measurements::default()),
             });
             let mut workers = lock(&self.control.workers);
             if self.control.state.load(Ordering::Acquire) == RuntimeState::Stopped.wire_value() {
@@ -246,40 +230,8 @@ impl RuntimeHandle {
         worker::WorkerRegistration::new(self.clone(), worker)
     }
 
-    /// Requests bounded descriptions, optionally measuring polls first.
-    ///
-    /// Call from a diagnostic thread, not from a worker that must answer the
-    /// request. Each worker reports its own observation time and collection status.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid limits or a runtime that already stopped.
-    /// Worker timeouts and provider failures appear in the returned worker rows.
-    pub(crate) fn capture(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
-        self.validate_capture(&options)?;
-        Ok(without_recording(|| collection::capture(&self.control, options)))
-    }
-
-    /// Dispatches a capture and simulates a timeout while waiting for responses.
-    ///
-    /// Uses a frozen clock and does not wait for measurement or responses.
-    /// Queued requests are canceled, just as after a real timeout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid limits or a runtime that already stopped.
-    #[cfg(feature = "test-util")]
-    pub(crate) fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<RuntimeSnapshot, seismograph::Error> {
-        self.validate_capture(&options)?;
-        Ok(without_recording(|| collection::capture_with_timeout(&self.control, options)))
-    }
-
-    fn validate_capture(&self, options: &snapshot::CaptureOptions) -> Result<(), seismograph::Error> {
-        options.validate()?;
-        if self.control.state.load(Ordering::Acquire) == RuntimeState::Stopped.wire_value() {
-            return Err(seismograph::Error::new("cannot inspect a stopped runtime"));
-        }
-        Ok(())
+    pub(crate) fn capture(&self) -> RuntimeSnapshot {
+        without_recording(|| snapshot_runtime(&self.control))
     }
 
     /// Marks the runtime as stopping and records the transition once.
@@ -299,18 +251,16 @@ impl RuntimeHandle {
         });
     }
 
-    /// Retires providers and records the runtime's stop once.
+    /// Retires workers and records the runtime's stop once.
     pub(crate) fn stopped(&self) {
         let at = EventTimestamp::now();
         if !self.retire_at(at) {
             return;
         }
         let workers = lock(&self.control.workers).clone();
-        // Detach every callback before user-owned captures can run destructors.
-        let providers = workers
-            .into_iter()
-            .filter_map(|worker| worker::WorkerHandle::new(self.clone(), worker).detach_provider())
-            .collect::<Vec<_>>();
+        for worker in workers {
+            worker::WorkerHandle::new(self.clone(), worker).stop();
+        }
         record_with(
             &self.control,
             || at,
@@ -322,7 +272,6 @@ impl RuntimeHandle {
             0,
             self.control.lifecycle_backtraces,
         );
-        drop(providers);
     }
 
     fn retire_at(&self, retired_at: EventTimestamp) -> bool {
@@ -355,9 +304,6 @@ fn build_runtime(metadata: RuntimeBuilder) -> RuntimeHandle {
             retired_at: AtomicU64::new(0),
             state: AtomicU8::new(RuntimeState::Running.wire_value()),
             workers: Mutex::new(Vec::new()),
-            requests: AtomicUsize::new(0),
-            timing_window: AtomicU64::new(0),
-            timing: Mutex::new(collection::Timing::default()),
         });
         lock(&REGISTRY).push(Arc::clone(&control));
         control
@@ -376,44 +322,6 @@ fn build_runtime(metadata: RuntimeBuilder) -> RuntimeHandle {
     RuntimeHandle { control }
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy)]
-pub(crate) struct RuntimeMetadata<'a> {
-    name: &'a str,
-    configured_workers: u32,
-}
-
-#[cfg(test)]
-impl<'a> RuntimeMetadata<'a> {
-    pub(crate) const fn new(name: &'a str, configured_workers: u32) -> Self {
-        Self { name, configured_workers }
-    }
-}
-
-#[cfg(test)]
-impl RuntimeOwner {
-    pub(crate) fn handle(&self) -> RuntimeHandle {
-        self.handle.clone()
-    }
-
-    pub(crate) fn register_worker(&self, metadata: WorkerMetadata) -> worker::WorkerRegistration {
-        self.handle.register_worker(metadata)
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeOwner {
-    RuntimeOwner {
-        handle: build_runtime(RuntimeBuilder::new(metadata.name).configured_workers(metadata.configured_workers)),
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn allocate_type_descriptor_id() -> seismograph::recorder::runtime::TypeDescriptorId {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    seismograph::recorder::runtime::TypeDescriptorId::from_raw(next_id(&NEXT).get()).expect("type identity counters start at one")
-}
-
 #[derive(Debug)]
 pub(crate) struct RuntimeControl {
     pub(crate) id: RuntimeId,
@@ -424,12 +332,7 @@ pub(crate) struct RuntimeControl {
     pub(crate) retired_at: AtomicU64,
     pub(crate) state: AtomicU8,
     pub(crate) workers: Mutex<Vec<Arc<WorkerControl>>>,
-    pub(crate) requests: AtomicUsize,
-    pub(crate) timing_window: AtomicU64,
-    pub(crate) timing: Mutex<collection::Timing>,
 }
-
-pub(crate) type TaskProvider = Arc<dyn Fn(task::TaskRequest) + Send + Sync>;
 
 pub(crate) struct WorkerControl {
     pub(crate) id: WorkerId,
@@ -437,10 +340,6 @@ pub(crate) struct WorkerControl {
     pub(crate) processor_index: Option<u32>,
     pub(crate) state: AtomicU8,
     pub(crate) thread_id: AtomicU64,
-    pub(crate) current_task: AtomicU64,
-    pub(crate) provider: Mutex<Option<TaskProvider>>,
-    pub(crate) request_pending: AtomicBool,
-    pub(crate) measurements: Mutex<collection::Measurements>,
 }
 
 impl std::fmt::Debug for WorkerControl {
@@ -453,7 +352,7 @@ impl std::fmt::Debug for WorkerControl {
 }
 
 impl WorkerControl {
-    pub(crate) fn snapshot(&self, task_collection: snapshot::TaskCollection) -> Worker {
+    pub(crate) fn snapshot(&self) -> Worker {
         Worker {
             id: self.id,
             role: self.role,
@@ -461,20 +360,29 @@ impl WorkerControl {
             processor_index: self.processor_index,
             thread_id: NonZeroU64::new(self.thread_id.load(Ordering::Acquire))
                 .map(|id| seismograph::recorder::thread::ThreadId::new(id.get())),
-            current_task: TaskId::from_raw(self.current_task.load(Ordering::Acquire)),
-            task_collection,
         }
+    }
+}
+
+fn snapshot_runtime(runtime: &Arc<RuntimeControl>) -> RuntimeSnapshot {
+    let state = RuntimeState::from_wire_value(runtime.state.load(Ordering::Acquire)).expect("runtime state stores enum values");
+    RuntimeSnapshot {
+        id: runtime.id,
+        name: runtime.name.clone(),
+        configured_workers: runtime.configured_workers,
+        lifecycle_backtraces: runtime.lifecycle_backtraces,
+        state,
+        created_at: runtime.created_at,
+        retired_at: (state == RuntimeState::Stopped)
+            .then(|| EventTimestamp::from_ticks(runtime.retired_at.load(Ordering::Acquire))),
+        workers: lock(&runtime.workers).iter().map(|worker| worker.snapshot()).collect(),
     }
 }
 
 fn capture_source(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
     let runtimes = lock(&REGISTRY).clone();
     let snapshot = Snapshot {
-        runtimes: runtimes
-            .iter()
-            .map(|runtime| collection::capture(runtime, snapshot::CaptureOptions::default()))
-            .collect(),
-        addresses: Vec::new(),
+        runtimes: runtimes.iter().map(snapshot_runtime).collect(),
     };
     encode_source_with(
         &snapshot,
@@ -646,22 +554,15 @@ pub(crate) mod tests {
             processor_index: Some(17),
             state: AtomicU8::new(1),
             thread_id: AtomicU64::new(0),
-            current_task: AtomicU64::new(0),
-            provider: Mutex::new(None),
-            request_pending: AtomicBool::new(false),
-            measurements: Mutex::new(collection::Measurements::default()),
         };
         assert_eq!(
             format!("{worker:?}"),
             format!("{} {{ id: WorkerId(13), role: Core, .. }}", std::any::type_name::<WorkerControl>())
         );
-        assert_eq!(worker.snapshot(snapshot::TaskCollection::Unavailable).thread_id, None);
-        assert_eq!(worker.snapshot(snapshot::TaskCollection::Unavailable).current_task, None);
+        assert_eq!(worker.snapshot().thread_id, None);
         worker.thread_id.store(19, Ordering::Relaxed);
-        worker.current_task.store(23, Ordering::Relaxed);
-        let captured = worker.snapshot(snapshot::TaskCollection::Complete);
+        let captured = worker.snapshot();
         assert_eq!(captured.thread_id.unwrap().get(), 19);
-        assert_eq!(captured.current_task.unwrap().get(), 23);
     }
 
     #[test]

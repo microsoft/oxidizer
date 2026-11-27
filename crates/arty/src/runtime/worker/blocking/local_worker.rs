@@ -16,11 +16,11 @@ thread_local! {
 #[derive(Debug)]
 pub(crate) struct LocalWorker {
     pool: PoolIdentity,
-    monitoring: Option<seismograph_runtime::blocking::Worker>,
+    monitoring: seismograph_runtime::blocking::Worker,
 }
 
 impl LocalWorker {
-    pub(crate) fn attach(pool: PoolIdentity, monitoring: Option<seismograph_runtime::blocking::Worker>) {
+    pub(crate) fn attach(pool: PoolIdentity, monitoring: seismograph_runtime::blocking::Worker) {
         worker::WorkerMarker::attach();
         CURRENT.with_borrow_mut(|current| {
             assert!(current.is_none(), "a blocking local worker is already attached to this thread");
@@ -34,7 +34,7 @@ impl LocalWorker {
             .try_with(|current| {
                 let current = current.borrow();
                 run.take().expect("the local-worker callback is invoked exactly once")(
-                    current.as_ref().and_then(|current| current.monitoring.as_ref()),
+                    current.as_ref().map(|current| &current.monitoring),
                 )
             })
             .unwrap_or_else(|_| run.take().expect("the local-worker callback is invoked exactly once")(None))

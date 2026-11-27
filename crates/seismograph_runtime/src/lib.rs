@@ -10,10 +10,6 @@
 //! registrations and creates dedicated [`asynchronous::Worker`] and
 //! [`blocking::Worker`] handles.
 //!
-//! An asynchronous worker can provide snapshots of tasks in its native task
-//! storage. A blocking worker reports lifecycle events only. Blocking tasks do
-//! not appear in task snapshots.
-//!
 //! Both task types use the shared `Task*` event kinds. Task methods return
 //! lightweight handles when runtime task recording is enabled. The caller
 //! records queue insertion and moves each token through execution, poll, and
@@ -21,7 +17,46 @@
 //!
 //! [`TaskIdentity`] lets the runtime assign an identity before it records the
 //! task. Event recording retains only events emitted after recording starts.
-//! It does not reconstruct earlier task history.
+//! [`model::RuntimeModel`] reconstructs runtime, worker, and task state from the
+//! retained event ring. A task that does not poll after recording starts does
+//! not appear in that model.
+//!
+//! # Runtime integration
+//!
+//! Create one [`Runtime`] during runtime startup. Keep it until all runtime
+//! workers stop. Create it even when the application does not start a
+//! Seismograph monitor connection.
+//!
+//! Create one [`asynchronous::Worker`] on each asynchronous worker thread.
+//! Create one [`blocking::Worker`] on each blocking worker thread. Store each
+//! worker in thread-local runtime state and borrow it for lifecycle callbacks.
+//! Do not clone a worker for each callback.
+//!
+//! When an asynchronous task is spawned, call [`Runtime::async_task`] with its
+//! identity, parent, origin worker, and concrete body size. The method returns
+//! `None` when runtime-task recording is disabled. If it returns a handle, move
+//! the handle with the task and call [`asynchronous::TaskHandle::enqueued`] when
+//! the task enters the executor queue.
+//!
+//! Pass the resulting optional [`asynchronous::QueuedTask`] into the executor.
+//! On the first poll, call [`asynchronous::QueuedTask::activated`] and then
+//! [`asynchronous::Task::poll_started`]. After every poll, call
+//! [`asynchronous::Poll::finished`] with `None` for a pending poll or with the
+//! terminal outcome.
+//!
+//! If a task has no queued handle, keep a dormant executor state. When a later
+//! poll starts, create an active token with [`asynchronous::Task::unrecorded`].
+//! This records the new poll without inventing queue or activation events.
+//!
+//! For blocking work, call [`Runtime::blocking_task`] at submission. If it
+//! returns a handle, call [`blocking::TaskHandle::enqueued`] while the queue
+//! lock supplies the queue length. Call [`blocking::QueuedTask::started`] when
+//! a worker removes the job, and call [`blocking::Execution::finished`] after
+//! the function returns or panics.
+//!
+//! Keep the disabled path short. Runtime and worker handles are always present,
+//! but task handles are optional. Do not add a task registry, provider callback,
+//! mutex, clock read, or shared-reference clone to the disabled task path.
 //!
 //! # Example
 //!
@@ -35,7 +70,7 @@
 //! let runtime = Runtime::builder("primary").configured_workers(1).build();
 //! let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 //! let identity = TaskIdentity::from_location(std::panic::Location::caller());
-//! let queued = runtime.async_task(None, identity, None, 0).enqueued(0);
+//! let queued = runtime.async_task(None, identity, None, 0).unwrap().enqueued(0);
 //! let task = queued.activated(&worker);
 //! let poll = task.poll_started(&worker);
 //! assert!(
@@ -46,11 +81,10 @@
 
 pub mod asynchronous;
 pub mod blocking;
+pub mod model;
 pub mod snapshot;
 
-mod collection;
 mod runtime;
-mod task;
 mod task_identity;
 mod task_outcome;
 mod worker;

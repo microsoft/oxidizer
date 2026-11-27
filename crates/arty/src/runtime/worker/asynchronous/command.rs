@@ -71,12 +71,6 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
-    /// Copies task descriptions from native executor storage between cycles.
-    #[debug("Inspect")]
-    Inspect {
-        request: seismograph_runtime::asynchronous::TaskRequest,
-    },
-
     /// Registers or executes one runtime hook on this worker.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },

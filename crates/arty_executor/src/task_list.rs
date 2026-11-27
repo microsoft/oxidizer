@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
-use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::{TaskHandle, TaskPtr};
@@ -16,18 +15,6 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
-    pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> ControlFlow<()>) {
-        let mut next = self.head;
-        while let Some(task) = next {
-            // SAFETY: The list owns these live tasks. Inspection cannot mutate the
-            // list, and a cycle cannot run while its owner borrows it for inspection.
-            next = unsafe { task.as_task() }.links().next.get();
-            if visit(task).is_break() {
-                break;
-            }
-        }
-    }
-
     pub(crate) fn insert(&mut self, task_handle: TaskHandle) -> TaskPtr {
         let pointer = task_handle.as_ptr();
         // SAFETY: `task_handle` keeps the pinned allocation alive on its owner thread.
@@ -111,28 +98,6 @@ mod tests {
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-
-    #[test]
-    fn inspection_advances_once_per_task_and_honors_early_termination() {
-        let pool = MultiPool::new();
-        let mut list = TaskList::default();
-        let expected: Vec<_> = (0..3).map(|_| list.insert(crate::allocate_test_task_in(&pool))).collect();
-        let mut visited = Vec::new();
-        list.inspect_until(|pointer| {
-            assert!(!visited.contains(&pointer), "inspection must advance to the next task");
-            visited.push(pointer);
-            ControlFlow::Continue(())
-        });
-        assert_eq!(visited, expected);
-        visited.clear();
-        list.inspect_until(|pointer| {
-            visited.push(pointer);
-            ControlFlow::Break(())
-        });
-        assert_eq!(visited, vec![*expected.first().unwrap()]);
-        drop(list);
-        assert!(pool.is_empty());
-    }
 
     #[test]
     fn gamma_survivor_middle_and_tail_unlinks_preserve_neighbors_and_owner_counts() {

@@ -50,7 +50,10 @@ mod tests {
     fn marker_remains_accessible_after_destructible_worker_state() {
         std::thread::spawn(|| {
             OWNER.with(|_| {});
-            asynchronous::LocalWorker::attach(None);
+            let monitoring = seismograph_runtime::Runtime::builder("")
+                .build()
+                .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+            asynchronous::LocalWorker::attach(monitoring);
         })
         .join()
         .unwrap();

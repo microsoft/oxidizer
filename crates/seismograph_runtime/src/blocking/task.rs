@@ -3,6 +3,7 @@
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
+use seismograph::recorder::is_enabled;
 
 use crate::{TaskIdentity, TaskOutcome};
 
@@ -33,8 +34,8 @@ impl TaskHandle {
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        is_enabled(EventClass::RuntimeTask).then(|| Self {
             data: TaskData {
                 identity,
                 runtime,
@@ -45,7 +46,7 @@ impl TaskHandle {
                 recorded: false,
             },
             origin: origin.map(|origin| origin.worker_for(runtime)),
-        }
+        })
     }
 
     /// Records the task entering a queue.
@@ -117,6 +118,7 @@ impl QueuedTask {
             finish_on_drop: true,
         }
     }
+
 }
 
 impl Drop for QueuedTask {

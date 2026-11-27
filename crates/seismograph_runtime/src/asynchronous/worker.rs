@@ -3,8 +3,7 @@
 
 use std::sync::Arc;
 
-use seismograph::recorder::event::EventTimestamp;
-use seismograph::recorder::runtime::{RuntimeId, TaskId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeId, WorkerId};
 
 /// Heavy asynchronous worker state intended for thread-local installation.
 #[derive(Clone, Debug)]
@@ -54,21 +53,6 @@ impl Worker {
         self.inner.registration.handle().unparked();
     }
 
-    /// Returns whether the next execution cycle needs diagnostic hooks.
-    #[must_use]
-    pub fn is_observed(&self) -> bool {
-        self.inner.registration.handle().is_observed()
-    }
-
-    /// Routes bounded task requests to this worker's native storage.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the worker already stopped.
-    pub fn register_task_provider(&self, provider: impl Fn(super::TaskRequest) + Send + Sync + 'static) -> Result<(), seismograph::Error> {
-        self.inner.registration.handle().register_task_provider(provider)
-    }
-
     pub(crate) fn validate_runtime(&self, runtime: RuntimeId) {
         assert_eq!(
             self.inner.runtime.id(),
@@ -77,14 +61,4 @@ impl Worker {
         );
     }
 
-    pub(crate) fn begin_poll(&self, task: TaskId) -> u64 {
-        self.inner.registration.handle().begin_task_poll(task)
-    }
-
-    pub(crate) fn finish_poll(&self, task: TaskId, window: u64, started_at: EventTimestamp, finished_at: EventTimestamp) {
-        self.inner
-            .registration
-            .handle()
-            .finish_task_poll(task, window, started_at, finished_at);
-    }
 }

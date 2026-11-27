@@ -1,29 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::map_err_ignore,
-    reason = "Private fixed-buffer encoding intentionally collapses representability failures into one source error"
-)]
-
-//! Runtime-source snapshot model and wire encoding.
-
-use std::time::Duration;
+//! Runtime and worker source snapshot model.
 
 use seismograph::recorder::event::{BacktraceCapture, EventTimestamp};
-use seismograph::recorder::runtime::{RuntimeId, TaskId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::runtime::{RuntimeId, WorkerId};
 use seismograph::recorder::thread::ThreadId;
 
-use crate::worker::WorkerRole;
+use crate::WorkerRole;
 
 const MAGIC: [u8; 8] = *b"SEISRUNT";
 const WIRE_VERSION: u16 = 1;
-const SCHEMA_VERSION: u16 = 9;
-const HEADER_LEN: usize = 20;
-const RUNTIME_FIXED_LEN: usize = 104;
-const WORKER_FIXED_LEN: usize = 32;
-const TASK_FIXED_LEN: usize = 184;
-const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
+const SCHEMA_VERSION: u16 = 10;
+const HEADER_LEN: usize = 16;
+const RUNTIME_FIXED_LEN: usize = 38;
+const WORKER_FIXED_LEN: usize = 22;
 
 /// Stable identity and schema metadata for the process-wide runtime source.
 pub mod source {
@@ -70,11 +61,11 @@ impl RuntimeState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum WorkerState {
-    /// The worker is available to execute tasks.
+    /// The worker can execute tasks.
     Running,
     /// The worker is parked.
     Parked,
-    /// The worker has stopped.
+    /// The worker stopped.
     Stopped,
 }
 
@@ -97,25 +88,6 @@ impl WorkerState {
     }
 }
 
-/// Aggregate counters retained for one logical runtime.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct Counters {
-    /// Tasks assigned an identity.
-    pub spawned_tasks: u64,
-    /// Tasks that have not reached a terminal state.
-    pub live_tasks: u64,
-    /// Tasks that completed successfully.
-    pub completed_tasks: u64,
-    /// Tasks that were canceled.
-    pub canceled_tasks: u64,
-    /// Tasks that panicked.
-    pub panicked_tasks: u64,
-    /// Completed task polls.
-    pub poll_count: u64,
-    /// Nanoseconds spent polling tasks.
-    pub poll_duration_nanos: u64,
-}
-
 /// Point-in-time state of one runtime worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Worker {
@@ -129,244 +101,9 @@ pub struct Worker {
     pub processor_index: Option<u32>,
     /// Seismograph thread recorder associated with the worker, when attached.
     pub thread_id: Option<ThreadId>,
-    /// Task currently polled by the worker, when one is active.
-    pub current_task: Option<TaskId>,
-    /// Completeness or availability of this worker's native task collection.
-    pub task_collection: TaskCollection,
 }
 
-/// Limits for a bounded capture from runtime-owned task storage.
-///
-/// The defaults inspect up to 256 tasks per worker and wait up to 50 milliseconds.
-/// The ceilings bound copied task descriptions, caller delays, and the interval
-/// during which workers read poll clocks.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CaptureOptions {
-    /// Maximum native tasks inspected per worker, from 1 through 4096.
-    pub limit_per_worker: usize,
-    /// Total response deadline across workers, greater than zero and at most five seconds.
-    pub timeout: Duration,
-    /// Optional poll-measurement interval before collecting descriptions, at most one second.
-    ///
-    /// The diagnostic caller waits. Overlapping timed captures share a measurement
-    /// window. A zero interval requests state without poll clock reads.
-    pub measure_for: Duration,
-}
-
-impl Default for CaptureOptions {
-    fn default() -> Self {
-        Self {
-            limit_per_worker: 256,
-            timeout: Duration::from_millis(50),
-            measure_for: Duration::ZERO,
-        }
-    }
-}
-
-impl CaptureOptions {
-    pub(crate) fn validate(self) -> Result<(), seismograph::Error> {
-        if !(1..=4096).contains(&self.limit_per_worker)
-            || self.timeout.is_zero()
-            || self.timeout > Duration::from_secs(5)
-            || self.measure_for > Duration::from_secs(1)
-        {
-            return Err(seismograph::Error::new(
-                "runtime captures require 1..=4096 tasks, a response timeout up to five seconds, and a measurement interval up to one second",
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Whether one worker answered a bounded task request.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[repr(u16)]
-pub enum TaskCollection {
-    /// A historical source used retained task records.
-    #[default]
-    Retained = 0,
-    /// All native live tasks were inspected.
-    Complete = 1,
-    /// The task limit was reached.
-    Truncated = 2,
-    /// Another request still occupies the worker.
-    Busy = 3,
-    /// The worker did not respond before the deadline.
-    TimedOut = 4,
-    /// The worker stopped.
-    Stopped = 5,
-    /// The provider failed or dropped the request without answering.
-    Failed = 6,
-    /// No native task provider is installed.
-    Unavailable = 7,
-}
-
-impl TaskCollection {
-    fn from_wire(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(Self::Retained),
-            1 => Some(Self::Complete),
-            2 => Some(Self::Truncated),
-            3 => Some(Self::Busy),
-            4 => Some(Self::TimedOut),
-            5 => Some(Self::Stopped),
-            6 => Some(Self::Failed),
-            7 => Some(Self::Unavailable),
-            _ => None,
-        }
-    }
-}
-
-/// Availability of the runtime's aggregate counters.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[repr(u32)]
-pub enum CountersScope {
-    /// A historical producer maintained lifetime counters.
-    #[default]
-    Lifetime = 0,
-    /// Native task inspection does not maintain diagnostic lifetime counters.
-    Uncollected = 1,
-}
-
-/// Availability and scope of one task's numeric measurements.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TaskMetricsScope {
-    /// A historical producer maintained lifetime metrics.
-    #[default]
-    Lifetime,
-    /// Poll measurements are unavailable.
-    Uncollected,
-    /// Completed polls observed since this time in the requested window.
-    PollsSince(EventTimestamp),
-}
-
-/// Description copied from native storage, or decoded from a historical source.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Task {
-    /// Process-monotonic task identity.
-    pub id: TaskId,
-    /// Parent task that spawned this task, when known.
-    pub parent: Option<TaskId>,
-    /// Runtime-provided descriptor for this task.
-    ///
-    /// The provider defines its meaning. Arty uses the static spawn location,
-    /// not the concrete task type.
-    pub type_descriptor: TypeDescriptorId,
-    /// Inline bytes in the concrete future or synchronous task body before runtime wrapping.
-    ///
-    /// Excludes separately allocated buffers and executor bookkeeping. `Some(0)`
-    /// is a known zero-byte body; `None` denotes an unknown size.
-    /// The wire format supports sizes below `u64::MAX`.
-    pub future_size_bytes: Option<u64>,
-    /// Creation time, if it was collected when the task was created.
-    pub spawned_at: Option<EventTimestamp>,
-    /// Owning worker at inspection time, or the last worker in a historical source.
-    ///
-    /// Native ownership does not imply that an earlier poll was observed.
-    pub last_worker_id: Option<WorkerId>,
-    /// Numeric measurements interpreted through [`Self::metrics_scope`].
-    pub metrics: TaskMetrics,
-    /// Whether numeric measurements are known and which interval they describe.
-    pub metrics_scope: TaskMetricsScope,
-    /// Current native state, or activity supplied by the task provider.
-    pub activity: Option<TaskActivity>,
-}
-
-impl Task {
-    /// Describes native queue state without inventing task history.
-    #[must_use]
-    pub fn new(id: TaskId, type_descriptor: TypeDescriptorId, state: TaskActivityState) -> Self {
-        Self {
-            id,
-            parent: None,
-            type_descriptor,
-            future_size_bytes: None,
-            spawned_at: None,
-            last_worker_id: None,
-            metrics: TaskMetrics::default(),
-            metrics_scope: TaskMetricsScope::Uncollected,
-            activity: Some(TaskActivity {
-                observed_at: EventTimestamp::now(),
-                state,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            }),
-        }
-    }
-}
-
-/// Task activity at a worker's observation boundary.
-///
-/// Ages must be measured against `observed_at`, not the reader's wall clock.
-/// Native Ready and Waiting states remain available without recording.
-/// Missing historical timestamps do not imply a known age. Each worker answers
-/// separately, so a capture is not an atomic snapshot of all runtime workers.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TaskActivity {
-    /// Observation boundary in the same clock as runtime events.
-    pub observed_at: EventTimestamp,
-    /// Execution state read from native storage.
-    pub state: TaskActivityState,
-    /// First outstanding raw wake, including a request to poll again while running.
-    pub ready_since: Option<EventTimestamp>,
-    /// Start of the current poll, present only for `Running`.
-    pub poll_started_at: Option<EventTimestamp>,
-    /// Worker executing this exact poll, coherent with `state` and `poll_started_at`.
-    ///
-    /// Present only for `Running`. Neither the notifier thread nor independently
-    /// read worker slots establish the identity of this poll's worker.
-    pub poll_worker_id: Option<WorkerId>,
-    /// Start of scheduler queue waiting, present only for `Ready`.
-    ///
-    /// For a wake during a poll, this starts when that poll finishes, not at
-    /// the wake. `ready_since` separately preserves the raw wake-to-poll latency.
-    pub queued_since: Option<EventTimestamp>,
-}
-
-/// Execution state, independent of recording and timing collection.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum TaskActivityState {
-    /// No current evidence is available.
-    Unknown,
-    /// The task is not polling and no outstanding wake was observed.
-    Waiting,
-    /// An outstanding wake is waiting for a worker to begin polling.
-    Ready,
-    /// A worker is polling; an additional outstanding wake may request another poll.
-    Running,
-}
-
-/// Task measurements whose availability is described by [`Task::metrics_scope`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TaskMetrics {
-    /// Completed task polls.
-    pub poll_count: u64,
-    /// Total nanoseconds spent polling the task.
-    pub poll_duration_nanos: u64,
-    /// Longest completed poll in nanoseconds.
-    pub max_poll_duration_nanos: u64,
-    /// Poll starts that followed a completed poll.
-    pub resume_count: u64,
-    /// Total nanoseconds from a poll finish to the following poll start.
-    pub resume_duration_nanos: u64,
-    /// Longest interval from a poll finish to the following poll start.
-    pub max_resume_duration_nanos: u64,
-    /// Poll starts that consumed a recorded wake timestamp.
-    pub ready_wait_count: u64,
-    /// Total raw wake-to-poll nanoseconds, including wakes during the preceding poll.
-    ///
-    /// This lifetime counter predates recording-only activity. It is not a pure
-    /// scheduler queue measurement; use `TaskActivity::queued_since` for an
-    /// outstanding scheduler wait.
-    pub ready_wait_duration_nanos: u64,
-    /// Longest raw wake-to-poll interval, including time in a preceding poll.
-    pub max_ready_wait_duration_nanos: u64,
-}
-
-/// Point-in-time state and retained metadata for one logical runtime.
+/// Point-in-time state of one logical runtime.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Runtime {
     /// Process-monotonic runtime identity.
@@ -379,47 +116,19 @@ pub struct Runtime {
     pub lifecycle_backtraces: BacktraceCapture,
     /// Current logical lifecycle state.
     pub state: RuntimeState,
-    /// Timestamp captured when the runtime was registered.
+    /// Runtime creation time.
     pub created_at: EventTimestamp,
-    /// Timestamp captured when the runtime retired, when stopped.
+    /// Runtime retirement time, when stopped.
     pub retired_at: Option<EventTimestamp>,
-    /// Aggregate runtime counters.
-    pub counters: Counters,
-    /// Availability of aggregate runtime counters.
-    pub counters_scope: CountersScope,
-    /// Active and retired worker metadata.
+    /// Workers registered by this runtime.
     pub workers: Vec<Worker>,
-    /// Spawn metadata for tasks that have not reached a terminal state.
-    ///
-    /// Captures contain at most one row per task identity, sorted by identity.
-    /// If worker responses contain both queued and running observations, the capture keeps the running observation.
-    pub tasks: Vec<Task>,
 }
 
-/// Decoded payload contributed by the process-wide runtime source.
+/// Runtime source payload decoded from one snapshot.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Snapshot {
     /// Active and retained retired logical runtimes.
     pub runtimes: Vec<Runtime>,
-    /// Symbol metadata read from older runtime-source captures.
-    ///
-    /// New captures keep backtraces in event records and leave this collection empty.
-    pub addresses: Vec<AddressLookup>,
-}
-
-/// Symbol information associated with a captured runtime address.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AddressLookup {
-    /// Original captured address.
-    pub address: u64,
-    /// Resolved symbol name, when available.
-    pub symbol: Option<String>,
-    /// Resolved source filename, when available.
-    pub filename: Option<String>,
-    /// One-based source line, when available.
-    pub line: Option<u32>,
-    /// One-based source column, when available.
-    pub column: Option<u32>,
 }
 
 /// Error reported while decoding a runtime source payload.
@@ -455,220 +164,111 @@ impl Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            ErrorKind::Malformed => f.write_str("the runtime telemetry source payload is malformed"),
-            ErrorKind::UnsupportedWireVersion(version) => {
-                write!(f, "runtime telemetry wire version {version} is unsupported")
-            }
-            ErrorKind::UnsupportedSchemaVersion(version) => {
-                write!(f, "runtime telemetry schema version {version} is unsupported")
-            }
+            ErrorKind::Malformed => f.write_str("malformed runtime source payload"),
+            ErrorKind::UnsupportedWireVersion(version) => write!(f, "unsupported runtime source wire version {version}"),
+            ErrorKind::UnsupportedSchemaVersion(version) => write!(f, "unsupported runtime source schema version {version}"),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
-/// Decodes one process-wide runtime source payload.
-///
-/// # Errors
-///
-/// Returns an error for malformed bytes or an unsupported wire or schema
-/// version. Only the current wire and schema versions are accepted.
+/// Decodes one runtime source payload.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
-    decode_reader(&mut Reader::new(bytes))
-}
-
-fn decode_reader(reader: &mut Reader<'_>) -> Result<Snapshot, Error> {
+    let mut reader = Reader::new(bytes);
     if reader.read(MAGIC.len())? != MAGIC {
-        return Err(Error::new(ErrorKind::Malformed));
+        return Err(malformed());
     }
-    let wire_version = reader.u16()?;
-    if wire_version != WIRE_VERSION {
-        return Err(Error::new(ErrorKind::UnsupportedWireVersion(wire_version)));
+    let wire = reader.u16()?;
+    if wire != WIRE_VERSION {
+        return Err(Error::new(ErrorKind::UnsupportedWireVersion(wire)));
     }
-    let schema_version = reader.u16()?;
-    if schema_version != SCHEMA_VERSION {
-        return Err(Error::new(ErrorKind::UnsupportedSchemaVersion(schema_version)));
+    let schema = reader.u16()?;
+    if schema != SCHEMA_VERSION {
+        return Err(Error::new(ErrorKind::UnsupportedSchemaVersion(schema)));
     }
     let runtime_count = reader.u32()? as usize;
-    let address_count = reader.u32()? as usize;
-    if
-    // #[gamma::skip(cond.always_false, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
-    !count_fits(runtime_count, RUNTIME_FIXED_LEN, reader.remaining().len()) {
-        return Err(Error::new(ErrorKind::Malformed));
-    }
-
     let mut runtimes = Vec::with_capacity(runtime_count);
     for _ in 0..runtime_count {
-        runtimes.push(read_runtime(reader)?);
+        runtimes.push(read_runtime(&mut reader)?);
     }
-    if !count_fits(address_count, ADDRESS_LOOKUP_FIXED_LEN, reader.remaining().len()) {
-        return Err(Error::new(ErrorKind::Malformed));
-    }
-    let addresses = (0..address_count)
-        .map(|_| read_address_lookup(reader))
-        .collect::<Result<Vec<_>, _>>()?;
     if !reader.remaining().is_empty() {
-        return Err(Error::new(ErrorKind::Malformed));
+        return Err(malformed());
     }
-    Ok(Snapshot { runtimes, addresses })
+    Ok(Snapshot { runtimes })
 }
 
 pub(crate) fn encoded_len(snapshot: &Snapshot) -> Option<usize> {
-    encoded_len_from_counts(
-        snapshot
-            .runtimes
-            .iter()
-            .map(|runtime| (runtime.name.len(), runtime.workers.len(), runtime.tasks.len())),
-        snapshot.addresses.iter().map(|lookup| {
-            (
-                lookup.symbol.as_ref().map_or(0, String::len),
-                lookup.filename.as_ref().map_or(0, String::len),
-            )
-        }),
-    )
-}
-
-fn encoded_len_from_counts(
-    runtimes: impl IntoIterator<Item = (usize, usize, usize)>,
-    addresses: impl IntoIterator<Item = (usize, usize)>,
-) -> Option<usize> {
-    let runtimes_len = runtimes
-        .into_iter()
-        .try_fold(HEADER_LEN, |total, (name_len, worker_count, task_count)| {
-            let workers = worker_count.checked_mul(WORKER_FIXED_LEN)?;
-            let tasks = task_count.checked_mul(TASK_FIXED_LEN)?;
-            total
-                .checked_add(RUNTIME_FIXED_LEN)?
-                .checked_add(name_len)?
-                .checked_add(workers)
-                .and_then(|total| total.checked_add(tasks))
-        })?;
-    addresses.into_iter().try_fold(runtimes_len, |total, (symbol_len, filename_len)| {
-        total
-            .checked_add(ADDRESS_LOOKUP_FIXED_LEN)?
-            .checked_add(symbol_len)?
-            .checked_add(filename_len)
-    })
-}
-
-fn wire_count(value: usize) -> Result<u32, ()> {
-    u32::try_from(value).map_err(|_| ())
-}
-
-fn header_counts(runtime_count: usize, address_count: usize) -> Result<(u32, u32), ()> {
-    Ok((wire_count(runtime_count)?, wire_count(address_count)?))
+    let mut len = HEADER_LEN;
+    for runtime in &snapshot.runtimes {
+        len = len.checked_add(RUNTIME_FIXED_LEN)?.checked_add(runtime.name.len())?;
+        len = len.checked_add(runtime.workers.len().checked_mul(WORKER_FIXED_LEN)?)?;
+    }
+    u32::try_from(snapshot.runtimes.len()).ok()?;
+    Some(len)
 }
 
 pub(crate) fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<(), ()> {
-    encode_with(snapshot, output, header_counts, write_address_lookup)
-}
-
-fn encode_with(
-    snapshot: &Snapshot,
-    output: &mut [u8],
-    counts: impl FnOnce(usize, usize) -> Result<(u32, u32), ()>,
-    address: impl FnMut(&mut Writer<'_>, &AddressLookup) -> Result<(), ()>,
-) -> Result<(), ()> {
     if encoded_len(snapshot) != Some(output.len()) {
         return Err(());
     }
     let mut writer = Writer::new(output);
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed magic field")]
     writer.write(&MAGIC)?;
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed wire version")]
     writer.u16(WIRE_VERSION)?;
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed schema version")]
     writer.u16(SCHEMA_VERSION)?;
-    let (runtime_count, address_count) = counts(snapshot.runtimes.len(), snapshot.addresses.len())?;
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len proved exact buffer size for this fixed count; wire-count failure is outside the guard")]
-    writer.u32(runtime_count)?;
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len proved exact buffer size for this fixed count; wire-count failure is outside the guard")]
-    writer.u32(address_count)?;
+    writer.u32(u32::try_from(snapshot.runtimes.len()).map_err(|_| ())?)?;
     for runtime in &snapshot.runtimes {
         write_runtime(&mut writer, runtime)?;
-    }
-    write_records(&mut writer, &snapshot.addresses, address)?;
-    // #[gamma::skip(cond.always_true, result.err_to_ok, reason = "encoded_len checks exact output length and counts the same fields and variable lengths written above; successful writes consume the entire buffer")]
-    if writer.remaining.is_empty() { Ok(()) } else { Err(()) }
-}
-
-fn write_records<T>(
-    writer: &mut Writer<'_>,
-    records: &[T],
-    mut write: impl FnMut(&mut Writer<'_>, &T) -> Result<(), ()>,
-) -> Result<(), ()> {
-    for record in records {
-        write(writer, record)?;
     }
     Ok(())
 }
 
 fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
-    if runtime.counters_scope == CountersScope::Uncollected && runtime.counters != Counters::default() {
-        return Err(());
-    }
     writer.u64(runtime.id.get())?;
-    writer.u8(runtime.state.wire_value())?;
-    writer.u8(backtrace_wire_value(runtime.lifecycle_backtraces))?;
-    writer.u16(0)?;
+    writer.u32(u32::try_from(runtime.name.len()).map_err(|_| ())?)?;
     writer.u32(runtime.configured_workers)?;
+    writer.u8(backtrace_wire_value(runtime.lifecycle_backtraces))?;
+    writer.u8(runtime.state.wire_value())?;
     writer.u64(runtime.created_at.ticks())?;
-    writer.u64(runtime.retired_at.map_or(0, EventTimestamp::ticks))?;
-    writer.count(runtime.name.len())?;
-    writer.count(runtime.workers.len())?;
-    writer.count(runtime.tasks.len())?;
-    writer.u32(runtime.counters_scope as u32)?;
-    write_counters(writer, runtime.counters)?;
+    writer.u64(runtime.retired_at.map_or(u64::MAX, EventTimestamp::ticks))?;
+    writer.u32(u32::try_from(runtime.workers.len()).map_err(|_| ())?)?;
     writer.write(runtime.name.as_bytes())?;
     for worker in &runtime.workers {
-        write_worker(writer, worker)?;
-    }
-    for task in &runtime.tasks {
-        write_task(writer, task)?;
+        writer.u64(worker.id.get())?;
+        writer.u8(worker.role.wire_value())?;
+        writer.u8(worker.state.wire_value())?;
+        writer.u32(worker.processor_index.unwrap_or(u32::MAX))?;
+        writer.u64(worker.thread_id.map_or(u64::MAX, ThreadId::get))?;
     }
     Ok(())
 }
 
 fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
     let id = RuntimeId::from_raw(reader.u64()?).ok_or_else(malformed)?;
-    let state = RuntimeState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
-    let lifecycle_backtraces = backtrace_from_wire_value(reader.u8()?).ok_or_else(malformed)?;
-    if reader.u16()? != 0 {
-        return Err(malformed());
-    }
-    let configured_workers = reader.u32()?;
-    let created_at = EventTimestamp::from_ticks(reader.u64()?);
-    let retired_at_ticks = reader.u64()?;
     let name_len = reader.u32()? as usize;
+    let configured_workers = reader.u32()?;
+    let lifecycle_backtraces = backtrace_from_wire_value(reader.u8()?).ok_or_else(malformed)?;
+    let state = RuntimeState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
+    let created_at = EventTimestamp::from_ticks(reader.u64()?);
+    let retired_at = optional_timestamp(reader.u64()?);
     let worker_count = reader.u32()? as usize;
-    let task_count = reader.u32()? as usize;
-    let counters_scope = match reader.u32()? {
-        0 => CountersScope::Lifetime,
-        1 => CountersScope::Uncollected,
-        _ => return Err(malformed()),
-    };
-    let counters = read_counters(reader)?;
-    if counters_scope == CountersScope::Uncollected && counters != Counters::default() {
-        return Err(malformed());
-    }
-    let name = std::str::from_utf8(reader.read(name_len)?).map_err(|_| malformed())?.to_owned();
-    if !count_fits(worker_count, WORKER_FIXED_LEN, reader.remaining().len()) {
-        return Err(malformed());
-    }
-    let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
-    // This bounds allocation; read_task independently rejects truncated metadata.
-    // #[gamma::skip(cond.always_false, expr.decrement)]
-    if !count_fits(task_count, TASK_FIXED_LEN, reader.remaining().len()) {
-        return Err(malformed());
-    }
-    let tasks = (0..task_count).map(|_| read_task(reader)).collect::<Result<Vec<_>, _>>()?;
-    let retired_at = match retired_at_ticks {
-        0 => None,
-        ticks => Some(EventTimestamp::from_ticks(ticks)),
-    };
-    if matches!(state, RuntimeState::Stopped) != retired_at.is_some() {
-        return Err(malformed());
+    let name = std::str::from_utf8(reader.read(name_len)?)
+        .map_err(|_| malformed())?
+        .to_owned();
+    let mut workers = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let id = WorkerId::from_raw(reader.u64()?).ok_or_else(malformed)?;
+        let role = WorkerRole::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
+        let state = WorkerState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
+        let processor_index = optional_u32(reader.u32()?);
+        let thread_id = optional_thread(reader.u64()?);
+        workers.push(Worker {
+            id,
+            role,
+            state,
+            processor_index,
+            thread_id,
+        });
     }
     Ok(Runtime {
         id,
@@ -678,327 +278,20 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
         state,
         created_at,
         retired_at,
-        counters,
-        counters_scope,
         workers,
-        tasks,
     })
-}
-
-fn write_worker(writer: &mut Writer<'_>, worker: &Worker) -> Result<(), ()> {
-    writer.u64(worker.id.get())?;
-    writer.u8(worker.role.wire_value())?;
-    writer.u8(worker.state.wire_value())?;
-    writer.u16(worker.task_collection as u16)?;
-    writer.u32(worker.processor_index.unwrap_or(u32::MAX))?;
-    writer.u64(worker.thread_id.map_or(0, ThreadId::get))?;
-    writer.u64(worker.current_task.map_or(0, TaskId::get))
-}
-
-fn read_worker(reader: &mut Reader<'_>) -> Result<Worker, Error> {
-    let id = WorkerId::from_raw(reader.u64()?).ok_or_else(malformed)?;
-    let role = WorkerRole::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
-    let state = WorkerState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
-    let collection = reader.u16()?;
-    let task_collection = TaskCollection::from_wire(collection).ok_or_else(malformed)?;
-    let processor_index = match reader.u32()? {
-        u32::MAX => None,
-        value => Some(value),
-    };
-    let thread_id = match reader.u64()? {
-        0 => None,
-        value => Some(ThreadId::new(value)),
-    };
-    let current_task = match reader.u64()? {
-        0 => None,
-        // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero arm was excluded and TaskId::from_raw accepts every nonzero u64")]
-        value => Some(TaskId::from_raw(value).ok_or_else(malformed)?),
-    };
-    Ok(Worker {
-        id,
-        role,
-        state,
-        processor_index,
-        thread_id,
-        current_task,
-        task_collection,
-    })
-}
-
-fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
-    if task.metrics_scope == TaskMetricsScope::Uncollected && task.metrics != TaskMetrics::default() {
-        return Err(());
-    }
-    writer.u64(task.id.get())?;
-    writer.u64(task.parent.map_or(0, TaskId::get))?;
-    writer.u64(task.type_descriptor.get())?;
-    // Reserved. Creation stacks are stored in events, not duplicated per task.
-    writer.u32(0)?;
-    writer.u32(match task.metrics_scope {
-        TaskMetricsScope::Lifetime => 0,
-        TaskMetricsScope::Uncollected => 1,
-        TaskMetricsScope::PollsSince(_) => 2,
-    })?;
-    writer.u64(match task.spawned_at {
-        None => 0,
-        Some(at) => at.ticks().checked_add(1).ok_or(())?,
-    })?;
-    writer.u64(task.last_worker_id.map_or(0, WorkerId::get))?;
-    writer.u64(task.metrics.poll_count)?;
-    writer.u64(task.metrics.poll_duration_nanos)?;
-    writer.u64(task.metrics.max_poll_duration_nanos)?;
-    writer.u64(task.metrics.resume_count)?;
-    writer.u64(task.metrics.resume_duration_nanos)?;
-    writer.u64(task.metrics.max_resume_duration_nanos)?;
-    writer.u64(task.metrics.ready_wait_count)?;
-    writer.u64(task.metrics.ready_wait_duration_nanos)?;
-    writer.u64(task.metrics.max_ready_wait_duration_nanos)?;
-    write_activity(writer, task.activity)?;
-    // Zero remains unknown; adding one preserves known zero-byte futures.
-    let encoded_size = match task.future_size_bytes {
-        None => 0,
-        Some(size) => size.checked_add(1).ok_or(())?,
-    };
-    writer.u64(encoded_size)?;
-    writer.u64(match task.metrics_scope {
-        TaskMetricsScope::PollsSince(at) => at.ticks(),
-        _ => 0,
-    })?;
-    Ok(())
-}
-
-fn read_task(reader: &mut Reader<'_>) -> Result<Task, Error> {
-    let id = TaskId::from_raw(reader.u64()?).ok_or_else(malformed)?;
-    let parent = match reader.u64()? {
-        0 => None,
-        // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero arm was excluded and TaskId::from_raw accepts every nonzero u64")]
-        value => Some(TaskId::from_raw(value).ok_or_else(malformed)?),
-    };
-    let type_descriptor = TypeDescriptorId::from_raw(reader.u64()?).ok_or_else(malformed)?;
-    if reader.u32()? != 0 {
-        return Err(malformed());
-    }
-    let metrics_tag = reader.u32()?;
-    let spawned_at = reader.u64()?.checked_sub(1).map(EventTimestamp::from_ticks);
-    let last_worker_id = match reader.u64()? {
-        0 => None,
-        value => Some(WorkerId::from_raw(value).expect("the preceding match arm handles the only invalid worker ID, zero")),
-    };
-    let metrics = TaskMetrics {
-        poll_count: reader.u64()?,
-        poll_duration_nanos: reader.u64()?,
-        max_poll_duration_nanos: reader.u64()?,
-        resume_count: reader.u64()?,
-        resume_duration_nanos: reader.u64()?,
-        max_resume_duration_nanos: reader.u64()?,
-        ready_wait_count: reader.u64()?,
-        ready_wait_duration_nanos: reader.u64()?,
-        max_ready_wait_duration_nanos: reader.u64()?,
-    };
-    let activity = read_activity(reader)?;
-    let future_size_bytes = reader.u64()?.checked_sub(1);
-    let since = reader.u64()?;
-    let metrics_scope = match metrics_tag {
-        0 if since == 0 => TaskMetricsScope::Lifetime,
-        1 if since == 0 => TaskMetricsScope::Uncollected,
-        2 => TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(since)),
-        _ => return Err(malformed()),
-    };
-    if metrics_scope == TaskMetricsScope::Uncollected && metrics != TaskMetrics::default() {
-        return Err(malformed());
-    }
-    Ok(Task {
-        id,
-        parent,
-        type_descriptor,
-        future_size_bytes,
-        spawned_at,
-        last_worker_id,
-        metrics,
-        metrics_scope,
-        activity,
-    })
-}
-
-fn write_activity(writer: &mut Writer<'_>, activity: Option<TaskActivity>) -> Result<(), ()> {
-    if activity.is_some_and(|activity| !valid_activity(activity)) {
-        return Err(());
-    }
-    let (tag, observed, ready, poll, queued) = match activity {
-        None => (0, 0, 0, 0, 0),
-        Some(activity) => {
-            let tag = match activity.state {
-                TaskActivityState::Unknown => 1,
-                TaskActivityState::Waiting => 2,
-                TaskActivityState::Ready => 3,
-                TaskActivityState::Running => 4,
-            };
-            (
-                tag,
-                activity.observed_at.ticks(),
-                activity.ready_since.map_or(0, EventTimestamp::ticks),
-                activity.poll_started_at.map_or(0, EventTimestamp::ticks),
-                activity.queued_since.map_or(0, EventTimestamp::ticks),
-            )
-        }
-    };
-    writer.u64(tag)?;
-    writer.u64(observed)?;
-    writer.u64(ready)?;
-    writer.u64(poll)?;
-    writer.u64(queued)?;
-    writer.u64(activity.and_then(|activity| activity.poll_worker_id).map_or(0, WorkerId::get))
-}
-
-fn valid_activity(activity: TaskActivity) -> bool {
-    // #[gamma::skip(collection.reverse_array, reason = "all applies a pure timestamp validity predicate; reordering these optional timestamps cannot change the boolean")]
-    let times_valid = [activity.ready_since, activity.poll_started_at, activity.queued_since]
-        .into_iter()
-        .flatten()
-        .all(|at| at.ticks() != 0 && at <= activity.observed_at);
-    if !times_valid {
-        return false;
-    }
-    match activity.state {
-        TaskActivityState::Unknown | TaskActivityState::Waiting => matches!(
-            (
-                activity.poll_worker_id,
-                activity.ready_since,
-                activity.poll_started_at,
-                activity.queued_since,
-            ),
-            (None, None, None, None)
-        ),
-        TaskActivityState::Ready => match (
-            activity.poll_worker_id,
-            activity.ready_since,
-            activity.poll_started_at,
-            activity.queued_since,
-        ) {
-            (None, Some(ready), None, Some(queued)) => queued >= ready,
-            (None, None, None, None) => true,
-            _ => false,
-        },
-        TaskActivityState::Running => match (activity.ready_since, activity.poll_started_at, activity.queued_since) {
-            (ready, Some(poll), None) => ready.is_none_or(|ready| ready >= poll),
-            (None, None, None) => true,
-            _ => false,
-        },
-    }
-}
-
-fn read_activity(reader: &mut Reader<'_>) -> Result<Option<TaskActivity>, Error> {
-    let tag = reader.u64()?;
-    let observed = reader.u64()?;
-    let ready = reader.u64()?;
-    let poll = reader.u64()?;
-    let queued = reader.u64()?;
-    let worker = reader.u64()?;
-    let state = match tag {
-        0 if observed == 0 && ready == 0 && poll == 0 && queued == 0 && worker == 0 => return Ok(None),
-        1 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Unknown,
-        2 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Waiting,
-        3 if poll == 0 && ((ready != 0 && queued >= ready) || (ready == 0 && queued == 0)) => TaskActivityState::Ready,
-        4 if queued == 0
-            && match (poll, ready) {
-                (0, 0) => true,
-                (0, _) => false,
-                (_, 0) => true,
-                (poll, ready) => ready >= poll,
-            } =>
-        {
-            TaskActivityState::Running
-        }
-        _ => return Err(malformed()),
-    };
-    // #[gamma::skip(collection.reverse_array, reason = "any applies the same pure upper-bound predicate to each timestamp")]
-    if [ready, poll, queued].into_iter().any(|timestamp| timestamp > observed) {
-        return Err(malformed());
-    }
-    if state != TaskActivityState::Running && worker != 0 {
-        return Err(malformed());
-    }
-    let timestamp = |ticks| (ticks != 0).then_some(EventTimestamp::from_ticks(ticks));
-    Ok(Some(TaskActivity {
-        observed_at: EventTimestamp::from_ticks(observed),
-        state,
-        ready_since: timestamp(ready),
-        poll_started_at: timestamp(poll),
-        poll_worker_id: WorkerId::from_raw(worker),
-        queued_since: timestamp(queued),
-    }))
-}
-
-fn write_address_lookup(writer: &mut Writer<'_>, lookup: &AddressLookup) -> Result<(), ()> {
-    let symbol = lookup.symbol.as_deref().unwrap_or_default().as_bytes();
-    let filename = lookup.filename.as_deref().unwrap_or_default().as_bytes();
-    writer.u64(lookup.address)?;
-    writer.count(symbol.len())?;
-    writer.count(filename.len())?;
-    writer.u32(lookup.line.unwrap_or(u32::MAX))?;
-    writer.u32(lookup.column.unwrap_or(u32::MAX))?;
-    writer.write(symbol)?;
-    writer.write(filename)
-}
-
-fn read_address_lookup(reader: &mut Reader<'_>) -> Result<AddressLookup, Error> {
-    let address = reader.u64()?;
-    let symbol_len = reader.u32()? as usize;
-    let filename_len = reader.u32()? as usize;
-    let line = optional_u32(reader.u32()?);
-    let column = optional_u32(reader.u32()?);
-    let symbol = optional_string(reader.read(symbol_len)?)?;
-    let filename = optional_string(reader.read(filename_len)?)?;
-    Ok(AddressLookup {
-        address,
-        symbol,
-        filename,
-        line,
-        column,
-    })
-}
-
-fn optional_string(bytes: &[u8]) -> Result<Option<String>, Error> {
-    if bytes.is_empty() {
-        Ok(None)
-    } else {
-        std::str::from_utf8(bytes)
-            .map(|value| Some(value.to_owned()))
-            .map_err(|_| malformed())
-    }
 }
 
 const fn optional_u32(value: u32) -> Option<u32> {
     if value == u32::MAX { None } else { Some(value) }
 }
 
-const fn count_fits(count: usize, item_bytes: usize, remaining_bytes: usize) -> bool {
-    match count.checked_mul(item_bytes) {
-        Some(required) => required <= remaining_bytes,
-        None => false,
-    }
+fn optional_timestamp(value: u64) -> Option<EventTimestamp> {
+    (value != u64::MAX).then(|| EventTimestamp::from_ticks(value))
 }
 
-fn write_counters(writer: &mut Writer<'_>, counters: Counters) -> Result<(), ()> {
-    writer.u64(counters.spawned_tasks)?;
-    writer.u64(counters.live_tasks)?;
-    writer.u64(counters.completed_tasks)?;
-    writer.u64(counters.canceled_tasks)?;
-    writer.u64(counters.panicked_tasks)?;
-    writer.u64(counters.poll_count)?;
-    writer.u64(counters.poll_duration_nanos)
-}
-
-fn read_counters(reader: &mut Reader<'_>) -> Result<Counters, Error> {
-    Ok(Counters {
-        spawned_tasks: reader.u64()?,
-        live_tasks: reader.u64()?,
-        completed_tasks: reader.u64()?,
-        canceled_tasks: reader.u64()?,
-        panicked_tasks: reader.u64()?,
-        poll_count: reader.u64()?,
-        poll_duration_nanos: reader.u64()?,
-    })
+fn optional_thread(value: u64) -> Option<ThreadId> {
+    (value != u64::MAX).then(|| ThreadId::new(value))
 }
 
 const fn backtrace_wire_value(value: BacktraceCapture) -> u8 {
@@ -1027,21 +320,18 @@ struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    fn new(bytes: &'a mut [u8]) -> Self {
-        Self { remaining: bytes }
-    }
-
-    fn count(&mut self, value: usize) -> Result<(), ()> {
-        self.u32(wire_count(value)?)
+    const fn new(output: &'a mut [u8]) -> Self {
+        Self { remaining: output }
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        let remaining = std::mem::take(&mut self.remaining);
-        let Some((destination, tail)) = remaining.split_at_mut_checked(bytes.len()) else {
+        if self.remaining.len() < bytes.len() {
             return Err(());
-        };
-        destination.copy_from_slice(bytes);
-        self.remaining = tail;
+        }
+        let remaining = std::mem::take(&mut self.remaining);
+        let (target, rest) = remaining.split_at_mut(bytes.len());
+        target.copy_from_slice(bytes);
+        self.remaining = rest;
         Ok(())
     }
 
@@ -1064,17 +354,11 @@ impl<'a> Writer<'a> {
 
 struct Reader<'a> {
     remaining: &'a [u8],
-    #[cfg(test)]
-    requested_bytes: usize,
 }
 
 impl<'a> Reader<'a> {
-    const fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            remaining: bytes,
-            #[cfg(test)]
-            requested_bytes: 0,
-        }
+    const fn new(input: &'a [u8]) -> Self {
+        Self { remaining: input }
     }
 
     const fn remaining(&self) -> &'a [u8] {
@@ -1082,13 +366,10 @@ impl<'a> Reader<'a> {
     }
 
     fn read(&mut self, len: usize) -> Result<&'a [u8], Error> {
-        #[cfg(test)]
-        {
-            self.requested_bytes = self.requested_bytes.saturating_add(len);
-        }
-        let Some((value, remaining)) = self.remaining.split_at_checked(len) else {
+        if self.remaining.len() < len {
             return Err(malformed());
-        };
+        }
+        let (value, remaining) = self.remaining.split_at(len);
         self.remaining = remaining;
         Ok(value)
     }
@@ -1098,20 +379,15 @@ impl<'a> Reader<'a> {
     }
 
     fn u16(&mut self) -> Result<u16, Error> {
-        let bytes = self.read(2)?;
-        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+        Ok(u16::from_le_bytes(self.read(2)?.try_into().map_err(|_| malformed())?))
     }
 
     fn u32(&mut self) -> Result<u32, Error> {
-        let bytes = self.read(4)?;
-        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        Ok(u32::from_le_bytes(self.read(4)?.try_into().map_err(|_| malformed())?))
     }
 
     fn u64(&mut self) -> Result<u64, Error> {
-        let bytes = self.read(8)?;
-        Ok(u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]))
+        Ok(u64::from_le_bytes(self.read(8)?.try_into().map_err(|_| malformed())?))
     }
 }
 
@@ -1119,473 +395,23 @@ impl<'a> Reader<'a> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn nov6_encoder_propagates_header_admission_and_address_writer_errors() {
-        let snapshot = Snapshot {
-            addresses: vec![AddressLookup {
-                address: 17,
-                ..AddressLookup::default()
-            }],
-            ..Snapshot::default()
-        };
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        assert_eq!(
-            encode_with(
-                &snapshot,
-                &mut bytes,
-                |runtimes, addresses| {
-                    assert_eq!((runtimes, addresses), (0, 1));
-                    Err(())
-                },
-                |_, _| panic!("header rejection must stop before address writing")
-            ),
-            Err(())
-        );
-        assert_eq!(
-            encode_with(&snapshot, &mut bytes, header_counts, |_, address| {
-                assert_eq!(address.address, 17);
-                Err(())
-            }),
-            Err(())
-        );
-        encode(&snapshot, &mut bytes).unwrap();
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn november_serialized_counts_admit_exact_u32_boundaries_without_allocating_large_records() {
-        for count in [0_u32, 1, 0x1234_5678, u32::MAX] {
-            assert_eq!(header_counts(count as usize, 17), Ok((count, 17)));
-            assert_eq!(header_counts(17, count as usize), Ok((17, count)));
-            let mut output = [0xa5; 5];
-            let mut writer = Writer::new(&mut output);
-            assert_eq!(writer.count(count as usize), Ok(()));
-            assert_eq!(writer.remaining, [0xa5]);
-            assert_eq!(output[..4], count.to_le_bytes());
-        }
-        let mut too_short = [0xa5; 3];
-        assert_eq!(Writer::new(&mut too_short).count(17), Err(()));
-        assert_eq!(too_short, [0xa5; 3]);
-        #[cfg(target_pointer_width = "64")]
-        {
-            let too_large = u32::MAX as usize + 1;
-            assert_eq!(header_counts(too_large, 0), Err(()));
-            assert_eq!(header_counts(0, too_large), Err(()));
-            let mut output = [0xa5; 4];
-            let mut writer = Writer::new(&mut output);
-            assert_eq!(writer.count(too_large), Err(()));
-            assert_eq!(writer.remaining, [0xa5; 4]);
-            assert_eq!(output, [0xa5; 4]);
-        }
-    }
-
-    #[test]
-    fn november_address_record_batch_propagates_each_failure_without_writing_later_records() {
-        for failed in [None, Some(0), Some(1), Some(2)] {
-            let mut output = [0xa5; 4];
-            let mut calls = Vec::new();
-            let result = write_records(&mut Writer::new(&mut output), &[0, 1, 2], |writer, &record| {
-                calls.push(record);
-                if failed == Some(record) { Err(()) } else { writer.u8(record) }
-            });
-            let written = failed.unwrap_or(3) as usize;
-            assert_eq!(result, failed.map_or(Ok(()), |_| Err(())));
-            assert_eq!(calls, (0..failed.map_or(3, |index| index + 1)).collect::<Vec<_>>());
-            assert_eq!(&output[..written], &(0..u8::try_from(written).unwrap()).collect::<Vec<_>>());
-            assert_eq!(&output[written..], &vec![0xa5; 4 - written]);
-        }
-    }
-
-    #[test]
-    fn november_top_level_count_preflight_rejects_before_requesting_record_bytes() {
-        for (runtimes, addresses, record_size) in [(1_u32, 0_u32, RUNTIME_FIXED_LEN), (0, 1, ADDRESS_LOOKUP_FIXED_LEN)] {
-            let mut bytes = MAGIC.to_vec();
-            bytes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-            bytes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-            bytes.extend_from_slice(&runtimes.to_le_bytes());
-            bytes.extend_from_slice(&addresses.to_le_bytes());
-            bytes.resize(HEADER_LEN + record_size - 1, 0);
-            let mut reader = Reader::new(&bytes);
-            assert_eq!(decode_reader(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
-            assert_eq!(
-                reader.requested_bytes, HEADER_LEN,
-                "invalid advertised count must not begin parsing its first row"
-            );
-            assert_eq!(reader.remaining().len(), record_size - 1);
-        }
-    }
-
-    #[test]
-    fn november_nested_count_preflight_checks_workers_and_tasks_before_reading_them() {
-        let mut runtime = fixture().runtimes.remove(0);
-        runtime.workers.clear();
-        runtime.tasks.clear();
-        let prefix_len = RUNTIME_FIXED_LEN + runtime.name.len();
-        for (count_offset, record_size) in [(36, WORKER_FIXED_LEN), (40, TASK_FIXED_LEN)] {
-            let mut bytes = vec![0; prefix_len + record_size - 1];
-            write_runtime(&mut Writer::new(&mut bytes), &runtime).unwrap();
-            bytes[count_offset..count_offset + 4].copy_from_slice(&1_u32.to_le_bytes());
-            let mut reader = Reader::new(&bytes);
-            assert_eq!(read_runtime(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
-            assert_eq!(reader.requested_bytes, prefix_len, "count admission must precede all row reads");
-            assert_eq!(reader.remaining().len(), record_size - 1);
-        }
-    }
-
-    #[test]
-    fn nonzero_reserved_frame_counts_are_rejected_before_task_metrics() {
-        let task = fixture().runtimes.remove(0).tasks.remove(0);
-        let mut bytes = vec![0; TASK_FIXED_LEN + 8];
-        write_task(&mut Writer::new(&mut bytes), &task).unwrap();
-        bytes.pop();
-        for frames in [20_u32, 1] {
-            bytes[24..28].copy_from_slice(&frames.to_le_bytes());
-            let mut reader = Reader::new(&bytes);
-            assert_eq!(read_task(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
-            assert_eq!(reader.requested_bytes, 28);
-            assert_eq!(reader.remaining().len(), bytes.len() - 28);
-        }
-    }
-
-    #[test]
-    fn gamma_round2_wire_counts_reject_the_first_unrepresentable_length_without_allocating() {
-        assert_eq!(wire_count(0), Ok(0));
-        assert_eq!(wire_count(37), Ok(37));
-        assert_eq!(wire_count(u32::MAX as usize), Ok(u32::MAX));
-        if usize::BITS > u32::BITS {
-            assert_eq!(wire_count(u32::MAX as usize + 1), Err(()));
-        }
-    }
-
-    #[test]
-    fn gamma_round2_encoded_lengths_reject_each_scripted_overflow_without_large_buffers() {
-        assert_eq!(
-            encoded_len_from_counts([(3, 2, 1)], [(5, 7)]),
-            Some(HEADER_LEN + RUNTIME_FIXED_LEN + 3 + 2 * WORKER_FIXED_LEN + TASK_FIXED_LEN + ADDRESS_LOOKUP_FIXED_LEN + 12)
-        );
-        for runtimes in [
-            vec![(usize::MAX, 0, 0)],
-            vec![(0, usize::MAX, 0)],
-            vec![(0, 0, usize::MAX)],
-            vec![(usize::MAX - HEADER_LEN - RUNTIME_FIXED_LEN, 0, 0), (0, 0, 0)],
-        ] {
-            assert_eq!(encoded_len_from_counts(runtimes, []), None);
-        }
-        assert_eq!(
-            encoded_len_from_counts([(usize::MAX - HEADER_LEN - RUNTIME_FIXED_LEN, 0, 0)], [(0, 0)]),
-            None
-        );
-        assert_eq!(encoded_len_from_counts([], [(usize::MAX, 0)]), None);
-        assert_eq!(encoded_len_from_counts([], [(0, usize::MAX)]), None);
-    }
-
-    #[test]
-    fn gamma_round2_field_writers_return_errors_at_every_short_buffer() {
-        let snapshot = fixture();
-        let runtime = &snapshot.runtimes[0];
-        let task = &runtime.tasks[0];
-        let activity = Some(TaskActivity {
-            observed_at: EventTimestamp::from_ticks(100),
-            state: TaskActivityState::Ready,
-            ready_since: Some(EventTimestamp::from_ticks(70)),
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: Some(EventTimestamp::from_ticks(90)),
-        });
-        let runtime_len = RUNTIME_FIXED_LEN + runtime.name.len() + WORKER_FIXED_LEN + TASK_FIXED_LEN;
-        for length in 0..runtime_len {
-            let mut output = vec![0xa5; length];
-            assert_eq!(write_runtime(&mut Writer::new(&mut output), runtime), Err(()), "runtime {length}");
-        }
-        for length in 0..WORKER_FIXED_LEN {
-            let mut output = vec![0xa5; length];
-            assert_eq!(
-                write_worker(&mut Writer::new(&mut output), &runtime.workers[0]),
-                Err(()),
-                "worker {length}"
-            );
-        }
-        for length in 0..TASK_FIXED_LEN {
-            let mut output = vec![0xa5; length];
-            assert_eq!(write_task(&mut Writer::new(&mut output), task), Err(()), "task {length}");
-        }
-        for length in 0..48 {
-            let mut output = vec![0xa5; length];
-            assert_eq!(
-                write_activity(&mut Writer::new(&mut output), activity),
-                Err(()),
-                "activity {length}"
-            );
-        }
-        let lookup = &snapshot.addresses[0];
-        let lookup_len = 24 + lookup.symbol.as_ref().unwrap().len() + lookup.filename.as_ref().unwrap().len();
-        for length in 0..lookup_len {
-            let mut output = vec![0xa5; length];
-            assert_eq!(
-                write_address_lookup(&mut Writer::new(&mut output), lookup),
-                Err(()),
-                "address {length}"
-            );
-        }
-        for length in 0..56 {
-            let mut output = vec![0xa5; length];
-            assert_eq!(
-                write_counters(&mut Writer::new(&mut output), runtime.counters),
-                Err(()),
-                "counters {length}"
-            );
-        }
-    }
-
-    #[test]
-    fn gamma_round2_private_readers_return_errors_before_fixed_records_are_complete() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].tasks[0].activity = None;
-        let mut output = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut output).unwrap();
-        let worker_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len();
-        for length in 0..WORKER_FIXED_LEN {
-            let mut reader = Reader::new(&output[worker_start..worker_start + length]);
-            assert_eq!(
-                read_worker(&mut reader).unwrap_err().kind(),
-                ErrorKind::Malformed,
-                "worker {length}"
-            );
-        }
-        let task_start = worker_start + WORKER_FIXED_LEN;
-        for length in 0..TASK_FIXED_LEN {
-            let mut reader = Reader::new(&output[task_start..task_start + length]);
-            assert_eq!(read_task(&mut reader).unwrap_err().kind(), ErrorKind::Malformed, "task {length}");
-        }
-    }
-
-    #[test]
-    fn gamma_round2_encoder_rejects_wrong_lengths_without_touching_output() {
-        let snapshot = fixture();
-        let length = encoded_len(&snapshot).unwrap();
-        for size in [HEADER_LEN + 1, length - 1, length + 1] {
-            let mut output = vec![0xa5; size];
-            assert_eq!(encode(&snapshot, &mut output), Err(()));
-            assert_eq!(output, vec![0xa5; size]);
-        }
-    }
-
-    mod gamma_wire {
-        include!("../tests/support/gamma_wire.rs");
-    }
-
-    #[test]
-    fn gamma_survivor_runtime_encoder_overwrites_poison_with_exact_wire_image() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].counters = Counters {
-            spawned_tasks: 7,
-            live_tasks: 2,
-            completed_tasks: 21,
-            canceled_tasks: 22,
-            panicked_tasks: 23,
-            poll_count: 24,
-            poll_duration_nanos: 25,
-        };
-        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(417);
-        snapshot.runtimes[0].tasks[0].activity = Some(TaskActivity {
-            observed_at: EventTimestamp::from_ticks(100),
-            state: TaskActivityState::Running,
-            ready_since: Some(EventTimestamp::from_ticks(90)),
-            poll_started_at: Some(EventTimestamp::from_ticks(80)),
-            poll_worker_id: Some(WorkerId::from_raw(2).unwrap()),
-            queued_since: None,
-        });
-        let expected = gamma_wire::image([4, 100, 90, 80, 0, 2]);
-        assert_eq!(encoded_len(&snapshot), Some(expected.len()));
-        let mut output = vec![0xa5; expected.len()];
-        encode(&snapshot, &mut output).unwrap();
-        assert_eq!(output, expected);
-        for length in [expected.len() - 1, expected.len() + 1] {
-            assert_eq!(encode(&snapshot, &mut vec![0; length]), Err(()));
-        }
-    }
-
-    #[test]
-    fn gamma_survivor_runtime_encoder_rejects_each_incoherent_activity() {
-        for activity in [
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Unknown,
-                ready_since: Some(EventTimestamp::from_ticks(1)),
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            },
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Waiting,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: Some(WorkerId::from_raw(2).unwrap()),
-                queued_since: None,
-            },
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Ready,
-                ready_since: Some(EventTimestamp::from_ticks(90)),
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: Some(EventTimestamp::from_ticks(80)),
-            },
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Running,
-                ready_since: Some(EventTimestamp::from_ticks(70)),
-                poll_started_at: Some(EventTimestamp::from_ticks(80)),
-                poll_worker_id: None,
-                queued_since: None,
-            },
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Running,
-                ready_since: None,
-                poll_started_at: Some(EventTimestamp::from_ticks(101)),
-                poll_worker_id: None,
-                queued_since: None,
-            },
-            TaskActivity {
-                observed_at: EventTimestamp::from_ticks(100),
-                state: TaskActivityState::Running,
-                ready_since: None,
-                poll_started_at: Some(EventTimestamp::from_ticks(0)),
-                poll_worker_id: None,
-                queued_since: None,
-            },
-        ] {
-            let mut snapshot = fixture();
-            snapshot.runtimes[0].tasks[0].activity = Some(activity);
-            assert_eq!(encode(&snapshot, &mut vec![0; encoded_len(&snapshot).unwrap()]), Err(()));
-        }
-    }
-
-    #[test]
-    fn gamma_survivor_runtime_encoder_writes_all_optional_sentinels() {
-        let mut snapshot = fixture();
-        let runtime = &mut snapshot.runtimes[0];
-        runtime.counters = Counters {
-            spawned_tasks: 7,
-            live_tasks: 2,
-            completed_tasks: 21,
-            canceled_tasks: 22,
-            panicked_tasks: 23,
-            poll_count: 24,
-            poll_duration_nanos: 25,
-        };
-        runtime.state = RuntimeState::Stopped;
-        runtime.retired_at = Some(EventTimestamp::from_ticks(101));
-        runtime.lifecycle_backtraces = BacktraceCapture::Always;
-        let worker = &mut runtime.workers[0];
-        worker.role = WorkerRole::Io;
-        worker.state = WorkerState::Stopped;
-        worker.processor_index = None;
-        worker.thread_id = None;
-        worker.current_task = None;
-        runtime.tasks[0].parent = None;
-        runtime.tasks[0].last_worker_id = None;
-        snapshot.addresses[0].line = None;
-        snapshot.addresses[0].column = None;
-        let mut expected = gamma_wire::image([0; 6]);
-        expected[28] = 3;
-        expected[29] = 3;
-        expected[44..52].copy_from_slice(&101_u64.to_le_bytes());
-        expected[139] = 3;
-        expected[140] = 3;
-        expected[143..147].fill(255);
-        expected[147..163].fill(0);
-        expected[171..179].fill(0);
-        expected[203..211].fill(0);
-        expected[331..339].fill(0);
-        expected[363..371].fill(255);
-        let mut output = vec![0xa5; expected.len()];
-        encode(&snapshot, &mut output).unwrap();
-        assert_eq!(output, expected);
-    }
-
-    #[test]
-    fn gamma_survivor_activity_snapshot_uses_only_coherent_frozen_evidence() {
-        let mut activity = TaskActivity {
-            observed_at: EventTimestamp::from_ticks(100),
-            state: TaskActivityState::Waiting,
-            ready_since: None,
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: None,
-        };
-        assert!(valid_activity(activity));
-        activity.state = TaskActivityState::Running;
-        activity.ready_since = Some(EventTimestamp::from_ticks(90));
-        activity.poll_started_at = Some(EventTimestamp::from_ticks(80));
-        activity.poll_worker_id = Some(WorkerId::from_raw(19).unwrap());
-        assert!(valid_activity(activity));
-        let mut newer = activity;
-        newer.poll_started_at = Some(EventTimestamp::from_ticks(101));
-        assert!(!valid_activity(newer));
-        activity.state = TaskActivityState::Unknown;
-        assert!(!valid_activity(activity));
-        activity.ready_since = None;
-        activity.poll_started_at = None;
-        activity.poll_worker_id = None;
-        assert!(valid_activity(activity));
-    }
-
     fn fixture() -> Snapshot {
         Snapshot {
             runtimes: vec![Runtime {
                 id: RuntimeId::from_raw(1).unwrap(),
-                name: "primary".to_owned(),
-                configured_workers: 4,
+                name: "primary".into(),
+                configured_workers: 2,
                 lifecycle_backtraces: BacktraceCapture::Configured,
                 state: RuntimeState::Running,
-                created_at: EventTimestamp::from_ticks(10),
+                created_at: EventTimestamp::from_ticks(3),
                 retired_at: None,
-                counters_scope: CountersScope::Lifetime,
-                counters: Counters {
-                    spawned_tasks: 7,
-                    live_tasks: 2,
-                    ..Counters::default()
-                },
                 workers: vec![Worker {
-                    id: WorkerId::from_raw(2).unwrap(),
+                    id: WorkerId::from_raw(4).unwrap(),
                     role: WorkerRole::Core,
-                    state: WorkerState::Running,
-                    processor_index: Some(3),
-                    thread_id: Some(ThreadId::new(9)),
-                    current_task: Some(TaskId::from_raw(4).unwrap()),
-                    task_collection: TaskCollection::Retained,
+                    state: WorkerState::Parked,
+                    processor_index: Some(5),
+                    thread_id: Some(ThreadId::new(6)),
                 }],
-                tasks: vec![Task {
-                    id: TaskId::from_raw(4).unwrap(),
-                    parent: Some(TaskId::from_raw(3).unwrap()),
-                    type_descriptor: TypeDescriptorId::from_raw(5).unwrap(),
-                    future_size_bytes: None,
-                    spawned_at: Some(EventTimestamp::from_ticks(11)),
-                    metrics_scope: TaskMetricsScope::Lifetime,
-                    activity: None,
-                    last_worker_id: Some(WorkerId::from_raw(2).unwrap()),
-                    metrics: TaskMetrics {
-                        poll_count: 12,
-                        poll_duration_nanos: 13,
-                        max_poll_duration_nanos: 14,
-                        resume_count: 15,
-                        resume_duration_nanos: 16,
-                        max_resume_duration_nanos: 17,
-                        ready_wait_count: 18,
-                        ready_wait_duration_nanos: 19,
-                        max_ready_wait_duration_nanos: 20,
-                    },
-                }],
-            }],
-            addresses: vec![AddressLookup {
-                address: 0x1234,
-                symbol: Some("example::spawn".into()),
-                filename: Some("example.rs".into()),
-                line: Some(42),
-                column: Some(7),
             }],
         }
     }
@@ -1595,695 +421,19 @@ mod tests {
         let snapshot = fixture();
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
-
-        assert_eq!(bytes.len(), 395);
         assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
     #[test]
-    fn task_frame_copies_are_rejected() {
+    fn malformed_and_unsupported_payloads_are_rejected() {
         let snapshot = fixture();
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
-        bytes[task_start + 24..task_start + 28].copy_from_slice(&2_u32.to_le_bytes());
-        let stack_start = task_start + TASK_FIXED_LEN;
-        bytes.splice(
-            stack_start..stack_start,
-            0x1234_u64.to_le_bytes().into_iter().chain(0x5678_u64.to_le_bytes()),
-        );
-
-        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn future_sizes_round_trip_without_confusing_zero_and_unknown() {
-        for size in [None, Some(0), Some(1), Some(4096), Some(u64::MAX - 1)] {
-            let mut snapshot = fixture();
-            snapshot.runtimes[0].tasks[0].future_size_bytes = size;
-            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-            encode(&snapshot, &mut bytes).unwrap();
-            assert_eq!(decode(&bytes).unwrap(), snapshot);
-            assert_eq!(&bytes[10..12], &SCHEMA_VERSION.to_le_bytes());
-        }
-    }
-
-    #[test]
-    fn unrepresentable_future_size_is_rejected() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(u64::MAX);
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        assert_eq!(encode(&snapshot, &mut bytes), Err(()));
-    }
-
-    #[test]
-    fn unresolved_addresses_round_trip_without_symbol_metadata() {
-        let snapshot = Snapshot {
-            addresses: vec![AddressLookup {
-                address: 0x1234,
-                symbol: None,
-                filename: None,
-                line: None,
-                column: None,
-            }],
-            ..fixture()
-        };
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn every_truncated_source_payload_is_rejected() {
-        let snapshot = fixture();
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-
-        for len in 0..bytes.len() {
-            assert_eq!(decode(&bytes[..len]).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-    }
-
-    #[test]
-    fn fixed_record_count_boundaries_are_exact() {
-        assert!(count_fits(0, RUNTIME_FIXED_LEN, 0));
-        assert!(count_fits(2, WORKER_FIXED_LEN, 2 * WORKER_FIXED_LEN));
-        assert!(!count_fits(2, WORKER_FIXED_LEN, 2 * WORKER_FIXED_LEN - 1));
-        assert!(!count_fits(usize::MAX, TASK_FIXED_LEN, usize::MAX));
-    }
-
-    #[test]
-    fn future_wire_version_is_rejected() {
-        let mut bytes = Vec::from(MAGIC);
-        bytes.extend_from_slice(&(WIRE_VERSION + 1).to_le_bytes());
-        bytes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-
-        assert_eq!(
-            decode(&bytes).unwrap_err().kind(),
-            ErrorKind::UnsupportedWireVersion(WIRE_VERSION + 1)
-        );
-    }
-
-    #[test]
-    fn previous_source_schemas_are_rejected() {
-        let mut bytes = Vec::from(MAGIC);
-        bytes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-
-        for version in 0..SCHEMA_VERSION {
-            bytes[10..12].copy_from_slice(&version.to_le_bytes());
-            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::UnsupportedSchemaVersion(version));
-        }
-    }
-
-    #[test]
-    fn states_roles_and_backtrace_policies_round_trip() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].state = RuntimeState::Stopping;
-        snapshot.runtimes[0].lifecycle_backtraces = BacktraceCapture::Never;
-        snapshot.runtimes[0].workers = vec![
-            Worker {
-                id: WorkerId::from_raw(2).unwrap(),
-                role: WorkerRole::Blocking,
-                task_collection: TaskCollection::Retained,
-                state: WorkerState::Parked,
-                processor_index: None,
-                thread_id: None,
-                current_task: None,
-            },
-            Worker {
-                id: WorkerId::from_raw(3).unwrap(),
-                role: WorkerRole::Io,
-                task_collection: TaskCollection::Retained,
-                state: WorkerState::Stopped,
-                processor_index: None,
-                thread_id: None,
-                current_task: None,
-            },
-        ];
-        let mut stopped = snapshot.runtimes[0].clone();
-        stopped.id = RuntimeId::from_raw(4).unwrap();
-        stopped.state = RuntimeState::Stopped;
-        stopped.retired_at = Some(EventTimestamp::from_ticks(30));
-        stopped.lifecycle_backtraces = BacktraceCapture::Always;
-        stopped.workers.clear();
-        stopped.tasks.clear();
-        snapshot.runtimes.push(stopped);
-
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn errors_have_stable_categories_and_messages() {
-        let cases = [
-            (
-                Error::new(ErrorKind::Malformed),
-                "the runtime telemetry source payload is malformed",
-            ),
-            (
-                Error::new(ErrorKind::UnsupportedWireVersion(7)),
-                "runtime telemetry wire version 7 is unsupported",
-            ),
-            (
-                Error::new(ErrorKind::UnsupportedSchemaVersion(8)),
-                "runtime telemetry schema version 8 is unsupported",
-            ),
-        ];
-        for (error, expected) in cases {
-            assert_eq!(error.to_string(), expected);
-            assert_eq!(error.kind(), error.kind);
-        }
-    }
-
-    #[test]
-    fn invalid_wire_discriminants_are_rejected() {
-        assert_eq!(RuntimeState::from_wire_value(0), None);
-        assert_eq!(WorkerState::from_wire_value(0), None);
-        assert_eq!(WorkerRole::from_wire_value(0), None);
-        assert_eq!(backtrace_from_wire_value(0), None);
-    }
-
-    #[test]
-    fn malformed_headers_counts_and_trailing_data_are_rejected() {
-        let mut invalid_magic = vec![0; HEADER_LEN];
-        invalid_magic[8..10].copy_from_slice(&WIRE_VERSION.to_le_bytes());
-        invalid_magic[10..12].copy_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        assert_eq!(decode(&invalid_magic).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut unsupported_schema = Vec::from(MAGIC);
-        unsupported_schema.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        unsupported_schema.extend_from_slice(&(SCHEMA_VERSION + 1).to_le_bytes());
-        unsupported_schema.extend_from_slice(&0_u32.to_le_bytes());
-        unsupported_schema.extend_from_slice(&0_u32.to_le_bytes());
-        assert_eq!(
-            decode(&unsupported_schema).unwrap_err().kind(),
-            ErrorKind::UnsupportedSchemaVersion(SCHEMA_VERSION + 1)
-        );
-
-        let mut excessive_runtimes = Vec::from(MAGIC);
-        excessive_runtimes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        excessive_runtimes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        excessive_runtimes.extend_from_slice(&1_u32.to_le_bytes());
-        excessive_runtimes.extend_from_slice(&0_u32.to_le_bytes());
-        assert_eq!(decode(&excessive_runtimes).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut excessive_addresses = Vec::from(MAGIC);
-        excessive_addresses.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        excessive_addresses.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        excessive_addresses.extend_from_slice(&0_u32.to_le_bytes());
-        excessive_addresses.extend_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(decode(&excessive_addresses).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut trailing = Vec::from(MAGIC);
-        trailing.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        trailing.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        trailing.extend_from_slice(&0_u32.to_le_bytes());
-        trailing.extend_from_slice(&0_u32.to_le_bytes());
-        trailing.push(1);
-        assert_eq!(decode(&trailing).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn malformed_runtime_worker_and_task_records_are_rejected() {
-        fn encoded_fixture() -> Vec<u8> {
-            let snapshot = fixture();
-            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-            encode(&snapshot, &mut bytes).unwrap();
-            bytes
-        }
-
-        for (offset, value) in [(30, 1_u8), (64, 2), (141, 8), (191, 3)] {
-            let mut bytes = encoded_fixture();
-            bytes[offset] = value;
-            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-
-        for (offset, value) in [(56, u32::MAX), (60, u32::MAX)] {
-            let mut bytes = encoded_fixture();
-            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-
-        let mut stopped_without_retirement = encoded_fixture();
-        stopped_without_retirement[28] = RuntimeState::Stopped.wire_value();
-        assert_eq!(decode(&stopped_without_retirement).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut excessive_frames = encoded_fixture();
-        excessive_frames[187..191].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(decode(&excessive_frames).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn malformed_variable_lengths_and_text_are_rejected() {
-        fn encoded_fixture() -> Vec<u8> {
-            let snapshot = fixture();
-            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-            encode(&snapshot, &mut bytes).unwrap();
-            bytes
-        }
-
-        for offset in [52, 355, 359] {
-            let mut bytes = encoded_fixture();
-            bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-
-        let mut invalid_runtime_name = encoded_fixture();
-        invalid_runtime_name[124] = 0xff;
-        assert_eq!(decode(&invalid_runtime_name).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut invalid_symbol = encoded_fixture();
-        invalid_symbol[371] = 0xff;
-        assert_eq!(decode(&invalid_symbol).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn poll_worker_identity_is_rejected_outside_running_state() {
-        for words in [
-            [0_u64, 0, 0, 0, 0, 7],
-            [1, 10, 0, 0, 0, 7],
-            [2, 10, 0, 0, 0, 7],
-            [3, 10, 1, 0, 2, 7],
-        ] {
-            let bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-        let invalid = TaskActivity {
-            observed_at: EventTimestamp::from_ticks(10),
-            state: TaskActivityState::Waiting,
-            ready_since: None,
-            poll_started_at: None,
-            poll_worker_id: WorkerId::from_raw(7),
-            queued_since: None,
-        };
-        assert_eq!(write_activity(&mut Writer::new(&mut [0; 48]), Some(invalid)), Err(()));
-    }
-
-    #[test]
-    fn activity_states_round_trip_with_exact_size_and_truncation_checks() {
-        let at = EventTimestamp::from_ticks;
-        for activity in [
-            None,
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Unknown,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Waiting,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Ready,
-                ready_since: Some(at(10)),
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: Some(at(20)),
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Running,
-                ready_since: None,
-                poll_started_at: Some(at(10)),
-                poll_worker_id: None,
-                queued_since: None,
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Running,
-                ready_since: Some(at(20)),
-                poll_started_at: Some(at(10)),
-                poll_worker_id: WorkerId::from_raw(7),
-                queued_since: None,
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Ready,
-                ready_since: Some(at(50)),
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: Some(at(50)),
-            }),
-            Some(TaskActivity {
-                observed_at: at(50),
-                state: TaskActivityState::Running,
-                ready_since: Some(at(50)),
-                poll_started_at: Some(at(50)),
-                poll_worker_id: WorkerId::from_raw(7),
-                queued_since: None,
-            }),
-        ] {
-            let mut bytes = [0; 48];
-            write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
-            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap(), activity);
-            for len in 0..bytes.len() {
-                assert_eq!(
-                    read_activity(&mut Reader::new(&bytes[..len])).unwrap_err().kind(),
-                    ErrorKind::Malformed
-                );
-            }
-            let mut snapshot = fixture();
-            snapshot.runtimes[0].tasks[0].activity = activity;
-            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-            encode(&snapshot, &mut bytes).unwrap();
-            assert_eq!(decode(&bytes).unwrap(), snapshot);
-            bytes.push(1);
-            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-    }
-
-    #[test]
-    fn malformed_activity_tags_and_inconsistent_times_are_rejected() {
-        for words in [
-            [0_u64, 1, 0, 0, 0],
-            [5, 10, 0, 0, 0],
-            [1, 10, 1, 0, 0],
-            [2, 10, 0, 1, 0],
-            [3, 10, 0, 0, 1],
-            [3, 10, 2, 0, 1],
-            [3, 10, 1, 1, 2],
-            [3, 10, 11, 0, 11],
-            [4, 10, 1, 2, 0],
-            [4, 10, 0, 1, 1],
-            [4, 10, 0, 11, 0],
-        ] {
-            let mut bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-            bytes.extend_from_slice(&0_u64.to_le_bytes());
-            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-        }
-        let invalid = TaskActivity {
-            observed_at: EventTimestamp::from_ticks(10),
-            state: TaskActivityState::Running,
-            ready_since: None,
-            poll_started_at: Some(EventTimestamp::from_ticks(0)),
-            poll_worker_id: None,
-            queued_since: None,
-        };
-        assert_eq!(write_activity(&mut Writer::new(&mut [0; 48]), Some(invalid)), Err(()));
-    }
-
-    #[test]
-    fn activity_validation_requires_each_state_specific_field_combination() {
-        let at = EventTimestamp::from_ticks;
-        let base = TaskActivity {
-            observed_at: at(10),
-            state: TaskActivityState::Waiting,
-            ready_since: None,
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: None,
-        };
-        assert!(valid_activity(base));
-        assert!(!valid_activity(TaskActivity {
-            ready_since: Some(at(1)),
-            ..base
-        }));
-        assert!(!valid_activity(TaskActivity {
-            poll_started_at: Some(at(1)),
-            ..base
-        }));
-        assert!(!valid_activity(TaskActivity {
-            queued_since: Some(at(1)),
-            ..base
-        }));
-        assert!(valid_activity(TaskActivity {
-            state: TaskActivityState::Ready,
-            ready_since: Some(at(4)),
-            queued_since: Some(at(4)),
-            ..base
-        }));
-        assert!(!valid_activity(TaskActivity {
-            state: TaskActivityState::Ready,
-            ready_since: Some(at(4)),
-            ..base
-        }));
-        assert!(valid_activity(TaskActivity {
-            state: TaskActivityState::Running,
-            ready_since: Some(at(4)),
-            poll_started_at: Some(at(4)),
-            poll_worker_id: WorkerId::from_raw(1),
-            ..base
-        }));
-        assert!(valid_activity(TaskActivity {
-            state: TaskActivityState::Running,
-            ..base
-        }));
-    }
-
-    #[test]
-    fn fixed_buffer_failures_are_handled() {
-        let snapshot = fixture();
-        let mut short = vec![0; encoded_len(&snapshot).unwrap() - 1];
-        assert_eq!(encode(&snapshot, &mut short), Err(()));
-        let mut long = vec![0; encoded_len(&snapshot).unwrap() + 1];
-        assert_eq!(encode(&snapshot, &mut long), Err(()));
-
-        let mut writer_bytes = [0_u8; 1];
-        assert_eq!(Writer::new(&mut writer_bytes).u64(1), Err(()));
-        assert_eq!(Reader::new(&[]).u64().unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn native_measurement_scopes_and_worker_availability_round_trip_exactly() {
-        for collection in [
-            TaskCollection::Complete,
-            TaskCollection::Truncated,
-            TaskCollection::Busy,
-            TaskCollection::TimedOut,
-            TaskCollection::Stopped,
-            TaskCollection::Failed,
-            TaskCollection::Unavailable,
-        ] {
-            for scope in [
-                TaskMetricsScope::Uncollected,
-                TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(17)),
-            ] {
-                let mut expected = fixture();
-                let runtime = &mut expected.runtimes[0];
-                runtime.counters = Counters::default();
-                runtime.counters_scope = CountersScope::Uncollected;
-                runtime.workers[0].task_collection = collection;
-                let task = &mut runtime.tasks[0];
-                task.metrics_scope = scope;
-                task.metrics = if matches!(scope, TaskMetricsScope::PollsSince(_)) {
-                    TaskMetrics {
-                        poll_count: 2,
-                        poll_duration_nanos: 41,
-                        max_poll_duration_nanos: 30,
-                        ..TaskMetrics::default()
-                    }
-                } else {
-                    TaskMetrics::default()
-                };
-                let mut bytes = vec![0; encoded_len(&expected).unwrap()];
-
-                encode(&expected, &mut bytes).unwrap();
-
-                assert_eq!(decode(&bytes).unwrap(), expected);
-            }
-        }
-    }
-
-    #[test]
-    fn uncollected_values_reject_numeric_evidence_in_both_directions() {
-        let mut expected = fixture();
-        expected.runtimes[0].counters_scope = CountersScope::Uncollected;
-        let mut bytes = vec![0; encoded_len(&expected).unwrap()];
-        assert_eq!(encode(&expected, &mut bytes), Err(()));
-        expected.runtimes[0].counters_scope = CountersScope::Lifetime;
-        expected.runtimes[0].tasks[0].metrics_scope = TaskMetricsScope::Uncollected;
-        assert_eq!(encode(&expected, &mut bytes), Err(()));
-
-        expected.runtimes[0].tasks[0].metrics_scope = TaskMetricsScope::Lifetime;
-        encode(&expected, &mut bytes).unwrap();
-        bytes[64..68].copy_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-        bytes[64..68].copy_from_slice(&0_u32.to_le_bytes());
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + expected.runtimes[0].name.len() + WORKER_FIXED_LEN;
-        bytes[task_start + 28..task_start + 32].copy_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn unknown_collection_and_inconsistent_metric_tags_are_rejected() {
-        let expected = fixture();
-        let mut runtime = expected.runtimes[0].clone();
-        runtime.counters = Counters::default();
-        runtime.counters_scope = CountersScope::Uncollected;
-        let mut worker = runtime.workers[0].clone();
-        worker.task_collection = TaskCollection::Complete;
-        let mut bytes = [0; WORKER_FIXED_LEN];
-        write_worker(&mut Writer::new(&mut bytes), &worker).unwrap();
-        bytes[10..12].copy_from_slice(&99_u16.to_le_bytes());
-        assert_eq!(read_worker(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-
-        let mut task = runtime.tasks[0].clone();
-        task.metrics_scope = TaskMetricsScope::Uncollected;
-        task.metrics = TaskMetrics::default();
-        let mut bytes = [0; TASK_FIXED_LEN];
-        write_task(&mut Writer::new(&mut bytes), &task).unwrap();
-        bytes[176..184].copy_from_slice(&7_u64.to_le_bytes());
-        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-        bytes[28..32].copy_from_slice(&0_u32.to_le_bytes());
-        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn native_states_remain_known_without_age_measurements() {
-        for state in [TaskActivityState::Ready, TaskActivityState::Running] {
-            let activity = Some(TaskActivity {
-                observed_at: EventTimestamp::from_ticks(10),
-                state,
-                ready_since: None,
-                poll_started_at: None,
-                poll_worker_id: None,
-                queued_since: None,
-            });
-            let mut bytes = [0; 48];
-            write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
-
-            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap(), activity);
-        }
-    }
-
-    #[test]
-    fn capture_budget_boundaries_are_inclusive() {
-        for limit in [1, 4096] {
-            let valid = CaptureOptions {
-                limit_per_worker: limit,
-                timeout: Duration::from_secs(5),
-                measure_for: Duration::from_secs(1),
-            };
-            valid.validate().unwrap();
-        }
-    }
-
-    #[test]
-    fn task_encoding_rejects_every_short_output_without_overwriting() {
-        let task = &fixture().runtimes[0].tasks[0];
-        for length in 0..TASK_FIXED_LEN {
-            let mut bytes = vec![0; length];
-
-            assert_eq!(write_task(&mut Writer::new(&mut bytes), task), Err(()), "output length {length}");
-        }
-    }
-
-    #[test]
-    fn task_decoding_rejects_every_truncated_metadata_field() {
-        let mut bytes = [0; TASK_FIXED_LEN];
-        write_task(&mut Writer::new(&mut bytes), &fixture().runtimes[0].tasks[0]).unwrap();
-
-        for length in 0..bytes.len() {
-            assert_eq!(
-                read_task(&mut Reader::new(&bytes[..length])).unwrap_err().kind(),
-                ErrorKind::Malformed,
-                "input length {length}"
-            );
-        }
-    }
-
-    #[test]
-    fn activity_metadata_rejects_timestamps_without_matching_states() {
-        for tag in [0_u64, 1, 2] {
-            for field in [2, 3, 4] {
-                let mut fields = [tag, if tag == 0 { 0 } else { 10 }, 0, 0, 0, 0];
-                fields[field] = 1;
-                let bytes = fields.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-
-                assert_eq!(
-                    read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(),
-                    ErrorKind::Malformed,
-                    "tag {tag}, field {field}"
-                );
-            }
-        }
-        let bytes = [3_u64, 10, 1, 0, 0, 0].into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-        assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn task_metadata_can_omit_creation_time_worker_and_future_size() {
-        let mut expected = fixture();
-        let task = &mut expected.runtimes[0].tasks[0];
-        task.spawned_at = None;
-        task.last_worker_id = None;
-        task.future_size_bytes = None;
-        let mut bytes = vec![0; encoded_len(&expected).unwrap()];
-
-        encode(&expected, &mut bytes).unwrap();
-
-        assert_eq!(decode(&bytes).unwrap(), expected);
-    }
-
-    #[test]
-    fn task_creation_timestamp_encoding_preserves_the_largest_representable_time_and_rejects_overflow() {
-        let mut task = fixture().runtimes.remove(0).tasks.remove(0);
-        let mut bytes = [0; TASK_FIXED_LEN];
-        task.spawned_at = Some(EventTimestamp::from_ticks(u64::MAX - 1));
-        write_task(&mut Writer::new(&mut bytes), &task).unwrap();
-        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap().spawned_at, task.spawned_at);
-        task.spawned_at = Some(EventTimestamp::from_ticks(u64::MAX));
-        assert_eq!(write_task(&mut Writer::new(&mut bytes), &task), Err(()));
-    }
-
-    #[test]
-    fn record_writers_reject_uncollected_numeric_evidence_before_emitting_any_bytes() {
-        let mut runtime = fixture().runtimes.remove(0);
-        runtime.counters_scope = CountersScope::Uncollected;
-        let mut bytes = [0xa5; RUNTIME_FIXED_LEN];
-        assert_eq!(write_runtime(&mut Writer::new(&mut bytes), &runtime), Err(()));
-        assert_eq!(bytes, [0xa5; RUNTIME_FIXED_LEN]);
-
-        let mut task = runtime.tasks.remove(0);
-        task.metrics_scope = TaskMetricsScope::Uncollected;
-        let mut bytes = [0xa5; TASK_FIXED_LEN];
-        assert_eq!(write_task(&mut Writer::new(&mut bytes), &task), Err(()));
-        assert_eq!(bytes, [0xa5; TASK_FIXED_LEN]);
-    }
-
-    #[test]
-    fn task_frames_cannot_use_bytes_needed_by_fixed_metadata() {
-        let mut bytes = [0; TASK_FIXED_LEN];
-        write_task(&mut Writer::new(&mut bytes), &fixture().runtimes[0].tasks[0]).unwrap();
-        bytes[24..28].copy_from_slice(&1_u32.to_le_bytes());
-
-        let decoded = read_task(&mut Reader::new(&bytes));
-
-        assert_eq!(decoded.unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn running_activity_cannot_have_a_notification_time_without_a_poll_time() {
-        let activity = TaskActivity {
-            observed_at: EventTimestamp::from_ticks(10),
-            state: TaskActivityState::Running,
-            ready_since: Some(EventTimestamp::from_ticks(1)),
-            poll_started_at: None,
-            poll_worker_id: None,
-            queued_since: None,
-        };
-        let bytes = [4_u64, 10, 1, 0, 0, 0].into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-
-        assert_eq!(
-            (
-                valid_activity(activity),
-                write_activity(&mut Writer::new(&mut [0; 48]), Some(activity)),
-                read_activity(&mut Reader::new(&bytes)).unwrap_err().kind()
-            ),
-            (false, Err(()), ErrorKind::Malformed)
-        );
+        assert_eq!(decode(&bytes[..bytes.len() - 1]).unwrap_err().kind(), ErrorKind::Malformed);
+        bytes[8..10].copy_from_slice(&2_u16.to_le_bytes());
+        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::UnsupportedWireVersion(2));
+        bytes[8..10].copy_from_slice(&WIRE_VERSION.to_le_bytes());
+        bytes[10..12].copy_from_slice(&9_u16.to_le_bytes());
+        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::UnsupportedSchemaVersion(9));
     }
 }

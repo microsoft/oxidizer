@@ -1,23 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::num::NonZeroUsize;
-use std::ops::ControlFlow;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task;
 use std::thread::ThreadId;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
-use seismograph_runtime::asynchronous::TaskRequest;
-use seismograph_runtime::snapshot::{TaskActivityState, TaskCollection};
 use tick::{SimpleClock, Stopwatch};
 
 #[cfg(test)]
 use crate::TaskIdentity;
 use crate::{
-    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskPtr, TaskSet,
-    discard_task_panic_payload, executor_context,
+    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context,
 };
 
 /// An async task executor that runs on one thread.
@@ -150,65 +145,6 @@ impl Executor {
         let outcome = self.cycle_outcome();
         self.finish_cycle();
         outcome
-    }
-
-    /// Answers one native Seismograph task collection request.
-    pub fn collect(&mut self, request: TaskRequest) {
-        if request.is_canceled() || self.shared.monitoring().is_none() {
-            return;
-        }
-        let limit = request.limit();
-        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
-        let collected = catch_unwind(AssertUnwindSafe(|| {
-            let mut tasks = Vec::new();
-            let mut visited = HashSet::new();
-            let truncated = std::cell::Cell::new(false);
-            let mut collect = |pointer: TaskPtr, state| {
-                if !visited.insert(pointer) {
-                    return ControlFlow::Continue(());
-                }
-                if tasks.len() == limit {
-                    truncated.set(true);
-                    return ControlFlow::Break(());
-                }
-                // SAFETY: Each queue retains the task throughout this owner-only visit.
-                let task = unsafe { pointer.as_task() };
-                let state = if task.is_notified() { TaskActivityState::Ready } else { state };
-                if let Some(task) = task.snapshot(state) {
-                    tasks.push(task);
-                }
-                ControlFlow::Continue(())
-            };
-            if self
-                .shared
-                .inspect_new_tasks(|handle| collect(handle.as_ptr(), TaskActivityState::Ready))
-                .is_err()
-            {
-                return (tasks, TaskCollection::Busy);
-            }
-            if !truncated.get() {
-                let _traversal = self
-                    .active
-                    .iter()
-                    .try_for_each(|handle| collect(handle.as_ptr(), TaskActivityState::Ready));
-            }
-            if !truncated.get() {
-                self.pending.inspect_until(|pointer| collect(pointer, TaskActivityState::Waiting));
-            }
-            let status = if truncated.get() {
-                TaskCollection::Truncated
-            } else {
-                TaskCollection::Complete
-            };
-            (tasks, status)
-        }));
-        match collected {
-            Ok((tasks, status)) => request.respond(tasks, status),
-            Err(panic) => {
-                discard_task_panic_payload(panic);
-                request.respond(Vec::new(), TaskCollection::Failed);
-            }
-        }
     }
 
     fn start_cycle(&mut self) {

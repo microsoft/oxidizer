@@ -24,8 +24,6 @@ mod tests;
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub(crate) type MonitorHandle<'a> = Option<&'a seismograph_runtime::Runtime>;
-
 pub(crate) use blocking::BlockingJob;
 pub(crate) use runtime::Monitoring;
 pub(crate) use task::current_origin;

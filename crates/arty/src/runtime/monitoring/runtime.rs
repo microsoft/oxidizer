@@ -21,27 +21,30 @@ pub(crate) struct Monitoring {
 }
 
 impl Monitoring {
-    pub(crate) fn from_config(config: &RuntimeConfig, workers: usize) -> Result<Option<Self>, Error> {
-        if !config.monitor_policy.is_enabled() {
-            return Ok(None);
-        }
+    pub(crate) fn from_config(config: &RuntimeConfig, workers: usize) -> Result<Self, Error> {
         let workers = u32::try_from(workers).map_err(Error::new)?;
-        let monitor_name = if config.name.as_str().is_empty() {
-            "arty"
+        let monitor = if config.monitor_policy.is_enabled() {
+            let monitor_name = if config.name.as_str().is_empty() {
+                "arty"
+            } else {
+                config.name.as_str()
+            };
+            let builder = Monitor::builder().name(monitor_name);
+            #[cfg(test)]
+            let builder = builder.io(
+                TEST_IO
+                    .with_borrow(Clone::clone)
+                    .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0),
+            );
+            Some(builder.start().map_err(Error::new)?)
         } else {
-            config.name.as_str()
+            None
         };
-        let builder = Monitor::builder().name(monitor_name);
-        #[cfg(test)]
-        let builder = builder.io(TEST_IO
-            .with_borrow(Clone::clone)
-            .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
-        let monitor = builder.start().map_err(Error::new)?;
         let runtime = Runtime::builder(config.name.as_str()).configured_workers(workers).build();
-        Ok(Some(Self {
-            monitor: Mutex::new(Some(monitor)),
+        Ok(Self {
+            monitor: Mutex::new(monitor),
             runtime,
-        }))
+        })
     }
 
     pub(crate) const fn runtime(&self) -> &Runtime {
@@ -56,12 +59,15 @@ impl Monitoring {
         error.map_or(Ok(()), |message| Err(Error::new(MonitorFailure::new(message))))
     }
 
-    #[cfg(test)]
     pub(crate) fn from_runtime(runtime: Runtime) -> Self {
         Self {
             monitor: Mutex::new(None),
             runtime,
         }
+    }
+
+    pub(crate) fn disabled() -> Self {
+        Self::from_runtime(Runtime::builder("").build())
     }
 
     #[cfg(test)]
@@ -124,9 +130,7 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::Accept, std::io::Error::other("monitor listener failed"));
-        let monitoring = Monitoring::with_test_io(io, || Monitoring::from_config(&config(""), 1))
-            .unwrap()
-            .unwrap();
+        let monitoring = Monitoring::with_test_io(io, || Monitoring::from_config(&config(""), 1)).unwrap();
         while monitoring.monitor.lock().unwrap().as_ref().unwrap().last_error().is_none() {
             std::thread::yield_now();
         }
@@ -144,7 +148,7 @@ mod tests {
     fn monitor_connections_keep_named_runtimes_and_supply_an_empty_name_fallback() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         for (name, connection_name) in [("requests", "requests"), ("", "arty")] {
-            let monitoring = Monitoring::from_config(&config(name), 1).unwrap().unwrap();
+            let monitoring = Monitoring::from_config(&config(name), 1).unwrap();
 
             assert_eq!(
                 monitoring.monitor.lock().unwrap().as_ref().unwrap().descriptor().name,

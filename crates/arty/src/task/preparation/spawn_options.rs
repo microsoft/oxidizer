@@ -6,14 +6,11 @@ use seismograph_runtime::TaskIdentity;
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
-use crate::runtime::monitoring::MonitorHandle;
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct SpawnOptions {
     identity: TaskIdentity,
     origin: Option<seismograph_runtime::WorkerOrigin>,
     task: Option<seismograph_runtime::asynchronous::TaskHandle>,
-    monitoring_checked: bool,
-    monitoring_enabled: bool,
     parent: Option<TaskIdentity>,
     future_size: usize,
     observers: Option<TaskObservers>,
@@ -25,8 +22,6 @@ impl SpawnOptions {
             identity,
             origin: crate::runtime::monitoring::current_origin(),
             task: None,
-            monitoring_checked: false,
-            monitoring_enabled: false,
             parent,
             future_size,
             observers: None,
@@ -42,18 +37,14 @@ impl SpawnOptions {
         self
     }
 
-    pub(crate) fn monitor(mut self, runtime: MonitorHandle<'_>) -> Self {
-        if !self.monitoring_checked {
-            self.monitoring_checked = true;
-            if let Some(runtime) = runtime {
-                self.monitoring_enabled = true;
-                self.task = Some(runtime.async_task(
-                    self.origin.take(),
-                    self.identity,
-                    self.parent.map(TaskIdentity::id),
-                    self.future_size,
-                ));
-            }
+    pub(crate) fn monitor(mut self, runtime: &seismograph_runtime::Runtime) -> Self {
+        if self.task.is_none() {
+            self.task = runtime.async_task(
+                self.origin.take(),
+                self.identity,
+                self.parent.map(TaskIdentity::id),
+                self.future_size,
+            );
         }
         self
     }
@@ -64,8 +55,9 @@ impl SpawnOptions {
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
     {
-        let mut options = crate::runtime::worker::asynchronous::LocalWorker::with_monitoring(|worker| {
-            self.monitor(worker.map(seismograph_runtime::asynchronous::Worker::runtime))
+        let mut options = crate::runtime::worker::asynchronous::LocalWorker::with_monitoring(|worker| match worker {
+            Some(worker) => self.monitor(worker.runtime()),
+            None => self,
         });
         let Some(observers) = options.observers.take() else {
             options.register_with(tasks, future, completion, ());
@@ -86,14 +78,9 @@ impl SpawnOptions {
         I: TaskObserver,
     {
         let task = tasks.task(self.identity, future);
-        if self.monitoring_enabled {
-            let queued = self
-                .task
-                .expect("monitoring creates a task handle")
-                .enqueued(u64::try_from(tasks.len()).expect("live task count fits the platform address space"));
-            task.monitor(queued).observe(instrumentation).register(completion);
-        } else {
-            task.observe(instrumentation).register(completion);
-        }
+        let queued = self
+            .task
+            .map(|task| task.enqueued(u64::try_from(tasks.len()).expect("live task count fits the platform address space")));
+        task.monitor(queued).observe(instrumentation).register(completion);
     }
 }

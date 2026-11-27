@@ -162,18 +162,6 @@ impl FilterIndex {
         // Stack zero represents missing provenance for partial lifecycle records.
         intern(Vec::new());
         let mut task_stacks = HashMap::new();
-        if let Some(source) = &runtime {
-            for runtime in &source.runtimes {
-                for task in &runtime.tasks {
-                    task_stacks.entry((runtime.id.get(), task.id.get())).or_default();
-                }
-                for worker in &runtime.workers {
-                    if let Some(task) = worker.current_task {
-                        task_stacks.entry((runtime.id.get(), task.get())).or_default();
-                    }
-                }
-            }
-        }
         let mut io_frames = HashMap::<u64, Vec<u64>>::new();
         let events = std::mem::take(&mut decoded.events.events)
             .into_iter()
@@ -435,9 +423,9 @@ impl FilterIndex {
             .collect()
     }
 
-    fn runtime_source(&self, filter: &FilterSpec, visible_tasks: &HashSet<(u64, u64)>, events: &[Event]) -> Option<RuntimeSource> {
+    fn runtime_source(&self, filter: &FilterSpec, _visible_tasks: &HashSet<(u64, u64)>, events: &[Event]) -> Option<RuntimeSource> {
         let mut source = self.runtime.clone()?;
-        let mut visible_workers = events
+        let visible_workers = events
             .iter()
             .filter_map(|event| {
                 let runtime = event.runtime()?;
@@ -447,24 +435,8 @@ impl FilterIndex {
         for runtime in &mut source.runtimes {
             if filter.is_active() {
                 runtime
-                    .tasks
-                    .retain(|task| visible_tasks.contains(&(runtime.id.get(), task.id.get())));
-                for task in &runtime.tasks {
-                    if let Some(worker) = task.last_worker_id {
-                        visible_workers.insert((runtime.id.get(), worker.get()));
-                    }
-                    if let Some(worker) = task.activity.and_then(|activity| activity.poll_worker_id) {
-                        visible_workers.insert((runtime.id.get(), worker.get()));
-                    }
-                }
-                for worker in &mut runtime.workers {
-                    worker.current_task = worker
-                        .current_task
-                        .filter(|task| visible_tasks.contains(&(runtime.id.get(), task.get())));
-                }
-                runtime
                     .workers
-                    .retain(|worker| worker.current_task.is_some() || visible_workers.contains(&(runtime.id.get(), worker.id.get())));
+                    .retain(|worker| visible_workers.contains(&(runtime.id.get(), worker.id.get())));
             }
         }
         Some(source)
@@ -700,7 +672,7 @@ mod tests {
         assert_eq!(spawned.runtime.workers[0].tasks[0].state, "Completed");
         let event_stack = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
         assert_eq!(event_stack.filter_summary.events.shown, 1);
-        assert_eq!(event_stack.runtime.workers[0].tasks[0].state, "Unknown");
+        assert_eq!(event_stack.runtime.workers[0].tasks[0].state, "Ready");
     }
 
     #[test]
@@ -723,81 +695,6 @@ mod tests {
         let index = index(events, vec![lookup(1, "app::spawn"), lookup(2, "noise::spawn")]);
         let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Spawn).unwrap());
         assert_eq!((filtered.filter_summary.events.shown, filtered.filter_summary.tasks.shown), (2, 1));
-    }
-
-    #[test]
-    fn filtered_runtime_keeps_workers_with_either_task_or_event_evidence() {
-        use seismograph::recorder::event::BacktraceCapture;
-        use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-        use seismograph_runtime::WorkerRole;
-        use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
-
-        let source = RuntimeSource {
-            runtimes: vec![Runtime {
-                id: RuntimeId::from_raw(1).unwrap(),
-                name: "executor".into(),
-                configured_workers: 2,
-                lifecycle_backtraces: BacktraceCapture::Never,
-                state: RuntimeState::Running,
-                created_at: EventTimestamp::from_ticks(1),
-                retired_at: None,
-                counters: Counters::default(),
-                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
-                workers: [Some(TaskId::from_raw(1).unwrap()), None]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, current_task)| Worker {
-                        id: WorkerId::from_raw(u64::try_from(index).unwrap() + 1).unwrap(),
-                        role: WorkerRole::Core,
-                        state: WorkerState::Running,
-                        processor_index: None,
-                        thread_id: None,
-                        current_task,
-                        task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
-                    })
-                    .collect(),
-                tasks: vec![Task {
-                    id: TaskId::from_raw(1).unwrap(),
-                    parent: None,
-                    type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                    future_size_bytes: None,
-                    spawned_at: Some(EventTimestamp::from_ticks(1)),
-                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
-                    last_worker_id: None,
-                    activity: None,
-                    metrics: TaskMetrics::default(),
-                }],
-            }],
-            addresses: Vec::new(),
-        };
-        let index = FilterIndex::new(DecodedSnapshot::default(), None, Some(source), Vec::new(), HashSet::new());
-        let worker_event = Event {
-            kind: EventKind::WorkerParked,
-            payload: EventPayload::Runtime(RuntimeEvent {
-                runtime_id: RuntimeId::from_raw(1).unwrap(),
-                worker_id: Some(WorkerId::from_raw(2).unwrap()),
-                subject_id: 0,
-                related_id: 0,
-                value_0: 0,
-                value_1: 0,
-            }),
-            ..event(1, None)
-        };
-        let filtered = index
-            .runtime_source(
-                &FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap(),
-                &HashSet::from([(1, 1)]),
-                &[worker_event],
-            )
-            .unwrap();
-        assert_eq!(
-            filtered.runtimes[0]
-                .workers
-                .iter()
-                .map(|worker| (worker.id.get(), worker.current_task.map(TaskId::get)))
-                .collect::<Vec<_>>(),
-            [(1, Some(1)), (2, None)]
-        );
     }
 
     #[test]
@@ -906,143 +803,6 @@ mod tests {
         for metrics in [&worker.metrics, &worker.tasks[0].metrics] {
             assert!((metrics.executing_fraction.unwrap() - 1.0 / 6.0).abs() < f64::EPSILON);
         }
-    }
-
-    #[test]
-    #[expect(clippy::too_many_lines, reason = "the fixture must keep one coherent runtime metadata graph")]
-    fn runtime_metadata_cannot_reintroduce_an_excluded_current_task() {
-        use seismograph::recorder::event::BacktraceCapture;
-        use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-        use seismograph_runtime::WorkerRole;
-        use seismograph_runtime::snapshot::{
-            Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics, Worker, WorkerState,
-        };
-
-        let source = RuntimeSource {
-            runtimes: vec![Runtime {
-                id: RuntimeId::from_raw(1).unwrap(),
-                name: "executor".into(),
-                configured_workers: 1,
-                lifecycle_backtraces: BacktraceCapture::Never,
-                state: RuntimeState::Running,
-                created_at: EventTimestamp::from_ticks(0),
-                retired_at: None,
-                counters: Counters::default(),
-                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
-                workers: vec![Worker {
-                    id: WorkerId::from_raw(1).unwrap(),
-                    role: WorkerRole::Core,
-                    state: WorkerState::Running,
-                    processor_index: None,
-                    thread_id: Some(ThreadId::new(1)),
-                    current_task: Some(TaskId::from_raw(1).unwrap()),
-                    task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
-                }],
-                tasks: [1, 2]
-                    .into_iter()
-                    .map(|id| Task {
-                        id: TaskId::from_raw(id).unwrap(),
-                        parent: None,
-                        type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                        future_size_bytes: None,
-                        spawned_at: Some(EventTimestamp::from_ticks(1)),
-                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
-                        last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
-                        activity: (id == 2).then_some(TaskActivity {
-                            poll_worker_id: Some(WorkerId::from_raw(1).unwrap()),
-                            observed_at: EventTimestamp::from_ticks(100),
-                            state: TaskActivityState::Unknown,
-                            ready_since: None,
-                            poll_started_at: None,
-                            queued_since: None,
-                        }),
-                        metrics: TaskMetrics {
-                            poll_count: 7,
-                            ..TaskMetrics::default()
-                        },
-                    })
-                    .collect(),
-            }],
-            addresses: Vec::new(),
-        };
-        let addresses = vec![lookup(1, "noise::spawn"), lookup(2, "app::spawn")];
-        let mut runtime_without_worker = event(2, Some(2));
-        runtime_without_worker.kind = EventKind::TaskReady;
-        runtime_without_worker.payload = EventPayload::Runtime(RuntimeEvent {
-            runtime_id: RuntimeId::from_raw(1).unwrap(),
-            worker_id: None,
-            subject_id: 2,
-            related_id: 0,
-            value_0: 0,
-            value_1: 0,
-        });
-        let decoded = DecodedSnapshot {
-            events: Events {
-                total_events: 4,
-                events: vec![
-                    Event {
-                        kind: EventKind::TaskSpawned,
-                        payload: EventPayload::Runtime(RuntimeEvent {
-                            runtime_id: RuntimeId::from_raw(1).unwrap(),
-                            worker_id: None,
-                            subject_id: 1,
-                            related_id: 0,
-                            value_0: 1,
-                            value_1: 0,
-                        }),
-                        ..event(3, Some(1))
-                    },
-                    Event {
-                        kind: EventKind::TaskSpawned,
-                        payload: EventPayload::Runtime(RuntimeEvent {
-                            runtime_id: RuntimeId::from_raw(1).unwrap(),
-                            worker_id: None,
-                            subject_id: 2,
-                            related_id: 0,
-                            value_0: 1,
-                            value_1: 0,
-                        }),
-                        ..event(4, Some(2))
-                    },
-                    event(1, Some(1)),
-                    runtime_without_worker,
-                ],
-                ..Events::default()
-            },
-            ..DecodedSnapshot::default()
-        };
-        let original = RuntimeSnapshot::from_events(&decoded, &addresses, Some(&source));
-        let index = Arc::new(FilterIndex::new(decoded, None, Some(source), addresses, HashSet::new()));
-        let filtered = index.render(&FilterSpec::parse("crate:app", "crate:noise", false, RuntimeStackMode::Spawn).unwrap());
-        let worker = &filtered.runtime.workers[0];
-        assert_eq!(
-            (
-                worker.current_task,
-                worker
-                    .tasks
-                    .iter()
-                    .map(|task| (task.task_id, task.metrics.poll_count))
-                    .collect::<Vec<_>>()
-            ),
-            (None, vec![(2, 0)])
-        );
-        assert_eq!(
-            filtered.filter_summary.tasks,
-            FilterCounts {
-                total: 2,
-                shown: 1,
-                unknown: 0
-            }
-        );
-        assert_eq!(
-            (
-                worker.tasks[0].activity.state.as_str(),
-                worker.tasks[0].activity.running_for,
-                worker.tasks[0].activity.ready_for
-            ),
-            ("Unknown", None, None)
-        );
-        assert_eq!(index.render(&FilterSpec::default()).runtime, original.runtime);
     }
 
     #[test]

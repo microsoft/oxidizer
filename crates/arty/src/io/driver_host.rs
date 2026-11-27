@@ -149,7 +149,10 @@ mod tests {
     }
 
     fn host() -> (IoRuntime, Thread, InstalledHost) {
-        LocalWorker::attach(None);
+        let monitoring = seismograph_runtime::Runtime::builder("")
+            .build()
+            .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+        LocalWorker::attach(monitoring);
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);

@@ -3,6 +3,7 @@
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
+use seismograph::recorder::is_enabled;
 
 use crate::{TaskIdentity, TaskOutcome};
 
@@ -34,8 +35,8 @@ impl TaskHandle {
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        is_enabled(EventClass::RuntimeTask).then(|| Self {
             data: TaskData {
                 identity,
                 runtime,
@@ -47,7 +48,7 @@ impl TaskHandle {
                 recorded: false,
             },
             origin: origin.map(|origin| origin.worker_for(runtime)),
-        }
+        })
     }
 
     /// Records the task entering a queue.
@@ -90,18 +91,6 @@ impl QueuedTask {
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
         self.data.identity
-    }
-
-    /// Returns the timestamp used by the queue event.
-    #[must_use]
-    pub const fn enqueued_at(&self) -> Option<EventTimestamp> {
-        self.data.enqueued_at
-    }
-
-    /// Describes the task from native executor storage.
-    #[must_use]
-    pub fn snapshot(&self, state: crate::snapshot::TaskActivityState) -> crate::snapshot::Task {
-        snapshot(self.data, state)
     }
 
     /// Activates the task on its first execution worker.
@@ -151,16 +140,28 @@ pub struct Task {
 }
 
 impl Task {
+    /// Creates a task with no retained queue lifecycle.
+    #[must_use]
+    pub fn unrecorded(identity: TaskIdentity, worker: &super::Worker) -> Self {
+        Self {
+            data: TaskData {
+                identity,
+                runtime: worker.runtime().id(),
+                backtrace: BacktraceCapture::Never,
+                last_worker: Some(worker.id()),
+                parent: None,
+                body_size: 1,
+                enqueued_at: None,
+                recorded: false,
+            },
+            cancel_on_drop: false,
+        }
+    }
+
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
         self.data.identity
-    }
-
-    /// Describes the task from native executor storage.
-    #[must_use]
-    pub fn snapshot(&self, state: crate::snapshot::TaskActivityState) -> crate::snapshot::Task {
-        snapshot(self.data, state)
     }
 
     /// Starts one poll.
@@ -170,17 +171,23 @@ impl Task {
     /// Panics if `worker` belongs to another runtime.
     pub fn poll_started(mut self, worker: &super::Worker) -> Poll {
         worker.validate_runtime(self.data.runtime);
-        let started_at = EventTimestamp::now();
-        let window = worker.begin_poll(self.data.identity.id());
-        record(
-            started_at,
-            EventKind::TaskPollStarted,
-            self.data,
-            Some(worker.id()),
-            0,
-            0,
-            BacktraceCapture::Never,
-        );
+        let mut started_at = None;
+        seismograph::record(EventClass::RuntimeTask, || {
+            let at = EventTimestamp::now();
+            started_at = Some(at);
+            self.data.recorded = true;
+            Some(runtime_record(
+                at,
+                EventKind::TaskPollStarted,
+                self.data.runtime,
+                Some(worker.id()),
+                self.data.identity.id().get(),
+                0,
+                0,
+                0,
+                BacktraceCapture::Never,
+            ))
+        });
         self.cancel_on_drop = false;
         Poll {
             data: TaskData {
@@ -189,7 +196,6 @@ impl Task {
             },
             worker: worker.id(),
             started_at,
-            window,
         }
     }
 }
@@ -208,8 +214,7 @@ impl Drop for Task {
 pub struct Poll {
     data: TaskData,
     worker: WorkerId,
-    started_at: EventTimestamp,
-    window: u64,
+    started_at: Option<EventTimestamp>,
 }
 
 impl Poll {
@@ -225,8 +230,13 @@ impl Poll {
             self.worker,
             "finish an asynchronous poll on the worker that started it"
         );
+        let Some(started_at) = self.started_at else {
+            return outcome.is_none().then_some(Task {
+                data: self.data,
+                cancel_on_drop: true,
+            });
+        };
         let finished_at = EventTimestamp::now();
-        worker.finish_poll(self.data.identity.id(), self.window, self.started_at, finished_at);
         let backtrace = if outcome.as_ref() == Some(&TaskOutcome::Panicked) {
             self.data.backtrace
         } else {
@@ -237,7 +247,7 @@ impl Poll {
             EventKind::TaskPollFinished,
             self.data,
             Some(worker.id()),
-            crate::runtime::duration_nanos(finished_at, self.started_at),
+            crate::runtime::duration_nanos(finished_at, started_at),
             outcome.as_ref().map_or(0, TaskOutcome::event_value),
             backtrace,
         );
@@ -292,14 +302,6 @@ fn record(
             backtrace,
         ))
     });
-}
-
-fn snapshot(data: TaskData, state: crate::snapshot::TaskActivityState) -> crate::snapshot::Task {
-    let mut task = crate::snapshot::Task::new(data.identity.id(), data.identity.descriptor(), state);
-    task.parent = data.parent;
-    task.spawned_at = data.enqueued_at;
-    task.future_size_bytes = Some(data.body_size.saturating_sub(1));
-    task
 }
 
 #[expect(

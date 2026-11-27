@@ -14,7 +14,6 @@ use thread_aware::ThreadAware;
 
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::hook::HookRegistration;
-use crate::runtime::monitoring::MonitorHandle;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
@@ -28,11 +27,7 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    pub(crate) fn register_task_provider(&self, thread: ThreadId, worker: &seismograph_runtime::asynchronous::Worker) {
-        self.core.register_task_provider(thread, worker);
-    }
-
-    pub(crate) fn monitoring(&self) -> MonitorHandle<'_> {
+    pub(crate) fn monitoring(&self) -> &seismograph_runtime::Runtime {
         self.core.monitoring()
     }
 
