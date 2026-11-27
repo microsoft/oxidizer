@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use data_privacy::DataClass;
+use observed::__private::{field_descriptor, log_field};
 use observed::metadata::FieldDescriptor;
 use routerama::RouteTable;
 
@@ -24,10 +25,13 @@ impl RouteFields {
             parameters: layer
                 .route_parameter_data_classes
                 .iter()
-                .map(|(name, data_class)| RouteParameter {
-                    name: name.clone(),
-                    descriptor: FieldDescriptor::log_only(intern(&format!("http.route.parameter.{name}"))),
-                    data_class: data_class.clone(),
+                .map(|(name, data_class)| {
+                    let key = intern(&format!("http.route.parameter.{name}"));
+                    RouteParameter {
+                        name: name.clone(),
+                        descriptor: field_descriptor(key, Some(log_field(key)), None),
+                        data_class: data_class.clone(),
+                    }
                 })
                 .collect(),
         })

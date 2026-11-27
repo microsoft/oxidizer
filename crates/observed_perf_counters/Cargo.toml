@@ -1,0 +1,59 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_perf_counters"
+description = "Native Windows performance-counter publishing for typed observed integer metrics."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "windows", "performance", "counters"]
+categories = ["development-tools::debugging", "os::windows-apis"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_perf_counters"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "observed::event::Event",
+    "observed::error::FlushError",
+    "observed::metadata::event::EventDescription",
+    "observed::processing::event_view::EventView",
+    "observed::processing::processor::EventProcessor",
+    "ohno::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.anvil.examples]
+no-run = ["publish"]
+
+[dependencies]
+observed = { workspace = true }
+ohno = { workspace = true }
+performables = { workspace = true }
+quick-xml = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+uuid = { workspace = true, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Performance"] }
+
+[dev-dependencies]
+ctor = { workspace = true }
+ohno = { path = "../ohno", features = ["app-err"] }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids", default-features = false }
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
+uuid = { workspace = true, features = ["std", "v5"] }
+
+[target.'cfg(all(windows, target_pointer_width = "64"))'.dev-dependencies]
+alloc_tracker = { workspace = true }
+
+[lints]
+workspace = true

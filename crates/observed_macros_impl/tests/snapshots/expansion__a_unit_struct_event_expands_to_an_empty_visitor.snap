@@ -14,11 +14,11 @@ const _: () = {
         }
     }
     impl ::observed::Event for NoFields {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "no.fields",
             ::core::option::Option::Some(::core::any::TypeId::of::<NoFields>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "no.fields",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -26,7 +26,7 @@ const _: () = {
             ),
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([]),
         );
     }
 };

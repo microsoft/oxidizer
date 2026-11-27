@@ -252,11 +252,12 @@ impl Sink {
     /// # Examples
     ///
     /// ```
-    /// use observed::Sink;
-    /// use observed::metadata::EventDescription;
+    /// use observed::{Event, Sink, event};
     ///
-    /// let description = EventDescription::new("request.completed", None, None, None, false, false);
-    /// assert!(!Sink::noop().is_interested(&description));
+    /// #[event("request.completed")]
+    /// struct RequestCompleted;
+    ///
+    /// assert!(!Sink::noop().is_interested(&RequestCompleted::DESCRIPTION));
     /// ```
     #[must_use]
     // External sources call this on their hot path; allow cross-crate inlining.
@@ -680,7 +681,7 @@ mod tests {
             ControlFlow::Continue(())
         }
         fn description(&self) -> EventDescription {
-            EventDescription::new("dummy", None, None, None, false, false)
+            EventDescription::new("dummy")
         }
     }
 
@@ -710,7 +711,7 @@ mod tests {
         }
         fn description(&self) -> EventDescription {
             self.description_calls.fetch_add(1, Ordering::Relaxed);
-            EventDescription::new("description-counting", None, None, None, false, false)
+            EventDescription::new("description-counting")
         }
     }
 
@@ -1089,7 +1090,7 @@ mod tests {
         }
 
         impl Event for ProbeEvent {
-            const DESCRIPTION: EventDescription = EventDescription::new("probe", None, None, None, false, false);
+            const DESCRIPTION: EventDescription = EventDescription::new("probe");
         }
 
         let uninterested = CountingProcessor::new(false);

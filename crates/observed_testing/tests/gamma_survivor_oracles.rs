@@ -3,8 +3,8 @@
 
 //! Negative controls for the test harness's comparison oracles.
 
-use observed::__private::EnrichmentEntry;
-use observed::metadata::{EventDescription, InstrumentKind, LogDescription, MetricDescription};
+use observed::__private::{EnrichmentEntry, event_description, log_description, metric_description};
+use observed::metadata::{InstrumentKind, MetricValueKind};
 use observed::{Event, Severity, emit, event};
 use observed_testing::{ExpectedEnrichmentEntry, ExpectedEvent, ExpectedEventDescription, TEST_ID, test_emitter};
 
@@ -156,13 +156,19 @@ fn gamma_survivor_description_equality_checks_each_flag_and_metric_identity() {
         assert_ne!(description, expected);
         assert_ne!(expected, description);
     }
-    let no_log = EventDescription::new(
+    let no_log = event_description(
         "gamma.metric",
         None,
         None,
-        Some(MetricDescription::new("gamma.count", InstrumentKind::Counter, "", "")),
+        Some(metric_description(
+            "gamma.count",
+            InstrumentKind::Counter,
+            "",
+            "",
+            MetricValueKind::U64,
+        )),
         false,
-        false,
+        &[],
     );
     assert_eq!(
         no_log,
@@ -174,13 +180,13 @@ fn gamma_survivor_description_equality_checks_each_flag_and_metric_identity() {
             .log()
             .event_metric("gamma.count", InstrumentKind::Counter)
     );
-    let no_metric = EventDescription::new(
+    let no_metric = event_description(
         "gamma.metric",
         None,
-        Some(LogDescription::new("gamma.metric", Severity::Info, Some("metric body"))),
+        Some(log_description("gamma.metric", Severity::Info, Some("metric body"))),
         None,
-        true,
         false,
+        &[],
     );
     assert_ne!(no_metric, expected);
 }
