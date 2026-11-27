@@ -159,6 +159,8 @@ h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
 # Pinned exactly because the differential benchmarks use this release as their baseline.
 headers = { version = "=0.4.1", default-features = false }
+health = { path = "crates/health", default-features = false, version = "0.1.0" }
+health_probe = { path = "crates/health_probe", default-features = false, version = "0.1.0" }
 heck = { version = "0.5.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
@@ -221,7 +223,6 @@ opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
-health = { path = "crates/health", default-features = false, version = "0.1.0" }
 parking_lot = { version = "0.13.0", default-features = false }
 paste = { package = "pastey", version = "0.2.3", default-features = false }
 path-tree = { version = "0.8.3", default-features = false }

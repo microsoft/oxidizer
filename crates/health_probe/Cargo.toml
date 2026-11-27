@@ -1,0 +1,60 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "health_probe"
+description = "Kubernetes HTTP readiness adapters for health."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["health", "readiness", "kubernetes", "http"]
+categories = ["asynchronous", "web-programming::http-server"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/health_probe"
+
+[package.metadata.cargo_check_external_types]
+# The crate is an interoperability adapter over these public contracts.
+allowed_external_types = [
+    "health::aggregator::Monitor",
+    "http::request::Request",
+    "http::response::Response",
+    "http_extensions::request_handler::RequestHandler",
+    "tower_service::Service",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+http = ["dep:http", "dep:tower-service"]
+request-handler = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
+
+[dependencies]
+bytesbuf = { workspace = true, optional = true, features = ["std"] }
+health.workspace = true
+http = { workspace = true, optional = true }
+http_extensions = { workspace = true, optional = true }
+layered = { workspace = true, optional = true }
+tick = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
+
+[dev-dependencies]
+bytesbuf = { path = "../bytesbuf", default-features = false, features = ["std"] }
+futures = { workspace = true, features = ["executor"] }
+http.workspace = true
+http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
+layered = { path = "../layered", default-features = false }
+observed = { path = "../observed" }
+tick = { path = "../tick", default-features = false }
+tower = { workspace = true, features = ["util"] }
+tower-service.workspace = true
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

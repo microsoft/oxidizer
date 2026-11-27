@@ -2464,6 +2464,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "health_probe"
+version = "0.1.0"
+dependencies = [
+ "bytesbuf",
+ "futures",
+ "health",
+ "http",
+ "http_extensions",
+ "layered",
+ "observed",
+ "tick",
+ "tower",
+ "tower-service",
+]
+
+[[package]]
 name = "heapless"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
