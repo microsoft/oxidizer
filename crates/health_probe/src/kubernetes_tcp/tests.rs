@@ -8,6 +8,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 use futures::channel::oneshot;
@@ -186,19 +187,19 @@ async fn health_change_after_rebind_failure_stops_rebinding() {
     );
     let (_component, mut monitor, mut publisher) = healthy_fixture().await;
     let control = ClockControl::new();
-    let server = spawn_server(io.clone(), monitor.clone(), control.to_clock());
+    let clock = control.to_clock();
+    let mut server_monitor = monitor.clone();
+    let mut server = Box::pin(serve_with(io.clone(), &mut server_monitor, ADDRESS, &clock));
 
-    io.wait_for_accept_calls(1).await;
+    assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
+    assert_eq!(io.inner.accept_calls.load(Ordering::SeqCst), 1);
     control.advance(ACCEPT_RETRY_DELAY);
-    io.wait_for_bind_calls(2).await;
+    assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
+    assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 2);
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
     control.advance(ACCEPT_RETRY_DELAY);
-    tokio::task::yield_now().await;
+    assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
     assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 2);
-    assert!(!server.is_finished());
-
-    server.abort();
-    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test(flavor = "current_thread")]

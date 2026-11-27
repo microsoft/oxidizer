@@ -48,7 +48,7 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 bytesbuf = { path = "../bytesbuf", default-features = false, features = ["std"] }
-futures = { workspace = true, features = ["executor"] }
+futures = { workspace = true, features = ["async-await", "executor"] }
 http.workspace = true
 http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
 layered = { path = "../layered", default-features = false }
