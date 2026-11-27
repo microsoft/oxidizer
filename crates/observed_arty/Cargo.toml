@@ -1,0 +1,58 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_arty"
+description = "Integrates Observed sinks with the Arty runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["arty", "observed", "telemetry", "async"]
+categories = ["asynchronous", "development-tools::debugging"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_arty"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty::runtime::builder::RuntimeBuilder",
+    "arty::runtime::control::RuntimeControl",
+    "observed::sink::core::Sink",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+arty = { workspace = true, features = ["rt"] }
+observed = { workspace = true }
+thread_aware = { workspace = true, features = ["derive", "std"] }
+
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+arty = { path = "../arty", features = ["macros", "rt"] }
+criterion = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+metabench = { path = "../metabench" }
+observed = { path = "../observed", features = ["test-util"] }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+
+[[bench]]
+name = "observed_arty_task_spawn"
+harness = false
+
+[[example]]
+name = "observed_arty_basic"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
