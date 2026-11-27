@@ -159,7 +159,7 @@ fn dropping_publishers_and_components_converges() {
 
     drop(failing);
     wait_for_monitor(&mut monitor, Health::Healthy);
-    assert_eq!(block_on(monitor.reports()).len(), 1);
+    assert_eq!(block_on(monitor.reports()).count(), 1);
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn publisher_keeps_registration_during_an_in_flight_publish() {
     });
     let notified = receive(&entered_rx).is_ok();
     drop(component);
-    let remaining = block_on(monitor.reports()).len();
+    let remaining = block_on(monitor.reports()).count();
     let _ = release_tx.send(());
     let publisher = worker.join().unwrap();
 
@@ -280,7 +280,7 @@ fn publisher_keeps_registration_during_an_in_flight_publish() {
     wait_for_monitor(&mut monitor, Health::Degraded);
     drop(publisher);
     wait_for_monitor(&mut monitor, Health::Unhealthy);
-    assert_eq!(block_on(monitor.reports()).len(), 0);
+    assert_eq!(block_on(monitor.reports()).count(), 0);
 }
 
 #[test]
@@ -292,11 +292,11 @@ fn chained_publisher_keeps_component_registered() {
     publisher.degraded("slow");
     assert_eq!(publisher.signal().state(), Health::Degraded);
     wait_for_monitor(&mut monitor, Health::Degraded);
-    assert_eq!(block_on(monitor.reports()).len(), 1);
+    assert_eq!(block_on(monitor.reports()).count(), 1);
 
     drop(publisher);
     wait_for_monitor(&mut monitor, Health::Unhealthy);
-    assert_eq!(block_on(monitor.reports()).len(), 0);
+    assert_eq!(block_on(monitor.reports()).count(), 0);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn component_is_idempotent_by_name() {
     let mut publisher = aggregator.component(String::from("database")).publisher();
     publisher.degraded("slow");
     wait_for_component(&mut first, Health::Degraded);
-    assert_eq!(block_on(monitor.reports()).len(), 1);
+    assert_eq!(block_on(monitor.reports()).count(), 1);
 }
 
 #[test]

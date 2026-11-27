@@ -3,7 +3,6 @@
 
 use std::any::type_name;
 use std::fmt::{self, Debug, Formatter};
-use std::iter::FusedIterator;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::vec;
@@ -47,7 +46,7 @@ use crate::{Component, Health, Report};
 /// }
 ///
 /// let reports = monitor.reports().await;
-/// assert_eq!(reports.len(), 2);
+/// assert_eq!(reports.count(), 2);
 /// # });
 /// ```
 pub struct Aggregator {
@@ -166,7 +165,7 @@ impl Monitor {
         clippy::unused_async,
         reason = "the contract allows report assembly to wait for the component owners"
     )]
-    pub async fn reports(&self) -> impl ExactSizeIterator<Item = Report> + FusedIterator + Clone + Debug + use<> {
+    pub async fn reports(&self) -> impl Iterator<Item = Report> + use<> {
         self.shared.reports()
     }
 }
