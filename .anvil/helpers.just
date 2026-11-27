@@ -8,8 +8,12 @@
 # because their check scripts read `ANVIL_IMPACT` directly.
 [private]
 [no-exit-message]
+[script("pwsh", "-NoProfile")]
 _anvil-unscoped name:
-    {{ if os() == "windows" { "$env:ANVIL_IMPACT = 'off'; & " } else { "ANVIL_IMPACT=off " } }}{{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --set anvil_impact_override off _anvil-{{ name }}
+    $ErrorActionPreference = 'Stop'
+    $env:ANVIL_IMPACT = 'off'
+    & {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} --set anvil_impact_override off _anvil-{{ name }}
+    exit $LASTEXITCODE
 
 anvil_impact_override := ""
 anvil_impact_mode := if anvil_impact_override != "" {
