@@ -87,7 +87,9 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         }
 
         let listener = loop {
+            // #[gamma::skip(cond.always_true, cond.negate, relational.ne_to_eq, tag = "timeout", reason = "These mutations turn the healthy bind loop into non-yielding repetition before another future can be polled.")]
             if monitor.state() != Health::Healthy {
+                // #[gamma::skip(loop.break_value_default, tag = "equivalent", reason = "Option's default value is None for every listener type.")]
                 break None;
             }
             match io.bind(address).await {
@@ -104,9 +106,6 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         let Some(listener) = listener else {
             continue 'server;
         };
-        if monitor.state() != Health::Healthy {
-            continue;
-        }
 
         let retry = loop {
             tokio::select! {
@@ -127,12 +126,12 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         drop(listener);
 
         if retry {
-            let _ = wait_before_retry(monitor, clock).await;
+            wait_before_retry(monitor, clock).await;
         }
     }
 }
 
-async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) -> bool {
+async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
     let delay = clock.delay(ACCEPT_RETRY_DELAY);
     tokio::pin!(delay);
 
@@ -141,10 +140,10 @@ async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) -> bool {
             biased;
             () = monitor.changed() => {
                 if monitor.state() != Health::Healthy {
-                    return false;
+                    return;
                 }
             }
-            () = &mut delay => return true,
+            () = &mut delay => return,
         }
     }
 }

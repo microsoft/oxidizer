@@ -21,7 +21,7 @@ use tick::Clock;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 const RETRY_DELAY: Duration = Duration::from_millis(10);
 
 fn unused_address() -> SocketAddr {
@@ -133,7 +133,10 @@ async fn tcp_probe_reports_bind_failure() {
     let (_component, mut monitor, mut publisher) = fixture();
     publish_and_wait(&mut publisher, &mut monitor, Health::Healthy).await;
 
-    let error = serve(monitor, address, Clock::new_frozen()).await.unwrap_err();
+    let error = timeout(TEST_TIMEOUT, serve(monitor, address, Clock::new_frozen()))
+        .await
+        .unwrap()
+        .unwrap_err();
 
     assert_eq!(error.kind(), ErrorKind::AddrInUse);
 }

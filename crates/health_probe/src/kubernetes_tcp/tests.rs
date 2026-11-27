@@ -20,7 +20,7 @@ use tokio::time::timeout;
 
 use super::{ACCEPT_RETRY_DELAY, TcpIo, serve_with, wait_before_retry};
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_TIMEOUT: Duration = Duration::from_secs(1);
 const ADDRESS: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081);
 
 #[derive(Clone)]
@@ -59,15 +59,23 @@ impl ScriptedIo {
     }
 
     async fn wait_for_bind_calls(&self, count: usize) {
-        while self.inner.bind_calls.load(Ordering::SeqCst) < count {
-            tokio::task::yield_now().await;
-        }
+        timeout(TEST_TIMEOUT, async {
+            while self.inner.bind_calls.load(Ordering::SeqCst) < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     async fn wait_for_accept_calls(&self, count: usize) {
-        while self.inner.accept_calls.load(Ordering::SeqCst) < count {
-            tokio::task::yield_now().await;
-        }
+        timeout(TEST_TIMEOUT, async {
+            while self.inner.accept_calls.load(Ordering::SeqCst) < count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }
 
@@ -159,7 +167,7 @@ async fn health_change_cancels_retry_wait() {
 
     tokio::task::yield_now().await;
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
-    assert!(!timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap());
+    timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -176,7 +184,7 @@ async fn healthy_report_change_keeps_retry_waiting() {
     assert!(!wait.is_finished());
 
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
-    assert!(!timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap());
+    timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]
