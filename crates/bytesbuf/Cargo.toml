@@ -63,7 +63,7 @@ bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
-plurality = { path = "../plurality" }
+plurality = { workspace = true, features = ["std"] }
 seismograph = { path = "../seismograph" }
 seismograph_io = { path = "../seismograph_io" }
 static_assertions = { workspace = true }
