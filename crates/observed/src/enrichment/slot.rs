@@ -440,7 +440,7 @@ mod coverage_tests {
     }
 
     #[test]
-    fn gamma_round2_owned_transfer_restores_the_overwritten_chain_head() {
+    fn gamma_round2_transfer_restores_the_overwritten_chain_head() {
         let slot = Slot::new();
         let captured_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("captured", 1_i64)]));
         let captured = slot.current().unwrap();
@@ -449,7 +449,8 @@ mod coverage_tests {
         drop(captured_guard);
         let current_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("current", 2_i64)]));
         let current = slot.current().unwrap();
-        let applied = transfer.apply_owned();
+        let mut state = transfer.apply_state();
+        let applied = transfer.apply(&mut state);
         assert!(Arc::ptr_eq(&slot.current().unwrap(), &captured));
         drop(applied);
         assert!(Arc::ptr_eq(&slot.current().unwrap(), &current));

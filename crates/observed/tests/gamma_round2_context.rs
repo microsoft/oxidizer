@@ -14,6 +14,9 @@ use observed::enrichment::{EnrichFnExt, EnrichFutureExt, Enrichment, EnrichmentE
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, FlushError, Sink, Value, emit, event};
+use static_assertions::assert_not_impl_any;
+
+assert_not_impl_any!(observed::context::TransferGuard: Send, Sync);
 
 #[event("round2.event")]
 #[info("round2 body")]
@@ -137,6 +140,22 @@ fn gamma_round2_composite_transfer_restores_each_childs_independent_chain() {
     );
     assert!(first.current_enrichments().is_empty());
     assert!(second.current_enrichments().is_empty());
+}
+
+#[test]
+fn transfer_guard_debug_does_not_disclose_context() {
+    let capture = Arc::new(Capture::default());
+    let sink = sink(&capture);
+    let transfer = (|| sink.transfer_context()).enrich(&sink, Layer("captured-secret", 1))();
+
+    (|| {
+        let guard = transfer.apply_current_thread();
+        let debug = format!("{guard:?}");
+        assert_eq!(debug, "observed::context::transfer::TransferGuard { .. }");
+        assert!(!debug.contains("prior-secret"));
+        assert!(!debug.contains("captured-secret"));
+    })
+    .enrich(&sink, Layer("prior-secret", 2))();
 }
 
 #[test]

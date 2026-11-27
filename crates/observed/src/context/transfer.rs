@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer};
+use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer, Guard};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -107,8 +107,8 @@ impl Transfer {
     /// so a guard dropped on another thread would wipe that thread's live
     /// enrichment and strand the entries it applied on the origin thread.
     #[must_use = "the enrichment is removed as soon as the returned guard is dropped"]
-    pub fn apply_current_thread(&self) -> impl Sized + use<> {
-        ThreadBoundGuard::new(self.enrichment.apply_owned())
+    pub fn apply_current_thread(&self) -> TransferGuard {
+        TransferGuard::new(self.enrichment.apply_owned())
     }
 
     pub(crate) fn apply_state(&self) -> ApplyState {
@@ -117,6 +117,29 @@ impl Transfer {
 
     pub(crate) fn apply_current_thread_borrowed<'a>(&'a self, state: &'a mut ApplyState) -> impl Sized + 'a {
         ThreadBoundGuard::new(self.enrichment.apply(state))
+    }
+}
+
+/// Restores the prior enrichment when it is dropped.
+///
+/// The guard belongs to the thread that created it. It cannot move to another
+/// thread.
+#[must_use = "the enrichment is removed as soon as the guard is dropped"]
+pub struct TransferGuard {
+    _inner: ThreadBoundGuard<Guard>,
+}
+
+impl std::fmt::Debug for TransferGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
+    }
+}
+
+impl TransferGuard {
+    fn new(guard: Guard) -> Self {
+        Self {
+            _inner: ThreadBoundGuard::new(guard),
+        }
     }
 }
 
