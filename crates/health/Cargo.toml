@@ -32,6 +32,7 @@ performables.workspace = true
 thread_aware = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
 observed_testing = { path = "../observed_testing" }
 static_assertions.workspace = true
