@@ -87,19 +87,22 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         }
 
         let listener = loop {
+            if monitor.state() != Health::Healthy {
+                break None;
+            }
             match io.bind(address).await {
                 Ok(listener) => {
                     bound_once = true;
-                    break listener;
+                    break Some(listener);
                 }
                 Err(error) if !bound_once => return Err(error),
                 Err(_) => {
                     wait_before_retry(monitor, clock).await;
-                    if monitor.state() != Health::Healthy {
-                        continue 'server;
-                    }
                 }
             }
+        };
+        let Some(listener) = listener else {
+            continue 'server;
         };
         if monitor.state() != Health::Healthy {
             continue;
@@ -124,12 +127,12 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         drop(listener);
 
         if retry {
-            wait_before_retry(monitor, clock).await;
+            let _ = wait_before_retry(monitor, clock).await;
         }
     }
 }
 
-async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
+async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) -> bool {
     let delay = clock.delay(ACCEPT_RETRY_DELAY);
     tokio::pin!(delay);
 
@@ -138,10 +141,10 @@ async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
             biased;
             () = monitor.changed() => {
                 if monitor.state() != Health::Healthy {
-                    return;
+                    return false;
                 }
             }
-            () = &mut delay => return,
+            () = &mut delay => return true,
         }
     }
 }

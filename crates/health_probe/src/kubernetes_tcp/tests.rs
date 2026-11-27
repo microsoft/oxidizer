@@ -158,7 +158,7 @@ async fn health_change_cancels_retry_wait() {
 
     tokio::task::yield_now().await;
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
-    timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
+    assert!(!timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -175,14 +175,14 @@ async fn healthy_report_change_keeps_retry_waiting() {
     assert!(!wait.is_finished());
 
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
-    timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
+    assert!(!timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap());
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn health_change_after_rebind_failure_waits_for_recovery() {
+async fn health_change_after_rebind_failure_stops_rebinding() {
     let io = ScriptedIo::new(
-        [BindStep::Ready, BindStep::Error(io::ErrorKind::AddrInUse), BindStep::Ready],
-        [AcceptStep::Error(io::ErrorKind::ConnectionAborted), AcceptStep::Pending],
+        [BindStep::Ready, BindStep::Error(io::ErrorKind::AddrInUse)],
+        [AcceptStep::Error(io::ErrorKind::ConnectionAborted)],
     );
     let (_component, mut monitor, mut publisher) = healthy_fixture().await;
     let control = ClockControl::new();
@@ -193,13 +193,8 @@ async fn health_change_after_rebind_failure_waits_for_recovery() {
     io.wait_for_bind_calls(2).await;
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
     tokio::task::yield_now().await;
-    publish_and_wait(&mut publisher, &mut monitor, Health::Healthy).await;
-    timeout(TEST_TIMEOUT, async {
-        io.wait_for_bind_calls(3).await;
-        io.wait_for_accept_calls(2).await;
-    })
-    .await
-    .unwrap();
+    assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 2);
+    assert!(!server.is_finished());
 
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
