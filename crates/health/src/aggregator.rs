@@ -108,6 +108,8 @@ impl ThreadAware for Aggregator {
 /// A read-only handle to the process health of an [`Aggregator`].
 ///
 /// Each clone has an independent [`changed`](Self::changed) notification cursor.
+/// A monitor keeps the process root and worker alive after all `Aggregator` handles are dropped.
+/// Its state, reports, and pending change waits continue to observe component updates.
 ///
 /// # Examples
 ///

@@ -2454,6 +2454,7 @@ dependencies = [
  "arc-swap",
  "data_privacy",
  "foldhash 0.2.0",
+ "future_assert",
  "futures",
  "observed",
  "observed_testing",
