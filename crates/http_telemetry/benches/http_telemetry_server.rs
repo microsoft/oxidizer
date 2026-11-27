@@ -12,6 +12,7 @@ mod common;
 
 use std::borrow::Borrow;
 use std::hint::black_box;
+use std::io::{self, ErrorKind};
 use std::sync::Arc;
 
 use common::{
@@ -21,12 +22,13 @@ use common::{
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
 use http::header::RETRY_AFTER;
-use http::{HeaderValue, Request, StatusCode};
+use http::{HeaderValue, Method, Request, StatusCode, Version};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
 use observed::{Sink, SinkId};
+use routerama::HttpMethod;
 use templated_uri::BasePath;
 use tick::SimpleClock;
 
@@ -94,6 +96,12 @@ fn streamed(steps: impl IntoIterator<Item = Step>) -> HttpRequest {
     common::get().map(|_| common::scripted(steps))
 }
 
+/// A `HEAD` request over HTTP/1.1 whose body has bytes. [`Echoing`] responds with this body, and a response to `HEAD`
+/// has no content.
+fn head_with_body() -> HttpRequest {
+    common::request(Method::HEAD, Version::HTTP_11).map(|_| common::scripted([common::data("chunk"), Step::End]))
+}
+
 /// Sends `request` to `handler`, polls the response body `polls` times, and drops it.
 fn read_body(handler: &impl RequestHandler, request: HttpRequest, polls: usize) {
     let mut body = send(handler, request).expect("the handler responds").into_body();
@@ -137,6 +145,26 @@ fn routed_stack(class: Option<DataClass>, warm_up: HttpRequest) -> Telemetry<Res
     stack
 }
 
+/// The route of the resolver of [`runtime_routed_stack`], which adds it at run time.
+#[routerama::resolver]
+enum RuntimeRoute {
+    ListBooks,
+}
+
+/// The server middleware with a resolver that adds the route `GET /books` at run time, over a sink with two
+/// processors that read every field, in front of [`Responding`]. The stack already got one request to that route.
+fn runtime_routed_stack() -> Telemetry<Responding> {
+    let resolver = RuntimeRoute::builder()
+        .add_list_books(HttpMethod::GET, "/books")
+        .build()
+        .expect("the route is valid");
+    let stack = Telemetry::server(reading_sink(2))
+        .route_resolver(resolver)
+        .layer(common::responding(StatusCode::OK));
+    drop(send(&stack, common::get_to("http://example.com/books")));
+    stack
+}
+
 /// The server middleware with the request header `x-request-id` and the response header
 /// `retry-after`, both with `class`, over a sink with two processors that read every field, in
 /// front of [`Echoing`]. The stack already got `warm_up`, as for [`routed_stack`].
@@ -155,6 +183,15 @@ fn long_book() -> HttpRequest {
     Request::get(format!("http://example.com/books/1{}", "0".repeat(128)))
         .body(HttpBodyBuilder::new_fake().empty())
         .expect("the URI is valid")
+}
+
+/// The request of [`with_headers`] with three lines of `x-request-id`, so the request side of the event has three
+/// header values.
+fn three_request_ids() -> HttpRequest {
+    let mut request = with_headers(HeaderValue::from_static("120"));
+    request.headers_mut().append(REQUEST_ID, HeaderValue::from_static("8"));
+    request.headers_mut().append(REQUEST_ID, HeaderValue::from_static("9"));
+    request
 }
 
 /// The server middleware that logs the bodies of `application/json` responses, over a sink with two
@@ -283,8 +320,19 @@ fn abandoned_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest)
     Box::new(echoing_stack(reading_sink(1))),
     streamed([Step::Error(HttpError::validation("the page is missing"))])
 )]
+#[bench::connection_refused(
+    Box::new(echoing_stack(reading_sink(1))),
+    streamed([Step::Error(HttpError::from(io::Error::from(ErrorKind::ConnectionRefused)))])
+)]
 fn body_error<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
     read_body(stack.borrow(), request, 1);
+    stack
+}
+
+#[metabench::benchmark(COMPLETE_WITHOUT_CONTENT, GROUP, "complete_without_content")]
+#[bench::head(Box::new(echoing_stack(reading_sink(1))), head_with_body())]
+fn complete_without_content<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 0);
     stack
 }
 
@@ -321,6 +369,12 @@ fn complete_with_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: Http
     (send(stack.borrow(), request), stack)
 }
 
+#[metabench::benchmark(COMPLETE_WITH_RUNTIME_ROUTE, GROUP, "complete_with_runtime_route")]
+#[bench::get(Box::new(runtime_routed_stack()), common::get_to("http://example.com/books"))]
+fn complete_with_runtime_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
 #[metabench::benchmark(COMPLETE_WITH_ROUTE_PARAMETERS, GROUP, "complete_with_route_parameters")]
 #[bench::classified(
     Box::new(routed_stack(Some(PUBLIC), common::get_to("http://example.com/books/1"))),
@@ -329,6 +383,10 @@ fn complete_with_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: Http
 #[bench::classified_long(Box::new(routed_stack(Some(PUBLIC), long_book())), long_book())]
 #[bench::erased(
     Box::new(routed_stack(Some(SECRET), common::get_to("http://example.com/books/1"))),
+    common::get_to("http://example.com/books/1")
+)]
+#[bench::unclassified(
+    Box::new(routed_stack(None, common::get_to("http://example.com/books/1"))),
     common::get_to("http://example.com/books/1")
 )]
 fn complete_with_route_parameters<S: Borrow<Telemetry<Responding>>>(
@@ -351,6 +409,7 @@ fn complete_with_route_parameters<S: Borrow<Telemetry<Responding>>>(
     Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))),
     with_headers(HeaderValue::from_str("120").expect("120 is a valid header value"))
 )]
+#[bench::three_values(Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))), three_request_ids())]
 fn complete_with_headers<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -480,6 +539,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    group.bench_function(BenchmarkId::new(BODY_ERROR.benchmark_name(), "connection_refused"), |bencher| {
+        bencher.iter_batched(
+            || streamed([Step::Error(HttpError::from(io::Error::from(ErrorKind::ConnectionRefused)))]),
+            |request| body_error(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
+    group.bench_function(BenchmarkId::new(COMPLETE_WITHOUT_CONTENT.benchmark_name(), "head"), |bencher| {
+        bencher.iter_batched(
+            head_with_body,
+            |request| complete_without_content(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
     let stack = echoing_stack(reading_sink(2));
     group.bench_function(
         BenchmarkId::new(COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS.benchmark_name(), CASE),
@@ -508,11 +581,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    let stack = runtime_routed_stack();
+    group.bench_function(BenchmarkId::new(COMPLETE_WITH_RUNTIME_ROUTE.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || common::get_to("http://example.com/books"),
+            |request| complete_with_runtime_route(&stack, request).0,
+            BatchSize::SmallInput,
+        );
+    });
     let book: fn() -> HttpRequest = || common::get_to("http://example.com/books/1");
     for (case, class, request) in [
         ("classified", Some(PUBLIC), book),
         ("classified_long", Some(PUBLIC), long_book),
         ("erased", Some(SECRET), book),
+        ("unclassified", None, book),
     ] {
         let stack = routed_stack(class, request());
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_ROUTE_PARAMETERS.benchmark_name(), case), |bencher| {
@@ -529,6 +611,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         ("classified", PUBLIC, static_value),
         ("erased", SECRET, static_value),
         ("owned_value", SECRET, owned_value),
+        ("three_values", SECRET, three_request_ids),
     ] {
         let stack = header_stack(class, static_value());
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_HEADERS.benchmark_name(), case), |bencher| {
@@ -593,10 +676,12 @@ metabench::main!(
         COMPLETE_STREAMED_BODY,
         ABANDONED_BODY,
         BODY_ERROR,
+        COMPLETE_WITHOUT_CONTENT,
         COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS,
         INNER_ERROR,
         HANDLER_ERROR,
         COMPLETE_WITH_ROUTE,
+        COMPLETE_WITH_RUNTIME_ROUTE,
         COMPLETE_WITH_ROUTE_PARAMETERS,
         COMPLETE_WITH_HEADERS,
         COMPLETE_WITH_RESPONSE_BODY,

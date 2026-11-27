@@ -311,6 +311,16 @@ fn fields_complete_with_request_body<S: Borrow<Telemetry<Sending>>>(
     (send(stack.borrow(), request), stack)
 }
 
+#[metabench::benchmark(FIELDS_COMPLETE_READ_TWICE, FIELDS, "complete_read_twice")]
+#[bench::redacted_path(
+    Box::new(responding_stack(&Telemetry::client(Sink::composite([passthrough_sink(), passthrough_sink()])), get())),
+    get()
+)]
+#[bench::method_original(Box::new(responding_stack(&Telemetry::client(reading_sink(2)), get())), common::purge())]
+fn fields_complete_read_twice<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
 #[expect(clippy::too_many_lines, reason = "one registration for each case of the group")]
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ATTEMPT);
@@ -454,6 +464,24 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             },
         );
     }
+    let stack = responding_stack(&Telemetry::client(Sink::composite([passthrough_sink(), passthrough_sink()])), get());
+    group.bench_function(
+        BenchmarkId::new(FIELDS_COMPLETE_READ_TWICE.benchmark_name(), "redacted_path"),
+        |bencher| {
+            bencher.iter_batched(get, |request| fields_complete_read_twice(&stack, request).0, BatchSize::SmallInput);
+        },
+    );
+    let stack = responding_stack(&Telemetry::client(reading_sink(2)), get());
+    group.bench_function(
+        BenchmarkId::new(FIELDS_COMPLETE_READ_TWICE.benchmark_name(), "method_original"),
+        |bencher| {
+            bencher.iter_batched(
+                common::purge,
+                |request| fields_complete_read_twice(&stack, request).0,
+                BatchSize::SmallInput,
+            );
+        },
+    );
     group.finish();
 }
 
@@ -473,5 +501,6 @@ metabench::main!(
         FIELDS_HANDLER_ERROR,
         FIELDS_COMPLETE_WITH_RESPONSE_BODY,
         FIELDS_COMPLETE_WITH_REQUEST_BODY,
+        FIELDS_COMPLETE_READ_TWICE,
     ],
 );
