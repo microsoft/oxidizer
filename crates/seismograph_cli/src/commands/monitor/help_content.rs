@@ -132,6 +132,7 @@ pub(super) const fn title(context: Context) -> &'static str {
         Context::IoOperations => "I/O operations",
         Context::CacheTiers => "Cache tiers",
         Context::CacheOperations => "Cache outcomes",
+        Context::Hotspots => "Actionable performance hotspots",
         Context::Recording => "Recording configuration",
         Context::Filters => "Stack filters",
         Context::Capture => "Capturing a snapshot",
@@ -174,6 +175,7 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::IoOperations => &[IO_OPERATIONS],
         Context::CacheTiers => &[CACHE_TIERS],
         Context::CacheOperations => &[CACHE_OPERATIONS],
+        Context::Hotspots => &[HOTSPOTS],
         Context::Recording => &[RECORDING],
         Context::Filters => &[FILTERS],
         Context::Capture => &[CAPTURE],
@@ -262,6 +264,23 @@ const OFFLINE_INFO: &Section = section!("SNAPSHOT FILE";
     "Source events" => "All-class accepted and overwritten source counts, plus the number of thread summaries; not an allocation population or a live rate.",
     "Heap errors" => "Heap decoding may fail while other telemetry remains available.",
     "Offline" => "There is no live activity polling or process connection. Scope notes apply to saved data.",
+);
+
+const HOTSPOTS: &Section = section!("ACTIONABLE HOTSPOTS";
+    "Finding" => "An evidence-backed performance signal that meets a fixed threshold and has a concrete code location or instrumented identity.",
+    "Severity" => "High means a stronger retained signal or larger observed cost. Medium means the threshold was met but the impact is smaller.",
+    "Category" => "Allocation, contention, async runtime, blocking runtime, cache, or I/O.",
+    "Evidence" => "Retained counts, bytes, or durations from this snapshot. Values are not extrapolated to process lifetime.",
+    "Location" => "The first application frame, task spawn location, cache tier identity, or I/O resource identity used to address the finding.",
+    "Agent instruction" => "A copy-ready implementation task. It states the evidence, a narrow fix direction, behavior constraints, and the validation to add.",
+    "Allocation thresholds" => "Maximum allocation at least 256 KiB, or at least 1,000 allocations and 8 MiB total at one captured stack.",
+    "Runtime thresholds" => "Async poll maximum at least 10 ms with three samples, or at least 50 ms once. Blocking queue maximum at least 50 ms with three runs.",
+    "Contention thresholds" => "At least 50 retained mutex, RwLock, Once, or blocked-send contention events. Normal notify, condition-variable, barrier, and receive waits are excluded.",
+    "Cache / I/O thresholds" => "Any retained cache or I/O error. Cache miss findings also need at least 100 lookup outcomes and at least 50% misses.",
+    "Capture warning" => "Source overwrite makes findings lower-bound evidence. Capture loss is not itself reported as an application hotspot.",
+    "No actionable hotspots" => "No signal met the thresholds with enough attribution. This is not proof that the application has no performance issue.",
+    "Up/Down / Home/End" => "Select a finding.",
+    "Column headers / [ / ] / r" => "Click a heading or use the keys to change the sort column and direction.",
 );
 
 const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
@@ -569,7 +588,7 @@ const HELP_CONTROLS: &Section = section!("HELP CONTROLS";
 );
 
 const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
-    "1-9 / Tab / Shift-Tab" => "Select or cycle main tabs from every Runtime focus, including Activity.",
+    "1-9 / 0 / Tab / Shift-Tab" => "Select or cycle main tabs from every Runtime focus, including Activity. 0 opens Hotspots.",
     "Click rows / drag borders" => "Select and enter a row's detail pane / resize panes.",
     "s" => "Run the selected Record and continue / Record and stop action. Analysis tables do not continuously refresh.",
     "c" => "Configure recording.",
@@ -582,7 +601,7 @@ const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
 
 const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
     "Read-only" => "Offline is read-only: no process connection, recording changes, capture, capture-mode changes or clearing server buffers.",
-    "1-9 / Tab / Shift-Tab" => "Select or cycle tabs. Sorting, stack presentation, and F filters change only the saved-data view.",
+    "1-9 / 0 / Tab / Shift-Tab" => "Select or cycle tabs. 0 opens Hotspots. Sorting, stack presentation, and F filters change only the saved-data view.",
     "q / Esc" => "Quit the offline viewer. With help open these keys close help instead.",
     "Missing data" => "A live-only 'press s' placeholder cannot create missing data in an offline file.",
 );
@@ -591,7 +610,7 @@ const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
 mod tests {
     use super::*;
 
-    const CONTEXTS: [Context; 32] = [
+    const CONTEXTS: [Context; 33] = [
         Context::Browser,
         Context::Info,
         Context::NativeMemory,
@@ -619,6 +638,7 @@ mod tests {
         Context::IoOperations,
         Context::CacheTiers,
         Context::CacheOperations,
+        Context::Hotspots,
         Context::Recording,
         Context::Filters,
         Context::Capture,
@@ -704,6 +724,7 @@ mod tests {
             (Context::IoOperations, vec![IO_OPERATIONS]),
             (Context::CacheTiers, vec![CACHE_TIERS]),
             (Context::CacheOperations, vec![CACHE_OPERATIONS]),
+            (Context::Hotspots, vec![HOTSPOTS]),
         ] {
             let mut expected = sections;
             expected.push(HELP_CONTROLS);
@@ -848,6 +869,7 @@ mod tests {
                 Context::RuntimeWorkers,
                 &["Blocking", "Running", "Parked", "Stopped", "not necessarily polling now"][..],
             ),
+            (Context::Hotspots, &["Severity", "Category", "Finding", "Location"]),
             (
                 Context::Allocations,
                 &["process-live", "zero overwrites", "without a matched", "Sampling"][..],

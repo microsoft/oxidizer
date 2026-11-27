@@ -41,6 +41,7 @@ pub(super) enum Context {
     IoOperations,
     CacheTiers,
     CacheOperations,
+    Hotspots,
     Recording,
     Filters,
     Capture,
@@ -129,6 +130,7 @@ impl App {
                 CacheFocus::Tiers => Context::CacheTiers,
                 CacheFocus::Operations => Context::CacheOperations,
             },
+            MonitorTab::Hotspots => Context::Hotspots,
         }
     }
 }
@@ -426,6 +428,7 @@ mod tests {
             app.cache_view.focus = focus;
             assert_eq!(app.panel_help_context(MonitorTab::Cache), expected);
         }
+        assert_eq!(app.panel_help_context(MonitorTab::Hotspots), Context::Hotspots);
     }
 
     #[test]
@@ -460,6 +463,7 @@ mod tests {
             app.runtime_view,
             app.io_view,
             app.cache_view,
+            app.hotspot_view,
         );
         app.handle_key(KeyCode::F(1));
         for code in [
@@ -470,6 +474,7 @@ mod tests {
             KeyCode::Char('f'),
             KeyCode::Char('r'),
             KeyCode::Char('8'),
+            KeyCode::Char('0'),
             KeyCode::Char(']'),
             KeyCode::Enter,
             KeyCode::Tab,
@@ -496,7 +501,8 @@ mod tests {
                 app.thread_view,
                 app.runtime_view,
                 app.io_view,
-                app.cache_view
+                app.cache_view,
+                app.hotspot_view
             )
         );
         for close in [KeyCode::Esc, KeyCode::F(1), KeyCode::Char('q'), KeyCode::Char('Q')] {

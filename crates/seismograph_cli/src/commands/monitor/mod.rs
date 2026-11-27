@@ -11,6 +11,7 @@ mod filter_index;
 mod filter_ui;
 mod help;
 mod help_content;
+mod hotspot_analysis;
 mod live_activity;
 mod mimalloc_ui;
 mod mouse;

@@ -22,6 +22,7 @@ pub(super) struct CapturedSnapshot {
     pub(super) runtime: RuntimeMonitorSnapshot,
     pub(super) io: IoMonitorSnapshot,
     pub(super) cache: CacheMonitorSnapshot,
+    pub(super) hotspots: super::hotspot_analysis::Report,
     pub(super) threads: ThreadSnapshot,
     pub(super) task_events: super::task_events::TaskEventsSnapshot,
     pub(super) captured_at: Option<SystemTime>,

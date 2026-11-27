@@ -58,6 +58,8 @@ pub(super) enum ListTarget {
     CacheTierHeader(super::app::CacheTierSort),
     CacheOperations,
     CacheOperationHeader(super::app::CacheOperationSort),
+    HotspotFindings,
+    HotspotHeader(super::app::HotspotSort),
 }
 
 impl ListTarget {
@@ -95,6 +97,7 @@ impl ListTarget {
             }
             Self::IoResources | Self::IoResourceHeader(_) | Self::IoOperations | Self::IoOperationHeader(_) => Some(MonitorTab::Io),
             Self::CacheTiers | Self::CacheTierHeader(_) | Self::CacheOperations | Self::CacheOperationHeader(_) => Some(MonitorTab::Cache),
+            Self::HotspotFindings | Self::HotspotHeader(_) => Some(MonitorTab::Hotspots),
         }
     }
 }
@@ -304,6 +307,16 @@ impl App {
                 self.cache_view.operation_descending = true;
             }
             self.cache_view.operation_selected = 0;
+            return;
+        }
+        if let ListTarget::HotspotHeader(sort) = target {
+            if self.hotspot_view.sort == sort {
+                self.hotspot_view.descending = !self.hotspot_view.descending;
+            } else {
+                self.hotspot_view.sort = sort;
+                self.hotspot_view.descending = sort == super::app::HotspotSort::Severity;
+            }
+            self.hotspot_view.selected = 0;
             return;
         }
         if let ListTarget::RuntimeWorkerHeader(focus, sort) = target {
@@ -521,6 +534,7 @@ impl App {
                 self.cache_view.focus = CacheFocus::Operations;
                 &mut self.cache_view.operation_selected
             }
+            ListTarget::HotspotFindings => &mut self.hotspot_view.selected,
             ListTarget::Applications
             | ListTarget::NativeSubsystems
             | ListTarget::NativeClasses
@@ -538,6 +552,7 @@ impl App {
             | ListTarget::IoOperationHeader(_)
             | ListTarget::CacheTierHeader(_)
             | ListTarget::CacheOperationHeader(_)
+            | ListTarget::HotspotHeader(_)
             | ListTarget::AsynchronousWorkersTab
             | ListTarget::BlockingWorkersTab
             | ListTarget::RuntimeWorkerHeader(_, _)
@@ -708,6 +723,18 @@ mod tests {
     }
 
     #[test]
+    fn hotspot_rows_select_the_exact_finding() {
+        let mut app = App::offline("capture.seismograph".into());
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Hotspots;
+        }
+
+        app.activate_selectable_mouse_row(ListTarget::HotspotFindings, 3);
+
+        assert_eq!(app.hotspot_view.selected, 3);
+    }
+
+    #[test]
     #[expect(
         clippy::too_many_lines,
         reason = "one regression verifies consistent click sorting across every diagnostic table"
@@ -822,5 +849,12 @@ mod tests {
         assert!(app.cache_view.operation_descending);
         app.activate_mouse_row(ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome), 0);
         assert!(!app.cache_view.operation_descending);
+
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Hotspots;
+        }
+        app.activate_mouse_row(ListTarget::HotspotHeader(super::super::app::HotspotSort::Category), 0);
+        assert_eq!(app.hotspot_view.sort, super::super::app::HotspotSort::Category);
+        assert!(!app.hotspot_view.descending);
     }
 }

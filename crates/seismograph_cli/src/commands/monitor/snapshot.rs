@@ -88,6 +88,13 @@ pub(super) fn prepare_with_progress(
         .as_ref()
         .map(|snapshot| AllocationSnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
     let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), identities.as_ref(), progress);
+    let hotspots = super::hotspot_analysis::analyze(
+        allocations.as_ref(),
+        &runtime.primitives,
+        &runtime.runtime,
+        &runtime.io,
+        &runtime.cache,
+    );
     progress(Phase::IndexStacks);
     let native = allocator.as_ref().and_then(|snapshot| snapshot.native.clone());
     let mimalloc = allocator.as_ref().and_then(|snapshot| snapshot.mimalloc.clone());
@@ -112,6 +119,7 @@ pub(super) fn prepare_with_progress(
         runtime: runtime.runtime,
         io: runtime.io,
         cache: runtime.cache,
+        hotspots,
         threads: runtime.threads,
         task_events: runtime.task_events,
         captured_at: None,

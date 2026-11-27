@@ -8,8 +8,9 @@ use ratatui::widgets::{Block, Borders};
 
 use super::app::{AllocatorBackend, App, MonitorTab, Screen};
 
-pub(super) const TABS: [(MonitorTab, &str); 9] = [
+pub(super) const TABS: [(MonitorTab, &str); 10] = [
     (MonitorTab::Info, "  Info  "),
+    (MonitorTab::Hotspots, " Hotspots "),
     (MonitorTab::Heaps, " Allocator "),
     (MonitorTab::Allocations, "  Allocations  "),
     (MonitorTab::Primitives, "  Primitives  "),
@@ -58,12 +59,13 @@ enum Split {
     RuntimeTaskRows,
     Io,
     Cache,
+    Hotspots,
 }
 
 #[derive(Default)]
 pub(super) struct Panels {
     pub(super) rows: super::mouse::MouseRows,
-    sizes: [Option<Constraint>; 20],
+    sizes: [Option<Constraint>; 21],
     dragging: Option<(MonitorTab, Split)>,
 }
 
@@ -153,6 +155,14 @@ impl Panels {
             }
             MonitorTab::Cache => {
                 [areas[0], areas[1]] = split(Split::Cache, Direction::Vertical, area, Constraint::Percentage(35));
+            }
+            MonitorTab::Hotspots => {
+                let direction = if area.width >= 110 {
+                    Direction::Horizontal
+                } else {
+                    Direction::Vertical
+                };
+                [areas[0], areas[1]] = split(Split::Hotspots, direction, area, Constraint::Percentage(44));
             }
         }
         Arrangement { areas, dividers }
@@ -320,7 +330,7 @@ mod tests {
 
     #[test]
     fn gamma_survivor_tab_mouse_rows_match_tiny_connected_layout() {
-        for (height, expected) in [(3, MonitorTab::Info), (4, MonitorTab::Heaps)] {
+        for (height, expected) in [(3, MonitorTab::Info), (4, MonitorTab::Hotspots)] {
             let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
             let mut app = App::with_io(io);
             app.screen = Screen::Offline {
@@ -412,6 +422,7 @@ mod tests {
                 MonitorTab::Runtime,
                 MonitorTab::Io,
                 MonitorTab::Cache,
+                MonitorTab::Hotspots,
             ] {
                 assert!(
                     panels
@@ -531,7 +542,16 @@ mod tests {
                 tab_at(area, 24, 9),
                 tab_at(Rect::new(0, 0, 1, 1), 0, 0),
             ],
-            [None, None, None, None, Some(MonitorTab::Info), Some(MonitorTab::Heaps), None, None],
+            [
+                None,
+                None,
+                None,
+                None,
+                Some(MonitorTab::Info),
+                Some(MonitorTab::Hotspots),
+                None,
+                None
+            ],
         );
     }
 

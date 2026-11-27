@@ -1087,6 +1087,55 @@ pub(super) enum CacheOperationSort {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct HotspotViewState {
+    pub(super) selected: usize,
+    pub(super) sort: HotspotSort,
+    pub(super) descending: bool,
+}
+
+impl HotspotViewState {
+    const fn new() -> Self {
+        Self {
+            selected: 0,
+            sort: HotspotSort::Severity,
+            descending: true,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.selected = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HotspotSort {
+    Severity,
+    Category,
+    Finding,
+    Location,
+}
+
+impl HotspotSort {
+    const fn next(self) -> Self {
+        match self {
+            Self::Severity => Self::Category,
+            Self::Category => Self::Finding,
+            Self::Finding => Self::Location,
+            Self::Location => Self::Severity,
+        }
+    }
+
+    const fn previous(self) -> Self {
+        match self {
+            Self::Severity => Self::Location,
+            Self::Category => Self::Severity,
+            Self::Finding => Self::Category,
+            Self::Location => Self::Finding,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MonitorTab {
     Info,
     Heaps,
@@ -1097,26 +1146,29 @@ pub(super) enum MonitorTab {
     RuntimeTask,
     Io,
     Cache,
+    Hotspots,
 }
 
 impl MonitorTab {
     pub(super) const fn index(self) -> usize {
         match self {
             Self::Info => 0,
-            Self::Heaps => 1,
-            Self::Allocations => 2,
-            Self::Primitives => 3,
-            Self::Threads => 4,
-            Self::Runtime => 5,
-            Self::RuntimeTask => 6,
-            Self::Io => 7,
-            Self::Cache => 8,
+            Self::Hotspots => 1,
+            Self::Heaps => 2,
+            Self::Allocations => 3,
+            Self::Primitives => 4,
+            Self::Threads => 5,
+            Self::Runtime => 6,
+            Self::RuntimeTask => 7,
+            Self::Io => 8,
+            Self::Cache => 9,
         }
     }
 
     const fn next(self) -> Self {
         match self {
-            Self::Info => Self::Heaps,
+            Self::Info => Self::Hotspots,
+            Self::Hotspots => Self::Heaps,
             Self::Heaps => Self::Allocations,
             Self::Allocations => Self::Primitives,
             Self::Primitives => Self::Threads,
@@ -1131,7 +1183,8 @@ impl MonitorTab {
     const fn previous(self) -> Self {
         match self {
             Self::Info => Self::Cache,
-            Self::Heaps => Self::Info,
+            Self::Hotspots => Self::Info,
+            Self::Heaps => Self::Hotspots,
             Self::Allocations => Self::Heaps,
             Self::Primitives => Self::Allocations,
             Self::Threads => Self::Primitives,
@@ -1172,6 +1225,7 @@ pub(super) struct App {
     pub(super) runtime_view: RuntimeViewState,
     pub(super) io_view: IoViewState,
     pub(super) cache_view: CacheViewState,
+    pub(super) hotspot_view: HotspotViewState,
     pub(super) panels: super::panels::Panels,
     pub(super) activity_samples: VecDeque<ActivitySample>,
     pub(super) recorder_statistics: Option<RecorderStatistics>,
@@ -1293,6 +1347,7 @@ impl App {
             runtime_view: RuntimeViewState::new(),
             io_view: IoViewState::new(),
             cache_view: CacheViewState::new(),
+            hotspot_view: HotspotViewState::new(),
             panels: super::panels::Panels::default(),
             activity_samples: VecDeque::new(),
             recorder_statistics: None,
@@ -1379,6 +1434,10 @@ impl App {
             }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the top-level key dispatcher enforces modal precedence before routing each monitor tab"
+    )]
     pub(super) fn handle_key(&mut self, code: KeyCode) -> bool {
         if self.handle_help_key(code) || self.native_back(code) {
             return false;
@@ -1441,6 +1500,7 @@ impl App {
                     MonitorTab::RuntimeTask => handle_runtime_task_key(code, &mut self.runtime_view, snapshot.as_deref()),
                     MonitorTab::Io => handle_io_key(code, &mut self.io_view, snapshot.as_deref()),
                     MonitorTab::Cache => handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()),
+                    MonitorTab::Hotspots => handle_hotspot_key(code, &mut self.hotspot_view, snapshot.as_deref()),
                     MonitorTab::Info => handle_info_key(code, &mut self.info_thread_selected, self.live_activity.threads.len()),
                 };
                 if handled_by_tab {
@@ -1466,6 +1526,7 @@ impl App {
                     KeyCode::Char('7') => *tab = MonitorTab::RuntimeTask,
                     KeyCode::Char('8') => *tab = MonitorTab::Io,
                     KeyCode::Char('9') => *tab = MonitorTab::Cache,
+                    KeyCode::Char('0') => *tab = MonitorTab::Hotspots,
                     KeyCode::Char('d') => {
                         self.capture_mode = self.capture_mode.next();
                         self.status = format!("{} selected (s to capture)", self.capture_mode.label());
@@ -1705,6 +1766,7 @@ impl App {
                     self.runtime_view.reset();
                     self.io_view.reset();
                     self.cache_view.reset();
+                    self.hotspot_view.reset();
                     self.filter_snapshot_arrived();
                 }
             }
@@ -1738,6 +1800,7 @@ impl App {
         self.runtime_view.reset();
         self.io_view.reset();
         self.cache_view.reset();
+        self.hotspot_view.reset();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -2674,6 +2737,30 @@ fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&
     true
 }
 
+fn handle_hotspot_key(code: KeyCode, view: &mut HotspotViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    let count = snapshot.map_or(0, |snapshot| snapshot.hotspots.findings.len());
+    match code {
+        KeyCode::Up => view.selected = view.selected.saturating_sub(1),
+        KeyCode::Down => view.selected = advance_selection(view.selected, count),
+        KeyCode::Home => view.selected = 0,
+        KeyCode::End => view.selected = count.saturating_sub(1),
+        KeyCode::Char('[') => {
+            view.sort = view.sort.previous();
+            view.selected = 0;
+        }
+        KeyCode::Char(']') => {
+            view.sort = view.sort.next();
+            view.selected = 0;
+        }
+        KeyCode::Char('r') => {
+            view.descending = !view.descending;
+            view.selected = 0;
+        }
+        _ => return false,
+    }
+    true
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 // #[gamma::skip(fn_value.err_default, tag = "timeout", reason = "November 6 campaign 539dc359dfa6: replacing capture with Err(Default::default()) exceeded the timeout")]
 fn capture_connected_snapshot(
@@ -2989,6 +3076,7 @@ mod tests {
             runtime: runtime.runtime,
             io: runtime.io,
             cache: runtime.cache,
+            hotspots: super::super::hotspot_analysis::Report::default(),
             threads: runtime.threads,
             task_events: runtime.task_events,
             captured_at: None,
@@ -3211,6 +3299,7 @@ mod tests {
             task_events: super::super::task_events::TaskEventsSnapshot::default(),
             io: IoMonitorSnapshot::default(),
             cache: CacheMonitorSnapshot::default(),
+            hotspots: super::super::hotspot_analysis::Report::default(),
             threads: ThreadSnapshot {
                 threads: Vec::new(),
                 hidden_internal_threads: 0,
@@ -3393,9 +3482,14 @@ mod tests {
             ..CacheViewState::new()
         };
         cache.reset();
+        let mut hotspot = HotspotViewState {
+            selected: 3,
+            ..HotspotViewState::new()
+        };
+        hotspot.reset();
 
         assert_eq!(
-            (allocation, primitive, heap, thread, runtime, io, cache),
+            (allocation, primitive, heap, thread, runtime, io, cache, hotspot),
             (
                 AllocationViewState::new(),
                 PrimitiveViewState::new(),
@@ -3404,6 +3498,7 @@ mod tests {
                 RuntimeViewState::new(),
                 IoViewState::new(),
                 CacheViewState::new(),
+                HotspotViewState::new(),
             )
         );
     }
@@ -3623,6 +3718,7 @@ mod tests {
         assert_eq!(
             [
                 MonitorTab::Info,
+                MonitorTab::Hotspots,
                 MonitorTab::Heaps,
                 MonitorTab::Allocations,
                 MonitorTab::Primitives,
@@ -3634,15 +3730,16 @@ mod tests {
             ]
             .map(|tab| (tab.index(), tab.next(), tab.previous())),
             [
-                (0, MonitorTab::Heaps, MonitorTab::Cache),
-                (1, MonitorTab::Allocations, MonitorTab::Info),
-                (2, MonitorTab::Primitives, MonitorTab::Heaps),
-                (3, MonitorTab::Threads, MonitorTab::Allocations),
-                (4, MonitorTab::Runtime, MonitorTab::Primitives),
-                (5, MonitorTab::RuntimeTask, MonitorTab::Threads),
-                (6, MonitorTab::Io, MonitorTab::Runtime),
-                (7, MonitorTab::Cache, MonitorTab::RuntimeTask),
-                (8, MonitorTab::Info, MonitorTab::Io),
+                (0, MonitorTab::Hotspots, MonitorTab::Cache),
+                (1, MonitorTab::Heaps, MonitorTab::Info),
+                (2, MonitorTab::Allocations, MonitorTab::Hotspots),
+                (3, MonitorTab::Primitives, MonitorTab::Heaps),
+                (4, MonitorTab::Threads, MonitorTab::Allocations),
+                (5, MonitorTab::Runtime, MonitorTab::Primitives),
+                (6, MonitorTab::RuntimeTask, MonitorTab::Threads),
+                (7, MonitorTab::Io, MonitorTab::Runtime),
+                (8, MonitorTab::Cache, MonitorTab::RuntimeTask),
+                (9, MonitorTab::Info, MonitorTab::Io),
             ]
         );
     }
@@ -3920,6 +4017,7 @@ mod tests {
             (KeyCode::Char('7'), MonitorTab::RuntimeTask),
             (KeyCode::Char('8'), MonitorTab::Io),
             (KeyCode::Char('9'), MonitorTab::Cache),
+            (KeyCode::Char('0'), MonitorTab::Hotspots),
             (KeyCode::Char('1'), MonitorTab::Info),
             (KeyCode::Left, MonitorTab::Cache),
             (KeyCode::Right, MonitorTab::Info),
@@ -3943,6 +4041,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one regression proves that every tab changes only its own navigation state"
+    )]
     fn connected_tab_dispatch_updates_only_the_active_view() {
         let cases = [
             (MonitorTab::Heaps, KeyCode::Char(']')),
@@ -3952,6 +4054,7 @@ mod tests {
             (MonitorTab::Runtime, KeyCode::Char('b')),
             (MonitorTab::Io, KeyCode::Enter),
             (MonitorTab::Cache, KeyCode::Enter),
+            (MonitorTab::Hotspots, KeyCode::Char(']')),
         ];
 
         let actual = cases.map(|(tab, key)| {
@@ -3965,6 +4068,7 @@ mod tests {
                 app.runtime_view.focus,
                 app.io_view.focus,
                 app.cache_view.focus,
+                app.hotspot_view.sort,
                 connected_fields(&app.screen).unwrap().2,
             )
         });
@@ -3980,6 +4084,7 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Heaps,
                 ),
                 (
@@ -3990,6 +4095,7 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Allocations,
                 ),
                 (
@@ -4000,6 +4106,7 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Primitives,
                 ),
                 (
@@ -4010,6 +4117,7 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Threads,
                 ),
                 (
@@ -4020,6 +4128,7 @@ mod tests {
                     RuntimeWorkersFocus::Blocking,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Runtime,
                 ),
                 (
@@ -4030,6 +4139,7 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Operations,
                     CacheFocus::Tiers,
+                    HotspotSort::Severity,
                     MonitorTab::Io,
                 ),
                 (
@@ -4040,7 +4150,19 @@ mod tests {
                     RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Operations,
+                    HotspotSort::Severity,
                     MonitorTab::Cache,
+                ),
+                (
+                    MemoryTier::Small,
+                    AllocationSort::Allocations,
+                    PrimitiveSort::Events,
+                    AllocationStackFilter::Application,
+                    RuntimeWorkersFocus::Asynchronous,
+                    IoFocus::Resources,
+                    CacheFocus::Tiers,
+                    HotspotSort::Category,
+                    MonitorTab::Hotspots,
                 ),
             ]
         );
@@ -4465,6 +4587,7 @@ mod tests {
         app.runtime_view.section = RuntimeSectionFocus::GroupTasks;
         app.io_view.focus = IoFocus::Operations;
         app.cache_view.focus = CacheFocus::Operations;
+        app.hotspot_view.selected = 3;
         app.finish_snapshot_capture(Ok(CaptureOutcome {
             snapshot: empty_capture(),
             status: "saved".into(),
@@ -4479,6 +4602,7 @@ mod tests {
                 app.runtime_view,
                 app.io_view,
                 app.cache_view,
+                app.hotspot_view,
                 app.status.as_str(),
             ),
             (
@@ -4489,6 +4613,7 @@ mod tests {
                 RuntimeViewState::new(),
                 IoViewState::new(),
                 CacheViewState::new(),
+                HotspotViewState::new(),
                 "saved",
             )
         );
@@ -4804,7 +4929,7 @@ mod tests {
         assert!(matches!(
             app.screen,
             Screen::Connected {
-                tab: MonitorTab::Heaps,
+                tab: MonitorTab::Hotspots,
                 ..
             }
         ));
@@ -5469,7 +5594,7 @@ mod tests {
     fn offline_navigation_never_starts_remote_actions() {
         let mut app = App::offline(PathBuf::from("capture.seismograph"));
         app.finish_offline_load(empty_capture());
-        for tab in ['1', '2', '3', '4', '5', '6', '7', '8', '9'] {
+        for tab in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] {
             app.handle_key(KeyCode::Char(tab));
             for key in ['s', 'r', 'c', 'd', 'C'] {
                 assert!(!app.handle_key(KeyCode::Char(key)));
@@ -5480,7 +5605,7 @@ mod tests {
         assert!(matches!(
             app.screen,
             Screen::Offline {
-                tab: MonitorTab::Cache,
+                tab: MonitorTab::Hotspots,
                 ..
             }
         ));

@@ -18,9 +18,10 @@ use seismograph_protocol::monitor::MonitorDescriptor;
 use super::app::HeapFocus;
 use super::app::{
     ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheOperationSort, CacheTierSort, CacheViewState, CaptureMode,
-    CaptureStep, HeapViewState, IoFocus, IoOperationSort, IoResourceSort, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveHotspotSort,
-    PrimitiveTypeSort, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus, ThreadListSort,
-    ThreadObjectSort, ThreadOperationSort, ThreadParticipantSort, ThreadViewState, format_sampling_percentage, recording_policy_label,
+    CaptureStep, HeapViewState, HotspotViewState, IoFocus, IoOperationSort, IoResourceSort, IoViewState, MonitorTab, PrimitiveFocus,
+    PrimitiveHotspotSort, PrimitiveTypeSort, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus,
+    ThreadListSort, ThreadObjectSort, ThreadOperationSort, ThreadParticipantSort, ThreadViewState, format_sampling_percentage,
+    recording_policy_label,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
@@ -31,6 +32,8 @@ use super::data::{MemorySnapshot, MemoryTier};
 use super::live_activity::LiveActivity;
 use super::mouse::{ListTarget, MouseRows};
 
+#[path = "hotspots_ui.rs"]
+mod hotspots_ui;
 #[path = "info_ui.rs"]
 mod info_ui;
 #[path = "runtime_group_ui.rs"]
@@ -112,6 +115,7 @@ impl App {
                     runtime_view: self.runtime_view,
                     io_view: self.io_view,
                     cache_view: self.cache_view,
+                    hotspot_view: self.hotspot_view,
                     panels: &self.panels,
                     activity_samples: &self.activity_samples,
                     recorder_statistics: self.recorder_statistics.as_ref(),
@@ -123,7 +127,7 @@ impl App {
         let line = match &self.screen {
             Screen::Browse => browse_footer(&self.status),
             Screen::Offline { .. } => Line::from(format!(
-                " F1 help · Offline · read-only · F filters · Tab/1–9 tabs · drag borders to resize · q/Esc quit · {}",
+                " F1 help · Offline · read-only · F filters · Tab/1–9/0 tabs · drag borders to resize · q/Esc quit · {}",
                 self.status
             )),
             Screen::Connected { recording, snapshot, .. } => {
@@ -252,6 +256,7 @@ struct ConnectedView<'a> {
     runtime_view: RuntimeViewState,
     io_view: IoViewState,
     cache_view: CacheViewState,
+    hotspot_view: HotspotViewState,
     panels: &'a super::panels::Panels,
     activity_samples: &'a VecDeque<ActivitySample>,
     recorder_statistics: Option<&'a RecorderStatistics>,
@@ -438,6 +443,14 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot.map(|snapshot| &snapshot.cache),
             view.snapshot_error,
             view.cache_view,
+        ),
+        MonitorTab::Hotspots => hotspots_ui::draw(
+            frame,
+            &view.panels.rows,
+            [panels[0], panels[1]],
+            view.snapshot,
+            view.snapshot_error,
+            view.hotspot_view,
         ),
     }
 }
@@ -3167,6 +3180,7 @@ mod tests {
             task_events: runtime.task_events,
             io: runtime.io,
             cache: runtime.cache,
+            hotspots: super::super::hotspot_analysis::Report::default(),
             threads: runtime.threads,
             captured_at: Some(SystemTime::UNIX_EPOCH),
             captured_instant: Some(Instant::now()),
@@ -3878,6 +3892,7 @@ mod tests {
             MonitorTab::RuntimeTask,
             MonitorTab::Io,
             MonitorTab::Cache,
+            MonitorTab::Hotspots,
         ] {
             let mut app = App::new();
             app.screen = Screen::Connected {
@@ -3965,6 +3980,7 @@ mod tests {
             runtime_view: app.runtime_view,
             io_view: app.io_view,
             cache_view: app.cache_view,
+            hotspot_view: app.hotspot_view,
             panels: &app.panels,
             activity_samples: &app.activity_samples,
             recorder_statistics: None,
@@ -4159,6 +4175,7 @@ mod tests {
             MonitorTab::Runtime,
             MonitorTab::Io,
             MonitorTab::Cache,
+            MonitorTab::Hotspots,
         ] {
             if let Screen::Offline { tab: selected, .. } = &mut app.screen {
                 *selected = tab;
@@ -4169,7 +4186,7 @@ mod tests {
                 let [body, ..] = app.screen_areas(terminal_area);
                 let [_, content] = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(body);
                 let second = app.panels.arrange(tab, content).areas[1];
-                let (column, row) = if matches!(tab, MonitorTab::Threads | MonitorTab::Io | MonitorTab::Cache) {
+                let (column, row) = if matches!(tab, MonitorTab::Threads | MonitorTab::Io | MonitorTab::Cache | MonitorTab::Hotspots) {
                     (second.x, second.y.saturating_add(1))
                 } else {
                     (second.x.saturating_add(1), second.y)
@@ -4210,6 +4227,14 @@ mod tests {
                 assert!(output.contains(label), "{tab:?}: missing {label}");
             }
         }
+    }
+
+    #[test]
+    fn medium_width_tabs_keep_hotspots_visible() {
+        let mut app = App::offline("capture.seismograph".into());
+        app.finish_offline_load(representative_capture());
+
+        assert!(render_native_sized(&app, 100, 30).contains("Hotspots"));
     }
 
     #[test]
@@ -4812,6 +4837,7 @@ mod tests {
             MonitorTab::Runtime,
             MonitorTab::Io,
             MonitorTab::Cache,
+            MonitorTab::Hotspots,
         ] {
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
@@ -4976,6 +5002,7 @@ mod tests {
             MonitorTab::Runtime,
             MonitorTab::Io,
             MonitorTab::Cache,
+            MonitorTab::Hotspots,
         ] {
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
@@ -5054,6 +5081,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (497_493, 16_131_620_604_177_929_989));
+        assert_eq!(stable_digest(&output), (521_626, 5_398_699_480_934_313_611));
     }
 }
