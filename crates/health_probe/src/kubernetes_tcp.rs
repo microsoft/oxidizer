@@ -34,6 +34,23 @@ trait TcpIo {
     fn accept<'a>(&'a self, listener: &'a Self::Listener) -> impl Future<Output = io::Result<Self::Stream>> + Send + 'a;
 }
 
+trait HealthMonitor {
+    fn state(&self) -> Health;
+    fn changed(&mut self) -> impl Future<Output = ()> + Send;
+}
+
+#[expect(clippy::use_self, reason = "qualified calls avoid recursive trait dispatch")]
+impl HealthMonitor for Monitor {
+    fn state(&self) -> Health {
+        Monitor::state(self)
+    }
+
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "Removing the monitor wait makes the unhealthy server loop non-yielding, so no asynchronous test timeout can observe it.")]
+    async fn changed(&mut self) {
+        Monitor::changed(self).await;
+    }
+}
+
 struct TokioTcp;
 
 impl TcpIo for TokioTcp {
@@ -78,7 +95,12 @@ pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> i
     serve_with(TokioTcp, &mut monitor, address, &clock).await
 }
 
-async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, address: SocketAddr, clock: &Clock) -> io::Result<()> {
+async fn serve_with<I: TcpIo + Send + Sync, M: HealthMonitor + Send>(
+    io: I,
+    monitor: &mut M,
+    address: SocketAddr,
+    clock: &Clock,
+) -> io::Result<()> {
     let mut bound_once = false;
 
     'server: loop {
@@ -106,6 +128,9 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
         let Some(listener) = listener else {
             continue 'server;
         };
+        if monitor.state() != Health::Healthy {
+            continue;
+        }
 
         let retry = loop {
             tokio::select! {
@@ -131,7 +156,7 @@ async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, addres
     }
 }
 
-async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
+async fn wait_before_retry(monitor: &mut (impl HealthMonitor + Send), clock: &Clock) {
     let delay = clock.delay(ACCEPT_RETRY_DELAY);
     tokio::pin!(delay);
 

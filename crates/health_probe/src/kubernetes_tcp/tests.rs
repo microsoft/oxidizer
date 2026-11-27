@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Duration;
@@ -15,13 +15,23 @@ use futures::channel::oneshot;
 use health::{Aggregator, Attribute, Component, Health, Monitor, Publisher};
 use observed::Sink;
 use tick::{Clock, ClockControl};
+use tokio::runtime::Builder;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use super::{ACCEPT_RETRY_DELAY, TcpIo, serve_with, wait_before_retry};
+use super::{ACCEPT_RETRY_DELAY, HealthMonitor, TcpIo, serve_with, wait_before_retry};
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(1);
 const ADDRESS: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8081);
+
+macro_rules! runtime_test {
+    ($name:ident, $body:block) => {
+        #[test]
+        fn $name() {
+            Builder::new_current_thread().enable_time().build().unwrap().block_on(async $body);
+        }
+    };
+}
 
 #[derive(Clone)]
 struct ScriptedIo {
@@ -44,6 +54,37 @@ enum BindStep {
 enum AcceptStep {
     Error(io::ErrorKind),
     Pending,
+}
+
+#[derive(Clone)]
+struct ScriptedMonitor {
+    healthy: Arc<AtomicBool>,
+}
+
+impl ScriptedMonitor {
+    fn healthy() -> Self {
+        Self {
+            healthy: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    fn set(&self, state: Health) {
+        self.healthy.store(state == Health::Healthy, Ordering::SeqCst);
+    }
+}
+
+impl HealthMonitor for ScriptedMonitor {
+    fn state(&self) -> Health {
+        if self.healthy.load(Ordering::SeqCst) {
+            Health::Healthy
+        } else {
+            Health::Unhealthy
+        }
+    }
+
+    async fn changed(&mut self) {
+        std::future::pending::<()>().await;
+    }
 }
 
 impl ScriptedIo {
@@ -137,8 +178,7 @@ fn spawn_server(io: ScriptedIo, monitor: Monitor, clock: Clock) -> JoinHandle<io
     })
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn retries_accept_and_rebind_errors() {
+runtime_test!(retries_accept_and_rebind_errors, {
     let io = ScriptedIo::new(
         [BindStep::Ready, BindStep::Error(io::ErrorKind::AddrInUse), BindStep::Ready],
         [AcceptStep::Error(io::ErrorKind::ConnectionAborted), AcceptStep::Pending],
@@ -156,10 +196,9 @@ async fn retries_accept_and_rebind_errors() {
 
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-}
+});
 
-#[tokio::test(flavor = "current_thread")]
-async fn health_change_cancels_retry_wait() {
+runtime_test!(health_change_cancels_retry_wait, {
     let (_component, mut monitor, mut publisher) = healthy_fixture().await;
     let mut retry_monitor = monitor.clone();
     let clock = Clock::new_frozen();
@@ -168,10 +207,9 @@ async fn health_change_cancels_retry_wait() {
     tokio::task::yield_now().await;
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
     timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
-}
+});
 
-#[tokio::test(flavor = "current_thread")]
-async fn healthy_report_change_keeps_retry_waiting() {
+runtime_test!(healthy_report_change_keeps_retry_waiting, {
     let (_component, mut monitor, mut publisher) = healthy_fixture().await;
     let mut retry_monitor = monitor.clone();
     let clock = Clock::new_frozen();
@@ -185,10 +223,9 @@ async fn healthy_report_change_keeps_retry_waiting() {
 
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
     timeout(TEST_TIMEOUT, wait).await.unwrap().unwrap();
-}
+});
 
-#[tokio::test(flavor = "current_thread")]
-async fn health_change_after_rebind_failure_stops_rebinding() {
+runtime_test!(health_change_after_rebind_failure_stops_rebinding, {
     let io = ScriptedIo::new(
         [BindStep::Ready, BindStep::Error(io::ErrorKind::AddrInUse)],
         [AcceptStep::Error(io::ErrorKind::ConnectionAborted)],
@@ -208,10 +245,9 @@ async fn health_change_after_rebind_failure_stops_rebinding() {
     control.advance(ACCEPT_RETRY_DELAY);
     assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
     assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 2);
-}
+});
 
-#[tokio::test(flavor = "current_thread")]
-async fn health_change_after_bind_skips_listening() {
+runtime_test!(health_change_after_bind_skips_listening, {
     let (release, wait) = oneshot::channel();
     let io = ScriptedIo::new([BindStep::WaitReady(wait), BindStep::Ready], [AcceptStep::Pending]);
     let (_component, mut monitor, mut publisher) = healthy_fixture().await;
@@ -231,10 +267,25 @@ async fn health_change_after_bind_skips_listening() {
 
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-}
+});
 
-#[tokio::test(flavor = "current_thread")]
-async fn healthy_report_change_keeps_listener() {
+runtime_test!(post_bind_health_check_skips_accept, {
+    let (release, wait) = oneshot::channel();
+    let io = ScriptedIo::new([BindStep::WaitReady(wait)], [AcceptStep::Pending]);
+    let mut monitor = ScriptedMonitor::healthy();
+    let monitor_control = monitor.clone();
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let mut server = Box::pin(serve_with(io.clone(), &mut monitor, ADDRESS, &clock));
+
+    assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
+    monitor_control.set(Health::Unhealthy);
+    release.send(()).unwrap();
+    assert!(matches!(futures::poll!(server.as_mut()), Poll::Pending));
+    assert_eq!(io.inner.accept_calls.load(Ordering::SeqCst), 0);
+});
+
+runtime_test!(healthy_report_change_keeps_listener, {
     let io = ScriptedIo::new([BindStep::Ready], [AcceptStep::Pending, AcceptStep::Pending]);
     let (_component, monitor, mut publisher) = healthy_fixture().await;
     let server = spawn_server(io.clone(), monitor, Clock::new_frozen());
@@ -246,4 +297,4 @@ async fn healthy_report_change_keeps_listener() {
 
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-}
+});
