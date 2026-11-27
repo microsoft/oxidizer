@@ -7,6 +7,7 @@
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
@@ -27,7 +28,7 @@ use seatbelt::RecoveryInfo;
 
 const FORMATS: &[Format] = &[Format::Gzip, Format::Brotli, Format::Zstd, Format::Zlib];
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 struct ChannelBody(UnboundedReceiver<Result<Frame<BytesView>>>);
 

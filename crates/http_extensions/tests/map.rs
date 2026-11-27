@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpError};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn maps_buffered_and_streaming_content() {

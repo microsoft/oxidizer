@@ -8,6 +8,7 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytesbuf::mem::{CallbackMemory, GlobalPool};
@@ -18,10 +19,10 @@ use crate::core::{Compress, Compression, CompressionInternal, Destination, Outpu
 use crate::{Error, Resources, Result};
 
 /// The general-purpose provider owned by the unit-test binary.
-pub(crate) static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+pub(crate) static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 /// The general-purpose compression resources owned by the unit-test binary.
-pub(crate) static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(MEMORY.clone()));
+pub(crate) static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(MEMORY.clone()));
 
 /// Operations requested from a [`counting_memory`] provider.
 ///

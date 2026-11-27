@@ -5,13 +5,14 @@
 
 #![cfg(windows)]
 
+use std::sync::LazyLock;
 use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
 use tick::Clock;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn facade_accepts_a_global_pool_without_building_a_client() {

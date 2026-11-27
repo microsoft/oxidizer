@@ -5,11 +5,13 @@
 
 #![cfg(all(windows, feature = "private-test-util"))]
 
+use std::sync::LazyLock;
+use bytesbuf::mem::GlobalPool;
 use bytes::Bytes;
 use fetch_winhttp_impl::testing::{ResponseFrame, ResponsePlan, ResponseScript, collect_frames};
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn gamma_survivor_winhttp_builder_reports_exact_runtime_and_transport() {

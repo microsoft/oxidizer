@@ -6,9 +6,11 @@
 #![cfg(feature = "test-util")]
 
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use bytesbuf_io::testing::{FakeRead, FakeWrite, Null, Pending};
+use std::sync::LazyLock;
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn stream_builders_accept_global_pools() {

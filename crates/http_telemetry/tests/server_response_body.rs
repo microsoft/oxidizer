@@ -10,6 +10,7 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::LazyLock;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use http::{Method, StatusCode, Version};
 use http_body::Body;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 use layered::{Layer, Service};
 use observed::{Severity, Value};
 use ohno::Labeled;

@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::num::NonZeroU64;
+use std::sync::LazyLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -19,9 +20,9 @@ use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponseBui
 use layered::{Layer as _, Service as _};
 use ohno::Labeled as _;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(MEMORY.clone()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(MEMORY.clone()));
 
 fn request(method: Method, accept: Option<&str>) -> HttpRequest {
     let mut request = http::Request::builder()

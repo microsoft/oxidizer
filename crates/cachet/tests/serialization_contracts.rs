@@ -5,10 +5,12 @@
 
 #![cfg(test)]
 
+use bytesbuf::mem::GlobalPool;
+use std::sync::LazyLock;
 testing_aids::init_tracing!();
 
 #[cfg(feature = "serialize")]
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg(feature = "serialize")]
 mod serialization {

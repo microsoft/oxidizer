@@ -128,10 +128,11 @@ impl ThreadAware for Resources {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MEMORY;
 
     #[test]
     fn recycling_is_on_by_default_and_its_capacity_is_adjustable() {
-        let recycling = Resources::new(crate::testing::MEMORY.clone());
+        let recycling = Resources::new(MEMORY.clone());
         assert!(recycling.pool().capacity() > 0, "recycling must be the default");
 
         let plain = recycling.with_pool_capacity(0);

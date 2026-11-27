@@ -3,12 +3,15 @@
 
 //! URI assembly errors must preserve both diagnostics and request state.
 
+use std::sync::LazyLock;
+
+use bytesbuf::mem::GlobalPool;
 use http_extensions::routing::{BaseUriConflict, RequestUris, Router, RouterContext};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
 use ohno::Labeled as _;
 use templated_uri::{BaseUri, PathAndQuery, Uri};
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 fn bodies() -> HttpBodyBuilder {
     HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen())

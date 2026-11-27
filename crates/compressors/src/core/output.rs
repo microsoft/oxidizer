@@ -88,10 +88,11 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MEMORY;
 
     #[test]
     fn into_data_returns_bytes_only_for_data() {
-        let memory = crate::testing::MEMORY.clone();
+        let memory = MEMORY.clone();
         let view = BytesView::copied_from_slice(b"hello", &memory);
 
         assert_eq!(Output::Data(view).into_data().map(|d| d.to_vec()), Some(b"hello".to_vec()));
@@ -102,7 +103,7 @@ mod tests {
 
     #[test]
     fn predicates_identify_exactly_one_variant() {
-        let memory = crate::testing::MEMORY.clone();
+        let memory = MEMORY.clone();
         let data = Output::Data(BytesView::copied_from_slice(b"x", &memory));
 
         assert!(data.is_data() && !data.is_progress() && !data.is_need_input() && !data.is_done());
@@ -123,7 +124,7 @@ mod tests {
 
     #[test]
     fn data_can_be_inspected_without_being_consumed() {
-        let memory = crate::testing::MEMORY.clone();
+        let memory = MEMORY.clone();
         let output = Output::Data(BytesView::copied_from_slice(b"peek", &memory));
 
         assert_eq!(output.as_data().map(BytesView::len), Some(4));

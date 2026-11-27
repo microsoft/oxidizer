@@ -82,6 +82,9 @@ pub(crate) mod trace {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "std")]
+    use std::sync::LazyLock;
+
     use core::sync::atomic::Ordering;
 
     use super::trace::Trace;
@@ -113,7 +116,7 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn gamma_nov4_pool_blocks_acquire_only_on_final_release() {
-        static POOL: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+        static POOL: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
         let pool = &*POOL;
         let view = BytesView::copied_from_slice(b"retained", pool);

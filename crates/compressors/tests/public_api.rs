@@ -7,6 +7,7 @@
 
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
 use std::num::{NonZeroU32, NonZeroU64};
+use std::sync::LazyLock;
 
 use bytesbuf::mem::GlobalPool;
 #[cfg(any(feature = "brotli", feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd"))]
@@ -14,7 +15,7 @@ use compressors::DecompressorLimits;
 use compressors::format::Format;
 use compressors::{Level, Resources};
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 #[cfg(all(feature = "deflate", not(feature = "zlib")))]
 #[test]

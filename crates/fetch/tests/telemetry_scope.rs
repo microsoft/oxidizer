@@ -4,6 +4,7 @@
 //! Integration tests for the `fetch.runtime` and `fetch.transport` instrumentation-scope
 //! attributes on client metrics.
 
+use std::sync::LazyLock;
 use bytes::Bytes;
 use bytesbuf::mem::GlobalPool;
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
@@ -19,7 +20,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 const TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 /// Returns `attribute_key` from the scope that recorded `metric_name`.
 fn scope_attribute_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str, attribute_key: &str) -> Option<String> {

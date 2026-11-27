@@ -5,7 +5,7 @@
 //!
 //! Explicit reservations use different ordinary sizes to distinguish access paths, not pool boundaries.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use bytesbuf::mem::testing::TransparentMemory;
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, OpaqueMemory};
@@ -14,7 +14,7 @@ use http_extensions::HttpBodyBuilder;
 use thread_aware::{Relocator, Thread, ThreadAware};
 use tick::Clock;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn body_builder_accepts_a_global_pool() {

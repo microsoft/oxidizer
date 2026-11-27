@@ -8,7 +8,7 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
+use std::sync::{LazyLock, Arc, Mutex};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, Htt
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 use observed::{Severity, Sink, Value};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;

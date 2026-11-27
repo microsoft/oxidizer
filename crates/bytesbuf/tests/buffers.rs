@@ -4,11 +4,13 @@
 //! Buffer construction, writes, and standard I/O adapters.
 
 use core::sync::atomic as sync_fence;
+use std::sync::LazyLock;
 
 use bytesbuf::mem;
+use bytesbuf::mem::GlobalPool;
 
 #[cfg(feature = "std")]
-pub(crate) static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+pub(crate) static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 // Shared fixture for integration tests and private unit tests.
 #[path = "../src/mem/testing/test_block.rs"]

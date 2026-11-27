@@ -78,7 +78,11 @@ mod linux;
 
 /// Supplies the one general-purpose provider for WinHTTP test support.
 #[cfg(all(windows, any(test, feature = "private-test-util")))]
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+use std::sync::LazyLock;
+#[cfg(all(windows, any(test, feature = "private-test-util")))]
+use bytesbuf::mem::GlobalPool;
+#[cfg(all(windows, any(test, feature = "private-test-util")))]
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg(windows)]
 pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};

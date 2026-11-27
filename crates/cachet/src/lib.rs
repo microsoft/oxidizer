@@ -323,4 +323,8 @@ testing_aids::init_tracing!();
 
 /// Supplies the one general-purpose provider used by the unit-test binary.
 #[cfg(test)]
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+use bytesbuf::mem::GlobalPool;
+#[cfg(test)]
+use std::sync::LazyLock;
+#[cfg(test)]
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);

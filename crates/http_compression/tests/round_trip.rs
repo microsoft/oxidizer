@@ -7,7 +7,7 @@
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::num::NonZeroU64;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{LazyLock, Arc, Mutex, PoisonError};
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -23,7 +23,7 @@ use ohno::{ErrorExt as _, Labeled as _};
 
 const URL: &str = "https://example.com/resource";
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 /// Compresses well so each transformation has a visible effect.
 fn payload() -> String {

@@ -5,6 +5,8 @@
 
 #![cfg(feature = "test-util")]
 
+use std::sync::LazyLock;
+use bytesbuf::mem::GlobalPool;
 use fetch::fake::FakeHandler;
 use fetch::handlers::Buffering;
 use fetch::{HttpBodyBuilder, HttpClient, HttpError, HttpResponseBuilder};
@@ -15,7 +17,7 @@ use tick::Clock;
 
 testing_aids::init_tracing!();
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn gamma_survivor_buffering_preserves_stream_error() {

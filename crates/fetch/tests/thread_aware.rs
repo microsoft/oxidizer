@@ -5,7 +5,7 @@
 
 use std::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{LazyLock, Arc, Barrier};
 
 use bytes::Bytes;
 use bytesbuf::mem::GlobalPool;
@@ -16,7 +16,7 @@ use thread_aware::{ThreadAware, ThreadBuilder};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

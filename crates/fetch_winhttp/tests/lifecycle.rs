@@ -9,6 +9,7 @@
 #![cfg(windows)]
 
 use std::future::Future as _;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use http::Version;
 use observed::Sink;
 use tick::Clock;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[cfg_attr(miri, ignore)]
 #[test]

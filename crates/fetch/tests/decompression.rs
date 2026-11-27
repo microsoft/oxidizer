@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{LazyLock, Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
@@ -26,7 +26,7 @@ testing_aids::init_tracing!();
 
 const URL: &str = "https://example.com/resource";
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(fetch::HttpBodyBuilder::new_fake()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(fetch::HttpBodyBuilder::new_fake()));
 
 fn payload() -> String {
     "the quick brown fox jumps over the lazy dog. ".repeat(64)

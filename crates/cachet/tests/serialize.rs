@@ -6,6 +6,7 @@
 #![cfg(feature = "serialize")]
 
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
@@ -14,7 +15,7 @@ use cachet::{Cache, CacheOp, CacheTier, MockCache};
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[tokio::test]
 async fn serialization_builders_accept_global_pools() {

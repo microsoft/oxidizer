@@ -7,6 +7,7 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::io::Read as _;
+use std::sync::LazyLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -15,7 +16,7 @@ use compressors::{DecompressorLimits, Resources, gzip};
 const FIXTURE_PLAINTEXT: &[u8] = b"The quick brown fox jumps over the lazy dog.\nPack my box with five dozen liquor jugs.\n";
 const SYSTEM_GZIP: &[u8] = include_bytes!("../src/tests/fixtures/system_gzip.gz");
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 fn view(bytes: &[u8]) -> BytesView {
     BytesView::copied_from_slice(bytes, RESOURCES.memory())

@@ -6,6 +6,7 @@
 #![allow(missing_docs, clippy::unwrap_used, reason = "benchmark code")]
 
 use std::hint::black_box;
+use std::sync::LazyLock;
 
 use alloc_tracker::{Allocator, Session};
 use benchmarking::{time_sample, time_sample_with_inputs};
@@ -19,7 +20,7 @@ use tick::Clock;
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 /// Forces serialization at the fallback boundary without accumulating primary entries.
 struct MissTier;

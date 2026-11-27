@@ -22,6 +22,7 @@
 
 use std::hint::black_box;
 use std::num::NonZeroUsize;
+use std::sync::LazyLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -33,7 +34,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 /// Sizes chosen to bracket real traffic: a small API response, a page, and a large document.
 const SIZES: [usize; 3] = [1024, 64 * 1024, 1024 * 1024];
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 /// Builds a payload that compresses like real data rather than like a repeated string.
 ///

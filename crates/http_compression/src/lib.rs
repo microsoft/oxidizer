@@ -142,5 +142,11 @@ pub use error::CompressibleTypeError;
 
 /// Supplies the one general-purpose resource set used by unit tests.
 #[cfg(test)]
-pub(crate) static RESOURCES: std::sync::LazyLock<compressors::Resources> =
-    std::sync::LazyLock::new(|| compressors::Resources::new(bytesbuf::mem::GlobalPool::new()));
+use bytesbuf::mem::GlobalPool;
+#[cfg(test)]
+use compressors::Resources;
+#[cfg(test)]
+use std::sync::LazyLock;
+#[cfg(test)]
+pub(crate) static RESOURCES: LazyLock<Resources> =
+    LazyLock::new(|| Resources::new(GlobalPool::new()));

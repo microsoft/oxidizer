@@ -7,6 +7,7 @@
 
 use std::error::Error as _;
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::sync::LazyLock;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -14,9 +15,9 @@ use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Error, Resources, TrailingData};
 use recoverable::{Recovery as _, RecoveryInfo};
 
-static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(MEMORY.clone()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(MEMORY.clone()));
 
 #[cfg(feature = "deflate")]
 #[test]

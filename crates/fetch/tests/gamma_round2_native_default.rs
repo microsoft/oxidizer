@@ -5,9 +5,11 @@
 
 #![cfg(all(feature = "tokio", feature = "native-tls", not(feature = "rustls")))]
 
+use std::sync::LazyLock;
+use bytesbuf::mem::GlobalPool;
 testing_aids::init_tracing!();
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 #[cfg_attr(miri, ignore = "native tests cover platform TLS initialization and default backend selection")]

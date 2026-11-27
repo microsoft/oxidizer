@@ -5,7 +5,9 @@
 
 #![cfg(test)]
 
-static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
+use bytesbuf::mem::GlobalPool;
+use std::sync::LazyLock;
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 mod read_fixture;
 

@@ -26,6 +26,7 @@
 )]
 
 use std::num::{NonZeroU64, NonZeroUsize};
+use std::sync::LazyLock;
 
 use bolero::TypeGenerator;
 use bytesbuf::BytesView;
@@ -46,7 +47,7 @@ const MAX_COPIES: usize = 4;
 /// top of this, never instead of it.
 const HARD_OUTPUT_CEILING: u64 = 1 << 20;
 
-static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 /// What to do to a valid stream before decompressing it.
 #[derive(Debug, Clone, Copy, TypeGenerator)]
