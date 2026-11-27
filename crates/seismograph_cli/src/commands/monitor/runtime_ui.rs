@@ -8,13 +8,15 @@ use std::cmp::Ordering;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table, TableState};
 
 use super::super::app::{RuntimeSectionFocus, RuntimeViewState, RuntimeWorkerSort, RuntimeWorkersFocus};
 use super::super::data::{RuntimeMonitorSnapshot, RuntimeWorkerSummary};
+use super::super::formatting::{format_count, format_histogram_duration, format_runtime_duration};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime_timeline::histogram;
-use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
+use super::super::table_ui;
+use super::draw_empty_panel_with_message;
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -33,21 +35,6 @@ pub(super) fn draw(
     draw_workers(frame, mouse, workers, runtime, &selected_workers, view);
     let selected = selected_index(view).min(selected_workers.len().saturating_sub(1));
     draw_worker_activity(frame, activity, selected_workers.get(selected).copied(), view.focus);
-}
-
-fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
-}
-
-fn selection(selected: bool) -> Style {
-    if selected {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().bg(Color::DarkGray)
-    }
 }
 
 fn workers_for(runtime: &RuntimeMonitorSnapshot, view: RuntimeViewState) -> Vec<&RuntimeWorkerSummary> {
@@ -70,13 +57,9 @@ fn workers_for(runtime: &RuntimeMonitorSnapshot, view: RuntimeViewState) -> Vec<
     workers
 }
 
-fn directed(ordering: Ordering, descending: bool) -> Ordering {
-    if descending { ordering.reverse() } else { ordering }
-}
-
 fn optional(left: Option<u64>, right: Option<u64>, descending: bool) -> Ordering {
     match (left, right) {
-        (Some(left), Some(right)) => directed(left.cmp(&right), descending),
+        (Some(left), Some(right)) => table_ui::directed(left.cmp(&right), descending),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
@@ -85,25 +68,25 @@ fn optional(left: Option<u64>, right: Option<u64>, descending: bool) -> Ordering
 
 fn compare_workers(left: &RuntimeWorkerSummary, right: &RuntimeWorkerSummary, sort: RuntimeWorkerSort, descending: bool) -> Ordering {
     let ordering = match sort {
-        RuntimeWorkerSort::WorkerId => directed(left.worker_id.cmp(&right.worker_id), descending),
-        RuntimeWorkerSort::State => directed(left.state.cmp(&right.state), descending),
-        RuntimeWorkerSort::Types => directed(left.task_types.cmp(&right.task_types), descending),
-        RuntimeWorkerSort::Tasks => directed(left.observed_tasks.cmp(&right.observed_tasks), descending),
-        RuntimeWorkerSort::Polls => directed(left.metrics.poll_count.cmp(&right.metrics.poll_count), descending),
+        RuntimeWorkerSort::WorkerId => table_ui::directed(left.worker_id.cmp(&right.worker_id), descending),
+        RuntimeWorkerSort::State => table_ui::directed(left.state.cmp(&right.state), descending),
+        RuntimeWorkerSort::Types => table_ui::directed(left.task_types.cmp(&right.task_types), descending),
+        RuntimeWorkerSort::Tasks => table_ui::directed(left.observed_tasks.cmp(&right.observed_tasks), descending),
+        RuntimeWorkerSort::Polls => table_ui::directed(left.metrics.poll_count.cmp(&right.metrics.poll_count), descending),
         RuntimeWorkerSort::Activity => {
             let activity = |worker: &RuntimeWorkerSummary| {
                 worker.metrics.polls.iter().fold(0_u64, |total, interval| {
                     total.saturating_add(interval.end.saturating_sub(interval.start))
                 })
             };
-            directed(activity(left).cmp(&activity(right)), descending)
+            table_ui::directed(activity(left).cmp(&activity(right)), descending)
         }
         RuntimeWorkerSort::MedianPoll => optional(left.metrics.median_poll_nanos, right.metrics.median_poll_nanos, descending),
         RuntimeWorkerSort::MaxPoll => optional(left.metrics.max_poll_nanos, right.metrics.max_poll_nanos, descending),
-        RuntimeWorkerSort::Runs => directed(left.blocking.executions.cmp(&right.blocking.executions), descending),
-        RuntimeWorkerSort::Succeeded => directed(left.blocking.succeeded.cmp(&right.blocking.succeeded), descending),
-        RuntimeWorkerSort::Canceled => directed(left.blocking.canceled.cmp(&right.blocking.canceled), descending),
-        RuntimeWorkerSort::Panicked => directed(left.blocking.panicked.cmp(&right.blocking.panicked), descending),
+        RuntimeWorkerSort::Runs => table_ui::directed(left.blocking.executions.cmp(&right.blocking.executions), descending),
+        RuntimeWorkerSort::Succeeded => table_ui::directed(left.blocking.succeeded.cmp(&right.blocking.succeeded), descending),
+        RuntimeWorkerSort::Canceled => table_ui::directed(left.blocking.canceled.cmp(&right.blocking.canceled), descending),
+        RuntimeWorkerSort::Panicked => table_ui::directed(left.blocking.panicked.cmp(&right.blocking.panicked), descending),
         RuntimeWorkerSort::AverageQueue => optional(
             left.blocking.queue_time.mean_nanos(),
             right.blocking.queue_time.mean_nanos(),
@@ -217,9 +200,15 @@ fn draw_workers(
         Paragraph::new(Line::from(vec![
             Span::raw(runtime_label),
             Span::raw(" | "),
-            Span::styled("Async workers", selection(view.focus == RuntimeWorkersFocus::Asynchronous)),
+            Span::styled(
+                "Async workers",
+                table_ui::selection_style(view.focus == RuntimeWorkersFocus::Asynchronous),
+            ),
             Span::raw(" | "),
-            Span::styled("Blocking workers", selection(view.focus == RuntimeWorkersFocus::Blocking)),
+            Span::styled(
+                "Blocking workers",
+                table_ui::selection_style(view.focus == RuntimeWorkersFocus::Blocking),
+            ),
             Span::raw(" · a/b · Enter task types"),
         ])),
         tabs,
@@ -265,7 +254,7 @@ fn draw_workers(
                 RuntimeWorkersFocus::Blocking => "No blocking workers are present in this capture.",
             })
             .style(Style::default().fg(Color::DarkGray))
-            .block(block(title, focused)),
+            .block(table_ui::focused_block(title, focused)),
             table,
         );
         return;
@@ -277,12 +266,24 @@ fn draw_workers(
         .take(visible)
         .map(|worker| worker_row(worker, view.focus, wide, table.width));
     let (headers, sorts, widths) = worker_columns(view.focus, wide);
-    register_sort_headers(mouse, table, &widths, &sorts, view.focus);
+    let targets = sorts
+        .iter()
+        .copied()
+        .map(|sort| ListTarget::RuntimeWorkerHeader(view.focus, sort))
+        .collect::<Vec<_>>();
+    table_ui::register_headers(mouse, table, &widths, &targets);
+    let (selected_sort, descending) = match view.focus {
+        RuntimeWorkersFocus::Asynchronous => (view.asynchronous_worker_sort, view.asynchronous_worker_descending),
+        RuntimeWorkersFocus::Blocking => (view.blocking_worker_sort, view.blocking_worker_descending),
+    };
     let widget = Table::new(rows, widths)
-        .header(Row::new(sort_headers(headers, &sorts, view)).style(Style::default().add_modifier(Modifier::BOLD)))
+        .header(
+            Row::new(table_ui::sort_headers(headers, &sorts, selected_sort, descending))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
         .column_spacing(1)
-        .row_highlight_style(selection(focused))
-        .block(block(title, focused));
+        .row_highlight_style(table_ui::selection_style(focused))
+        .block(table_ui::focused_block(title, focused));
     let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
     frame.render_stateful_widget(widget, table, &mut state);
     mouse.register(
@@ -400,50 +401,6 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
     }
 }
 
-fn sort_headers(headers: Vec<&str>, sorts: &[RuntimeWorkerSort], view: RuntimeViewState) -> Vec<String> {
-    let (selected, descending) = match view.focus {
-        RuntimeWorkersFocus::Asynchronous => (view.asynchronous_worker_sort, view.asynchronous_worker_descending),
-        RuntimeWorkersFocus::Blocking => (view.blocking_worker_sort, view.blocking_worker_descending),
-    };
-    headers
-        .into_iter()
-        .zip(sorts)
-        .map(|(header, sort)| {
-            if *sort == selected {
-                format!("{header}{}", if descending { "▼" } else { "▲" })
-            } else {
-                header.into()
-            }
-        })
-        .collect()
-}
-
-fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[RuntimeWorkerSort], focus: RuntimeWorkersFocus) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    if inner.is_empty() {
-        return;
-    }
-    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    let fixed = widths.iter().fold(0_u16, |total, width| {
-        total.saturating_add(match width {
-            Constraint::Length(width) => *width,
-            _ => 0,
-        })
-    });
-    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
-    let mut x = inner.x;
-    for (width, sort) in widths.iter().zip(sorts) {
-        let width = match width {
-            Constraint::Length(width) => *width,
-            Constraint::Min(minimum) => flexible.max(*minimum),
-            _ => 0,
-        }
-        .min(inner.right().saturating_sub(x));
-        mouse.register_item(Rect::new(x, inner.y, width, 1), ListTarget::RuntimeWorkerHeader(focus, *sort), 0);
-        x = x.saturating_add(width).saturating_add(1);
-    }
-}
-
 fn worker_row(worker: &RuntimeWorkerSummary, focus: RuntimeWorkersFocus, wide: bool, width: u16) -> Row<'static> {
     let mut cells = vec![worker_name(worker)];
     match (focus, wide) {
@@ -534,7 +491,7 @@ fn draw_worker_activity(frame: &mut ratatui::Frame<'_>, area: Rect, worker: Opti
             )),
             timeline(&worker.metrics.polls, worker.window, usize::from(area.width.saturating_sub(2))),
         ];
-        frame.render_widget(Paragraph::new(lines).block(block(title, false)), summary);
+        frame.render_widget(Paragraph::new(lines).block(table_ui::focused_block(title, false)), summary);
         draw_poll_histogram(frame, chart, &worker.metrics.poll_samples);
         return;
     }
@@ -562,7 +519,7 @@ fn draw_worker_activity(frame: &mut ratatui::Frame<'_>, area: Rect, worker: Opti
             duration(worker.blocking.execution_time.max_nanos),
         )),
     ];
-    frame.render_widget(Paragraph::new(lines).block(block(title, false)), area);
+    frame.render_widget(Paragraph::new(lines).block(table_ui::focused_block(title, false)), area);
 }
 
 fn draw_poll_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, samples: &[u64]) {
@@ -583,7 +540,7 @@ fn draw_poll_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, samples: &[u6
         .collect::<Vec<_>>();
     frame.render_widget(
         BarChart::default()
-            .block(block(
+            .block(table_ui::focused_block(
                 format!(
                     " Poll Duration · n={} · max {} ",
                     samples.len(),

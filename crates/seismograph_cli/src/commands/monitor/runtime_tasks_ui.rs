@@ -8,12 +8,14 @@ use std::cmp::Ordering;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
 use super::super::app::{RuntimeSectionFocus, RuntimeTaskTypeSort, RuntimeViewState, RuntimeWorkersFocus, selected_runtime_worker_id};
 use super::super::data::{AsynchronousTaskGroupSummary, BlockingTaskGroupSummary, RuntimeMonitorSnapshot};
+use super::super::formatting::{format_count, format_runtime_duration};
 use super::super::mouse::{ListTarget, MouseRows};
-use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
+use super::super::table_ui;
+use super::draw_empty_panel_with_message;
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -30,21 +32,6 @@ pub(super) fn draw(
     match view.focus {
         RuntimeWorkersFocus::Asynchronous => draw_asynchronous(frame, mouse, area, runtime, view),
         RuntimeWorkersFocus::Blocking => draw_blocking(frame, mouse, area, runtime, view),
-    }
-}
-
-fn block(title: String, focused: bool) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
-}
-
-fn selection(focused: bool) -> Style {
-    if focused {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().bg(Color::DarkGray)
     }
 }
 
@@ -71,52 +58,8 @@ fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
 
-fn sort_headers(headers: Vec<&str>, sorts: &[RuntimeTaskTypeSort], view: RuntimeViewState) -> Vec<String> {
-    headers
-        .into_iter()
-        .zip(sorts)
-        .map(|(header, sort)| {
-            if *sort == view.task_type_sort {
-                format!("{header}{}", if view.task_type_sort_descending { "▼" } else { "▲" })
-            } else {
-                header.into()
-            }
-        })
-        .collect()
-}
-
-fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[RuntimeTaskTypeSort]) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    if inner.is_empty() {
-        return;
-    }
-    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    let fixed = widths.iter().fold(0_u16, |total, width| {
-        total.saturating_add(match width {
-            Constraint::Length(width) => *width,
-            _ => 0,
-        })
-    });
-    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
-    let mut x = inner.x;
-    for (width, sort) in widths.iter().zip(sorts) {
-        let width = match width {
-            Constraint::Length(width) => *width,
-            Constraint::Min(minimum) => flexible.max(*minimum),
-            _ => 0,
-        }
-        .min(inner.right().saturating_sub(x));
-        mouse.register_item(Rect::new(x, inner.y, width, 1), ListTarget::RuntimeTaskTypeHeader(*sort), 0);
-        x = x.saturating_add(width).saturating_add(1);
-    }
-}
-
 fn directed(ordering: Ordering, view: RuntimeViewState) -> Ordering {
-    if view.task_type_sort_descending {
-        ordering.reverse()
-    } else {
-        ordering
-    }
+    table_ui::directed(ordering, view.task_type_sort_descending)
 }
 
 fn compare_optional<T: Ord>(left: Option<T>, right: Option<T>, view: RuntimeViewState) -> Ordering {
@@ -170,7 +113,7 @@ fn draw_empty(frame: &mut ratatui::Frame<'_>, area: Rect, title: String, message
     frame.render_widget(
         Paragraph::new(message)
             .style(Style::default().fg(Color::DarkGray))
-            .block(block(title, focused)),
+            .block(table_ui::focused_block(title, focused)),
         area,
     );
 }
@@ -318,12 +261,21 @@ fn draw_asynchronous(
             ],
         )
     };
-    register_sort_headers(mouse, area, &widths, &sorts);
+    let targets = sorts.iter().copied().map(ListTarget::RuntimeTaskTypeHeader).collect::<Vec<_>>();
+    table_ui::register_headers(mouse, area, &widths, &targets);
     let table = Table::new(rows, widths)
-        .header(Row::new(sort_headers(headers, &sorts, view)).add_modifier(Modifier::BOLD))
+        .header(
+            Row::new(table_ui::sort_headers(
+                headers,
+                &sorts,
+                view.task_type_sort,
+                view.task_type_sort_descending,
+            ))
+            .add_modifier(Modifier::BOLD),
+        )
         .column_spacing(1)
-        .row_highlight_style(selection(focused))
-        .block(block(title, focused));
+        .row_highlight_style(table_ui::selection_style(focused))
+        .block(table_ui::focused_block(title, focused));
     let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
     frame.render_stateful_widget(table, area, &mut state);
     mouse.register(
@@ -495,12 +447,21 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
             ],
         )
     };
-    register_sort_headers(mouse, area, &widths, &sorts);
+    let targets = sorts.iter().copied().map(ListTarget::RuntimeTaskTypeHeader).collect::<Vec<_>>();
+    table_ui::register_headers(mouse, area, &widths, &targets);
     let table = Table::new(rows, widths)
-        .header(Row::new(sort_headers(headers, &sorts, view)).add_modifier(Modifier::BOLD))
+        .header(
+            Row::new(table_ui::sort_headers(
+                headers,
+                &sorts,
+                view.task_type_sort,
+                view.task_type_sort_descending,
+            ))
+            .add_modifier(Modifier::BOLD),
+        )
         .column_spacing(1)
-        .row_highlight_style(selection(focused))
-        .block(block(title, focused));
+        .row_highlight_style(table_ui::selection_style(focused))
+        .block(table_ui::focused_block(title, focused));
     let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
     frame.render_stateful_widget(table, area, &mut state);
     mouse.register(

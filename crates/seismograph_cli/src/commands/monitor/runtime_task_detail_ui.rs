@@ -6,13 +6,15 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Borders, Paragraph};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Paragraph};
 
 use super::super::app::{RuntimeDetailMode, RuntimeViewState, TaskHistogram};
 use super::super::data::RuntimeTaskSummary;
+use super::super::formatting::{format_count, format_histogram_duration, format_runtime_duration};
 use super::super::runtime::RuntimeTaskKind;
 use super::super::runtime_timeline::{TimeWindow, bins, histogram};
-use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
+use super::super::table_ui;
+use super::draw_empty_panel_with_message;
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -85,20 +87,13 @@ pub(super) fn draw(
     };
     lines.push(Line::from(format!("{label} · t switches histogram · e opens inferred events")));
     frame.render_widget(
-        Paragraph::new(lines).block(block(
+        Paragraph::new(lines).block(table_ui::focused_block(
             format!(" Task Statistics · #{} ", task.task_id),
             view.detail_mode == RuntimeDetailMode::Task,
         )),
         summary,
     );
     draw_histogram(frame, chart, label, samples);
-}
-
-fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
 fn duration(value: Option<u64>) -> String {
@@ -132,7 +127,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         frame.render_widget(
             Paragraph::new("No completed duration samples.")
                 .style(Style::default().fg(Color::DarkGray))
-                .block(block(format!(" {label} "), false)),
+                .block(table_ui::focused_block(format!(" {label} "), false)),
             area,
         );
         return;
@@ -150,7 +145,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         .collect::<Vec<_>>();
     frame.render_widget(
         BarChart::default()
-            .block(block(
+            .block(table_ui::focused_block(
                 format!(" {label} · n={} · max {} ", samples.len(), duration(samples.iter().copied().max())),
                 false,
             ))

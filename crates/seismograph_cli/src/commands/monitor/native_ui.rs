@@ -16,6 +16,7 @@ use seismograph_rallocator::native::{Freshness, Observation, ObservationSource, 
 
 use super::help::Context;
 use super::mouse::{ListTarget, MouseRows};
+use super::table_ui;
 use super::ui::wrapped_detail_with_limit;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -283,7 +284,7 @@ pub(super) fn list<'a>(
         List::new(rows)
             .block(block)
             .highlight_symbol("› ")
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+            .highlight_style(table_ui::selection_style(true)),
         area,
         &mut state,
     );

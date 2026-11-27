@@ -9,6 +9,7 @@ mod data;
 mod filter;
 mod filter_index;
 mod filter_ui;
+mod formatting;
 mod help;
 mod help_content;
 mod hotspot_analysis;
@@ -23,6 +24,7 @@ mod profile;
 mod runtime;
 mod runtime_timeline;
 mod snapshot;
+mod table_ui;
 mod task_events;
 mod ui;
 

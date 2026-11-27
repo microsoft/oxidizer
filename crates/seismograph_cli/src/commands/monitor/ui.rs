@@ -29,8 +29,10 @@ use super::data::{
 };
 #[cfg(test)]
 use super::data::{MemorySnapshot, MemoryTier};
+use super::formatting::{format_bytes, format_count, format_runtime_duration};
 use super::live_activity::LiveActivity;
 use super::mouse::{ListTarget, MouseRows};
+use super::table_ui;
 
 #[path = "hotspots_ui.rs"]
 mod hotspots_ui;
@@ -169,7 +171,7 @@ impl App {
         });
         let list = List::new(items)
             .block(Block::default().title(" Seismograph applications ").borders(Borders::ALL))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .highlight_style(table_ui::selection_style(true).add_modifier(Modifier::BOLD))
             .highlight_symbol("> ");
         let mut state = ListState::default().with_selected((!self.instances.is_empty()).then_some(self.selected));
         frame.render_stateful_widget(list, area, &mut state);
@@ -232,7 +234,7 @@ impl App {
                     .title_bottom(" F1 help · ↑/↓ field · ←/→ change · Enter apply · Esc cancel ")
                     .borders(Borders::ALL),
             )
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .highlight_style(table_ui::selection_style(true).add_modifier(Modifier::BOLD))
             .highlight_symbol("> ");
         let mut state = ListState::default().with_selected(Some(popup.selected));
         frame.render_widget(Clear, popup_area);
@@ -301,7 +303,7 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             .padding("", "")
             .select(view.tab.index())
             .block(tabs_block)
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .highlight_style(table_ui::selection_style(true).add_modifier(Modifier::BOLD))
             .divider("│"),
         tabs,
     );
@@ -544,20 +546,14 @@ fn draw_io(
                 .saturating_add(left.canceled)
                 .cmp(&right.errors.saturating_add(right.canceled)),
         };
-        if view.resource_descending { ordering.reverse() } else { ordering }
+        table_ui::directed(ordering, view.resource_descending)
     });
     let resource_selected = view.resource_selected.min(resources.len().saturating_sub(1));
     let resource = resources.get(resource_selected).copied();
     let visible_resources = usize::from(resources_area.height.saturating_sub(3));
     let first_resource = resource_selected.saturating_sub(visible_resources.saturating_sub(1));
     mouse_rows.register(resources_area, 1, first_resource, resources.len(), ListTarget::IoResources);
-    let resource_heading = |label: &str, sort| {
-        if view.resource_sort == sort {
-            format!("{label}{}", if view.resource_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let resource_heading = |label: &str, sort| table_ui::sort_heading(label, view.resource_sort == sort, view.resource_descending);
     let mut resource_lines = vec![Line::from(Span::styled(
         format!(
             "{:<12} {:<12} {:>7} {:>7} {:>10} {:>10} {:>7}",
@@ -644,19 +640,13 @@ fn draw_io(
             IoOperationSort::Completed => left.completed_bytes.cmp(&right.completed_bytes),
             IoOperationSort::Duration => optional(left.duration_nanos, right.duration_nanos),
         };
-        if view.operation_descending { ordering.reverse() } else { ordering }
+        table_ui::directed(ordering, view.operation_descending)
     });
     let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
     let visible_operations = usize::from(operations_area.height.saturating_sub(3));
     let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::IoOperations);
-    let operation_heading = |label: &str, sort| {
-        if view.operation_sort == sort {
-            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let operation_heading = |label: &str, sort| table_ui::sort_heading(label, view.operation_sort == sort, view.operation_descending);
     let mut operation_lines = vec![Line::from(Span::styled(
         format!(
             "{:<11} {:<6} {:<12} {:>8} {:>10} {:>10} {:>10}",
@@ -782,20 +772,14 @@ fn draw_cache(
                 (u128::from(left.hits) * u128::from(right_lookups.max(1))).cmp(&(u128::from(right.hits) * u128::from(left_lookups.max(1))))
             }
         };
-        if view.tier_descending { ordering.reverse() } else { ordering }
+        table_ui::directed(ordering, view.tier_descending)
     });
     let tier_selected = view.tier_selected.min(tiers.len().saturating_sub(1));
     let tier = tiers.get(tier_selected).copied();
     let visible_tiers = usize::from(tiers_area.height.saturating_sub(3));
     let first_tier = tier_selected.saturating_sub(visible_tiers.saturating_sub(1));
     mouse_rows.register(tiers_area, 1, first_tier, tiers.len(), ListTarget::CacheTiers);
-    let tier_heading = |label: &str, sort| {
-        if view.tier_sort == sort {
-            format!("{label}{}", if view.tier_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let tier_heading = |label: &str, sort| table_ui::sort_heading(label, view.tier_sort == sort, view.tier_descending);
     let mut tier_lines = vec![Line::from(Span::styled(
         format!(
             "{:<19} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
@@ -870,19 +854,13 @@ fn draw_cache(
             CacheOperationSort::Outcome => cache_event_label(left.kind).cmp(cache_event_label(right.kind)),
             CacheOperationSort::Events => left.events.cmp(&right.events),
         };
-        if view.operation_descending { ordering.reverse() } else { ordering }
+        table_ui::directed(ordering, view.operation_descending)
     });
     let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
     let visible_operations = usize::from(operations_area.height.saturating_sub(3));
     let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::CacheOperations);
-    let operation_heading = |label: &str, sort| {
-        if view.operation_sort == sort {
-            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let operation_heading = |label: &str, sort| table_ui::sort_heading(label, view.operation_sort == sort, view.operation_descending);
     let mut operation_lines = vec![Line::from(Span::styled(
         format!(
             "{:<28} {:>12}",
@@ -987,36 +965,6 @@ fn format_hit_rate(hits: u64, lookups: u64) -> String {
     format!("{}.{:01}%", tenths / 10, tenths % 10)
 }
 
-fn format_runtime_duration(nanos: u64) -> String {
-    if nanos >= 1_000_000_000 {
-        format_decimal_duration(nanos, 1_000_000_000, "s")
-    } else if nanos >= 1_000_000 {
-        format_decimal_duration(nanos, 1_000_000, "ms")
-    } else if nanos >= 1_000 {
-        format_decimal_duration(nanos, 1_000, "us")
-    } else {
-        format!("{nanos}ns")
-    }
-}
-
-fn format_histogram_duration(nanos: u64) -> String {
-    match nanos {
-        0..1_000 => format!("{nanos}ns"),
-        1_000..1_000_000 => format!("{}us", nanos / 1_000),
-        1_000_000..1_000_000_000 => format!("{}ms", nanos / 1_000_000),
-        1_000_000_000..10_000_000_000 => {
-            format!("{}.{:01}s", nanos / 1_000_000_000, nanos % 1_000_000_000 / 100_000_000)
-        }
-        _ => format!("{}s", nanos / 1_000_000_000),
-    }
-}
-
-fn format_decimal_duration(nanos: u64, unit_nanos: u64, suffix: &str) -> String {
-    let whole = nanos / unit_nanos;
-    let hundredths = nanos % unit_nanos * 100 / unit_nanos;
-    format!("{whole}.{hundredths:02}{suffix}")
-}
-
 fn format_event_loss(lost_events: u64, total_events: u64) -> String {
     if total_events == 0 {
         return "0.0%".into();
@@ -1026,12 +974,8 @@ fn format_event_loss(lost_events: u64, total_events: u64) -> String {
 }
 
 fn register_fixed_headers(mouse: &MouseRows, area: Rect, widths: &[u16], targets: &[ListTarget]) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    let mut x = inner.x;
-    for (width, target) in widths.iter().copied().zip(targets.iter().copied()) {
-        mouse.register_item(Rect::new(x, inner.y, width.min(inner.right().saturating_sub(x)), 1), target, 0);
-        x = x.saturating_add(width).saturating_add(1);
-    }
+    let widths = widths.iter().copied().map(Constraint::Length).collect::<Vec<_>>();
+    table_ui::register_headers(mouse, area, &widths, targets);
 }
 
 #[expect(
@@ -1109,7 +1053,7 @@ fn draw_allocations(
                     location = hotspot.location(view.stack_filter),
                 ));
                 if hotspot_index == selected {
-                    line.style(Style::default().fg(Color::Black).bg(Color::Cyan))
+                    line.style(table_ui::selection_style(true))
                 } else {
                     line
                 }
@@ -1194,7 +1138,7 @@ fn draw_allocation_records(
                 .title_bottom(" View IDs correlate retained evidence only; orphan frees/resizes remain explicit ")
                 .borders(Borders::ALL),
         )
-        .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
+        .highlight_style(table_ui::selection_style(true))
         .highlight_symbol("> "),
         records_area,
         &mut state,
@@ -1459,7 +1403,7 @@ fn sorted_primitive_groups(primitives: &PrimitiveSnapshot, view: PrimitiveViewSt
             PrimitiveTypeSort::Objects => left.objects.cmp(&right.objects),
             PrimitiveTypeSort::Contentions => left.contentions.cmp(&right.contentions),
         };
-        let ordering = if view.type_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.type_descending);
         ordering.then_with(|| left.kind.label().cmp(right.kind.label()))
     });
     groups
@@ -1479,13 +1423,7 @@ fn draw_primitive_types(
     let selected = view.primitive_selected.min(groups.len().saturating_sub(1));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     mouse_rows.register(area, 1, first, groups.len(), ListTarget::PrimitiveTypes);
-    let heading = |label: &str, sort| {
-        if view.type_sort == sort {
-            format!("{label}{}", if view.type_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.type_sort == sort, view.type_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<TYPE_WIDTH$} {:>14} {:>14} {:>14}",
@@ -1555,13 +1493,7 @@ fn draw_primitive_operations(
 ) {
     const OPERATION_WIDTH: usize = 28;
 
-    let heading = |label: &str, sort| {
-        if view.sort == sort {
-            format!("{label}{}", if view.descending { "▼" } else { "▲" })
-        } else {
-            label.to_owned()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.sort == sort, view.descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<OPERATION_WIDTH$} {:>14} {:>12} {:>12} {:>12}",
@@ -1647,7 +1579,7 @@ fn sorted_primitive_hotspots(operation: &super::data::PrimitiveOperation, view: 
             PrimitiveHotspotSort::Events => left.count.cmp(&right.count),
             PrimitiveHotspotSort::Location => left.location(view.stack_filter).cmp(right.location(view.stack_filter)),
         };
-        let ordering = if view.hotspot_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.hotspot_descending);
         ordering.then_with(|| left.location(view.stack_filter).cmp(right.location(view.stack_filter)))
     });
     hotspots
@@ -1663,13 +1595,7 @@ fn draw_primitive_hotspots(
     let visible = usize::from(area.height.saturating_sub(3));
     let selected = hotspots.map_or(0, |hotspots| view.hotspot_selected.min(hotspots.len().saturating_sub(1)));
     let first = selected.saturating_sub(visible.saturating_sub(1));
-    let heading = |label: &str, sort| {
-        if view.hotspot_sort == sort {
-            format!("{label}{}", if view.hotspot_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.hotspot_sort == sort, view.hotspot_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:>12}  {}",
@@ -1815,7 +1741,7 @@ fn sorted_threads(threads: &ThreadSnapshot, view: ThreadViewState) -> Vec<&super
             ThreadListSort::Retained => left.retained_events.cmp(&right.retained_events),
             ThreadListSort::Overwritten => left.lost_events.cmp(&right.lost_events),
         };
-        let ordering = if view.thread_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.thread_descending);
         ordering.then_with(|| left.thread_id.cmp(&right.thread_id))
     });
     sorted
@@ -1830,7 +1756,7 @@ fn sorted_thread_operations(thread: &super::data::ThreadSummary, view: ThreadVie
             ThreadOperationSort::Objects => left.objects.cmp(&right.objects),
             ThreadOperationSort::Threads => left.participants.len().cmp(&right.participants.len()),
         };
-        let ordering = if view.operation_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.operation_descending);
         ordering.then_with(|| left.kind.label().cmp(right.kind.label()))
     });
     sorted
@@ -1844,11 +1770,7 @@ fn sorted_thread_participants(operation: &super::data::ThreadOperation, view: Th
             ThreadParticipantSort::Objects => left.objects.len().cmp(&right.objects.len()),
             ThreadParticipantSort::Events => left.events.cmp(&right.events),
         };
-        let ordering = if view.participant_descending {
-            ordering.reverse()
-        } else {
-            ordering
-        };
+        let ordering = table_ui::directed(ordering, view.participant_descending);
         ordering.then_with(|| left.thread_id.cmp(&right.thread_id))
     });
     sorted
@@ -1863,7 +1785,7 @@ fn sorted_thread_objects(participant: &super::data::ThreadParticipant, view: Thr
             ThreadObjectSort::Related => left.related_events.cmp(&right.related_events),
             ThreadObjectSort::Total => left.hotness().cmp(&right.hotness()),
         };
-        let ordering = if view.object_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.object_descending);
         ordering.then_with(|| left.object_id.cmp(&right.object_id))
     });
     sorted
@@ -1881,13 +1803,7 @@ fn draw_thread_list(
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     mouse_rows.register(area, 1, first, threads.len(), ListTarget::Threads);
-    let heading = |label: &str, sort| {
-        if view.thread_sort == sort {
-            format!("{label}{}", if view.thread_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.thread_sort == sort, view.thread_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<18} {:>9} {:>11}",
@@ -1955,13 +1871,7 @@ fn draw_thread_operations(
         operations.map_or(0, <[&super::data::ThreadOperation]>::len),
         ListTarget::ThreadOperations,
     );
-    let heading = |label: &str, sort| {
-        if view.operation_sort == sort {
-            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.operation_sort == sort, view.operation_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<28} {:>10} {:>10} {:>13}",
@@ -2042,13 +1952,7 @@ fn draw_thread_participants(
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     mouse_rows.register(area, 1, first, participants.len(), ListTarget::ThreadParticipants);
-    let heading = |label: &str, sort| {
-        if view.participant_sort == sort {
-            format!("{label}{}", if view.participant_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.participant_sort == sort, view.participant_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<14} {:>7} {:>7}",
@@ -2127,13 +2031,7 @@ fn draw_thread_objects(
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     mouse_rows.register(area, 1, first, objects.len(), ListTarget::ThreadObjects);
-    let heading = |label: &str, sort| {
-        if view.object_sort == sort {
-            format!("{label}{}", if view.object_descending { "▼" } else { "▲" })
-        } else {
-            label.into()
-        }
-    };
+    let heading = |label: &str, sort| table_ui::sort_heading(label, view.object_sort == sort, view.object_descending);
     let mut lines = vec![Line::from(Span::styled(
         format!(
             "{:<16} {:>5} {:>5} {:>5}",
@@ -2255,11 +2153,7 @@ fn primitive_selection_line(line: Line<'static>, selected: bool, focused: bool) 
     if !selected {
         return line;
     }
-    if focused {
-        line.style(Style::default().fg(Color::Black).bg(Color::Cyan))
-    } else {
-        line.style(Style::default().bg(Color::DarkGray))
-    }
+    line.style(table_ui::selection_style(focused))
 }
 
 fn draw_allocator(
@@ -2364,39 +2258,6 @@ fn recording_policy_line(label: &'static str, policy: RecordingPolicy) -> Line<'
             format_sampling_percentage(policy.sampling_one_in),
         ),
     )
-}
-
-fn format_count(value: u64) -> String {
-    let digits = value.to_string();
-    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index != 0 && (digits.len() - index).is_multiple_of(3) {
-            formatted.push(',');
-        }
-        formatted.push(digit);
-    }
-    formatted
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KIBIBYTE: u64 = 1024;
-    const MEBIBYTE: u64 = KIBIBYTE * 1024;
-    const GIBIBYTE: u64 = MEBIBYTE * 1024;
-    if bytes >= GIBIBYTE {
-        format_scaled_bytes(bytes, GIBIBYTE, "GiB")
-    } else if bytes >= MEBIBYTE {
-        format_scaled_bytes(bytes, MEBIBYTE, "MiB")
-    } else if bytes >= KIBIBYTE {
-        format_scaled_bytes(bytes, KIBIBYTE, "KiB")
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn format_scaled_bytes(bytes: u64, unit: u64, suffix: &str) -> String {
-    let whole = bytes / unit;
-    let hundredths = bytes % unit * 100 / unit;
-    format!("{whole}.{hundredths:02} {suffix}")
 }
 
 fn browse_footer(status: &str) -> Line<'static> {

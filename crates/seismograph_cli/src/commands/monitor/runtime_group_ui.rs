@@ -6,17 +6,19 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table, TableState};
 
 use super::super::app::{
     GroupHistogram, RuntimeDetailMode, RuntimeSectionFocus, RuntimeTaskRowSort, RuntimeViewState, RuntimeWorkersFocus,
     selected_runtime_group, sort_runtime_tasks,
 };
 use super::super::data::{RuntimeMonitorSnapshot, RuntimeTaskSummary};
+use super::super::formatting::{format_count, format_histogram_duration, format_runtime_duration};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime::{AsynchronousTaskGroupSummary, BlockingTaskGroupSummary};
 use super::super::runtime_timeline::histogram;
-use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
+use super::super::table_ui;
+use super::draw_empty_panel_with_message;
 
 pub(super) fn draw_statistics(
     frame: &mut ratatui::Frame<'_>,
@@ -87,13 +89,6 @@ pub(super) fn draw_task_list(
     draw_tasks(frame, mouse, area, &tasks, view);
 }
 
-fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
-}
-
 fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
@@ -104,46 +99,6 @@ fn task_spawn(task: &RuntimeTaskSummary) -> String {
         (Some(origin), Some(worker)) if origin == worker => format!("local w{worker}"),
         (Some(origin), Some(worker)) => format!("w{origin} -> w{worker}"),
         (Some(origin), None) => format!("w{origin} -> ?"),
-    }
-}
-
-fn sort_headers(headers: Vec<&str>, sorts: &[RuntimeTaskRowSort], view: RuntimeViewState) -> Vec<String> {
-    headers
-        .into_iter()
-        .zip(sorts)
-        .map(|(header, sort)| {
-            if *sort == view.task_sort {
-                format!("{header}{}", if view.task_sort_descending { "▼" } else { "▲" })
-            } else {
-                header.into()
-            }
-        })
-        .collect()
-}
-
-fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[RuntimeTaskRowSort]) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    if inner.is_empty() {
-        return;
-    }
-    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    let fixed = widths.iter().fold(0_u16, |total, width| {
-        total.saturating_add(match width {
-            Constraint::Length(width) => *width,
-            _ => 0,
-        })
-    });
-    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
-    let mut x = inner.x;
-    for (width, sort) in widths.iter().zip(sorts) {
-        let width = match width {
-            Constraint::Length(width) => *width,
-            Constraint::Min(minimum) => flexible.max(*minimum),
-            _ => 0,
-        }
-        .min(inner.right().saturating_sub(x));
-        mouse.register_item(Rect::new(x, inner.y, width, 1), ListTarget::RuntimeTaskHeader(*sort), 0);
-        x = x.saturating_add(width).saturating_add(1);
     }
 }
 
@@ -191,7 +146,7 @@ fn draw_async_statistics(
             )),
             Line::from(format!("{label} · t switches histogram")),
         ])
-        .block(block(" Task Type Statistics ", focused)),
+        .block(table_ui::focused_block(" Task Type Statistics ", focused)),
         summary,
     );
     draw_histogram(frame, chart, label, samples);
@@ -238,7 +193,7 @@ fn draw_blocking_statistics(
             )),
             Line::from(format!("{label} · t switches histogram")),
         ])
-        .block(block(" Task Type Statistics ", focused)),
+        .block(table_ui::focused_block(" Task Type Statistics ", focused)),
         summary,
     );
     draw_histogram(frame, chart, label, samples);
@@ -252,7 +207,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         frame.render_widget(
             Paragraph::new("No completed duration samples.")
                 .style(Style::default().fg(Color::DarkGray))
-                .block(block(format!(" {label} "), false)),
+                .block(table_ui::focused_block(format!(" {label} "), false)),
             area,
         );
         return;
@@ -270,7 +225,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         .collect::<Vec<_>>();
     frame.render_widget(
         BarChart::default()
-            .block(block(
+            .block(table_ui::focused_block(
                 format!(" {label} · n={} · max {} ", samples.len(), duration(samples.iter().copied().max())),
                 false,
             ))
@@ -282,6 +237,10 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
     );
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the responsive task table keeps category-specific columns, sorting, selection, and mouse targets aligned"
+)]
 fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tasks: &[&RuntimeTaskSummary], view: RuntimeViewState) {
     if area.is_empty() {
         return;
@@ -357,16 +316,16 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
             ],
         ),
     };
-    register_sort_headers(mouse, area, &widths, &sorts);
+    let targets = sorts.iter().copied().map(ListTarget::RuntimeTaskHeader).collect::<Vec<_>>();
+    table_ui::register_headers(mouse, area, &widths, &targets);
     let table = Table::new(rows, widths)
-        .header(Row::new(sort_headers(headers, &sorts, view)).style(Style::default().add_modifier(Modifier::BOLD)))
+        .header(
+            Row::new(table_ui::sort_headers(headers, &sorts, view.task_sort, view.task_sort_descending))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
         .column_spacing(1)
-        .row_highlight_style(if view.section == RuntimeSectionFocus::GroupTasks {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
-        } else {
-            Style::default().bg(Color::DarkGray)
-        })
-        .block(block(
+        .row_highlight_style(table_ui::selection_style(view.section == RuntimeSectionFocus::GroupTasks))
+        .block(table_ui::focused_block(
             format!(" Tasks · {} · select then open Runtime Task ", tasks.len()),
             view.section == RuntimeSectionFocus::GroupTasks,
         ));

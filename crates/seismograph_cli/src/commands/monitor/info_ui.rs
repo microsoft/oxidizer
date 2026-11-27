@@ -12,9 +12,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, GraphType, Paragraph};
 
 use super::super::app::ActivitySample;
+use super::super::formatting::format_count;
 use super::super::live_activity::{Availability, CLASS_LABELS, LiveActivity, ThreadActivity};
 use super::super::mouse::{ListTarget, MouseRows};
-use super::format_count;
+use super::super::table_ui;
 
 const CLASS_COLORS: [Color; 6] = [
     Color::Cyan,
@@ -168,7 +169,7 @@ fn draw_thread(frame: &mut ratatui::Frame<'_>, area: Rect, thread: &ThreadActivi
     .spacing(1)
     .areas(area);
     let selection_style = if selected {
-        Style::default().bg(Color::DarkGray)
+        table_ui::selection_style(false)
     } else {
         Style::default()
     };

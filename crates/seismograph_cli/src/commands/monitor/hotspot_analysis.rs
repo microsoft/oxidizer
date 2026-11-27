@@ -8,6 +8,7 @@ use std::cmp::Ordering;
 use super::data::{
     AllocationSnapshot, AllocationStackFilter, CacheMonitorSnapshot, IoMonitorSnapshot, PrimitiveSnapshot, RuntimeMonitorSnapshot,
 };
+use super::formatting::{format_bytes, format_count, format_prose_duration};
 
 const LARGE_ALLOCATION_BYTES: u64 = 256 * 1024;
 const VERY_LARGE_ALLOCATION_BYTES: u64 = 1024 * 1024;
@@ -246,8 +247,8 @@ fn runtime_findings(runtime: &RuntimeMonitorSnapshot, findings: &mut Vec<Finding
         let evidence = format!(
             "{} polls, {} average, {} maximum",
             format_count(group.polls),
-            group.poll_time.mean_nanos().map_or_else(|| "-".into(), format_duration),
-            format_duration(max_poll)
+            group.poll_time.mean_nanos().map_or_else(|| "-".into(), format_prose_duration),
+            format_prose_duration(max_poll)
         );
         findings.push(Finding {
             severity,
@@ -285,9 +286,9 @@ fn runtime_findings(runtime: &RuntimeMonitorSnapshot, findings: &mut Vec<Finding
         let evidence = format!(
             "{} runs, {} average queue, {} maximum queue, {} maximum execution",
             format_count(group.executions),
-            group.queue_time.mean_nanos().map_or_else(|| "-".into(), format_duration),
-            format_duration(max_queue),
-            group.execution_time.max_nanos.map_or_else(|| "-".into(), format_duration)
+            group.queue_time.mean_nanos().map_or_else(|| "-".into(), format_prose_duration),
+            format_prose_duration(max_queue),
+            group.execution_time.max_nanos.map_or_else(|| "-".into(), format_prose_duration)
         );
         let execution_advice = if max_execution >= LONG_BLOCKING_EXECUTION_NANOS {
             " Reduce callback duration or split large batches before increasing pool size."
@@ -415,51 +416,6 @@ fn compare_findings(left: &Finding, right: &Finding) -> Ordering {
         .then_with(|| right.score.cmp(&left.score))
         .then_with(|| left.category.cmp(&right.category))
         .then_with(|| left.location.cmp(&right.location))
-}
-
-fn format_count(value: u64) -> String {
-    let digits = value.to_string();
-    let mut output = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, character) in digits.chars().enumerate() {
-        if index != 0 && (digits.len() - index).is_multiple_of(3) {
-            output.push(',');
-        }
-        output.push(character);
-    }
-    output
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        format_decimal(bytes, GIB, "GiB")
-    } else if bytes >= MIB {
-        format_decimal(bytes, MIB, "MiB")
-    } else if bytes >= KIB {
-        format_decimal(bytes, KIB, "KiB")
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn format_duration(nanos: u64) -> String {
-    if nanos >= 1_000_000_000 {
-        format_decimal(nanos, 1_000_000_000, "s")
-    } else if nanos >= 1_000_000 {
-        format_decimal(nanos, 1_000_000, "ms")
-    } else if nanos >= 1_000 {
-        format_decimal(nanos, 1_000, "us")
-    } else {
-        format!("{nanos}ns")
-    }
-}
-
-fn format_decimal(value: u64, unit: u64, suffix: &str) -> String {
-    let whole = value / unit;
-    let hundredths = value % unit * 100 / unit;
-    format!("{whole}.{hundredths:02} {suffix}")
 }
 
 #[cfg(test)]

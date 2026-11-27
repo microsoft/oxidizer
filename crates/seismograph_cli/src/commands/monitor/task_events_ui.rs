@@ -12,9 +12,11 @@ use super::super::app::{
     RuntimeDetailMode, RuntimeViewState, TaskEventOperationSort, TaskEventsFocus, TaskEventsViewState, TaskOccurrenceSort,
 };
 use super::super::data::{AllocationStackFilter, RuntimeTaskSummary};
+use super::super::formatting::format_count;
 use super::super::mouse::{ListTarget, MouseRows};
+use super::super::table_ui;
 use super::super::task_events::{TaskEvent, TaskEventSummary, TaskEventsSnapshot, TaskObject, TaskOperation};
-use super::{draw_empty_panel_with_message, format_count};
+use super::draw_empty_panel_with_message;
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -68,7 +70,7 @@ fn sorted_operations(task: &TaskEventSummary, view: TaskEventsViewState) -> Vec<
             TaskEventOperationSort::Operation => left.kind.label().cmp(right.kind.label()),
             TaskEventOperationSort::Events => left.events.cmp(&right.events),
         };
-        let ordering = if view.operation_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.operation_descending);
         ordering.then_with(|| left.kind.label().cmp(right.kind.label()))
     });
     operations
@@ -83,7 +85,7 @@ fn sorted_occurrences(operation: &TaskOperation, view: TaskEventsViewState) -> V
             TaskOccurrenceSort::Sequence => left.sequence.cmp(&right.sequence),
             TaskOccurrenceSort::Object => left_object.object_id.cmp(&right_object.object_id),
         };
-        let ordering = if view.occurrence_descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.occurrence_descending);
         ordering
             .then_with(|| left.timestamp.cmp(&right.timestamp))
             .then_with(|| left.sequence.cmp(&right.sequence))
@@ -102,21 +104,6 @@ fn areas(area: Rect, focus: TaskEventsFocus) -> [Rect; 3] {
         };
     }
     Layout::horizontal([Constraint::Length(32), Constraint::Percentage(40), Constraint::Min(0)]).areas(area)
-}
-
-fn block(title: &str, focused: bool) -> Block<'_> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
-}
-
-fn selected_style(focused: bool) -> Style {
-    if focused {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().bg(Color::DarkGray)
-    }
 }
 
 fn draw_operations(
@@ -152,10 +139,25 @@ fn draw_operations(
     });
     let widths = [Constraint::Min(12), Constraint::Length(6)];
     let sorts = [TaskEventOperationSort::Operation, TaskEventOperationSort::Events];
+    let targets = [
+        ListTarget::TaskOperationHeader(TaskEventOperationSort::Operation),
+        ListTarget::TaskOperationHeader(TaskEventOperationSort::Events),
+    ];
     let table = Table::new(rows, widths)
-        .header(Row::new(operation_headers(view)).style(Style::default().add_modifier(Modifier::BOLD)))
-        .row_highlight_style(selected_style(focused && view.focus == TaskEventsFocus::Operations))
-        .block(block(" Operations ", focused && view.focus == TaskEventsFocus::Operations));
+        .header(
+            Row::new(table_ui::sort_headers(
+                vec!["Operation", "Events"],
+                &sorts,
+                view.operation_sort,
+                view.operation_descending,
+            ))
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .row_highlight_style(table_ui::selection_style(focused && view.focus == TaskEventsFocus::Operations))
+        .block(table_ui::focused_block(
+            " Operations ",
+            focused && view.focus == TaskEventsFocus::Operations,
+        ));
     let mut state = TableState::default().with_selected(Some(selected.saturating_sub(first)));
     frame.render_stateful_widget(table, area, &mut state);
     mouse.register(
@@ -165,7 +167,7 @@ fn draw_operations(
         operations.len(),
         ListTarget::TaskOperations,
     );
-    register_operation_headers(mouse, area, &widths, &sorts);
+    table_ui::register_headers(mouse, area, &widths, &targets);
 }
 
 fn draw_occurrences(
@@ -210,100 +212,31 @@ fn draw_occurrences(
         TaskOccurrenceSort::Sequence,
         TaskOccurrenceSort::Object,
     ];
+    let targets = [
+        ListTarget::TaskOccurrenceHeader(TaskOccurrenceSort::Time),
+        ListTarget::TaskOccurrenceHeader(TaskOccurrenceSort::Thread),
+        ListTarget::TaskOccurrenceHeader(TaskOccurrenceSort::Sequence),
+        ListTarget::TaskOccurrenceHeader(TaskOccurrenceSort::Object),
+    ];
     let table = Table::new(rows, widths)
-        .header(Row::new(occurrence_headers(view)).style(Style::default().add_modifier(Modifier::BOLD)))
-        .row_highlight_style(selected_style(focused && view.focus == TaskEventsFocus::Occurrences))
-        .block(block(&title, focused && view.focus == TaskEventsFocus::Occurrences));
+        .header(
+            Row::new(table_ui::sort_headers(
+                vec!["Time (ns)", "Thread", "Sequence", "Object"],
+                &sorts,
+                view.occurrence_sort,
+                view.occurrence_descending,
+            ))
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .row_highlight_style(table_ui::selection_style(focused && view.focus == TaskEventsFocus::Occurrences))
+        .block(table_ui::focused_block(
+            title,
+            focused && view.focus == TaskEventsFocus::Occurrences,
+        ));
     let mut state = TableState::default().with_selected((count > 0).then_some(selected.saturating_sub(first)));
     frame.render_stateful_widget(table, area, &mut state);
     mouse.register(area, 1, first.saturating_add(state.offset()), count, ListTarget::TaskOccurrences);
-    register_occurrence_headers(mouse, area, &widths, &sorts);
-}
-
-fn operation_headers(view: TaskEventsViewState) -> [String; 2] {
-    [
-        sort_heading(
-            "Operation",
-            view.operation_sort == TaskEventOperationSort::Operation,
-            view.operation_descending,
-        ),
-        sort_heading(
-            "Events",
-            view.operation_sort == TaskEventOperationSort::Events,
-            view.operation_descending,
-        ),
-    ]
-}
-
-fn occurrence_headers(view: TaskEventsViewState) -> [String; 4] {
-    [
-        sort_heading(
-            "Time (ns)",
-            view.occurrence_sort == TaskOccurrenceSort::Time,
-            view.occurrence_descending,
-        ),
-        sort_heading(
-            "Thread",
-            view.occurrence_sort == TaskOccurrenceSort::Thread,
-            view.occurrence_descending,
-        ),
-        sort_heading(
-            "Sequence",
-            view.occurrence_sort == TaskOccurrenceSort::Sequence,
-            view.occurrence_descending,
-        ),
-        sort_heading(
-            "Object",
-            view.occurrence_sort == TaskOccurrenceSort::Object,
-            view.occurrence_descending,
-        ),
-    ]
-}
-
-fn sort_heading(label: &str, selected: bool, descending: bool) -> String {
-    if selected {
-        format!("{label}{}", if descending { "▼" } else { "▲" })
-    } else {
-        label.into()
-    }
-}
-
-fn register_operation_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[TaskEventOperationSort]) {
-    register_headers(area, widths, |rect, index| {
-        mouse.register_item(rect, ListTarget::TaskOperationHeader(sorts[index]), 0);
-    });
-}
-
-fn register_occurrence_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[TaskOccurrenceSort]) {
-    register_headers(area, widths, |rect, index| {
-        mouse.register_item(rect, ListTarget::TaskOccurrenceHeader(sorts[index]), 0);
-    });
-}
-
-fn register_headers(area: Rect, widths: &[Constraint], mut register: impl FnMut(Rect, usize)) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    if inner.is_empty() {
-        return;
-    }
-    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    let fixed = widths.iter().fold(0_u16, |total, width| {
-        total.saturating_add(match width {
-            Constraint::Length(width) => *width,
-            _ => 0,
-        })
-    });
-    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
-    let mut x = inner.x;
-    for (index, width) in widths.iter().enumerate() {
-        let width = match width {
-            Constraint::Length(width) => *width,
-            Constraint::Min(minimum) => flexible.max(*minimum),
-            _ => 0,
-        }
-        .min(inner.right().saturating_sub(x));
-        register(Rect::new(x, inner.y, width, 1), index);
-        x = x.saturating_add(width).saturating_add(1);
-    }
+    table_ui::register_headers(mouse, area, &widths, &targets);
 }
 
 fn draw_stack(frame: &mut ratatui::Frame<'_>, area: Rect, occurrence: Option<(&TaskObject, &TaskEvent)>, view: TaskEventsViewState) {
@@ -360,7 +293,7 @@ fn draw_stack(frame: &mut ratatui::Frame<'_>, area: Rect, occurrence: Option<(&T
                 .collect::<Vec<_>>(),
         )
         .scroll((0, horizontal))
-        .block(block(" Event stack | f relative/all ", false).title_bottom(" PgUp/Dn scroll | Left/Right pan ")),
+        .block(table_ui::focused_block(" Event stack | f relative/all ", false).title_bottom(" PgUp/Dn scroll | Left/Right pan ")),
         area,
     );
 }

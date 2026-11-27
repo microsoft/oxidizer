@@ -12,6 +12,7 @@ use super::super::app::{HotspotSort, HotspotViewState};
 use super::super::data::CapturedSnapshot;
 use super::super::hotspot_analysis::{Finding, Report, Severity};
 use super::super::mouse::{ListTarget, MouseRows};
+use super::super::table_ui;
 use super::{draw_empty_panel_with_message, key_span};
 
 pub(super) fn draw(
@@ -47,7 +48,7 @@ fn sorted_findings(report: &Report, view: HotspotViewState) -> Vec<&Finding> {
             HotspotSort::Finding => left.title.cmp(&right.title),
             HotspotSort::Location => left.location.cmp(&right.location),
         };
-        let ordering = if view.descending { ordering.reverse() } else { ordering };
+        let ordering = table_ui::directed(ordering, view.descending);
         ordering
             .then_with(|| right.severity.cmp(&left.severity))
             .then_with(|| left_index.cmp(right_index))
@@ -70,6 +71,7 @@ fn draw_findings(
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     let (headers, sorts, widths) = columns(area.width);
+    let targets = sorts.iter().copied().map(ListTarget::HotspotHeader).collect::<Vec<_>>();
     let rows = findings.iter().skip(first).take(visible).map(|finding| {
         let values = if area.width >= 76 {
             vec![
@@ -110,9 +112,12 @@ fn draw_findings(
         .then_some(Row::new(vec!["No actionable hotspots met the evidence thresholds.".to_owned()]));
     let rows = rows.chain(empty);
     let table = Table::new(rows, widths.clone())
-        .header(Row::new(sort_headers(headers, &sorts, view)).style(Style::default().add_modifier(Modifier::BOLD)))
+        .header(
+            Row::new(table_ui::sort_headers(headers, &sorts, view.sort, view.descending))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
         .column_spacing(1)
-        .row_highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
+        .row_highlight_style(table_ui::selection_style(true))
         .block(
             Block::default()
                 .title(title)
@@ -132,7 +137,7 @@ fn draw_findings(
         findings.len(),
         ListTarget::HotspotFindings,
     );
-    register_sort_headers(mouse, area, &widths, &sorts);
+    table_ui::register_headers(mouse, area, &widths, &targets);
 }
 
 fn columns(width: u16) -> (Vec<&'static str>, Vec<HotspotSort>, Vec<Constraint>) {
@@ -164,46 +169,6 @@ fn columns(width: u16) -> (Vec<&'static str>, Vec<HotspotSort>, Vec<Constraint>)
             vec![HotspotSort::Severity, HotspotSort::Finding],
             vec![Constraint::Length(9), Constraint::Min(16)],
         )
-    }
-}
-
-fn sort_headers(headers: Vec<&str>, sorts: &[HotspotSort], view: HotspotViewState) -> Vec<String> {
-    headers
-        .into_iter()
-        .zip(sorts)
-        .map(|(header, sort)| {
-            if *sort == view.sort {
-                format!("{header}{}", if view.descending { "▼" } else { "▲" })
-            } else {
-                header.into()
-            }
-        })
-        .collect()
-}
-
-fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[HotspotSort]) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    if inner.is_empty() {
-        return;
-    }
-    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    let fixed = widths.iter().fold(0_u16, |total, width| {
-        total.saturating_add(match width {
-            Constraint::Length(width) => *width,
-            _ => 0,
-        })
-    });
-    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
-    let mut x = inner.x;
-    for (width, sort) in widths.iter().zip(sorts) {
-        let width = match width {
-            Constraint::Length(width) => *width,
-            Constraint::Min(minimum) => flexible.max(*minimum),
-            _ => 0,
-        }
-        .min(inner.right().saturating_sub(x));
-        mouse.register_item(Rect::new(x, inner.y, width, 1), ListTarget::HotspotHeader(*sort), 0);
-        x = x.saturating_add(width).saturating_add(1);
     }
 }
 

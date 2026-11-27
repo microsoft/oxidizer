@@ -16,6 +16,7 @@ use super::app::{App, Screen};
 use super::data::CapturedSnapshot;
 use super::filter::{FilterSpec, RuntimeStackMode};
 use super::filter_index::FilterIndex;
+use super::table_ui;
 
 #[derive(Default)]
 pub(super) struct Filters {
@@ -383,7 +384,7 @@ impl App {
             let prefix_width = Line::from(prefix.as_str()).width();
             let value = visible_tail(&value, usize::from(fields.width).saturating_sub(prefix_width));
             let style = if selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
+                table_ui::selection_style(true)
             } else {
                 Style::default()
             };

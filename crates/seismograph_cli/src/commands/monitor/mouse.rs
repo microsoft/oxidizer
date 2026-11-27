@@ -156,6 +156,15 @@ impl MouseRows {
     }
 }
 
+fn select_sort<T: Copy + Eq>(current: &mut T, descending: &mut bool, selected: T, default_descending: bool) {
+    if *current == selected {
+        *descending = !*descending;
+    } else {
+        *current = selected;
+        *descending = default_descending;
+    }
+}
+
 impl App {
     #[expect(
         clippy::too_many_lines,
@@ -182,140 +191,115 @@ impl App {
             return;
         }
         if let ListTarget::AllocationHeader(sort) = target {
-            if self.allocation_view.sort == sort {
-                self.allocation_view.descending = !self.allocation_view.descending;
-            } else {
-                self.allocation_view.sort = sort;
-                self.allocation_view.descending = true;
-            }
+            select_sort(&mut self.allocation_view.sort, &mut self.allocation_view.descending, sort, true);
             self.allocation_view.reset_position();
             return;
         }
         if let ListTarget::PrimitiveOperationHeader(sort) = target {
-            if self.primitive_view.sort == sort {
-                self.primitive_view.descending = !self.primitive_view.descending;
-            } else {
-                self.primitive_view.sort = sort;
-                self.primitive_view.descending = true;
-            }
+            select_sort(&mut self.primitive_view.sort, &mut self.primitive_view.descending, sort, true);
             self.primitive_view.reset_operations();
             return;
         }
         if let ListTarget::PrimitiveTypeHeader(sort) = target {
-            if self.primitive_view.type_sort == sort {
-                self.primitive_view.type_descending = !self.primitive_view.type_descending;
-            } else {
-                self.primitive_view.type_sort = sort;
-                self.primitive_view.type_descending = sort != super::app::PrimitiveTypeSort::Type;
-            }
+            select_sort(
+                &mut self.primitive_view.type_sort,
+                &mut self.primitive_view.type_descending,
+                sort,
+                sort != super::app::PrimitiveTypeSort::Type,
+            );
             self.primitive_view.primitive_selected = 0;
             self.primitive_view.reset_operations();
             return;
         }
         if let ListTarget::PrimitiveHotspotHeader(sort) = target {
-            if self.primitive_view.hotspot_sort == sort {
-                self.primitive_view.hotspot_descending = !self.primitive_view.hotspot_descending;
-            } else {
-                self.primitive_view.hotspot_sort = sort;
-                self.primitive_view.hotspot_descending = sort != super::app::PrimitiveHotspotSort::Location;
-            }
+            select_sort(
+                &mut self.primitive_view.hotspot_sort,
+                &mut self.primitive_view.hotspot_descending,
+                sort,
+                sort != super::app::PrimitiveHotspotSort::Location,
+            );
             self.primitive_view.hotspot_selected = 0;
             self.primitive_view.stack_scroll = 0;
             return;
         }
         if let ListTarget::ThreadHeader(sort) = target {
-            if self.thread_view.thread_sort == sort {
-                self.thread_view.thread_descending = !self.thread_view.thread_descending;
-            } else {
-                self.thread_view.thread_sort = sort;
-                self.thread_view.thread_descending = sort != super::app::ThreadListSort::Thread;
-            }
+            select_sort(
+                &mut self.thread_view.thread_sort,
+                &mut self.thread_view.thread_descending,
+                sort,
+                sort != super::app::ThreadListSort::Thread,
+            );
             self.thread_view.thread_selected = 0;
             self.thread_view.reset_operation();
             return;
         }
         if let ListTarget::ThreadOperationHeader(sort) = target {
-            if self.thread_view.operation_sort == sort {
-                self.thread_view.operation_descending = !self.thread_view.operation_descending;
-            } else {
-                self.thread_view.operation_sort = sort;
-                self.thread_view.operation_descending = sort != super::app::ThreadOperationSort::Operation;
-            }
+            select_sort(
+                &mut self.thread_view.operation_sort,
+                &mut self.thread_view.operation_descending,
+                sort,
+                sort != super::app::ThreadOperationSort::Operation,
+            );
             self.thread_view.operation_selected = 0;
             self.thread_view.reset_participant();
             return;
         }
         if let ListTarget::ThreadParticipantHeader(sort) = target {
-            if self.thread_view.participant_sort == sort {
-                self.thread_view.participant_descending = !self.thread_view.participant_descending;
-            } else {
-                self.thread_view.participant_sort = sort;
-                self.thread_view.participant_descending = sort != super::app::ThreadParticipantSort::Thread;
-            }
+            select_sort(
+                &mut self.thread_view.participant_sort,
+                &mut self.thread_view.participant_descending,
+                sort,
+                sort != super::app::ThreadParticipantSort::Thread,
+            );
             self.thread_view.participant_selected = 0;
             self.thread_view.reset_object();
             return;
         }
         if let ListTarget::ThreadObjectHeader(sort) = target {
-            if self.thread_view.object_sort == sort {
-                self.thread_view.object_descending = !self.thread_view.object_descending;
-            } else {
-                self.thread_view.object_sort = sort;
-                self.thread_view.object_descending = sort != super::app::ThreadObjectSort::Object;
-            }
+            select_sort(
+                &mut self.thread_view.object_sort,
+                &mut self.thread_view.object_descending,
+                sort,
+                sort != super::app::ThreadObjectSort::Object,
+            );
             self.thread_view.object_selected = 0;
             self.thread_view.stack_scroll = 0;
             return;
         }
         if let ListTarget::IoResourceHeader(sort) = target {
-            if self.io_view.resource_sort == sort {
-                self.io_view.resource_descending = !self.io_view.resource_descending;
-            } else {
-                self.io_view.resource_sort = sort;
-                self.io_view.resource_descending = true;
-            }
+            select_sort(&mut self.io_view.resource_sort, &mut self.io_view.resource_descending, sort, true);
             self.io_view.resource_selected = 0;
             self.io_view.operation_selected = 0;
             return;
         }
         if let ListTarget::IoOperationHeader(sort) = target {
-            if self.io_view.operation_sort == sort {
-                self.io_view.operation_descending = !self.io_view.operation_descending;
-            } else {
-                self.io_view.operation_sort = sort;
-                self.io_view.operation_descending = true;
-            }
+            select_sort(&mut self.io_view.operation_sort, &mut self.io_view.operation_descending, sort, true);
             self.io_view.operation_selected = 0;
             return;
         }
         if let ListTarget::CacheTierHeader(sort) = target {
-            if self.cache_view.tier_sort == sort {
-                self.cache_view.tier_descending = !self.cache_view.tier_descending;
-            } else {
-                self.cache_view.tier_sort = sort;
-                self.cache_view.tier_descending = true;
-            }
+            select_sort(&mut self.cache_view.tier_sort, &mut self.cache_view.tier_descending, sort, true);
             self.cache_view.tier_selected = 0;
             self.cache_view.operation_selected = 0;
             return;
         }
         if let ListTarget::CacheOperationHeader(sort) = target {
-            if self.cache_view.operation_sort == sort {
-                self.cache_view.operation_descending = !self.cache_view.operation_descending;
-            } else {
-                self.cache_view.operation_sort = sort;
-                self.cache_view.operation_descending = true;
-            }
+            select_sort(
+                &mut self.cache_view.operation_sort,
+                &mut self.cache_view.operation_descending,
+                sort,
+                true,
+            );
             self.cache_view.operation_selected = 0;
             return;
         }
         if let ListTarget::HotspotHeader(sort) = target {
-            if self.hotspot_view.sort == sort {
-                self.hotspot_view.descending = !self.hotspot_view.descending;
-            } else {
-                self.hotspot_view.sort = sort;
-                self.hotspot_view.descending = sort == super::app::HotspotSort::Severity;
-            }
+            select_sort(
+                &mut self.hotspot_view.sort,
+                &mut self.hotspot_view.descending,
+                sort,
+                sort == super::app::HotspotSort::Severity,
+            );
             self.hotspot_view.selected = 0;
             return;
         }
@@ -332,12 +316,12 @@ impl App {
                     &mut self.runtime_view.blocking_selected,
                 ),
             };
-            if *selected_sort == sort {
-                *descending = !*descending;
-            } else {
-                *selected_sort = sort;
-                *descending = !matches!(sort, super::app::RuntimeWorkerSort::WorkerId | super::app::RuntimeWorkerSort::State);
-            }
+            select_sort(
+                selected_sort,
+                descending,
+                sort,
+                !matches!(sort, super::app::RuntimeWorkerSort::WorkerId | super::app::RuntimeWorkerSort::State),
+            );
             *selected = 0;
             self.runtime_view.asynchronous_task_selected = 0;
             self.runtime_view.blocking_task_selected = 0;
@@ -346,12 +330,12 @@ impl App {
         }
         if let ListTarget::TaskOperationHeader(sort) = target {
             let view = &mut self.runtime_view.events;
-            if view.operation_sort == sort {
-                view.operation_descending = !view.operation_descending;
-            } else {
-                view.operation_sort = sort;
-                view.operation_descending = sort == super::app::TaskEventOperationSort::Events;
-            }
+            select_sort(
+                &mut view.operation_sort,
+                &mut view.operation_descending,
+                sort,
+                sort == super::app::TaskEventOperationSort::Events,
+            );
             view.operation_selected = 0;
             view.event_selected = 0;
             view.stack_scroll = 0;
@@ -359,12 +343,7 @@ impl App {
         }
         if let ListTarget::TaskOccurrenceHeader(sort) = target {
             let view = &mut self.runtime_view.events;
-            if view.occurrence_sort == sort {
-                view.occurrence_descending = !view.occurrence_descending;
-            } else {
-                view.occurrence_sort = sort;
-                view.occurrence_descending = false;
-            }
+            select_sort(&mut view.occurrence_sort, &mut view.occurrence_descending, sort, false);
             view.event_selected = 0;
             view.stack_scroll = 0;
             return;
@@ -396,12 +375,12 @@ impl App {
             return;
         }
         if let ListTarget::RuntimeTaskTypeHeader(sort) = target {
-            if self.runtime_view.task_type_sort == sort {
-                self.runtime_view.task_type_sort_descending = !self.runtime_view.task_type_sort_descending;
-            } else {
-                self.runtime_view.task_type_sort = sort;
-                self.runtime_view.task_type_sort_descending = true;
-            }
+            select_sort(
+                &mut self.runtime_view.task_type_sort,
+                &mut self.runtime_view.task_type_sort_descending,
+                sort,
+                true,
+            );
             self.runtime_view.asynchronous_task_selected = 0;
             self.runtime_view.blocking_task_selected = 0;
             self.runtime_view.task_selected = 0;
@@ -409,12 +388,12 @@ impl App {
             return;
         }
         if let ListTarget::RuntimeTaskHeader(sort) = target {
-            if self.runtime_view.task_sort == sort {
-                self.runtime_view.task_sort_descending = !self.runtime_view.task_sort_descending;
-            } else {
-                self.runtime_view.task_sort = sort;
-                self.runtime_view.task_sort_descending = false;
-            }
+            select_sort(
+                &mut self.runtime_view.task_sort,
+                &mut self.runtime_view.task_sort_descending,
+                sort,
+                false,
+            );
             self.runtime_view.task_selected = 0;
             self.runtime_view.task_selected_explicitly = false;
             return;
