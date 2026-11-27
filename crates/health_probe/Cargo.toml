@@ -3,10 +3,10 @@
 
 [package]
 name = "health_probe"
-description = "Kubernetes HTTP readiness adapters for health."
+description = "Kubernetes readiness adapters for health."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["health", "readiness", "kubernetes", "http"]
+keywords = ["health", "readiness", "kubernetes", "http", "tcp"]
 categories = ["asynchronous", "web-programming::http-server"]
 edition.workspace = true
 rust-version.workspace = true
@@ -33,6 +33,7 @@ all-features = true
 default = []
 http = ["dep:http", "dep:tower-service"]
 request-handler = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
+tcp = ["dep:tokio"]
 
 [dependencies]
 bytesbuf = { workspace = true, optional = true, features = ["std"] }
@@ -41,6 +42,7 @@ http = { workspace = true, optional = true }
 http_extensions = { workspace = true, optional = true }
 layered = { workspace = true, optional = true }
 tick = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["macros", "net"] }
 tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -51,6 +53,7 @@ http_extensions = { path = "../http_extensions", default-features = false, featu
 layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
 tick = { path = "../tick", default-features = false }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
 

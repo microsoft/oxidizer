@@ -2475,6 +2475,7 @@ dependencies = [
  "layered",
  "observed",
  "tick",
+ "tokio",
  "tower",
  "tower-service",
 ]
