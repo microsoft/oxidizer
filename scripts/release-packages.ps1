@@ -12,8 +12,8 @@
     workspace packages to release. In every mode the same pipeline
     runs: plan resolution + cascade toward dependents, an elevation review for
     any modified-but-unreleased dependencies, a final plan display, and atomic
-    execution of all Cargo.toml / CHANGELOG.md / README.md / workspace
-    Cargo.toml writes, followed by a workspace `cargo check` and a summary.
+    execution of all Cargo.toml / README.md / workspace Cargo.toml writes,
+    followed by a workspace `cargo check` and a summary.
 
     Every mode is interactive — even the targeted mode prompts for elevation
     review when modified-but-unreleased dependencies of the requested packages

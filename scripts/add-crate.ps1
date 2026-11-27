@@ -11,8 +11,7 @@
     * Create a skeleton folder for the crate with:
       * Starter Cargo.toml
       * Starter README.md file with standard badges and support for cargo-rdme
-      * Starter CHANGELOG.md file
-    * Update the top-level README and CHANGELOG.md files to point to the new crate
+    * Update the top-level README file to point to the new crate
     * Update the top-level Cargo.toml files to build the new crate
 
     When you run the script, it asks you for the crate name, description,
@@ -143,44 +142,6 @@ if ($crateName -notlike "*_macros*") {
     Write-Host "Skipping README.md update for macro crate"
 }
 
-
-# Update root CHANGELOG.md
-$changelogPath = Join-Path $repoRoot "CHANGELOG.md"
-$changelogLines = Get-Content $changelogPath
-$changelogCrates = @()
-$changelogInsertionIndex = -1
-$changelogEndIndex = -1
-
-for ($i = 0; $i -lt $changelogLines.Length; $i++) {
-    if ($changelogLines[$i] -match '^- \[`(.*)`\]\(.*/CHANGELOG.md\)') {
-        if($changelogInsertionIndex -eq -1) {
-            $changelogInsertionIndex = $i
-        }
-        $changelogCrates += $Matches[1]
-        $changelogEndIndex = $i
-    }
-    elseif ($changelogInsertionIndex -ne -1) {
-        # break if we are past the list and hit a non-empty line that's not a list item
-        if ($changelogLines[$i].Trim() -ne "") {
-            break
-        }
-    }
-}
-
-$changelogCrates += $crateName
-$changelogCrates = $changelogCrates | Sort-Object
-
-if ($changelogInsertionIndex -ne -1) {
-    $newLines = @()
-    foreach ($name in $changelogCrates) {
-        $newLines += ('- [`{0}`](./crates/{0}/CHANGELOG.md)' -f $name)
-    }
-    $pre = $changelogLines[0..($changelogInsertionIndex-1)]
-    $post = $changelogLines[($changelogEndIndex+1)..$changelogLines.Length]
-    $newChangelogContent = ($pre + $newLines + $post) -join [System.Environment]::NewLine
-    Set-Content -Path $changelogPath -Value $newChangelogContent
-    Write-Host "Updated root CHANGELOG.md"
-}
 
 # Update root Cargo.toml
 $cargoTomlPath = Join-Path $repoRoot "Cargo.toml"

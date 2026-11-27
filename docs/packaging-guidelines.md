@@ -26,7 +26,7 @@ include = [
 ```
 
 Anything not listed (for example `examples/`, `benches/`, `logo.png`,
-`favicon.ico`, `AGENTS.md`, `CHANGELOG.md`, `docs/diagrams/*`, editable
+`favicon.ico`, `AGENTS.md`, `docs/diagrams/*`, editable
 `*.graphml` sources, internal design notes) is **not** shipped.
 
 ## What belongs in the package
@@ -49,8 +49,7 @@ build the library, plus the metadata crates.io renders.
   dependent builds them, they routinely depend on unpublished in-workspace
   fixture crates, and shipping them enlarges the tarball and the LFS exposure
   surface for no consumer benefit.
-- **Everything else is dropped.** `CHANGELOG.md` is intentionally excluded: it
-  is neither build-required nor rendered by crates.io.
+- **Everything else is dropped.**
 
 A crate that declares an explicit `[[example]]` or `[[bench]]` target therefore
 publishes a manifest entry whose source is absent. Cargo does not build those
