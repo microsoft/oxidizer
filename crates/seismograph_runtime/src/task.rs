@@ -6,8 +6,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
+use crate::collection;
+use crate::runtime::{WorkerControl, lock};
 use crate::snapshot::{Task, TaskCollection, TaskMetrics};
-use crate::{WorkerControl, collection, lock};
 
 /// An owned request that a provider moves to its worker and answers once.
 #[derive(Debug)]

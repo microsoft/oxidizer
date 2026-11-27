@@ -10,8 +10,8 @@ use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, Even
 use seismograph::recorder::runtime::{TaskId, WorkerId};
 use seismograph::recorder::{is_enabled, without_recording};
 
+use crate::runtime::{RuntimeHandle, TaskProvider, WorkerControl, duration_nanos, lock, record_with};
 use crate::snapshot::WorkerState;
-use crate::{RuntimeHandle, WorkerControl, duration_nanos, lock, record_now};
 
 /// Lightweight worker identity used when a worker submits another task.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -200,7 +200,7 @@ impl WorkerHandle {
         drop(self.detach_provider());
     }
 
-    pub(crate) fn detach_provider(&self) -> Option<crate::TaskProvider> {
+    pub(crate) fn detach_provider(&self) -> Option<TaskProvider> {
         let mut slot = lock(&self.worker.provider);
         self.worker.current_task.store(0, Ordering::Relaxed);
         let previous = self.worker.state.swap(WorkerState::Stopped.wire_value(), Ordering::AcqRel);
@@ -220,8 +220,9 @@ impl WorkerHandle {
     }
 
     fn record(&self, kind: EventKind, subject_id: u64, related_id: u64, value_0: u64, value_1: u64, backtrace: BacktraceCapture) {
-        record_now(
+        record_with(
             &self.runtime.control,
+            EventTimestamp::now,
             Some(self.worker.id),
             kind,
             subject_id,

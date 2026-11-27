@@ -82,7 +82,7 @@ impl QueuedTask {
             EventKind::TaskMaterialized,
             self.data,
             Some(worker.id()),
-            crate::duration_nanos(started_at, self.enqueued_at),
+            crate::runtime::duration_nanos(started_at, self.enqueued_at),
             self.body_size,
             BacktraceCapture::Never,
         );
@@ -146,7 +146,7 @@ impl Execution {
             self.data,
             Some(worker.id()),
             finished_at,
-            crate::duration_nanos(finished_at, self.started_at),
+            crate::runtime::duration_nanos(finished_at, self.started_at),
             outcome,
             backtrace,
         );
@@ -162,7 +162,7 @@ impl Drop for Execution {
                 self.data,
                 Some(self.worker),
                 finished_at,
-                crate::duration_nanos(finished_at, self.started_at),
+                crate::runtime::duration_nanos(finished_at, self.started_at),
                 TaskOutcome::Cancelled,
                 BacktraceCapture::Never,
             );

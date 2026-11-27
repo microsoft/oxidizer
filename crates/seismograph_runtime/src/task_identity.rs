@@ -28,7 +28,7 @@ impl TaskIdentity {
     #[must_use]
     pub fn from_location(location: &'static Location<'static>) -> Self {
         Self {
-            id: crate::allocate_task_id(),
+            id: crate::runtime::allocate_task_id(),
             descriptor: TypeDescriptorId::from_raw(std::ptr::from_ref(location).addr() as u64)
                 .expect("a static location reference has a nonzero address"),
             location,

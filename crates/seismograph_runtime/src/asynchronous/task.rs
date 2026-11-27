@@ -90,7 +90,7 @@ impl QueuedTask {
             EventKind::TaskMaterialized,
             self.data,
             Some(worker.id()),
-            crate::duration_nanos(activated_at, self.enqueued_at),
+            crate::runtime::duration_nanos(activated_at, self.enqueued_at),
             self.body_size,
             BacktraceCapture::Never,
         );
@@ -122,6 +122,23 @@ pub struct Task {
 }
 
 impl Task {
+    /// Reconstructs an activated task that has no recording token.
+    ///
+    /// This does not reconstruct queue or materialization history from before
+    /// observation started.
+    #[must_use]
+    pub fn unrecorded(identity: TaskIdentity, worker: &super::Worker) -> Self {
+        Self {
+            data: TaskData {
+                identity,
+                runtime: worker.runtime().id(),
+                backtrace: worker.runtime().lifecycle_backtraces(),
+                last_worker: Some(worker.id()),
+            },
+            cancel_on_drop: true,
+        }
+    }
+
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
@@ -202,7 +219,7 @@ impl Poll {
             EventKind::TaskPollFinished,
             self.data,
             Some(worker.id()),
-            crate::duration_nanos(finished_at, self.started_at),
+            crate::runtime::duration_nanos(finished_at, self.started_at),
             outcome.as_ref().map_or(0, TaskOutcome::event_value),
             backtrace,
         );

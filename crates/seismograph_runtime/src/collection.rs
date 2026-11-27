@@ -10,9 +10,9 @@ use seismograph::recorder::event::EventTimestamp;
 use seismograph::recorder::runtime::{TaskId, WorkerId};
 use tick::SimpleClock;
 
+use crate::runtime::{RuntimeControl, WorkerControl, lock};
 use crate::snapshot::{CaptureOptions, Counters, Runtime, RuntimeState, Task, TaskCollection, TaskMetrics, WorkerState};
 use crate::task::TaskRequest;
-use crate::{RuntimeControl, WorkerControl, lock};
 
 const MEASUREMENT_TASK_LIMIT: usize = 4096;
 
@@ -313,9 +313,10 @@ impl std::fmt::Debug for Batch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::tests::test_lock;
+    use crate::runtime::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
     use crate::snapshot::{TaskActivityState, TaskMetricsScope};
     use crate::worker::{WorkerMetadata, WorkerRole};
-    use crate::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
 
     #[test]
     fn joining_a_timed_observation_keeps_measurements_already_collected_by_its_first_user() {
@@ -520,7 +521,7 @@ mod tests {
 
     #[test]
     fn a_poll_from_a_finished_window_cannot_enter_the_next_window() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("measurement-window", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
@@ -574,7 +575,7 @@ mod tests {
                 let _closed = self.0.send(Progress::Finished);
             }
         }
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("controlled-concurrent", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
@@ -617,7 +618,7 @@ mod tests {
 
     #[test]
     fn dropped_request_is_failed_even_while_another_worker_times_out() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("per-worker-failure", 2));
         let dropped = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let retained = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
@@ -646,7 +647,7 @@ mod tests {
 
     #[test]
     fn disconnected_collection_cancels_late_answers_and_releases_the_next_request() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("disconnected-collection", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
@@ -683,7 +684,7 @@ mod tests {
 
     #[test]
     fn response_receiver_gets_the_configured_deadline_budget() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         for configured in [None, Some(Duration::from_millis(42))] {
             let runtime = register_runtime(RuntimeMetadata::new("response-deadline", 1));
             let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
@@ -720,7 +721,7 @@ mod tests {
 
     #[test]
     fn response_transport_tolerates_disconnection_but_rejects_a_broken_capacity_invariant() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("response-transport", 1));
         let _worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let worker = Arc::clone(&lock(&runtime.handle.control.workers)[0]);
@@ -750,7 +751,7 @@ mod tests {
 
     #[test]
     fn a_provider_panic_overrides_a_response_sent_before_the_panic() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("response-before-panic", 2));
         let failed = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let complete = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
@@ -783,7 +784,7 @@ mod tests {
                 panic!("payload disposal");
             }
         }
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("provider-panic", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -846,7 +847,7 @@ mod tests {
 
     #[test]
     fn overlapping_timed_observers_keep_measurements_until_the_last_user_leaves() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("overlapping-windows", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let id = allocate_task_id();
@@ -890,7 +891,7 @@ mod tests {
 
     #[test]
     fn timed_capture_waits_for_the_requested_interval_and_releases_demand() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("capture-pause", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
@@ -947,7 +948,7 @@ mod tests {
 
     #[test]
     fn state_only_capture_does_not_read_poll_clocks_or_open_measurement_windows() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("untimed-polls", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
@@ -981,7 +982,7 @@ mod tests {
 
     #[test]
     fn recording_only_poll_tokens_do_not_populate_measurement_storage() {
-        let _test = crate::tests::test_lock();
+        let _test = test_lock();
         let runtime = register_runtime(RuntimeMetadata::new("recording-without-measurement", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let handle = worker.handle();
