@@ -9,11 +9,10 @@
 mod panic_support;
 
 use std::cell::RefCell;
-use std::future::Future as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
-use std::task::{Context, Waker};
 
+use futures::FutureExt as _;
 use panic_support::runtime;
 use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
@@ -29,7 +28,10 @@ struct JoinOnDrop {
 impl Drop for JoinOnDrop {
     fn drop(&mut self) {
         let task = self.task.take().expect("the cleanup owner retains one blocking task");
-        let result = futures::executor::block_on(task).expect("the runtime remains active during external thread cleanup");
+        let result = task
+            .now_or_never()
+            .expect("the following task completed on the single-worker FIFO pool")
+            .expect("the runtime remains active during external thread cleanup");
         self.completed
             .send(result)
             .expect("the test retains the cleanup completion receiver");
@@ -88,8 +90,8 @@ fn blocking_join_survives_local_worker_slot_teardown() {
                         .is_none()
                 );
             });
-            let mut task = std::pin::pin!(scheduler.spawn_blocking(|| ()));
-            _ = task.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+            // Finish both FIFO tasks before Windows holds the loader lock for TLS destruction.
+            futures::executor::block_on(scheduler.spawn_blocking(|| ())).unwrap();
         })
         .join()
         .unwrap();
