@@ -182,7 +182,7 @@ impl RuntimeHandle {
         without_recording(|| {
             lock(&self.control.task_locations)
                 .entry(identity.descriptor())
-                .or_insert(identity.location());
+                .or_insert_with(|| identity.location());
         });
     }
 
