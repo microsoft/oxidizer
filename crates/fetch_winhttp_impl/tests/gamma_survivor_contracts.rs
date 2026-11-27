@@ -15,12 +15,7 @@ static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyL
 fn gamma_survivor_winhttp_builder_reports_exact_runtime_and_transport() {
     use fetch_winhttp_impl::{HttpClientWinHttpExt, WinHttpDeps};
 
-    let deps = WinHttpDeps::builder(
-        tick::Clock::new_frozen(),
-        bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()),
-        observed::Sink::noop(),
-    )
-    .build();
+    let deps = WinHttpDeps::builder(tick::Clock::new_frozen(), MEMORY.clone(), observed::Sink::noop()).build();
     let builder = fetch::HttpClient::builder_winhttp(deps);
     let debug = format!("{builder:?}");
     assert!(debug.contains("runtime: \"winhttp\""), "{debug}");
@@ -55,7 +50,7 @@ fn gamma_survivor_response_plan_data_headers_trailers_and_stall() {
 
 #[test]
 fn gamma_survivor_collect_frames_keeps_data_order_and_trailers() {
-    let memory = bytesbuf::mem::OpaqueMemory::new(MEMORY.clone());
+    let memory = MEMORY.clone();
     let builder = fetch::HttpBodyBuilder::new(memory.clone(), &tick::Clock::new_frozen());
     let mut trailers = HeaderMap::new();
     trailers.insert("x-end", HeaderValue::from_static("done"));

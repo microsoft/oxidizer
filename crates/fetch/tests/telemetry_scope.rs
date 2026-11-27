@@ -5,7 +5,7 @@
 //! attributes on client metrics.
 
 use bytes::Bytes;
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::GlobalPool;
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::tokio::TokioDeps;
 use fetch::{HttpClient, HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -94,7 +94,7 @@ async fn custom_transport_scope_attribute() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(MEMORY.clone()),
+        memory: MEMORY.clone().into(),
         extras: (),
     };
 
@@ -128,7 +128,7 @@ async fn custom_transport_instrument_inherits_scope() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(MEMORY.clone()),
+        memory: MEMORY.clone().into(),
         extras: (),
     };
 

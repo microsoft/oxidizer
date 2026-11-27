@@ -496,7 +496,7 @@ mod tests {
             }
             Ok(())
         });
-        let memory = OpaqueMemory::new(crate::MEMORY.clone());
+        let memory = crate::MEMORY.clone().into();
         let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
         let error = crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err();
         assert!(error.to_string().contains("invalid status information"), "{error}");
@@ -528,7 +528,7 @@ mod tests {
             }
             Ok(())
         });
-        let memory = OpaqueMemory::new(crate::MEMORY.clone());
+        let memory = crate::MEMORY.clone().into();
         let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
         for _ in 0..2 {
             crate::mocks::drive(writer.end_automatic_chunking()).unwrap();
@@ -559,7 +559,7 @@ mod tests {
                 drop(active);
                 Ok(())
             });
-            let memory = OpaqueMemory::new(crate::MEMORY.clone());
+            let memory = crate::MEMORY.clone().into();
             let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
             let error = if final_write {
                 crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err()

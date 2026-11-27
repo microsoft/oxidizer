@@ -211,7 +211,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let memory = OpaqueMemory::new(GlobalPool::new());
+//! let memory = GlobalPool::new().into();
 //! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
 //!
 //! let cache = Cache::builder::<String, String>(clock)

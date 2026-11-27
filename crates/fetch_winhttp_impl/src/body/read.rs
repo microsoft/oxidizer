@@ -1461,7 +1461,7 @@ mod tests {
         .unwrap();
         let context = installed_context(&guard);
         drop((session, contexts));
-        let memory = OpaqueMemory::new(crate::MEMORY.clone());
+        let memory: OpaqueMemory = crate::MEMORY.clone().into();
 
         ReaderHarness {
             reader: WinHttpBodyReader::new(guard, facade, memory.clone(), declared_length),

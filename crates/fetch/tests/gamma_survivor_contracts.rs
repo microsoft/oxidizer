@@ -196,7 +196,7 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     let expected_tls = format!("{tls:?}");
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()),
+        memory: MEMORY.clone().into(),
         extras: (),
     };
     let builder = create_builder(

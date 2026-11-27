@@ -11,7 +11,7 @@ use templated_uri::{BaseUri, PathAndQuery, Uri};
 static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 fn bodies() -> HttpBodyBuilder {
-    HttpBodyBuilder::new(bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()), &tick::Clock::new_frozen())
+    HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen())
 }
 
 fn long_base() -> Result<BaseUri, templated_uri::UriError> {

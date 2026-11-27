@@ -80,7 +80,7 @@ pub fn client(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> Test
 ///
 /// Plain HTTP is allowed so a fixture can be reached without TLS.
 pub fn client_builder(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> (HttpClientBuilder, HttpBodyBuilder) {
-    let memory = OpaqueMemory::new(crate::MEMORY.clone());
+    let memory: OpaqueMemory = crate::MEMORY.clone().into();
     let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
     let deps = WinHttpDeps::builder(clock, memory, Sink::noop()).tls(tls).build();
     let mut builder = HttpClient::builder_winhttp(deps)

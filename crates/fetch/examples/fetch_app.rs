@@ -43,7 +43,7 @@ async fn main() -> Result<(), ohno::AppError> {
     // Use fundle to construct App.
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
-        .memory(|_| OpaqueMemory::new(GlobalPool::new()))
+        .memory(|_| GlobalPool::new().into())
         .client({
             let meter_provider = meter_provider.clone();
             move |x| {

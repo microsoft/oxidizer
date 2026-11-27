@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn transforming_preserves_the_source_idle_timeout() {
         let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &control.to_clock())
+        let builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let source = builder.with_options(options).stream(stream::pending());
@@ -430,7 +430,7 @@ mod tests {
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
         let memory = crate::MEMORY.clone();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(memory), &clock);
+        let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
 
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &clock);
+        let builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
@@ -666,7 +666,7 @@ mod tests {
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
         let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &clock).with_options(builder_options);
+        let builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));

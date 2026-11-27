@@ -348,7 +348,7 @@ mod tests {
     }
 
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder(clock(), OpaqueMemory::new(crate::MEMORY.clone()), Sink::noop())
+        WinHttpDeps::builder(clock(), crate::MEMORY.clone(), Sink::noop())
     }
 
     fn clock() -> Clock {

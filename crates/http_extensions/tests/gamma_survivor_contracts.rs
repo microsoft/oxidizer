@@ -12,7 +12,7 @@ use templated_uri::BaseUri;
 static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 fn body_builder() -> HttpBodyBuilder {
-    HttpBodyBuilder::new(bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()), &tick::Clock::new_frozen())
+    HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen())
 }
 
 #[test]

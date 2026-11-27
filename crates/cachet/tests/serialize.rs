@@ -188,7 +188,7 @@ async fn concurrent_serialize_from_multiple_tasks() {
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(MockCache::<String, String>::new())
-            .serialize(OpaqueMemory::new(MEMORY.clone()))
+            .serialize(MEMORY.clone())
             .fallback(Cache::builder(Clock::new_frozen()).storage(mock_after.clone()))
             .build(),
     );
@@ -238,7 +238,7 @@ async fn serialize_on_one_thread_deserialize_on_another() {
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(mock_before.clone())
-            .serialize(OpaqueMemory::new(MEMORY.clone()))
+            .serialize(MEMORY.clone())
             .fallback(Cache::builder(Clock::new_frozen()).storage(MockCache::<BytesView, BytesView>::new()))
             .build(),
     );

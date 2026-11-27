@@ -16,7 +16,7 @@ struct RawPath {
 }
 
 fn bodies() -> HttpBodyBuilder {
-    HttpBodyBuilder::new(bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()), &tick::Clock::new_frozen())
+    HttpBodyBuilder::new(MEMORY.clone(), &tick::Clock::new_frozen())
 }
 
 #[test]

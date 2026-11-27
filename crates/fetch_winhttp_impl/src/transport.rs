@@ -162,6 +162,8 @@ pub(crate) struct TransportInputs {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use bytesbuf::mem::OpaqueMemory;
+
     use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
@@ -169,7 +171,6 @@ mod tests {
     use std::time::Duration;
 
     use bytesbuf::BytesView;
-    use bytesbuf::mem::OpaqueMemory;
     use fetch::options::TransportOptions;
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
     use layered::Service;
@@ -333,7 +334,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Body, 0);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &clock());
+        let body_builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &clock());
         let body_error = HttpError::unavailable("upload stream failed").with_request(request("https://unrelated.example/attached-by-body"));
         let body = body_builder.stream(futures::stream::iter([Err::<BytesView, _>(body_error)]));
         let mut input = http::Request::builder()
@@ -370,7 +371,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Send, 0);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let memory = OpaqueMemory::new(crate::MEMORY.clone());
+        let memory: OpaqueMemory = crate::MEMORY.clone().into();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock());
         let body = body_builder.stream(futures::stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &memory))]));
         let mut input = http::Request::builder()
@@ -416,7 +417,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Write, 10);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &clock());
+        let body_builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &clock());
         let mut input = http::Request::builder()
             .method(http::Method::POST)
             .uri("https://example.com/upload")
@@ -566,7 +567,7 @@ mod tests {
     }
 
     fn inputs_with_clock(sink: Sink, clock: Clock) -> TransportInputs {
-        let memory = OpaqueMemory::new(crate::MEMORY.clone());
+        let memory: OpaqueMemory = crate::MEMORY.clone().into();
 
         TransportInputs {
             body_builder: HttpBodyBuilder::new(memory.clone(), &clock),
@@ -579,7 +580,7 @@ mod tests {
     }
 
     fn request(uri: &str) -> HttpRequest {
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &clock());
+        let body_builder = HttpBodyBuilder::new(crate::MEMORY.clone(), &clock());
         HttpRequestBuilder::new(&body_builder).get(uri).build().unwrap()
     }
 

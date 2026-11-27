@@ -10,7 +10,7 @@ use std::hint::black_box;
 use alloc_tracker::{Allocator, Session};
 use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::BytesView;
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::GlobalPool;
 use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
@@ -52,7 +52,7 @@ fn serialization(c: &mut Criterion) {
         let clock = Clock::new_frozen();
         let cache = Cache::builder(clock.clone())
             .storage(MissTier)
-            .serialize(OpaqueMemory::new(MEMORY.clone()))
+            .serialize(MEMORY.clone())
             .fallback(Cache::builder::<BytesView, BytesView>(clock).memory())
             .build();
         let key = String::from("key");
