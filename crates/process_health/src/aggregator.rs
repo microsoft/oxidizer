@@ -259,6 +259,7 @@ mod tests {
 
     use futures::FutureExt;
     use futures::executor::block_on;
+    use observed_testing::{TEST_ID, test_emitter};
     use testing_aids::execute_or_terminate_process;
 
     use super::*;
@@ -411,5 +412,36 @@ mod tests {
         drop(root.component("retired"));
         let _live = root.component("live");
         assert!(!root.shared.registry.lock().unwrap().contains_key("retired"));
+    }
+
+    #[test]
+    fn component_registration_uses_the_same_first_id_in_the_registry_and_worker() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        {
+            let root = Aggregator::new(sink);
+            let component = root.component("database");
+            let shared = root
+                .shared
+                .registry
+                .lock()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .shared
+                .upgrade()
+                .unwrap();
+            let registration = shared.dispatch.registration.load_full().unwrap();
+
+            assert_eq!(shared.id, 0);
+            root.shared.worker.sender.send(Work::Component(Arc::downgrade(&shared))).unwrap();
+            root.shared.worker.sender.send(Work::Stop).unwrap();
+            // Keep the registration live until owner teardown joins the worker.
+            drop(component);
+            shared.dispatch.registration.store(Some(registration));
+            drop(root);
+        }
+
+        assert!(processor.events().is_empty());
     }
 }

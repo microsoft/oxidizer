@@ -12,6 +12,7 @@ use std::time::Duration;
 use futures::executor::block_on;
 use health::{Aggregator, Component, Health};
 use observed::Sink;
+use testing_aids::is_mutation_testing;
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 3 });
 
@@ -34,7 +35,11 @@ fn turn<T>(probe: &mut Component, publish: impl FnOnce() -> T) -> (T, Thread) {
     let mut changed = pin!(probe.changed());
     assert!(changed.as_mut().poll(&mut cx).is_pending());
     let result = publish();
-    let worker = ack.recv_timeout(TURN_TIMEOUT).expect("worker must acknowledge the probe");
+    let worker = if is_mutation_testing() {
+        ack.recv().expect("worker must acknowledge the probe")
+    } else {
+        ack.recv_timeout(TURN_TIMEOUT).expect("worker must acknowledge the probe")
+    };
     assert!(changed.as_mut().poll(&mut cx).is_ready());
     (result, worker)
 }

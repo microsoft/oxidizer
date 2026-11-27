@@ -15,6 +15,7 @@ use futures::executor::block_on;
 use health::{Aggregator, Attribute, Component, Health, Monitor, Publisher, Report, Signal};
 use observed::Sink;
 use static_assertions::assert_impl_all;
+use testing_aids::is_mutation_testing;
 use thread_aware::{ThreadAware, ThreadBuilder};
 
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 5 });
@@ -48,7 +49,11 @@ impl Wake for BlockingWake {
 }
 
 fn receive<T>(receiver: &mpsc::Receiver<T>) -> Result<T, mpsc::RecvTimeoutError> {
-    receiver.recv_timeout(RECEIVE_TIMEOUT)
+    if is_mutation_testing() {
+        receiver.recv().map_err(Into::into)
+    } else {
+        receiver.recv_timeout(RECEIVE_TIMEOUT)
+    }
 }
 
 fn wait_for_component(component: &mut Component, state: Health) {

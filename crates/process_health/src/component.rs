@@ -411,6 +411,7 @@ mod tests {
         let registration = shared.dispatch.registration.load();
 
         assert_eq!(shared.id, 7);
+        assert!(shared.is_registered());
         assert_eq!(registration.as_ref().unwrap().id, 7);
     }
 
@@ -439,12 +440,32 @@ mod tests {
 
     #[test]
     fn publisher_registration_initializes_and_enqueues_its_slot() {
+        let process_blockers = Arc::new(AtomicUsize::new(0));
         let (work, pending) = mpsc::channel();
-        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::clone(&process_blockers));
         let publisher = Publisher::register_test(&clients).unwrap();
 
         assert!(publisher.slot_test().queued.load(Ordering::Acquire));
         assert!(!publisher.slot_test().removed.load(Ordering::Acquire));
+        assert_eq!(process_blockers.load(Ordering::SeqCst), 0);
+        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+    }
+
+    #[test]
+    fn publisher_replacement_enqueues_after_a_completed_turn() {
+        let (work, pending) = mpsc::channel();
+        let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let mut publisher = Publisher::register_test(&clients).unwrap();
+        let Work::Component(component) = pending.try_recv().unwrap() else {
+            panic!("registration must enqueue a component turn");
+        };
+        component
+            .upgrade()
+            .unwrap()
+            .process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
+
+        publisher.degraded("retrying");
+
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
     }
 
@@ -702,16 +723,26 @@ mod tests {
 
     #[test]
     fn enqueue_racing_receiver_teardown_does_not_wake_the_worker() {
-        let (work, pending) = mpsc::channel();
-        let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
-        let publisher = Publisher::register_test(&clients).unwrap();
-        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
-        clients.process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
+        let (updates, receiver) = mpsc::channel();
+        drop(receiver);
+        let (worker, pending) = mpsc::channel();
+        let dispatch = ComponentDispatch {
+            component: Weak::new(),
+            updates,
+            worker,
+            registration: ArcSwapOption::empty(),
+            scheduled: AtomicBool::new(false),
+        };
+        let slot = Arc::new(Slot {
+            id: 1,
+            pending: ArcSwapOption::empty(),
+            queued: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
+        });
 
-        // The publisher has checked registration, but the receiver disappears before enqueue.
-        drop(clients);
-        drop(actor);
-        publisher.dispatch_test().enqueue(publisher.slot_test());
+        dispatch.enqueue(&slot);
+
+        assert!(!dispatch.scheduled.load(Ordering::Acquire));
         assert!(pending.try_recv().is_err(), "there is no component left to process");
     }
 }
