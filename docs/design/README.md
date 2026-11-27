@@ -52,6 +52,10 @@ If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
 filter cannot classify.
 
+PR runtime analysis runs Miri, Careful, and Loom as separate jobs for each
+operating-system target. This keeps the full-workspace Miri workload below the
+six-hour GitHub-hosted job limit without removing any runtime check.
+
 Package-isolated all-target checks run in scheduled validation, not in the
 generated PR tiers. This division follows the standard Anvil catalog.
 `anvil-check-all-targets` checks each package separately with default features

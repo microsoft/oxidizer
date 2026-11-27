@@ -261,19 +261,20 @@ jobs:
         run: Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
 
   pr-runtime-analysis:
-    name: "Check Group: Runtime Analysis (${{ matrix.os }})"
+    name: "Check Group: Runtime Analysis (${{ matrix.os }}, ${{ matrix.check }})"
     permissions:
       contents: read
       statuses: write
     # Stricter-runtime correctness: miri + careful + loom.
-    # 4-leg matrix -- these checks compile per host target and can
-    # surface OS/arch-specific bugs. All are impact-scoped so the
-    # wall-clock is proportional to the PR's blast radius.
+    # Runtime checks compile per host target and can surface OS/arch-specific
+    # bugs. Separate Miri, Careful, and Loom jobs keep full-workspace Miri
+    # below the six-hour GitHub-hosted job limit.
     needs: [impact-linux, impact-windows]
     strategy:
       fail-fast: false
       matrix:
         os: [linux, windows, linux-arm, windows-arm]
+        check: [miri, careful, loom]
     runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
       || matrix.os == 'windows' && inputs.windows_runner
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
@@ -291,7 +292,7 @@ jobs:
           path: target/anvil/impact
       - uses: ./.anvil/github/actions/run-group
         with:
-          group: pr-runtime-analysis
+          group: ${{ matrix.check }}
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
           impact_mode: consume
 
