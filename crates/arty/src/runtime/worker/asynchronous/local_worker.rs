@@ -553,6 +553,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one ownership test covers relocation, execution state, observer callbacks, and shutdown transitions"
+    )]
     fn relocating_registration_checks_owner_execution_and_shutdown() {
         let observations = std::thread::spawn(|| {
             let identity = || TaskIdentity::from_location(std::panic::Location::caller());

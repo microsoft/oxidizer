@@ -991,7 +991,9 @@ fn format_histogram_duration(nanos: u64) -> String {
         0..1_000 => format!("{nanos}ns"),
         1_000..1_000_000 => format!("{}us", nanos / 1_000),
         1_000_000..1_000_000_000 => format!("{}ms", nanos / 1_000_000),
-        1_000_000_000..10_000_000_000 => format!("{:.1}s", nanos as f64 / 1_000_000_000.0),
+        1_000_000_000..10_000_000_000 => {
+            format!("{}.{:01}s", nanos / 1_000_000_000, nanos % 1_000_000_000 / 100_000_000)
+        }
         _ => format!("{}s", nanos / 1_000_000_000),
     }
 }
@@ -1019,6 +1021,10 @@ fn register_fixed_headers(mouse: &MouseRows, area: Rect, widths: &[u16], targets
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "allocation rows, sortable headings, source scope, selection, and stack drilldown are one coordinated panel"
+)]
 fn draw_allocations(
     frame: &mut ratatui::Frame<'_>,
     mouse_rows: &MouseRows,
@@ -1626,10 +1632,10 @@ fn sorted_primitive_hotspots(operation: &super::data::PrimitiveOperation, view: 
     hotspots.sort_unstable_by(|left, right| {
         let ordering = match view.hotspot_sort {
             PrimitiveHotspotSort::Events => left.count.cmp(&right.count),
-            PrimitiveHotspotSort::Location => left.location(view.stack_filter).cmp(&right.location(view.stack_filter)),
+            PrimitiveHotspotSort::Location => left.location(view.stack_filter).cmp(right.location(view.stack_filter)),
         };
         let ordering = if view.hotspot_descending { ordering.reverse() } else { ordering };
-        ordering.then_with(|| left.location(view.stack_filter).cmp(&right.location(view.stack_filter)))
+        ordering.then_with(|| left.location(view.stack_filter).cmp(right.location(view.stack_filter)))
     });
     hotspots
 }
@@ -1890,9 +1896,11 @@ fn draw_thread_list(
             view.focus == ThreadFocus::Threads,
         )
     }));
-    let hidden = (snapshot.hidden_internal_threads != 0)
-        .then(|| format!(" · {} telemetry sources hidden", snapshot.hidden_internal_threads))
-        .unwrap_or_default();
+    let hidden = if snapshot.hidden_internal_threads != 0 {
+        format!(" · {} telemetry sources hidden", snapshot.hidden_internal_threads)
+    } else {
+        String::new()
+    };
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()

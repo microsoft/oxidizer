@@ -102,7 +102,7 @@ mod tests {
         RuntimeConfig {
             name: RuntimeName::new(name),
             workers_policy: WorkersPolicy::exactly(1),
-            stack_size: NonZeroUsize::new(1).unwrap(),
+            stack_size: NonZeroUsize::MIN,
             blocking_pool_policy: BlockingPoolPolicy::shared(),
             monitor_policy: MonitorPolicy::enabled(),
             hook_registrations: std::sync::Mutex::new(Vec::new()),

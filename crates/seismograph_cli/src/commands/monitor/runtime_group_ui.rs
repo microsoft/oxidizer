@@ -130,7 +130,6 @@ fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], s
     let fixed = widths.iter().fold(0_u16, |total, width| {
         total.saturating_add(match width {
             Constraint::Length(width) => *width,
-            Constraint::Min(_) => 0,
             _ => 0,
         })
     });

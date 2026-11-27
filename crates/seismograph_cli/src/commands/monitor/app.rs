@@ -635,6 +635,10 @@ pub(super) enum HeapFocus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each sort direction belongs to an independently focusable thread table"
+)]
 pub(super) struct ThreadViewState {
     pub(super) focus: ThreadFocus,
     pub(super) thread_selected: usize,
@@ -735,6 +739,10 @@ pub(super) enum ThreadObjectSort {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "explicit selections and independent table sort directions preserve runtime navigation state"
+)]
 pub(super) struct RuntimeViewState {
     pub(super) runtime_selected: usize,
     pub(super) focus: RuntimeWorkersFocus,
@@ -2233,6 +2241,10 @@ fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option
     true
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one key dispatcher keeps dependent runtime selections and drilldown resets atomic"
+)]
 fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let runtime = snapshot.map(|snapshot| &snapshot.runtime);
     let runtime_id = runtime.and_then(|runtime| runtime.selected_runtime(view.runtime_selected).map(|runtime| runtime.runtime_id));

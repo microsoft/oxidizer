@@ -399,6 +399,10 @@ struct RuntimeSeed {
     unclassified_tasks: u64,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "runtime source metadata and retained event evidence are seeded together so partial task identities stay consistent"
+)]
 fn seed_runtime_model(events: &Events, source: Option<&Snapshot>) -> RuntimeSeed {
     let mut seed = RuntimeSeed::default();
     let mut runtime_task_locations = HashMap::new();
@@ -567,9 +571,8 @@ impl RuntimeMonitorSnapshot {
             mut asynchronous_groups,
             blocking_groups,
             task_locations,
-            asynchronous_worker_types: _,
-            blocking_worker_types: _,
             unclassified_tasks,
+            ..
         } = seed_runtime_model(events, source);
         for event in &events.events {
             let Some(runtime) = event.runtime() else { continue };

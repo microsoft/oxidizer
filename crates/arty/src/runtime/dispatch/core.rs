@@ -164,6 +164,10 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), future_factory, options)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the local fast path must return factory ownership without a heap allocation when the selected worker is not current"
+    )]
     pub(crate) fn spawn_relocating<FF, F>(&self, source: &Thread, future_factory: FF, options: SpawnOptions) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,

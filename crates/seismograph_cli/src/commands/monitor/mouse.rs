@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailMode,
-    RuntimeSectionFocus, RuntimeTaskRowSort, RuntimeTaskTypeSort, RuntimeWorkersFocus, Screen, TaskEventsFocus, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailMode, RuntimeSectionFocus,
+    RuntimeTaskRowSort, RuntimeTaskTypeSort, RuntimeWorkersFocus, Screen, TaskEventsFocus, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,13 +85,11 @@ impl ListTarget {
             | Self::BlockingWorkersTab
             | Self::RuntimeWorkerHeader(_, _)
             | Self::AsynchronousWorkers
-            | Self::BlockingWorkers => {
-                Some(MonitorTab::Runtime)
-            }
+            | Self::BlockingWorkers
+            | Self::RuntimeTaskHeader(_) => Some(MonitorTab::Runtime),
             Self::AsynchronousTaskGroups | Self::BlockingTaskGroups | Self::RuntimeTaskTypeHeader(_) | Self::RuntimeGroupTasks => {
                 Some(MonitorTab::Runtime)
             }
-            Self::RuntimeTaskHeader(_) => Some(MonitorTab::Runtime),
             Self::TaskOperations | Self::TaskOperationHeader(_) | Self::TaskOccurrences | Self::TaskOccurrenceHeader(_) => {
                 Some(MonitorTab::RuntimeTask)
             }
@@ -156,6 +154,10 @@ impl MouseRows {
 }
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "header sorting and direct row activation share tab validation and dependent selection resets"
+    )]
     pub(super) fn activate_mouse_row(&mut self, target: ListTarget, index: usize) {
         let (tab, snapshot) = match &self.screen {
             Screen::Browse => (None, None),
@@ -407,6 +409,10 @@ impl App {
         self.activate_selectable_mouse_row(target, index);
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one row dispatcher mirrors keyboard navigation across every focusable diagnostic table"
+    )]
     fn activate_selectable_mouse_row(&mut self, target: ListTarget, index: usize) {
         match target {
             ListTarget::AsynchronousWorkers => {
@@ -540,9 +546,10 @@ impl App {
             | ListTarget::AsynchronousTaskGroups
             | ListTarget::BlockingTaskGroups
             | ListTarget::RuntimeTaskTypeHeader(_)
-            | ListTarget::RuntimeGroupTasks => return,
-            ListTarget::RuntimeTaskHeader(_) => return,
-            ListTarget::TaskOperationHeader(_) | ListTarget::TaskOccurrenceHeader(_) => return,
+            | ListTarget::RuntimeGroupTasks
+            | ListTarget::RuntimeTaskHeader(_)
+            | ListTarget::TaskOperationHeader(_)
+            | ListTarget::TaskOccurrenceHeader(_) => return,
             ListTarget::TaskOperations | ListTarget::TaskOccurrences => {
                 self.runtime_view.detail_mode = RuntimeDetailMode::Events;
                 let view = &mut self.runtime_view.events;
@@ -701,6 +708,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one regression verifies consistent click sorting across every diagnostic table"
+    )]
     fn metric_header_clicks_select_and_reverse_sorting() {
         let mut app = App::offline("capture.seismograph".into());
         if let Screen::Offline { tab, .. } = &mut app.screen {
@@ -718,73 +729,40 @@ mod tests {
         app.activate_mouse_row(ListTarget::PrimitiveOperationHeader(super::super::data::PrimitiveSort::Objects), 0);
         assert_eq!(app.primitive_view.sort, super::super::data::PrimitiveSort::Objects);
         assert!(app.primitive_view.descending);
-        app.activate_mouse_row(
-            ListTarget::PrimitiveTypeHeader(super::super::app::PrimitiveTypeSort::Objects),
-            0,
-        );
-        assert_eq!(
-            app.primitive_view.type_sort,
-            super::super::app::PrimitiveTypeSort::Objects
-        );
+        app.activate_mouse_row(ListTarget::PrimitiveTypeHeader(super::super::app::PrimitiveTypeSort::Objects), 0);
+        assert_eq!(app.primitive_view.type_sort, super::super::app::PrimitiveTypeSort::Objects);
         assert!(app.primitive_view.type_descending);
         app.activate_mouse_row(
             ListTarget::PrimitiveHotspotHeader(super::super::app::PrimitiveHotspotSort::Location),
             0,
         );
-        assert_eq!(
-            app.primitive_view.hotspot_sort,
-            super::super::app::PrimitiveHotspotSort::Location
-        );
+        assert_eq!(app.primitive_view.hotspot_sort, super::super::app::PrimitiveHotspotSort::Location);
         assert!(!app.primitive_view.hotspot_descending);
 
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Threads;
         }
-        app.activate_mouse_row(
-            ListTarget::ThreadHeader(super::super::app::ThreadListSort::Overwritten),
-            0,
-        );
-        assert_eq!(
-            app.thread_view.thread_sort,
-            super::super::app::ThreadListSort::Overwritten
-        );
+        app.activate_mouse_row(ListTarget::ThreadHeader(super::super::app::ThreadListSort::Overwritten), 0);
+        assert_eq!(app.thread_view.thread_sort, super::super::app::ThreadListSort::Overwritten);
         assert!(app.thread_view.thread_descending);
-        app.activate_mouse_row(
-            ListTarget::ThreadOperationHeader(super::super::app::ThreadOperationSort::Events),
-            0,
-        );
-        assert_eq!(
-            app.thread_view.operation_sort,
-            super::super::app::ThreadOperationSort::Events
-        );
+        app.activate_mouse_row(ListTarget::ThreadOperationHeader(super::super::app::ThreadOperationSort::Events), 0);
+        assert_eq!(app.thread_view.operation_sort, super::super::app::ThreadOperationSort::Events);
         assert!(app.thread_view.operation_descending);
         app.activate_mouse_row(
             ListTarget::ThreadParticipantHeader(super::super::app::ThreadParticipantSort::Events),
             0,
         );
-        assert_eq!(
-            app.thread_view.participant_sort,
-            super::super::app::ThreadParticipantSort::Events
-        );
+        assert_eq!(app.thread_view.participant_sort, super::super::app::ThreadParticipantSort::Events);
         assert!(app.thread_view.participant_descending);
-        app.activate_mouse_row(
-            ListTarget::ThreadObjectHeader(super::super::app::ThreadObjectSort::Related),
-            0,
-        );
-        assert_eq!(
-            app.thread_view.object_sort,
-            super::super::app::ThreadObjectSort::Related
-        );
+        app.activate_mouse_row(ListTarget::ThreadObjectHeader(super::super::app::ThreadObjectSort::Related), 0);
+        assert_eq!(app.thread_view.object_sort, super::super::app::ThreadObjectSort::Related);
         assert!(app.thread_view.object_descending);
 
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Runtime;
         }
         app.activate_mouse_row(
-            ListTarget::RuntimeWorkerHeader(
-                RuntimeWorkersFocus::Asynchronous,
-                super::super::app::RuntimeWorkerSort::Polls,
-            ),
+            ListTarget::RuntimeWorkerHeader(RuntimeWorkersFocus::Asynchronous, super::super::app::RuntimeWorkerSort::Polls),
             0,
         );
         assert_eq!(
@@ -816,10 +794,7 @@ mod tests {
             super::super::app::TaskEventOperationSort::Events
         );
         assert!(app.runtime_view.events.operation_descending);
-        app.activate_mouse_row(
-            ListTarget::TaskOccurrenceHeader(super::super::app::TaskOccurrenceSort::Thread),
-            0,
-        );
+        app.activate_mouse_row(ListTarget::TaskOccurrenceHeader(super::super::app::TaskOccurrenceSort::Thread), 0);
         assert_eq!(
             app.runtime_view.events.occurrence_sort,
             super::super::app::TaskOccurrenceSort::Thread
@@ -829,50 +804,23 @@ mod tests {
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Io;
         }
-        app.activate_mouse_row(
-            ListTarget::IoResourceHeader(super::super::app::IoResourceSort::Errors),
-            0,
-        );
-        assert_eq!(
-            app.io_view.resource_sort,
-            super::super::app::IoResourceSort::Errors
-        );
+        app.activate_mouse_row(ListTarget::IoResourceHeader(super::super::app::IoResourceSort::Errors), 0);
+        assert_eq!(app.io_view.resource_sort, super::super::app::IoResourceSort::Errors);
         assert!(app.io_view.resource_descending);
-        app.activate_mouse_row(
-            ListTarget::IoOperationHeader(super::super::app::IoOperationSort::Outcome),
-            0,
-        );
-        assert_eq!(
-            app.io_view.operation_sort,
-            super::super::app::IoOperationSort::Outcome
-        );
+        app.activate_mouse_row(ListTarget::IoOperationHeader(super::super::app::IoOperationSort::Outcome), 0);
+        assert_eq!(app.io_view.operation_sort, super::super::app::IoOperationSort::Outcome);
         assert!(app.io_view.operation_descending);
 
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Cache;
         }
-        app.activate_mouse_row(
-            ListTarget::CacheTierHeader(super::super::app::CacheTierSort::HitRate),
-            0,
-        );
-        assert_eq!(
-            app.cache_view.tier_sort,
-            super::super::app::CacheTierSort::HitRate
-        );
+        app.activate_mouse_row(ListTarget::CacheTierHeader(super::super::app::CacheTierSort::HitRate), 0);
+        assert_eq!(app.cache_view.tier_sort, super::super::app::CacheTierSort::HitRate);
         assert!(app.cache_view.tier_descending);
-        app.activate_mouse_row(
-            ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome),
-            0,
-        );
-        assert_eq!(
-            app.cache_view.operation_sort,
-            super::super::app::CacheOperationSort::Outcome
-        );
+        app.activate_mouse_row(ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome), 0);
+        assert_eq!(app.cache_view.operation_sort, super::super::app::CacheOperationSort::Outcome);
         assert!(app.cache_view.operation_descending);
-        app.activate_mouse_row(
-            ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome),
-            0,
-        );
+        app.activate_mouse_row(ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome), 0);
         assert!(!app.cache_view.operation_descending);
     }
 }

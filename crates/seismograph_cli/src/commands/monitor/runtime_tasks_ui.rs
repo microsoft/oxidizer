@@ -94,7 +94,6 @@ fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], s
     let fixed = widths.iter().fold(0_u16, |total, width| {
         total.saturating_add(match width {
             Constraint::Length(width) => *width,
-            Constraint::Min(_) => 0,
             _ => 0,
         })
     });
@@ -188,6 +187,10 @@ fn outcome_totals(groups: impl Iterator<Item = (u64, u64, u64, u64, u64)>) -> (u
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the responsive async task-type table keeps columns, sorting, selection, and totals aligned"
+)]
 fn draw_asynchronous(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -366,6 +369,10 @@ fn asynchronous_row(group: &AsynchronousTaskGroupSummary, wide: bool) -> Row<'st
     }))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the responsive blocking task-type table keeps columns, sorting, selection, and totals aligned"
+)]
 fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, runtime: &RuntimeMonitorSnapshot, view: RuntimeViewState) {
     if area.is_empty() {
         return;

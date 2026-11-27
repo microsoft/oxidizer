@@ -105,9 +105,11 @@ async fn run_allocation_bursts(cx: Context, cycle: u64) -> usize {
     let mut allocated_bytes = 0;
 
     for step in 0..ASYNC_STEPS {
-        let fill = cycle.wrapping_add(step as u64) as u8;
+        let fill = wrapping_byte(cycle.wrapping_add(u64::try_from(step).expect("ASYNC_STEPS fits in u64")));
         let payloads: Vec<_> = (0..ALLOCATIONS_PER_STEP)
-            .map(|allocation| vec![fill.wrapping_add(allocation as u8); ALLOCATION_SIZE])
+            .map(|allocation| {
+                vec![fill.wrapping_add(u8::try_from(allocation).expect("ALLOCATIONS_PER_STEP is smaller than 256")); ALLOCATION_SIZE]
+            })
             .collect();
         allocated_bytes += payloads.iter().map(Vec::len).sum::<usize>();
 
@@ -142,7 +144,7 @@ fn run_blocking_analysis(cycle: u64) -> u64 {
 fn run_blocking_allocations(cycle: u64) -> usize {
     let allocations: Vec<_> = (0..BLOCKING_ALLOCATION_COUNT)
         .map(|allocation| {
-            let fill = cycle.wrapping_add(allocation as u64) as u8;
+            let fill = wrapping_byte(cycle.wrapping_add(u64::try_from(allocation).expect("BLOCKING_ALLOCATION_COUNT fits in u64")));
             vec![fill; BLOCKING_ALLOCATION_SIZE].into_boxed_slice()
         })
         .collect();
@@ -165,7 +167,7 @@ fn run_cache_workload(cycle: u64) -> usize {
     cache.insert(key, value);
     record_cache(tier, EventKind::CacheInserted);
 
-    let hits = usize::from(cache.get(&key).is_some());
+    let hits = usize::from(cache.contains_key(&key));
     if hits != 0 {
         record_cache(tier, EventKind::CacheHit);
     }
@@ -187,7 +189,7 @@ fn run_file_io(cycle: u64) -> usize {
     let resource_id = *RESOURCE.get_or_init(IoResourceId::allocate);
     let buffer_id = *BUFFER.get_or_init(BufferId::allocate);
     let path = env::temp_dir().join(format!("arty-monitoring-{}.tmp", std::process::id()));
-    let payload = vec![cycle as u8; IO_PAYLOAD_SIZE];
+    let payload = vec![wrapping_byte(cycle); IO_PAYLOAD_SIZE];
     let write_operation = IoOperationId::allocate();
     record_io(
         EventKind::IoWriteStarted,
@@ -273,4 +275,8 @@ fn io_event(
 
 fn record_io(kind: EventKind, event: IoEvent) {
     seismograph::record(EventClass::Io, || Some(Record::io(kind, event)));
+}
+
+const fn wrapping_byte(value: u64) -> u8 {
+    value.to_le_bytes()[0]
 }

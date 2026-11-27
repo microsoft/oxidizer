@@ -179,6 +179,10 @@ fn timeline(
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "worker tabs and the responsive sortable table share one selection and mouse-target layout"
+)]
 fn draw_workers(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -528,11 +532,7 @@ fn draw_worker_activity(frame: &mut ratatui::Frame<'_>, area: Rect, worker: Opti
                 duration(worker.metrics.median_poll_nanos),
                 duration(worker.metrics.max_poll_nanos)
             )),
-            Line::from(timeline(
-                &worker.metrics.polls,
-                worker.window,
-                usize::from(area.width.saturating_sub(2)),
-            )),
+            timeline(&worker.metrics.polls, worker.window, usize::from(area.width.saturating_sub(2))),
         ];
         frame.render_widget(Paragraph::new(lines).block(block(title, false)), summary);
         draw_poll_histogram(frame, chart, &worker.metrics.poll_samples);

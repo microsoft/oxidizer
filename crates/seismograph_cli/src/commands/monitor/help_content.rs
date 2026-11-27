@@ -841,7 +841,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "one table verifies each focused panel's metric semantics")]
     fn help_explains_noninterchangeable_scopes_and_operation_values() {
         for (context, distinctions) in [
             (Context::RuntimeTask, &["Canceled", "Panicked", "queue", "execution"][..]),
