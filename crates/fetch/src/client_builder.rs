@@ -498,7 +498,7 @@ impl Aware {
         let client_attributes = self.metering.client_attributes().clone();
         let meter: Meter = self.metering.into();
         let body_builder = self.transport.create_body_builder(&self.options);
-        let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport, &body_builder);
+        let dispatch = create_dispatch_handler(&meter, &client_attributes, self.options.clone(), &self.transport, &body_builder);
         let context = PipelineContext::new(
             self.resilience_context,
             &meter,

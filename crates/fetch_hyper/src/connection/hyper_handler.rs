@@ -113,6 +113,7 @@ where
         options,
         pool_index,
         sink,
+        client_attributes,
         hyper_builder,
         ..
     } = builder;
@@ -125,6 +126,7 @@ where
         options.connect_timeout,
         options.supported_http_versions,
         sink,
+        client_attributes,
         pool_index,
         options.connection_pool.connection_lifetime,
     );

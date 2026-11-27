@@ -22,6 +22,7 @@ use tick::Clock;
 
 use crate::handlers::TransportHandler;
 use crate::options::{ClientOptions, PoolIndex, TransportOptions};
+use crate::telemetry::ClientAttributes;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
@@ -179,7 +180,7 @@ where
     HttpClient::builder_custom_internal(
         runtime,
         transport,
-        move |cx| TransportHandler::new(factory(cx)),
+        move |cx, _client_attributes| TransportHandler::new(factory(cx)),
         isolation,
         deps.into(),
     )
@@ -190,7 +191,7 @@ impl HttpClient {
     ///
     /// The factory returns an erased [`TransportHandler`]. This avoids another boxing step when a
     /// transport can return several handler types. [`CustomContext`] always contains `tls` and
-    /// `meter`. A factory can use or ignore them.
+    /// `meter`. A factory can use or ignore them. The factory also gets the client attributes.
     pub(crate) fn builder_custom_internal<F, Extras>(
         runtime: impl Into<Cow<'static, str>>,
         transport: impl Into<Cow<'static, str>>,
@@ -199,7 +200,7 @@ impl HttpClient {
         deps: CustomDeps<Extras>,
     ) -> HttpClientBuilder
     where
-        F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
+        F: Fn(CustomContext<Extras>, ClientAttributes) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
         // Share the factory across threads. Copy `extras` into each new `CustomContext`.
@@ -213,8 +214,8 @@ impl HttpClient {
             sink: deps.sink.clone(),
             isolation,
             inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
-                let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
-                    Box::new(move |options, meter, pool_index| {
+                let transport: Box<dyn Fn(ClientOptions, Meter, ClientAttributes, PoolIndex) -> TransportHandler + Send + Sync> =
+                    Box::new(move |options, meter, client_attributes, pool_index| {
                         let context = CustomContext {
                             body_builder: create_body_builder(&deps.memory, &deps.clock, &options),
                             clock: deps.clock.clone(),
@@ -224,7 +225,7 @@ impl HttpClient {
                             tls: options.tls.clone(),
                             meter,
                         };
-                        factory(context)
+                        factory(context, client_attributes)
                     });
                 TransportFn::from(transport)
             }),
@@ -234,7 +235,7 @@ impl HttpClient {
     }
 }
 
-type TransportFn = Arc<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync>;
+type TransportFn = Arc<dyn Fn(ClientOptions, Meter, ClientAttributes, PoolIndex) -> TransportHandler + Send + Sync>;
 
 #[derive(Clone, ThreadAware)]
 pub(crate) struct Transport {
@@ -250,8 +251,14 @@ pub(crate) struct Transport {
 }
 
 impl Transport {
-    pub(crate) fn create_transport_handler(&self, options: ClientOptions, meter: Meter, index: PoolIndex) -> TransportHandler {
-        self.inner.as_ref()(options, meter, index)
+    pub(crate) fn create_transport_handler(
+        &self,
+        options: ClientOptions,
+        meter: Meter,
+        client_attributes: ClientAttributes,
+        index: PoolIndex,
+    ) -> TransportHandler {
+        self.inner.as_ref()(options, meter, client_attributes, index)
     }
 
     pub(crate) fn runtime(&self) -> &Cow<'static, str> {

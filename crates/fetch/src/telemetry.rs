@@ -42,12 +42,13 @@ pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
 
 /// The runtime, the transport and the name that tell which client sent a request.
 ///
-/// The scope of the `fetch` meter and the request events of the client carry these values.
+/// The scope of the `fetch` meter, the request events of the client and the connection events of the Tokio transport
+/// carry these values.
 #[derive(Debug, Clone)]
 pub(crate) struct ClientAttributes {
-    runtime: Cow<'static, str>,
-    transport: Cow<'static, str>,
-    client_name: Cow<'static, str>,
+    pub(crate) runtime: Cow<'static, str>,
+    pub(crate) transport: Cow<'static, str>,
+    pub(crate) client_name: Cow<'static, str>,
 }
 
 impl ClientAttributes {

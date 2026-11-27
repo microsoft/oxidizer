@@ -4,6 +4,7 @@
 //! [`HyperTransportBuilder`]: the public entry point for assembling a
 //! [`HyperTransport`].
 
+use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -15,12 +16,13 @@ use http::Version;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, Result};
 use hyper_util::client::legacy;
 use layered::{DynamicService, DynamicServiceExt, Service};
-use observed::Sink;
+use observed::{Sink, Text};
 use tick::Clock;
 
 use crate::HyperIo;
 use crate::connection::Connect;
 use crate::connection::hyper_handler::build_hyper_handler;
+use crate::telemetry::ClientAttributes;
 
 /// A type-erased Hyper request handler.
 #[derive(Clone, Debug)]
@@ -121,6 +123,7 @@ where
     pub(crate) options: TransportOptions,
     pub(crate) pool_index: PoolIndex,
     pub(crate) sink: Sink,
+    pub(crate) client_attributes: Option<ClientAttributes>,
     pub(crate) hyper_builder: legacy::Builder,
     pub(crate) _marker: PhantomData<fn() -> S>,
 }
@@ -169,6 +172,7 @@ where
             options,
             pool_index: PoolIndex::new(0),
             sink,
+            client_attributes: None,
             hyper_builder,
             _marker: PhantomData,
         }
@@ -188,6 +192,23 @@ where
     #[must_use]
     pub fn pool_index(mut self, pool_index: PoolIndex) -> Self {
         self.pool_index = pool_index;
+        self
+    }
+
+    /// Sets the runtime, the transport and the name of the client, which each connection event has as
+    /// `fetch.runtime`, `fetch.transport` and `http.client.name`. When not set, the events do not have them.
+    #[must_use]
+    pub fn client_attributes(
+        mut self,
+        runtime: impl Into<Cow<'static, str>>,
+        transport: impl Into<Cow<'static, str>>,
+        client_name: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        self.client_attributes = Some(ClientAttributes {
+            runtime: Text::from(runtime.into()),
+            transport: Text::from(transport.into()),
+            client_name: Text::from(client_name.into()),
+        });
         self
     }
 
@@ -305,6 +326,7 @@ mod tests {
 
     use bytes::Bytes;
     use fetch_options::{ConnectionLifetime, RequestFilter};
+    use observed::Value;
     use observed_testing::{TEST_ID, test_emitter};
 
     use super::*;
@@ -798,6 +820,43 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let events: Vec<_> = processor.events().iter().map(|event| event.name().to_owned()).collect();
         assert_eq!(events, ["http.client.connection.start", "http.client.connection.success"]);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn built_transport_adds_client_attributes_to_connection_events() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let handler = HyperTransportBuilder::new(
+            FakeConnector::new_pending_response(response_bytes, clock.clone()),
+            Spawner::new_tokio(None),
+            clock,
+            http_and_https_options(),
+            sink,
+        )
+        .body_builder(HttpBodyBuilder::new_fake())
+        .client_attributes("tokio", "hyper", "books")
+        .build(tls());
+        handler.execute(crate::testing::create_test_request()).await.unwrap();
+
+        let client_fields: Vec<_> = processor
+            .events()
+            .iter()
+            .map(|event| {
+                event
+                    .dimensions()
+                    .into_iter()
+                    .filter(|(key, _)| ["fetch.runtime", "fetch.transport", "http.client.name"].contains(&key.as_str()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let expected = vec![
+            ("fetch.runtime".to_owned(), Value::from("tokio")),
+            ("fetch.transport".to_owned(), Value::from("hyper")),
+            ("http.client.name".to_owned(), Value::from("books")),
+        ];
+        assert_eq!(client_fields, [expected.clone(), expected]);
     }
 
     #[test]

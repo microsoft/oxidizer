@@ -14,11 +14,13 @@ use bytes::Bytes;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
+use observed::Text;
 use seatbelt::RecoveryInfo;
 use templated_uri::BaseUri;
 use tick::Clock;
 
 use crate::error_labels::LABEL_CONNECT;
+use crate::telemetry::ClientAttributes;
 
 /// A stream that panics on every operation.
 ///
@@ -311,6 +313,16 @@ pub fn create_test_request() -> HttpRequest {
 #[must_use]
 pub fn fake_body_builder() -> HttpBodyBuilder {
     HttpBodyBuilder::new_fake()
+}
+
+/// Returns the client attributes of a client named `books` with the Tokio runtime and the Hyper transport.
+#[must_use]
+pub(crate) fn client_attributes() -> ClientAttributes {
+    ClientAttributes {
+        runtime: Text::from("tokio"),
+        transport: Text::from("hyper"),
+        client_name: Text::from("books"),
+    }
 }
 
 /// Returns a real [`hyper::Error`] driven by an in-memory stream.

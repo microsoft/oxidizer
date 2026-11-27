@@ -14,7 +14,7 @@ use hyper_util::client::legacy::connect::{Connected, Connection};
 use observed::{Sink, emit};
 use templated_uri::BaseUri;
 
-use crate::telemetry::{ConnectionClosed, protocol_version};
+use crate::telemetry::{ClientAttributes, ConnectionClosed, protocol_version};
 
 /// A wrapper around a stream that tracks connection lifecycle.
 #[derive(Debug)]
@@ -23,16 +23,25 @@ pub(crate) struct TrackedStream<T> {
     base_uri: BaseUri,
     info: ConnectionInfo,
     sink: Sink,
+    client_attributes: Option<ClientAttributes>,
     connected: Connected,
 }
 
 impl<T> TrackedStream<T> {
-    pub(crate) fn new(inner: T, base_uri: BaseUri, info: ConnectionInfo, sink: Sink, connected: Connected) -> Self {
+    pub(crate) fn new(
+        inner: T,
+        base_uri: BaseUri,
+        info: ConnectionInfo,
+        sink: Sink,
+        client_attributes: Option<ClientAttributes>,
+        connected: Connected,
+    ) -> Self {
         Self {
             inner,
             base_uri,
             info,
             sink,
+            client_attributes,
             connected,
         }
     }
@@ -48,6 +57,9 @@ impl<T> Drop for TrackedStream<T> {
                 scheme: self.base_uri.scheme().as_str(),
                 protocol_version: protocol_version(&self.connected),
                 duration_secs: self.info.age().as_secs_f64(),
+                runtime: self.client_attributes.as_ref().map(|attributes| attributes.runtime.clone()),
+                transport: self.client_attributes.as_ref().map(|attributes| attributes.transport.clone()),
+                client_name: self.client_attributes.as_ref().map(|attributes| attributes.client_name.clone()),
             }
         );
     }
@@ -103,7 +115,7 @@ mod tests {
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
 
     use super::*;
-    use crate::testing::PanickingStream;
+    use crate::testing::{PanickingStream, client_attributes};
 
     #[test]
     fn gamma_survivor_tracked_stream_preserves_write_vectored_capability() {
@@ -116,6 +128,7 @@ mod tests {
             base_uri: BaseUri::from_static("https://example.test"),
             info: ConnectionInfo::new(move || now, PoolIndex::new(0), None),
             sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         };
         assert_eq!(hyper::rt::Write::is_write_vectored(&stream), capability);
@@ -131,6 +144,7 @@ mod tests {
             base_uri: BaseUri::from_static("https://example.com"),
             info: frozen_info(0),
             sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         }
     }
@@ -145,6 +159,7 @@ mod tests {
             BaseUri::from_static("https://example.com"),
             ConnectionInfo::new(move || clock.instant(), PoolIndex::new(0), None),
             sink,
+            Some(client_attributes()),
             Connected::new().negotiated_h2(),
         );
         control.advance(Duration::from_millis(500));
@@ -155,7 +170,10 @@ mod tests {
             processor.single_event(),
             ExpectedEvent::new("http.client.connection.closed", Severity::Debug)
                 .body("connection closed")
+                .dimension("fetch.runtime", "tokio")
+                .dimension("fetch.transport", "hyper")
                 .dimension("http.client.connection.duration", 0.5)
+                .dimension("http.client.name", "books")
                 .dimension("network.protocol.version", "2")
                 .dimension("server.address", "example.com")
                 .dimension("server.port", 443_u16)
@@ -171,6 +189,7 @@ mod tests {
             base_uri: BaseUri::from_static("https://example.com"),
             info: frozen_info(7),
             sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         };
 

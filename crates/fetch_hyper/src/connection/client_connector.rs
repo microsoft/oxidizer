@@ -21,7 +21,7 @@ use crate::connection::connect::Connect;
 use crate::connection::io::HyperIo;
 use crate::connection::tracked_stream::TrackedStream;
 use crate::error_labels::{LABEL_CONNECT, LABEL_HTTP_VERSION_UNSUPPORTED, collect_error_labels};
-use crate::telemetry::{ConnectionError, ConnectionStart, ConnectionSuccess, protocol_version};
+use crate::telemetry::{ClientAttributes, ConnectionError, ConnectionStart, ConnectionSuccess, protocol_version};
 
 /// A connector service that applies connect-timeout, version verification,
 /// and lifecycle tracking on top of a user-supplied [`Connect`].
@@ -31,6 +31,7 @@ pub(crate) struct ClientConnector<C, S> {
     connect_timeout: Duration,
     supported_versions: Vec<Version>,
     sink: Sink,
+    client_attributes: Option<ClientAttributes>,
     pool_index: PoolIndex,
     connection_lifetime: ConnectionLifetime,
     _marker: PhantomData<fn() -> S>,
@@ -44,6 +45,7 @@ impl<C: Clone, S> Clone for ClientConnector<C, S> {
             connect_timeout: self.connect_timeout,
             supported_versions: self.supported_versions.clone(),
             sink: self.sink.clone(),
+            client_attributes: self.client_attributes.clone(),
             pool_index: self.pool_index,
             connection_lifetime: self.connection_lifetime.clone(),
             _marker: PhantomData,
@@ -52,12 +54,17 @@ impl<C: Clone, S> Clone for ClientConnector<C, S> {
 }
 
 impl<C, S> ClientConnector<C, S> {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument has its own type, so the compiler rejects a call that mixes two of them up"
+    )]
     pub(crate) fn new(
         connector: C,
         clock: Clock,
         connect_timeout: Duration,
         supported_versions: Vec<Version>,
         sink: Sink,
+        client_attributes: Option<ClientAttributes>,
         pool_index: PoolIndex,
         connection_lifetime: ConnectionLifetime,
     ) -> Self {
@@ -67,6 +74,7 @@ impl<C, S> ClientConnector<C, S> {
             connect_timeout,
             supported_versions,
             sink,
+            client_attributes,
             pool_index,
             connection_lifetime,
             _marker: PhantomData,
@@ -90,6 +98,7 @@ where
             &self.clock,
             self.connect_timeout,
             &self.sink,
+            self.client_attributes.as_ref(),
         )
         .await?;
 
@@ -101,6 +110,7 @@ where
             input,
             ConnectionInfo::new(connection_now(&self.clock), self.pool_index, max_age),
             self.sink.clone(),
+            self.client_attributes.clone(),
             connected,
         ))
     }
@@ -120,6 +130,7 @@ async fn connect_with_timeout<S>(
     clock: &Clock,
     connect_timeout: Duration,
     sink: &Sink,
+    client_attributes: Option<&ClientAttributes>,
 ) -> Result<S>
 where
     S: Connection,
@@ -131,6 +142,9 @@ where
             server_port: base_uri.effective_port(),
             scheme: base_uri.scheme().as_str(),
             url_full: &base_uri,
+            runtime: client_attributes.map(|attributes| attributes.runtime.clone()),
+            transport: client_attributes.map(|attributes| attributes.transport.clone()),
+            client_name: client_attributes.map(|attributes| attributes.client_name.clone()),
         }
     );
 
@@ -149,6 +163,9 @@ where
                     url_full: &base_uri,
                     protocol_version: protocol_version(&connection.connected()),
                     setup_duration_secs,
+                    runtime: client_attributes.map(|attributes| attributes.runtime.clone()),
+                    transport: client_attributes.map(|attributes| attributes.transport.clone()),
+                    client_name: client_attributes.map(|attributes| attributes.client_name.clone()),
                 }
             );
 
@@ -175,6 +192,9 @@ where
             error_type: Text::from(collect_error_labels(&error).into_cow()),
             exception_message: Text::from(error.to_string()),
             setup_duration_secs,
+            runtime: client_attributes.map(|attributes| attributes.runtime.clone()),
+            transport: client_attributes.map(|attributes| attributes.transport.clone()),
+            client_name: client_attributes.map(|attributes| attributes.client_name.clone()),
         }
     );
 
@@ -221,7 +241,7 @@ mod tests {
     use ohno::ErrorExt;
 
     use super::*;
-    use crate::testing::{FakeConnector, FakeStream, TestError};
+    use crate::testing::{FakeConnector, FakeStream, TestError, client_attributes};
 
     #[test]
     fn negotiated_version_defaults_to_http_11() {
@@ -268,7 +288,7 @@ mod tests {
         let base = BaseUri::from_static("http://example.com");
         let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
 
-        let (result, events) = connect(&clock, base.clone(), connector.execute(base));
+        let (result, events) = connect(&clock, base.clone(), connector.execute(base), Some(&client_attributes()));
 
         result.unwrap();
         assert_eq!(
@@ -276,13 +296,19 @@ mod tests {
             [
                 ExpectedEvent::new("http.client.connection.start", Severity::Debug)
                     .body("connecting to a remote endpoint")
+                    .dimension("fetch.runtime", "tokio")
+                    .dimension("fetch.transport", "hyper")
+                    .dimension("http.client.name", "books")
                     .dimension("server.address", "example.com")
                     .dimension("server.port", 80_u16)
                     .dimension("url.full", "http://example.com/")
                     .dimension("url.scheme", "http"),
                 ExpectedEvent::new("http.client.connection.success", Severity::Info)
                     .body("connected to server")
+                    .dimension("fetch.runtime", "tokio")
+                    .dimension("fetch.transport", "hyper")
                     .dimension("http.client.connection.setup.duration", 0.0)
+                    .dimension("http.client.name", "books")
                     .dimension("network.protocol.version", "1")
                     .dimension("server.address", "example.com")
                     .dimension("server.port", 80_u16)
@@ -299,7 +325,7 @@ mod tests {
         let base = BaseUri::from_static("https://example.com:8443");
         let connector = FakeConnector::new_connect_failure(TestError::new("connection refused"), clock.clone());
 
-        let (result, events) = connect(&clock, base.clone(), connector.execute(base));
+        let (result, events) = connect(&clock, base.clone(), connector.execute(base), Some(&client_attributes()));
 
         result.unwrap_err();
         assert_eq!(
@@ -307,6 +333,9 @@ mod tests {
             [
                 ExpectedEvent::new("http.client.connection.start", Severity::Debug)
                     .body("connecting to a remote endpoint")
+                    .dimension("fetch.runtime", "tokio")
+                    .dimension("fetch.transport", "hyper")
+                    .dimension("http.client.name", "books")
                     .dimension("server.address", "example.com")
                     .dimension("server.port", 8443_u16)
                     .dimension("url.full", "https://example.com:8443/")
@@ -315,7 +344,10 @@ mod tests {
                     .body("server connection failed")
                     .dimension("error.type", "connect")
                     .dimension("exception.message", "connection refused")
+                    .dimension("fetch.runtime", "tokio")
+                    .dimension("fetch.transport", "hyper")
                     .dimension("http.client.connection.setup.duration", 0.0)
+                    .dimension("http.client.name", "books")
                     .dimension("server.address", "example.com")
                     .dimension("server.port", 8443_u16)
                     .dimension("url.full", "https://example.com:8443/")
@@ -338,8 +370,8 @@ mod tests {
                 .dimension("url.scheme", "https")
         };
 
-        let (failure, failure_events) = connect(&clock, base.clone(), ready(Err(HttpError::unavailable("failure-marker"))));
-        let (timeout, timeout_events) = connect(&clock, base, pending());
+        let (failure, failure_events) = connect(&clock, base.clone(), ready(Err(HttpError::unavailable("failure-marker"))), None);
+        let (timeout, timeout_events) = connect(&clock, base, pending(), None);
 
         assert!(failure.unwrap_err().to_string().contains("failure-marker"));
         assert!(timeout.unwrap_err().to_string().contains("server connection timeout"));
@@ -392,6 +424,7 @@ mod tests {
             &clock,
             Duration::from_secs(5),
             &Sink::noop(),
+            None,
         )
         .await
         .expect_err("connector failure should propagate");
@@ -408,7 +441,7 @@ mod tests {
         let base = BaseUri::from_static("http://example.com");
         // pending() never resolves, so the timeout always wins.
         let hanging = pending::<Result<crate::testing::FakeStream>>();
-        let err = connect_with_timeout(hanging, base.clone(), &clock, Duration::from_secs(1), &Sink::noop())
+        let err = connect_with_timeout(hanging, base.clone(), &clock, Duration::from_secs(1), &Sink::noop(), None)
             .await
             .expect_err("connect should time out");
         let msg = err.to_string();
@@ -428,6 +461,7 @@ mod tests {
             Duration::from_secs(5),
             vec![Version::HTTP_11, Version::HTTP_2],
             Sink::noop(),
+            None,
             PoolIndex::new(7),
             ConnectionLifetime::fixed(Duration::from_mins(1)),
         );
@@ -447,6 +481,7 @@ mod tests {
             Duration::from_secs(5),
             vec![Version::HTTP_2, Version::HTTP_3],
             Sink::noop(),
+            None,
             PoolIndex::new(0),
             ConnectionLifetime::unlimited(),
         );
@@ -465,9 +500,17 @@ mod tests {
         clock: &Clock,
         base_uri: BaseUri,
         future: impl Future<Output = Result<FakeStream>>,
+        client_attributes: Option<&ClientAttributes>,
     ) -> (Result<FakeStream>, Vec<CapturedEvent>) {
         let (sink, processor) = test_emitter(TEST_ID);
-        let result = futures::executor::block_on(connect_with_timeout(future, base_uri, clock, Duration::from_secs(2), &sink));
+        let result = futures::executor::block_on(connect_with_timeout(
+            future,
+            base_uri,
+            clock,
+            Duration::from_secs(2),
+            &sink,
+            client_attributes,
+        ));
         (result, processor.events())
     }
 }

@@ -16,6 +16,14 @@ const SETUP_DURATION_BOUNDARIES: &[f64] = &[
 /// give these boundaries.
 const CONNECTION_DURATION_BOUNDARIES: &[f64] = &[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0];
 
+/// The runtime, the transport and the name of the client that the transport serves.
+#[derive(Clone, Debug)]
+pub(crate) struct ClientAttributes {
+    pub(crate) runtime: Text,
+    pub(crate) transport: Text,
+    pub(crate) client_name: Text,
+}
+
 /// Produces the event `http.client.connection.start` before the connector runs.
 #[event("http.client.connection.start")]
 #[debug("connecting to a remote endpoint")]
@@ -32,6 +40,18 @@ pub(crate) struct ConnectionStart<'a> {
     pub(crate) scheme: &'a str,
     #[dimension(log = "url.full")]
     pub(crate) url_full: &'a BaseUri,
+    #[dimension(log = "fetch.runtime")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) runtime: Option<Text>,
+    #[dimension(log = "fetch.transport")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) transport: Option<Text>,
+    #[dimension(log = "http.client.name")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) client_name: Option<Text>,
 }
 
 /// Produces the event `http.client.connection.success` when the connector returned a connection before the connect
@@ -64,6 +84,18 @@ pub(crate) struct ConnectionSuccess<'a> {
     #[dimension(log = "http.client.connection.setup.duration")]
     #[unredacted]
     pub(crate) setup_duration_secs: f64,
+    #[dimension(log = "fetch.runtime", metric = "fetch.runtime")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) runtime: Option<Text>,
+    #[dimension(log = "fetch.transport", metric = "fetch.transport")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) transport: Option<Text>,
+    #[dimension(log = "http.client.name", metric = "http.client.name")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) client_name: Option<Text>,
 }
 
 /// Produces the event `http.client.connection.error` when the connector returned an error, or when the connect timeout
@@ -99,6 +131,18 @@ pub(crate) struct ConnectionError<'a> {
     #[dimension(log = "http.client.connection.setup.duration")]
     #[unredacted]
     pub(crate) setup_duration_secs: f64,
+    #[dimension(log = "fetch.runtime", metric = "fetch.runtime")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) runtime: Option<Text>,
+    #[dimension(log = "fetch.transport", metric = "fetch.transport")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) transport: Option<Text>,
+    #[dimension(log = "http.client.name", metric = "http.client.name")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) client_name: Option<Text>,
 }
 
 /// Produces the event `http.client.connection.closed` when the stream of a connection is dropped.
@@ -128,6 +172,18 @@ pub(crate) struct ConnectionClosed<'a> {
     #[dimension(log = "http.client.connection.duration")]
     #[unredacted]
     pub(crate) duration_secs: f64,
+    #[dimension(log = "fetch.runtime", metric = "fetch.runtime")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) runtime: Option<Text>,
+    #[dimension(log = "fetch.transport", metric = "fetch.transport")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) transport: Option<Text>,
+    #[dimension(log = "http.client.name", metric = "http.client.name")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) client_name: Option<Text>,
 }
 
 /// The value of `network.protocol.version` for a connection. A connection knows only whether ALPN chose HTTP/2.
@@ -175,6 +231,9 @@ mod tests {
             server_port: Some(443),
             scheme: "https",
             url_full: &base_uri,
+            runtime: Some(Text::from("tokio")),
+            transport: Some(Text::from("hyper")),
+            client_name: Some(Text::from("books")),
         };
         let success = ConnectionSuccess {
             server_address: "example.test",
@@ -183,6 +242,9 @@ mod tests {
             url_full: &base_uri,
             protocol_version: "2",
             setup_duration_secs: 0.0,
+            runtime: Some(Text::from("tokio")),
+            transport: Some(Text::from("hyper")),
+            client_name: Some(Text::from("books")),
         };
         let error = ConnectionError {
             server_address: "example.test",
@@ -192,6 +254,9 @@ mod tests {
             error_type: Text::from("connect"),
             exception_message: Text::from("connection refused"),
             setup_duration_secs: 0.0,
+            runtime: Some(Text::from("tokio")),
+            transport: Some(Text::from("hyper")),
+            client_name: Some(Text::from("books")),
         };
         let closed = ConnectionClosed {
             server_address: "example.test",
@@ -199,27 +264,54 @@ mod tests {
             scheme: "https",
             protocol_version: "2",
             duration_secs: 0.0,
+            runtime: Some(Text::from("tokio")),
+            transport: Some(Text::from("hyper")),
+            client_name: Some(Text::from("books")),
         };
 
         assert_eq!(metric_fields(&start), (vec![], vec![]));
         assert_eq!(
             metric_fields(&success),
             (
-                vec!["server.address", "server.port", "url.scheme", "network.protocol.version"],
+                vec![
+                    "server.address",
+                    "server.port",
+                    "url.scheme",
+                    "network.protocol.version",
+                    "fetch.runtime",
+                    "fetch.transport",
+                    "http.client.name"
+                ],
                 vec![SETUP_DURATION]
             )
         );
         assert_eq!(
             metric_fields(&error),
             (
-                vec!["server.address", "server.port", "url.scheme", "error.type"],
+                vec![
+                    "server.address",
+                    "server.port",
+                    "url.scheme",
+                    "error.type",
+                    "fetch.runtime",
+                    "fetch.transport",
+                    "http.client.name"
+                ],
                 vec![SETUP_DURATION]
             )
         );
         assert_eq!(
             metric_fields(&closed),
             (
-                vec!["server.address", "server.port", "url.scheme", "network.protocol.version"],
+                vec![
+                    "server.address",
+                    "server.port",
+                    "url.scheme",
+                    "network.protocol.version",
+                    "fetch.runtime",
+                    "fetch.transport",
+                    "http.client.name"
+                ],
                 vec![CONNECTION_DURATION]
             )
         );

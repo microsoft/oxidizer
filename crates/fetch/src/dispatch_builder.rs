@@ -15,10 +15,12 @@ use opentelemetry::metrics::Meter;
 use crate::custom::Transport;
 use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, PoolIndex};
+use crate::telemetry::ClientAttributes;
 
 /// Builds the dispatch handler, wrapping every transport it creates.
 pub(crate) fn create_dispatch_handler(
     meter: &Meter,
+    client_attributes: &ClientAttributes,
     options: ClientOptions,
     transport: &Transport,
     body_builder: &HttpBodyBuilder,
@@ -27,7 +29,7 @@ pub(crate) fn create_dispatch_handler(
 
     // Apply the same wrapper to every transport in the pool.
     let mut create = |index: usize| {
-        let handler = transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(index));
+        let handler = transport.create_transport_handler(options.clone(), meter.clone(), client_attributes.clone(), PoolIndex::new(index));
 
         decompression::wrap(handler, decompression.as_ref())
     };

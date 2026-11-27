@@ -15,8 +15,8 @@
 //!
 //! Every client has three attributes: its runtime, its transport and its name. The instrumentation
 //! scope of its `fetch` meter has them, so the instruments of
-//! [`CustomContext::meter`](crate::custom::CustomContext::meter) carry them. Every request event
-//! has them as fields:
+//! [`CustomContext::meter`](crate::custom::CustomContext::meter) carry them. Every request event,
+//! and every connection event of the Tokio transport, has them as fields:
 //!
 //! | Key | Description | Sample value |
 //! |-----|-------------|--------------|
@@ -66,6 +66,8 @@
 //! | `exception.message` | error | Text of the error | `"server connection timeout, endpoint: https://api.example.com/, connection timeout(s): 30"` |
 //! | `http.client.connection.setup.duration` | success, error | Seconds from the start of the connection to its result | `0.012` |
 //! | `http.client.connection.duration` | closed | Seconds from the connection to the drop of its stream | `30.5` |
+//!
+//! Each event also has the [client attributes](#client-attributes).
 //!
 //! ---
 //!
