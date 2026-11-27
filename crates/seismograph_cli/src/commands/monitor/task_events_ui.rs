@@ -280,7 +280,7 @@ fn occurrence_headers(view: TaskEventsViewState) -> [String; 4] {
 
 fn sort_heading(label: &str, selected: bool, descending: bool) -> String {
     if selected {
-        format!("{label} {}", if descending { "▼" } else { "▲" })
+        format!("{label}{}", if descending { "▼" } else { "▲" })
     } else {
         label.into()
     }

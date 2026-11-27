@@ -540,7 +540,7 @@ fn draw_io(
     mouse_rows.register(resources_area, 1, first_resource, resources.len(), ListTarget::IoResources);
     let resource_heading = |label: &str, sort| {
         if view.resource_sort == sort {
-            format!("{label} {}", if view.resource_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.resource_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -639,7 +639,7 @@ fn draw_io(
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::IoOperations);
     let operation_heading = |label: &str, sort| {
         if view.operation_sort == sort {
-            format!("{label} {}", if view.operation_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -778,7 +778,7 @@ fn draw_cache(
     mouse_rows.register(tiers_area, 1, first_tier, tiers.len(), ListTarget::CacheTiers);
     let tier_heading = |label: &str, sort| {
         if view.tier_sort == sort {
-            format!("{label} {}", if view.tier_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.tier_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -865,7 +865,7 @@ fn draw_cache(
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::CacheOperations);
     let operation_heading = |label: &str, sort| {
         if view.operation_sort == sort {
-            format!("{label} {}", if view.operation_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -1040,7 +1040,7 @@ fn draw_allocations(
             Style::default().add_modifier(Modifier::BOLD)
         };
         let label = if view.sort == column {
-            format!("{label} {}", if view.descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.descending { "▼" } else { "▲" })
         } else {
             label.into()
         };
@@ -1095,16 +1095,16 @@ fn draw_allocations(
         Paragraph::new(lines).block(
             Block::default()
                 .title(Line::from(vec![
-                    Span::raw(" Hotspots · e events • click headers or sort "),
+                    Span::raw(" Hotspots · e events · click headings · "),
                     key_span("["),
-                    Span::raw(" previous • "),
+                    Span::raw("/"),
                     key_span("]"),
-                    Span::raw(" next • "),
-                    key_span("[r]"),
-                    Span::raw(" reverse • select "),
+                    Span::raw(" sort · "),
+                    key_span("r"),
+                    Span::raw(" reverse · "),
                     key_span("↑/↓"),
                     Span::raw(format!(
-                        " • all-class source: {} accepted • {} overwritten ",
+                        " select · source {} accepted / {} overwritten ",
                         format_count(allocations.total_events),
                         format_count(allocations.lost_events)
                     )),
@@ -1315,17 +1315,17 @@ fn draw_info(
     }
     if let Some(statistics) = view.recorder_statistics {
         lines.extend([
-            metric_line("Telemetry threads", format_count(statistics.thread_count)),
-            metric_line("Telemetry memory total", format_bytes(statistics.allocated_bytes)),
+            metric_line("Active recorder threads", format_count(statistics.thread_count)),
+            metric_line("Live telemetry memory total", format_bytes(statistics.allocated_bytes)),
             metric_line("Accepted telemetry events", format_count(statistics.total_events)),
             metric_line("Retained telemetry events", format_count(statistics.retained_events)),
             metric_line("Overwritten telemetry events", format_count(statistics.lost_events)),
         ]);
     } else if let Some(allocations) = view.snapshot.and_then(|capture| capture.allocations.as_ref()) {
         lines.extend([
-            metric_line("Telemetry threads", format_count(allocations.thread_count)),
+            metric_line("Captured source threads", format_count(allocations.thread_count)),
             metric_line(
-                "Telemetry memory total",
+                "Estimated buffer memory",
                 format_bytes(memory_per_thread.saturating_mul(allocations.thread_count)),
             ),
             metric_line("All-class source accepted", format_count(allocations.total_events)),
@@ -1457,7 +1457,7 @@ fn draw_primitive_types(
     mouse_rows.register(area, 1, first, groups.len(), ListTarget::PrimitiveTypes);
     let heading = |label: &str, sort| {
         if view.type_sort == sort {
-            format!("{label} {}", if view.type_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.type_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -1540,7 +1540,7 @@ fn draw_primitive_operations(
 
     let heading = |label: &str, sort| {
         if view.sort == sort {
-            format!("{label} {}", if view.descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.descending { "▼" } else { "▲" })
         } else {
             label.to_owned()
         }
@@ -1590,10 +1590,10 @@ fn draw_primitive_operations(
                     key_span("Enter"),
                     Span::raw(" hotspots · "),
                     key_span("["),
-                    Span::raw(" / "),
+                    Span::raw("/"),
                     key_span("]"),
                     Span::raw(" sort · "),
-                    key_span("[r]"),
+                    key_span("r"),
                     Span::raw(" reverse · "),
                     key_span("Backspace"),
                     Span::raw(" up "),
@@ -1651,7 +1651,7 @@ fn draw_primitive_hotspots(
     let first = selected.saturating_sub(visible.saturating_sub(1));
     let heading = |label: &str, sort| {
         if view.hotspot_sort == sort {
-            format!("{label} {}", if view.hotspot_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.hotspot_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -1691,9 +1691,9 @@ fn draw_primitive_hotspots(
                 .title(Line::from(vec![
                     Span::raw(" Hotspots · "),
                     key_span("↑/↓"),
-                    Span::raw(" select · "),
-                    key_span("[f]"),
-                    Span::raw(" application/all frames · "),
+                    Span::raw(" · "),
+                    key_span("f"),
+                    Span::raw(" frames · "),
                     key_span("Backspace"),
                     Span::raw(" up "),
                 ]))
@@ -1881,7 +1881,7 @@ fn draw_thread_list(
     mouse_rows.register(area, 1, first, threads.len(), ListTarget::Threads);
     let heading = |label: &str, sort| {
         if view.thread_sort == sort {
-            format!("{label} {}", if view.thread_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.thread_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -1947,7 +1947,7 @@ fn draw_thread_operations(
     mouse_rows.register(area, 1, first, operations.map_or(0, <[&super::data::ThreadOperation]>::len), ListTarget::ThreadOperations);
     let heading = |label: &str, sort| {
         if view.operation_sort == sort {
-            format!("{label} {}", if view.operation_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -2034,7 +2034,7 @@ fn draw_thread_participants(
     mouse_rows.register(area, 1, first, participants.len(), ListTarget::ThreadParticipants);
     let heading = |label: &str, sort| {
         if view.participant_sort == sort {
-            format!("{label} {}", if view.participant_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.participant_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -2119,7 +2119,7 @@ fn draw_thread_objects(
     mouse_rows.register(area, 1, first, objects.len(), ListTarget::ThreadObjects);
     let heading = |label: &str, sort| {
         if view.object_sort == sort {
-            format!("{label} {}", if view.object_descending { "▼" } else { "▲" })
+            format!("{label}{}", if view.object_descending { "▼" } else { "▲" })
         } else {
             label.into()
         }
@@ -2271,7 +2271,6 @@ fn draw_allocator(
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(unavailable.unwrap_or("The selected allocator does not expose a native state snapshot.")),
-                Line::from("Native allocator state is not available for the selected allocator."),
                 Line::from("Use the Allocations tab to inspect allocation events and stacks."),
             ])
             .block(Block::default().title(" Native allocator unavailable ").borders(Borders::ALL)),
@@ -2704,8 +2703,8 @@ mod tests {
             }
             assert_eq!(output.contains("Event ring buffer"), !unknown);
             for label in [
-                "Telemetry threads",
-                "Telemetry memory total",
+                "Active recorder threads",
+                "Live telemetry memory total",
                 "Accepted telemetry events",
                 "Retained telemetry events",
                 "Overwritten telemetry events",
@@ -2716,8 +2715,8 @@ mod tests {
                 assert!(output.contains("17"));
                 assert!(output.contains("987 B"));
                 let positions = [
-                    "Telemetry threads",
-                    "Telemetry memory total",
+                    "Active recorder threads",
+                    "Live telemetry memory total",
                     "Accepted telemetry events",
                     "Retained telemetry events",
                     "Overwritten telemetry events",
@@ -4118,7 +4117,8 @@ mod tests {
             );
         });
         assert!(output.contains("Unmatched B"));
-        assert!(output.contains("all-class source:"));
+        assert!(output.contains("source "));
+        assert!(output.contains("accepted /"));
         assert!(output.contains("not proven live allocations or leaks, even with zero overwrites"));
         assert!(!output.contains("Live bytes"));
     }
@@ -4200,6 +4200,24 @@ mod tests {
                 }
                 terminal.draw(|frame| app.draw(frame)).unwrap();
                 assert_eq!(terminal.backend().buffer().area, terminal_area);
+            }
+        }
+    }
+
+    #[test]
+    fn medium_width_io_and_cache_keep_their_diagnostic_columns() {
+        let mut app = App::offline("capture.seismograph".into());
+        app.finish_offline_load(representative_capture());
+        for (tab, expected) in [
+            (MonitorTab::Io, ["Errors", "Interval"]),
+            (MonitorTab::Cache, ["Hit rate", "Outcome"]),
+        ] {
+            if let Screen::Offline { tab: selected, .. } = &mut app.screen {
+                *selected = tab;
+            }
+            let output = render_native_sized(&app, 100, 30);
+            for label in expected {
+                assert!(output.contains(label), "{tab:?}: missing {label}");
             }
         }
     }
@@ -5046,6 +5064,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (497_204, 6_400_722_212_688_286_092));
+        assert_eq!(stable_digest(&output), (497_493, 16_131_620_604_177_929_989));
     }
 }

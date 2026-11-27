@@ -113,7 +113,7 @@ fn sort_headers(headers: Vec<&str>, sorts: &[RuntimeTaskRowSort], view: RuntimeV
         .zip(sorts)
         .map(|(header, sort)| {
             if *sort == view.task_sort {
-                format!("{header} {}", if view.task_sort_descending { "▼" } else { "▲" })
+                format!("{header}{}", if view.task_sort_descending { "▼" } else { "▲" })
             } else {
                 header.into()
             }

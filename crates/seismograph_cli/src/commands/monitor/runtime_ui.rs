@@ -150,6 +150,16 @@ fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
 
+fn histogram_duration(nanos: u64) -> String {
+    match nanos {
+        0..1_000 => format!("{nanos}ns"),
+        1_000..1_000_000 => format!("{}us", nanos / 1_000),
+        1_000_000..1_000_000_000 => format!("{}ms", nanos / 1_000_000),
+        1_000_000_000..10_000_000_000 => format!("{:.1}s", nanos as f64 / 1_000_000_000.0),
+        _ => format!("{}s", nanos / 1_000_000_000),
+    }
+}
+
 fn count_label(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })
 }
@@ -223,7 +233,7 @@ fn draw_workers(
             Span::styled("Async workers", selection(view.focus == RuntimeWorkersFocus::Asynchronous)),
             Span::raw(" | "),
             Span::styled("Blocking workers", selection(view.focus == RuntimeWorkersFocus::Blocking)),
-            Span::raw(" · a/b · Enter workers/task types"),
+            Span::raw(" · a/b · Enter task types"),
         ])),
         tabs,
     );
@@ -420,7 +430,7 @@ fn sort_headers(
         .zip(sorts)
         .map(|(header, sort)| {
             if *sort == selected {
-                format!("{header} {}", if descending { "▼" } else { "▲" })
+                format!("{header}{}", if descending { "▼" } else { "▲" })
             } else {
                 header.into()
             }
@@ -597,7 +607,7 @@ fn draw_poll_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, samples: &[u6
         .map(|bin| {
             Bar::default()
                 .value(bin.count)
-                .label(Line::from(format_runtime_duration(bin.lower)))
+                .label(Line::from(histogram_duration(bin.lower)))
                 .style(Style::default().fg(Color::Cyan))
         })
         .collect::<Vec<_>>();
@@ -624,6 +634,22 @@ mod tests {
     use super::*;
     use crate::commands::monitor::runtime::{BlockingWorkerSummary, DurationSummary, RuntimeSummary};
     use crate::commands::monitor::runtime_timeline::ExecutionMetrics;
+
+    #[test]
+    fn histogram_duration_labels_fit_fixed_width_bars() {
+        for (nanos, expected) in [
+            (999, "999ns"),
+            (1_000, "1us"),
+            (999_999, "999us"),
+            (1_000_000, "1ms"),
+            (999_999_999, "999ms"),
+            (1_000_000_000, "1.0s"),
+            (10_000_000_000, "10s"),
+        ] {
+            assert_eq!(histogram_duration(nanos), expected);
+            assert!(expected.len() <= 5);
+        }
+    }
 
     fn runtime() -> RuntimeMonitorSnapshot {
         RuntimeMonitorSnapshot {
