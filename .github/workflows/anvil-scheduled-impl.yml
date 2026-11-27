@@ -63,11 +63,11 @@ jobs:
           group: scheduled-test
           free-disk-space: true
       - name: Upload coverage to Codecov
-        # Upload both gated feature reports from every supported native slice.
-        if: always() && matrix.os != 'windows-arm' && hashFiles('target/coverage/lcov-all-features.info') != '' && hashFiles('target/coverage/lcov-no-default.info') != ''
+        # Upload the merged gated feature report from every supported native slice.
+        if: always() && matrix.os != 'windows-arm' && hashFiles('target/coverage/lcov-merged.info') != ''
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
+          files: target/coverage/lcov-merged.info
           flags: scheduled,${{ matrix.os }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

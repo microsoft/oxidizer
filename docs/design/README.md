@@ -44,8 +44,9 @@ It runs both `--all-features` and `--no-default-features` configurations.
 On Windows x64, the workflow collects those configurations in sequence.
 This releases the large scratch target before the next collection and reduces
 the peak disk use. The gate still evaluates both LCOV reports together.
-The local gate and CI uploads use the same filtered LCOV files, which contain
-line-coverage counts, under `target/coverage`.
+The local gate evaluates the separate filtered feature reports under
+`target/coverage`. CI uploads a merged report with union line coverage so
+Codecov applies the same coverage semantics as the gate.
 Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.
 If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
