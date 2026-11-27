@@ -6,10 +6,11 @@
 
 //! Kubernetes readiness adapters for [`health`].
 //!
-//! The TCP adapter listens on a dedicated port only while the aggregate state is
-//! [`health::Health::Healthy`]. The HTTP adapters read a [`health::Monitor`] for each request.
-//! They return `200 OK` with JSON `true` for a healthy process. They return
-//! `503 Service Unavailable` with JSON `false` for any other state.
+//! The TCP adapter listens on a dedicated port after it observes
+//! [`health::Health::Healthy`]. It closes the port after it observes another state.
+//! The HTTP adapters read a [`health::Monitor`] for each request. They return `200 OK`
+//! with JSON `true` for a healthy process. They return `503 Service Unavailable` with
+//! JSON `false` for any other state.
 //!
 //! # Features
 //!

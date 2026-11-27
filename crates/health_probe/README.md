@@ -15,10 +15,11 @@
 
 Kubernetes readiness adapters for [`health`][__link0].
 
-The TCP adapter listens on a dedicated port only while the aggregate state is
-[`health::Health::Healthy`][__link1]. The HTTP adapters read a [`health::Monitor`][__link2] for each request.
-They return `200 OK` with JSON `true` for a healthy process. They return
-`503 Service Unavailable` with JSON `false` for any other state.
+The TCP adapter listens on a dedicated port after it observes
+[`health::Health::Healthy`][__link1]. It closes the port after it observes another state.
+The HTTP adapters read a [`health::Monitor`][__link2] for each request. They return `200 OK`
+with JSON `true` for a healthy process. They return `503 Service Unavailable` with
+JSON `false` for any other state.
 
 ## Features
 
@@ -54,7 +55,7 @@ readinessProbe:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/health_probe">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb1bYNm_q_KcMb3epICoaCydobBQGfy_fq0YUbcPzgIr6w4aFhZIGCZmhlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbkow2oFsxi7ob04gEAZBf3nUboeTVOQsdKfYbyCrkgp0gablhZIGCZmhlYWx0aGUwLjEuMA
  [__link0]: https://crates.io/crates/health/0.1.0
  [__link1]: https://docs.rs/health/0.1.0/health/?search=Health::Healthy
  [__link2]: https://docs.rs/health/0.1.0/health/?search=Monitor

@@ -23,6 +23,7 @@ allowed_external_types = [
     "http::request::Request",
     "http::response::Response",
     "http_extensions::request_handler::RequestHandler",
+    "tick::clock::Clock",
     "tower_service::Service",
 ]
 
@@ -33,7 +34,7 @@ all-features = true
 default = []
 http = ["dep:http", "dep:tower-service"]
 request-handler = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
-tcp = ["dep:tokio"]
+tcp = ["dep:tick", "dep:tokio"]
 
 [dependencies]
 bytesbuf = { workspace = true, optional = true, features = ["std"] }
@@ -52,7 +53,7 @@ http.workspace = true
 http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
 layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
-tick = { path = "../tick", default-features = false }
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true

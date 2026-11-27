@@ -4,7 +4,11 @@
 //! Contract tests for Kubernetes TCP readiness.
 
 #![cfg(feature = "tcp")]
-#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
+#![expect(
+    clippy::unnecessary_literal_unwrap,
+    clippy::unwrap_used,
+    reason = "test failures use unwrap for concise backtraces"
+)]
 
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
@@ -13,6 +17,7 @@ use std::time::Duration;
 use health::{Aggregator, Attribute, Component, Health, Monitor, Publisher};
 use health_probe::kubernetes_tcp::serve;
 use observed::Sink;
+use tick::Clock;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
 
@@ -44,8 +49,12 @@ async fn publish_and_wait(publisher: &mut Publisher, monitor: &mut Monitor, stat
 async fn wait_for_connection(address: SocketAddr, expected: bool) {
     timeout(TEST_TIMEOUT, async {
         loop {
-            let connected = TcpStream::connect(address).await.is_ok();
-            if connected == expected {
+            let listening = if expected {
+                TcpStream::connect(address).await.is_ok()
+            } else {
+                listener_owns(address)
+            };
+            if listening == expected {
                 return;
             }
             sleep(RETRY_DELAY).await;
@@ -55,10 +64,32 @@ async fn wait_for_connection(address: SocketAddr, expected: bool) {
     .unwrap();
 }
 
+fn listener_owns(address: SocketAddr) -> bool {
+    match StdTcpListener::bind(address) {
+        Ok(listener) => {
+            drop(listener);
+            false
+        }
+        Err(error) if error.kind() == ErrorKind::AddrInUse => true,
+        Err(error) => Err::<bool, _>(error).unwrap(),
+    }
+}
+
 async fn assert_server_closes_connection(address: SocketAddr) {
     let stream = TcpStream::connect(address).await.unwrap();
-    timeout(TEST_TIMEOUT, stream.readable()).await.unwrap().unwrap();
-    assert_eq!(stream.try_read(&mut [0_u8; 1]).unwrap(), 0);
+    timeout(TEST_TIMEOUT, async {
+        loop {
+            stream.readable().await.unwrap();
+            match stream.try_read(&mut [0_u8; 1]) {
+                Ok(0) => return,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == ErrorKind::ConnectionReset => return,
+                result => assert_eq!(result.unwrap(), 0),
+            }
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -66,7 +97,7 @@ async fn assert_server_closes_connection(address: SocketAddr) {
 async fn tcp_probe_follows_health_and_releases_port() {
     let address = unused_address();
     let (_component, mut monitor, mut publisher) = fixture();
-    let server = tokio::spawn(serve(monitor.clone(), address));
+    let server = tokio::spawn(serve(monitor.clone(), address, Clock::new_frozen()));
 
     tokio::task::yield_now().await;
     wait_for_connection(address, false).await;
@@ -78,6 +109,9 @@ async fn tcp_probe_follows_health_and_releases_port() {
 
     publish_and_wait(&mut publisher, &mut monitor, Health::Degraded).await;
     wait_for_connection(address, false).await;
+
+    publish_and_wait(&mut publisher, &mut monitor, Health::Healthy).await;
+    wait_for_connection(address, true).await;
 
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
     wait_for_connection(address, false).await;
@@ -99,7 +133,7 @@ async fn tcp_probe_reports_bind_failure() {
     let (_component, mut monitor, mut publisher) = fixture();
     publish_and_wait(&mut publisher, &mut monitor, Health::Healthy).await;
 
-    let error = serve(monitor, address).await.unwrap_err();
+    let error = serve(monitor, address, Clock::new_frozen()).await.unwrap_err();
 
     assert_eq!(error.kind(), ErrorKind::AddrInUse);
 }

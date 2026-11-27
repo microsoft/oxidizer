@@ -7,20 +7,30 @@
 //! It closes each accepted connection without reading or writing data. Use a
 //! dedicated readiness address so health changes do not affect application traffic.
 //!
-//! The caller must run the returned future on a Tokio runtime with networking enabled.
-//! Cancel the future during application shutdown to release the readiness address.
+//! The caller must run the returned future and the supplied clock continuously.
+//! Health changes are asynchronous, so the socket can briefly show the previous state
+//! during a transition. Cancel the future during shutdown to release the address.
 
 use std::io;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use health::{Health, Monitor};
+use tick::Clock;
 use tokio::net::TcpListener;
+
+/// Delay before retrying an accept failure.
+///
+/// The delay prevents resource-exhaustion errors from causing a tight loop. A short
+/// delay keeps the readiness outage visible while allowing the process to recover.
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Serves TCP readiness for `monitor` on `address`.
 ///
 /// The function binds `address` only while the aggregate state is [`Health::Healthy`].
 /// It closes accepted connections and continues to listen. When the state becomes
-/// degraded or unhealthy, it drops the listener until the process recovers.
+/// degraded or unhealthy, it drops the listener until the process recovers. It also
+/// drops and reopens the listener after an accept failure.
 ///
 /// Cancel this future to stop the server and release the address.
 ///
@@ -28,18 +38,18 @@ use tokio::net::TcpListener;
 ///
 /// ```no_run
 /// # #[cfg(feature = "tcp")]
-/// # async fn example(monitor: health::Monitor) -> std::io::Result<()> {
+/// # async fn example(monitor: health::Monitor, clock: tick::Clock) -> std::io::Result<()> {
 /// use health_probe::kubernetes_tcp::serve;
 ///
 /// let address = "0.0.0.0:8081".parse().unwrap();
-/// serve(monitor, address).await
+/// serve(monitor, address, clock).await
 /// # }
 /// ```
 ///
 /// # Errors
 ///
-/// Returns an error when the server cannot bind `address` or accept a connection.
-pub async fn serve(mut monitor: Monitor, address: SocketAddr) -> io::Result<()> {
+/// Returns an error when the server cannot bind `address`.
+pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> io::Result<()> {
     loop {
         while monitor.state() != Health::Healthy {
             monitor.changed().await;
@@ -50,19 +60,43 @@ pub async fn serve(mut monitor: Monitor, address: SocketAddr) -> io::Result<()> 
             continue;
         }
 
-        loop {
+        let retry = loop {
             tokio::select! {
                 biased;
                 () = monitor.changed() => {
                     if monitor.state() != Health::Healthy {
-                        break;
+                        break false;
                     }
                 }
                 accepted = listener.accept() => {
-                    let (stream, _) = accepted?;
-                    drop(stream);
+                    match accepted {
+                        Ok((stream, _)) => drop(stream),
+                        Err(_) => break true,
+                    }
                 }
             }
+        };
+        drop(listener);
+
+        if retry {
+            wait_before_retry(&mut monitor, &clock).await;
+        }
+    }
+}
+
+async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
+    let delay = clock.delay(ACCEPT_RETRY_DELAY);
+    tokio::pin!(delay);
+
+    loop {
+        tokio::select! {
+            biased;
+            () = monitor.changed() => {
+                if monitor.state() != Health::Healthy {
+                    return;
+                }
+            }
+            () = &mut delay => return,
         }
     }
 }
