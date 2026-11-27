@@ -13,12 +13,13 @@
 
 </div>
 
-Kubernetes HTTP readiness adapters for [`health`][__link0].
+Readiness adapters for [`health`][__link0].
 
-Both adapters read a [`health::Monitor`][__link1] for each request. A healthy process returns
-status `200 OK` with the JSON body `true`. A degraded or unhealthy process returns
-`503 Service Unavailable` with the JSON body `false`. Responses contain no component details
-and disable caching.
+Both adapters read a
+[`health::Monitor`][__link1] for each
+request. A healthy process returns status `200 OK` with the JSON body `true`. A degraded or
+unhealthy process returns `503 Service Unavailable` with the JSON body `false`. Responses
+contain no component details and disable caching.
 
 ## Features
 
@@ -34,7 +35,6 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/health_probe">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbpXoqhIfze7YbZ5tYlnsi31obkA52rwh4jx4bi-pazXJ7D4FhZIGCZmhlYWx0aGUwLjEuMA
- [__link0]: https://crates.io/crates/health/0.1.0
- [__link1]: https://docs.rs/health/0.1.0/health/?search=Monitor
+ [__link0]: https://docs.rs/process_health/latest/health/
+ [__link1]: https://docs.rs/process_health/latest/health/?search=Monitor
  [__link2]: https://docs.rs/http_extensions

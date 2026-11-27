@@ -4,12 +4,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-//! Readiness adapters for [`health`].
+//! Readiness adapters for [`health`](https://docs.rs/process_health/latest/health/).
 //!
-//! Both adapters read a [`health::Monitor`] for each request. A healthy process returns
-//! status `200 OK` with the JSON body `true`. A degraded or unhealthy process returns
-//! `503 Service Unavailable` with the JSON body `false`. Responses contain no component details
-//! and disable caching.
+//! Both adapters read a
+//! [`health::Monitor`](https://docs.rs/process_health/latest/health/?search=Monitor) for each
+//! request. A healthy process returns status `200 OK` with the JSON body `true`. A degraded or
+//! unhealthy process returns `503 Service Unavailable` with the JSON body `false`. Responses
+//! contain no component details and disable caching.
 //!
 //! # Features
 //!
