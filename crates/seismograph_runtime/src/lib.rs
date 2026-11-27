@@ -18,8 +18,8 @@
 //! [`TaskIdentity`] lets the runtime assign an identity before it records the
 //! task. Event recording retains only events emitted after recording starts.
 //! [`model::RuntimeModel`] reconstructs runtime, worker, and task state from the
-//! retained event ring. A task that does not poll after recording starts does
-//! not appear in that model.
+//! retained event ring. A task that predates recording appears only after it
+//! emits a retained event, such as a later poll.
 //!
 //! # Runtime integration
 //!
@@ -33,7 +33,7 @@
 //! Do not clone a worker for each callback.
 //!
 //! When an asynchronous task is spawned, call [`Runtime::async_task`] with its
-//! identity, parent, origin worker, and concrete body size. The method returns
+//! origin worker, identity, parent, and concrete body size. The method returns
 //! `None` when runtime-task recording is disabled. If it returns a handle, move
 //! the handle with the task and call [`asynchronous::TaskHandle::enqueued`] when
 //! the task enters the executor queue.
@@ -47,12 +47,20 @@
 //! If a task has no queued handle, keep a dormant executor state. When a later
 //! poll starts, create an active token with [`asynchronous::Task::unrecorded`].
 //! This records the new poll without inventing queue or activation events.
+//! Read [`asynchronous::Worker::is_recording`] once at the start of an executor
+//! cycle. Select a recorded or silent poll loop for the full cycle. The silent
+//! loop must transform task state without recorder checks or clock reads.
 //!
 //! For blocking work, call [`Runtime::blocking_task`] at submission. If it
 //! returns a handle, call [`blocking::TaskHandle::enqueued`] while the queue
 //! lock supplies the queue length. Call [`blocking::QueuedTask::started`] when
 //! a worker removes the job, and call [`blocking::Execution::finished`] after
 //! the function returns or panics.
+//!
+//! Call [`asynchronous::Worker::parked`] before an asynchronous worker waits,
+//! and call [`asynchronous::Worker::unparked`] after it wakes. Apply the same
+//! rule to blocking workers. Call [`Runtime::stopping`] when shutdown starts,
+//! and call [`Runtime::stop`] after all workers stop.
 //!
 //! Keep the disabled path short. Runtime and worker handles are always present,
 //! but task handles are optional. Do not add a task registry, provider callback,
@@ -70,7 +78,10 @@
 //! let runtime = Runtime::builder("primary").configured_workers(1).build();
 //! let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 //! let identity = TaskIdentity::from_location(std::panic::Location::caller());
-//! let queued = runtime.async_task(None, identity, None, 0).unwrap().enqueued(0);
+//! let queued = runtime
+//!     .async_task(None, identity, None, 0)
+//!     .unwrap()
+//!     .enqueued(0);
 //! let task = queued.activated(&worker);
 //! let poll = task.poll_started(&worker);
 //! assert!(

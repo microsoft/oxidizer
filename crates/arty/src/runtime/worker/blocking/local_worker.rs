@@ -33,9 +33,7 @@ impl LocalWorker {
         CURRENT
             .try_with(|current| {
                 let current = current.borrow();
-                run.take().expect("the local-worker callback is invoked exactly once")(
-                    current.as_ref().map(|current| &current.monitoring),
-                )
+                run.take().expect("the local-worker callback is invoked exactly once")(current.as_ref().map(|current| &current.monitoring))
             })
             .unwrap_or_else(|_| run.take().expect("the local-worker callback is invoked exactly once")(None))
     }

@@ -169,10 +169,7 @@ mod tests {
             Pools::PerWorker { max_workers: Some(max), .. } if max.get() == 3
         ));
         assert!(matches!(
-            BlockingPoolPolicy::shared()
-                .max(4)
-                .into_pools(RuntimeName::default())
-                .unwrap(),
+            BlockingPoolPolicy::shared().max(4).into_pools(RuntimeName::default()).unwrap(),
             Pools::Shared(_)
         ));
     }

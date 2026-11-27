@@ -40,10 +40,16 @@ impl TaskSet {
         self.len() == 0
     }
 
+    /// Returns the number of tasks waiting for the executor to accept them.
+    #[must_use]
+    pub fn queue_len(&self) -> usize {
+        self.shared.queued_task_count()
+    }
+
     /// Configures a future for registration as a new task.
     ///
     /// Call [`TaskBuilder::register`] to submit the task with its completion target.
-    /// The default configuration has no inspector or task observer.
+    /// The default configuration has no task monitor or task observer.
     /// The caller supplies the task's identity. Each task must have its own identity.
     ///
     /// # Examples

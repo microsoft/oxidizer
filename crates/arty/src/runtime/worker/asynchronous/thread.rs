@@ -159,10 +159,9 @@ impl ThreadEntry {
             .expect("RuntimeBuilder failed between initializing and activating a worker")
             .dispatcher;
         blocking_worker.start(dispatcher.monitoring());
-        let monitoring_worker =
-            dispatcher
-                .monitoring()
-                .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+        let monitoring_worker = dispatcher
+            .monitoring()
+            .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
         asynchronous::LocalWorker::attach(monitoring_worker.clone());
         let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
         let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));

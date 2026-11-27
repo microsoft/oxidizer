@@ -74,7 +74,7 @@
 //!   [`MonitorPolicy`](crate::runtime::policy::MonitorPolicy) disables monitoring for
 //!   tests, doctests, documentation examples, and Miri. It enables monitoring
 //!   in other environments. An enabled policy starts a local connection for the
-//!   Seismograph CLI. Task collection runs on request. Event recording stays off
+//!   Seismograph CLI. Event recording stays off
 //!   until an application or the CLI enables it.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
 //! - `test-util`: Enables testing utilities, including

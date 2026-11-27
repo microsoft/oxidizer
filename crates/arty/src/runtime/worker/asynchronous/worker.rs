@@ -914,8 +914,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new(), None));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
-        let monitoring_worker =
-            monitoring.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+        let monitoring_worker = monitoring.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
         if !LocalWorker::is_current() {
             LocalWorker::attach(monitoring_worker.clone());
         }
@@ -1325,9 +1324,11 @@ mod tests {
                 })))
                 .unwrap();
         }
-        let join = worker_context(&worker).dispatcher().spawn(
+        let dispatcher = worker_context(&worker).dispatcher().clone();
+        let join = dispatcher.spawn(
             |_| std::future::ready(()),
             crate::task::preparation::SpawnOptions::new(
+                dispatcher.monitoring(),
                 seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
                 None,
@@ -1424,7 +1425,7 @@ mod tests {
         let completed = std::rc::Rc::clone(&polled);
         let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
         let tasks = worker.tasks.clone();
-        crate::task::preparation::SpawnOptions::new(identity, 0, None).register(
+        crate::task::preparation::SpawnOptions::new(worker_context(&worker).dispatcher().monitoring(), identity, 0, None).register(
             worker_context(&worker).thread(),
             &worker.tasks,
             async move {
@@ -1443,10 +1444,7 @@ mod tests {
             .io()
             .context::<ProbeContext>(&ProbeContext(runtime.clone(), Arc::clone(&states)));
         assert!(worker.execute_step().is_continue());
-        assert_eq!(
-            runtime.capture().workers[0].state,
-            WorkerState::Running
-        );
+        assert_eq!(runtime.capture().workers[0].state, WorkerState::Running);
         for _ in 0..COMMANDS_PER_CYCLE {
             commands.spawn_sender().send(enqueue(test_factory(|_, _| {}))).unwrap();
         }
@@ -2088,7 +2086,8 @@ mod tests {
             })))
             .unwrap();
         let invoked = Arc::new(AtomicBool::new(false));
-        let join = worker_context(&worker).dispatcher().spawn(
+        let dispatcher = worker_context(&worker).dispatcher().clone();
+        let join = dispatcher.spawn(
             {
                 let invoked = Arc::clone(&invoked);
                 move |_| {
@@ -2097,6 +2096,7 @@ mod tests {
                 }
             },
             crate::task::preparation::SpawnOptions::new(
+                dispatcher.monitoring(),
                 seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
                 size_of::<std::future::Ready<()>>(),
                 None,

@@ -31,11 +31,9 @@ impl Monitoring {
             };
             let builder = Monitor::builder().name(monitor_name);
             #[cfg(test)]
-            let builder = builder.io(
-                TEST_IO
-                    .with_borrow(Clone::clone)
-                    .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0),
-            );
+            let builder = builder.io(TEST_IO
+                .with_borrow(Clone::clone)
+                .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
             Some(builder.start().map_err(Error::new)?)
         } else {
             None

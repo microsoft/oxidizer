@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::is_enabled;
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 
 use crate::{TaskIdentity, TaskOutcome};
 
@@ -45,7 +45,7 @@ impl TaskHandle {
                 enqueued_at: None,
                 recorded: false,
             },
-            origin: origin.map(|origin| origin.worker_for(runtime)),
+            origin: origin.and_then(|origin| origin.worker_for(runtime)),
         })
     }
 
@@ -98,27 +98,28 @@ impl QueuedTask {
     /// Panics if `worker` belongs to another runtime.
     pub fn started(mut self, worker: &super::Worker) -> Execution {
         worker.validate_runtime(self.data.runtime);
-        let started_at = EventTimestamp::now();
-        record(
-            started_at,
-            EventKind::TaskMaterialized,
-            self.data,
-            Some(worker.id()),
-            self.data
-                .enqueued_at
-                .map_or(0, |enqueued_at| crate::runtime::duration_nanos(started_at, enqueued_at)),
-            self.data.body_size,
-            BacktraceCapture::Never,
-        );
+        let started_at = (self.data.recorded && is_enabled(EventClass::RuntimeTask)).then(EventTimestamp::now);
+        if let Some(started_at) = started_at {
+            record(
+                started_at,
+                EventKind::TaskMaterialized,
+                self.data,
+                Some(worker.id()),
+                self.data
+                    .enqueued_at
+                    .map_or(0, |enqueued_at| crate::runtime::duration_nanos(started_at, enqueued_at)),
+                self.data.body_size,
+                BacktraceCapture::Never,
+            );
+        }
         self.cancel_on_drop = false;
         Execution {
             data: self.data,
             worker: worker.id(),
             started_at,
-            finish_on_drop: true,
+            finish_on_drop: self.data.recorded,
         }
     }
-
 }
 
 impl Drop for QueuedTask {
@@ -142,7 +143,7 @@ impl Drop for QueuedTask {
 pub struct Execution {
     data: TaskData,
     worker: WorkerId,
-    started_at: EventTimestamp,
+    started_at: Option<EventTimestamp>,
     finish_on_drop: bool,
 }
 
@@ -161,6 +162,14 @@ impl Execution {
     pub fn finished(mut self, worker: &super::Worker, outcome: TaskOutcome) {
         worker.validate_runtime(self.data.runtime);
         assert_eq!(worker.id(), self.worker, "finish a blocking task on the worker that started it");
+        let Some(started_at) = self.started_at else {
+            self.finish_on_drop = false;
+            return;
+        };
+        if !is_enabled(EventClass::RuntimeTask) {
+            self.finish_on_drop = false;
+            return;
+        }
         let finished_at = EventTimestamp::now();
         let backtrace = if outcome == TaskOutcome::Panicked {
             self.data.backtrace
@@ -171,7 +180,7 @@ impl Execution {
             self.data,
             Some(worker.id()),
             finished_at,
-            crate::runtime::duration_nanos(finished_at, self.started_at),
+            crate::runtime::duration_nanos(finished_at, started_at),
             outcome,
             backtrace,
         );
@@ -182,12 +191,18 @@ impl Execution {
 impl Drop for Execution {
     fn drop(&mut self) {
         if self.finish_on_drop {
+            if !is_enabled(EventClass::RuntimeTask) {
+                return;
+            }
+            let Some(started_at) = self.started_at else {
+                return;
+            };
             let finished_at = EventTimestamp::now();
             record_finished(
                 self.data,
                 Some(self.worker),
                 finished_at,
-                crate::runtime::duration_nanos(finished_at, self.started_at),
+                crate::runtime::duration_nanos(finished_at, started_at),
                 TaskOutcome::Cancelled,
                 BacktraceCapture::Never,
             );

@@ -69,7 +69,7 @@ The default feature set enables `rt` and `macros`.
   [`MonitorPolicy`][__link13] disables monitoring for
   tests, doctests, documentation examples, and Miri. It enables monitoring
   in other environments. An enabled policy starts a local connection for the
-  Seismograph CLI. Task collection runs on request. Event recording stays off
+  Seismograph CLI. Event recording stays off
   until an application or the CLI enables it.
 * `macros`: Enables [`main`][__link14] and [`test`][__link15]. It also enables `rt`.
 * `test-util`: Enables testing utilities, including
@@ -82,7 +82,7 @@ The default feature set enables `rt` and `macros`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLqlrBVMrpikbl0wO-LnhJw8bRLDKh4YIdNIbUdMBbmjzJaVhZIKCZGFydHllMC43LjCCa2FydHlfbWFjcm9zZTAuNy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8KbtxrTcQVgbGZ79L-DE8AgbAoK1SJj8HwwbFhoPw4GMUeRhZIKCZGFydHllMC43LjCCa2FydHlfbWFjcm9zZTAuNy4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.7.0/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.7.0/arty/core/index.html

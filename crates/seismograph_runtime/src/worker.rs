@@ -30,9 +30,8 @@ impl WorkerOrigin {
         self.worker
     }
 
-    pub(crate) fn worker_for(self, runtime: seismograph::recorder::runtime::RuntimeId) -> WorkerId {
-        assert_eq!(self.runtime, runtime, "use a worker origin from the task's runtime");
-        self.worker
+    pub(crate) fn worker_for(self, runtime: seismograph::recorder::runtime::RuntimeId) -> Option<WorkerId> {
+        (self.runtime == runtime).then_some(self.worker)
     }
 }
 
@@ -108,8 +107,8 @@ impl WorkerRegistration {
         self.handle.id()
     }
 
-    pub(crate) fn handle(&self) -> WorkerHandle {
-        self.handle.clone()
+    pub(crate) const fn handle(&self) -> &WorkerHandle {
+        &self.handle
     }
 
     pub(crate) fn attach_current_thread(&self) {

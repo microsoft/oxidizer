@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use seismograph::recorder::event::EventClass;
+use seismograph::recorder::is_enabled;
 use seismograph::recorder::runtime::{RuntimeId, WorkerId};
 
 /// Heavy asynchronous worker state intended for thread-local installation.
@@ -43,6 +45,12 @@ impl Worker {
         crate::WorkerOrigin::new(self.inner.runtime.id(), self.id())
     }
 
+    /// Returns whether runtime-task events are currently enabled.
+    #[must_use]
+    pub fn is_recording(&self) -> bool {
+        is_enabled(EventClass::RuntimeTask)
+    }
+
     /// Marks this worker parked.
     pub fn parked(&self) {
         self.inner.registration.handle().parked();
@@ -60,5 +68,4 @@ impl Worker {
             "use an asynchronous worker from the task's runtime"
         );
     }
-
 }

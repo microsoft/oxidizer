@@ -5,10 +5,7 @@ use std::collections::BTreeMap;
 
 use seismograph_rallocator::callers::{AddressLookup, AddressLookupFields};
 
-pub(crate) fn merge(
-    allocator: Vec<AddressLookup>,
-    shared: Vec<seismograph::snapshot::Symbol>,
-) -> Vec<AddressLookup> {
+pub(crate) fn merge(allocator: Vec<AddressLookup>, shared: Vec<seismograph::snapshot::Symbol>) -> Vec<AddressLookup> {
     let mut lookups = shared
         .into_iter()
         .map(|lookup| {
@@ -42,6 +39,7 @@ pub(crate) fn merge(
 mod tests {
     use seismograph::recorder::event::Address;
     use seismograph::snapshot::Symbol;
+
     use super::*;
 
     #[test]
@@ -72,5 +70,4 @@ mod tests {
             })]
         );
     }
-
 }

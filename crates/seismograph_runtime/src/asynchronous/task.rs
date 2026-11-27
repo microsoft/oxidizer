@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
-use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::is_enabled;
+use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 
 use crate::{TaskIdentity, TaskOutcome};
 
@@ -47,7 +47,7 @@ impl TaskHandle {
                 enqueued_at: None,
                 recorded: false,
             },
-            origin: origin.map(|origin| origin.worker_for(runtime)),
+            origin: origin.and_then(|origin| origin.worker_for(runtime)),
         })
     }
 
@@ -87,6 +87,12 @@ pub struct QueuedTask {
 }
 
 impl QueuedTask {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn belongs_to(&self, worker: &super::Worker) -> bool {
+        self.data.runtime == worker.runtime().id()
+    }
+
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
@@ -98,27 +104,35 @@ impl QueuedTask {
     /// # Panics
     ///
     /// Panics if `worker` belongs to another runtime.
-    pub fn activated(mut self, worker: &super::Worker) -> Task {
+    pub fn activated(self, worker: &super::Worker) -> Task {
+        self.activated_with::<true>(worker)
+    }
+
+    #[doc(hidden)]
+    pub fn activated_with<const RECORDING: bool>(mut self, worker: &super::Worker) -> Task {
         worker.validate_runtime(self.data.runtime);
-        let activated_at = EventTimestamp::now();
-        record(
-            activated_at,
-            EventKind::TaskMaterialized,
-            self.data,
-            Some(worker.id()),
-            self.data
-                .enqueued_at
-                .map_or(0, |enqueued_at| crate::runtime::duration_nanos(activated_at, enqueued_at)),
-            self.data.body_size,
-            BacktraceCapture::Never,
-        );
+        if RECORDING && self.data.recorded {
+            let activated_at = EventTimestamp::now();
+            record(
+                activated_at,
+                EventKind::TaskMaterialized,
+                self.data,
+                Some(worker.id()),
+                self.data
+                    .enqueued_at
+                    .map_or(0, |enqueued_at| crate::runtime::duration_nanos(activated_at, enqueued_at)),
+                self.data.body_size,
+                BacktraceCapture::Never,
+            );
+        }
         self.cancel_on_drop = false;
+        let cancel_on_drop = self.data.recorded;
         Task {
             data: TaskData {
                 last_worker: Some(worker.id()),
                 ..self.data
             },
-            cancel_on_drop: true,
+            cancel_on_drop,
         }
     }
 }
@@ -169,25 +183,32 @@ impl Task {
     /// # Panics
     ///
     /// Panics if `worker` belongs to another runtime.
-    pub fn poll_started(mut self, worker: &super::Worker) -> Poll {
+    pub fn poll_started(self, worker: &super::Worker) -> Poll {
+        self.poll_started_with::<true>(worker)
+    }
+
+    #[doc(hidden)]
+    pub fn poll_started_with<const RECORDING: bool>(mut self, worker: &super::Worker) -> Poll {
         worker.validate_runtime(self.data.runtime);
         let mut started_at = None;
-        seismograph::record(EventClass::RuntimeTask, || {
-            let at = EventTimestamp::now();
-            started_at = Some(at);
-            self.data.recorded = true;
-            Some(runtime_record(
-                at,
-                EventKind::TaskPollStarted,
-                self.data.runtime,
-                Some(worker.id()),
-                self.data.identity.id().get(),
-                0,
-                0,
-                0,
-                BacktraceCapture::Never,
-            ))
-        });
+        if RECORDING {
+            seismograph::record(EventClass::RuntimeTask, || {
+                let at = EventTimestamp::now();
+                started_at = Some(at);
+                self.data.recorded = true;
+                Some(runtime_record(
+                    at,
+                    EventKind::TaskPollStarted,
+                    self.data.runtime,
+                    Some(worker.id()),
+                    self.data.identity.id().get(),
+                    0,
+                    0,
+                    0,
+                    BacktraceCapture::Never,
+                ))
+            });
+        }
         self.cancel_on_drop = false;
         Poll {
             data: TaskData {
@@ -224,16 +245,27 @@ impl Poll {
     ///
     /// Panics if `worker` belongs to another runtime or did not start this poll.
     pub fn finished(self, worker: &super::Worker, outcome: Option<TaskOutcome>) -> Option<Task> {
+        self.finished_with::<true>(worker, outcome)
+    }
+
+    #[doc(hidden)]
+    pub fn finished_with<const RECORDING: bool>(self, worker: &super::Worker, outcome: Option<TaskOutcome>) -> Option<Task> {
         worker.validate_runtime(self.data.runtime);
         assert_eq!(
             worker.id(),
             self.worker,
             "finish an asynchronous poll on the worker that started it"
         );
+        if !RECORDING {
+            return outcome.is_none().then_some(Task {
+                data: self.data,
+                cancel_on_drop: self.data.recorded,
+            });
+        }
         let Some(started_at) = self.started_at else {
             return outcome.is_none().then_some(Task {
                 data: self.data,
-                cancel_on_drop: true,
+                cancel_on_drop: self.data.recorded,
             });
         };
         let finished_at = EventTimestamp::now();
@@ -253,12 +285,15 @@ impl Poll {
         );
         outcome.is_none().then_some(Task {
             data: self.data,
-            cancel_on_drop: true,
+            cancel_on_drop: self.data.recorded,
         })
     }
 }
 
 fn record_cancelled(data: TaskData) {
+    if !data.recorded || !is_enabled(EventClass::RuntimeTask) {
+        return;
+    }
     record(
         EventTimestamp::now(),
         EventKind::TaskCanceled,

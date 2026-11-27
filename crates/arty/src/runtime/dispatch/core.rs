@@ -164,7 +164,7 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), future_factory, options)
     }
 
-    pub(crate) fn spawn_relocating<FF, F>(&self, source: &Thread, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
+    pub(crate) fn spawn_relocating<FF, F>(&self, source: &Thread, future_factory: FF, options: SpawnOptions) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
@@ -172,7 +172,7 @@ impl DispatcherCore {
     {
         let worker_index = self.next_worker_index();
         let endpoint = &self.worker_endpoints[usize::from(worker_index)];
-        let future_factory = if &endpoint.thread == source {
+        if &endpoint.thread == source {
             if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
                 return join_handle;
             }
@@ -180,35 +180,35 @@ impl DispatcherCore {
             // worker. A retained scheduler can still be used from another thread.
             match LocalWorker::with_scheduler(|current| {
                 let Some(current) = current.filter(|current| current.thread() == &endpoint.thread) else {
-                    return Err(future_factory);
+                    return Err((future_factory, options));
                 };
-                let handle = current.spawn(future_factory, identity);
+                let handle = current.spawn(future_factory, options);
                 if !current.tasks().is_executing() {
                     endpoint.waker.wake_by_ref();
                 }
                 Ok(handle)
             }) {
                 Ok(handle) => return handle.relocate_result_from(endpoint.thread.clone()),
-                Err(future_factory) => future_factory,
+                Err((future_factory, returned_options)) => {
+                    return self.spawn_relocating_on_worker(worker_index, future_factory, returned_options);
+                }
             }
-        } else {
-            future_factory
-        };
-        self.spawn_relocating_on_worker(worker_index, future_factory, identity)
+        }
+        self.spawn_relocating_on_worker(worker_index, future_factory, options)
     }
 
     pub(crate) fn spawn_at_worker_relocating<FF, F>(
         &self,
         worker_index: WorkerIndex,
         future_factory: FF,
-        identity: TaskIdentity,
+        options: SpawnOptions,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        self.spawn_relocating_on_worker(worker_index, future_factory, identity)
+        self.spawn_relocating_on_worker(worker_index, future_factory, options)
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -342,14 +342,13 @@ impl DispatcherCore {
         &self,
         worker_index: WorkerIndex,
         future_factory: FF,
-        identity: TaskIdentity,
+        options: SpawnOptions,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        let options = SpawnOptions::new(identity, size_of::<F>(), LocalWorker::current_task());
         self.enqueue(worker_index, future_factory, options)
     }
 
@@ -358,7 +357,7 @@ impl DispatcherCore {
         &self,
         worker_index: WorkerIndex,
         future_factory: FF,
-        identity: TaskIdentity,
+        options: SpawnOptions,
     ) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
@@ -366,7 +365,6 @@ impl DispatcherCore {
         F::Output: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        let options = SpawnOptions::new(identity, size_of::<F>(), LocalWorker::current_task());
         self.enqueue(worker_index, future_factory, options).relocate_result_from(source)
     }
 
@@ -380,7 +378,6 @@ impl DispatcherCore {
             drop(future_factory);
             return join_handle;
         }
-        let options = options.monitor(self.monitoring());
         let target = &self.worker_endpoints[usize::from(worker_index)].thread;
         let identity = options.identity();
         let options = options.observed_by(self.submission_observers(target, identity));
@@ -480,13 +477,19 @@ mod tests {
         )
     }
 
-    fn spawn_for_test<FF, F>(dispatcher: &DispatcherCore, future_factory: FF) -> JoinHandle<F::Output>
+    fn spawn_for_test<FF, F>(dispatcher: &Arc<DispatcherCore>, future_factory: FF) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        let options = SpawnOptions::new(TaskIdentity::from_location(std::panic::Location::caller()), size_of::<F>(), None);
+        let client = DispatcherClient::new(Arc::clone(dispatcher));
+        let options = SpawnOptions::new(
+            client.monitoring(),
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            size_of::<F>(),
+            None,
+        );
         dispatcher.spawn(future_factory, options)
     }
 
@@ -676,7 +679,14 @@ mod tests {
         );
 
         let index = dispatcher.worker_index(threads[1].id()).unwrap();
-        dispatcher.spawn_on_worker(index, |_| async {}, TaskIdentity::from_location(std::panic::Location::caller()));
+        let client = DispatcherClient::new(Arc::clone(&dispatcher));
+        let options = SpawnOptions::new(
+            client.monitoring(),
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            size_of::<std::future::Ready<()>>(),
+            None,
+        );
+        dispatcher.spawn_on_worker(index, |_| std::future::ready(()), options);
 
         assert_eq!((drain_spawn(&first_rx).len(), drain_spawn(&second_rx).len()), (0, 1),);
     }

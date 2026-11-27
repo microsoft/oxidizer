@@ -11,9 +11,7 @@ use tick::{SimpleClock, Stopwatch};
 
 #[cfg(test)]
 use crate::TaskIdentity;
-use crate::{
-    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context,
-};
+use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context};
 
 /// An async task executor that runs on one thread.
 ///
@@ -71,6 +69,28 @@ pub struct Executor {
     active: VecDeque<TaskHandle>,
     pending: TaskList,
     stopwatch: Stopwatch,
+}
+
+trait PollMode: Copy {
+    fn poll(self, task: std::pin::Pin<&dyn crate::TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()>;
+}
+
+#[derive(Clone, Copy)]
+struct SilentPoll;
+
+impl PollMode for SilentPoll {
+    fn poll(self, task: std::pin::Pin<&dyn crate::TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        task.poll(shared)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RecordedPoll;
+
+impl PollMode for RecordedPoll {
+    fn poll(self, task: std::pin::Pin<&dyn crate::TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        task.poll_recorded(shared)
+    }
 }
 
 impl Executor {
@@ -136,11 +156,23 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
+        if self
+            .shared
+            .monitoring()
+            .is_some_and(seismograph_runtime::asynchronous::Worker::is_recording)
+        {
+            self.execute_cycle_with(RecordedPoll)
+        } else {
+            self.execute_cycle_with(SilentPoll)
+        }
+    }
+
+    fn execute_cycle_with(&mut self, mode: impl PollMode) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
-        self.poll_active_tasks();
+        self.poll_active_tasks(mode);
         self.cancel_if_shutting_down();
         let outcome = self.cycle_outcome();
         self.finish_cycle();
@@ -203,7 +235,7 @@ impl Executor {
         }
     }
 
-    fn poll_active_tasks(&mut self) {
+    fn poll_active_tasks(&mut self, mode: impl PollMode) {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
@@ -227,7 +259,7 @@ impl Executor {
                 continue;
             }
 
-            let outcome = task.poll(&self.shared);
+            let outcome = mode.poll(task, &self.shared);
             let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
             match outcome {
                 task::Poll::Ready(()) => {
@@ -604,7 +636,7 @@ mod gamma_round2_tests {
         executor.accept_new_tasks();
         let completed = metric(&TASKS_COMPLETED);
         let dropped = metric(&TASKS_DROPPED);
-        executor.poll_active_tasks();
+        executor.poll_active_tasks(SilentPoll);
         assert_eq!(polled.get(), 0);
         assert!(executor.active.is_empty());
         assert!(executor.pending.is_empty());

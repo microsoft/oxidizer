@@ -139,7 +139,12 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>(), None);
+        let options = crate::task::preparation::SpawnOptions::new(
+            self.dispatcher.monitoring(),
+            TaskIdentity::from_location(Location::caller()),
+            size_of::<F>(),
+            None,
+        );
         let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
@@ -198,6 +203,7 @@ impl RuntimeScheduler {
         R: Send + 'static,
     {
         let options = crate::task::preparation::SpawnOptions::new(
+            self.dispatcher.monitoring(),
             TaskIdentity::from_location(Location::caller()),
             size_of::<F>(),
             LocalWorker::current_task(),

@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Private task monitoring and native task inspection.
+//! Private task lifecycle monitoring.
 //!
 //! The runtime owns its monitor connection and registration until its workers stop.
 //! Each async worker owns a worker registration and its current poll state.
 //! Blocking queues own worker registrations and runtime handles for submissions.
 //! Each submission creates an immutable identity from its caller's source location.
 //! The executor stores each async task's identity and sets it during polls.
-//! Blocking tasks report their queue and execution lifecycle without task inspection.
+//! Blocking tasks report their queue and execution lifecycle.
 //! Handles provide access to these registrations but do not own runtime shutdown.
 
 mod blocking;

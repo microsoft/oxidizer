@@ -252,9 +252,7 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
     let created_at = EventTimestamp::from_ticks(reader.u64()?);
     let retired_at = optional_timestamp(reader.u64()?);
     let worker_count = reader.u32()? as usize;
-    let name = std::str::from_utf8(reader.read(name_len)?)
-        .map_err(|_| malformed())?
-        .to_owned();
+    let name = std::str::from_utf8(reader.read(name_len)?).map_err(|_| malformed())?.to_owned();
     let mut workers = Vec::with_capacity(worker_count);
     for _ in 0..worker_count {
         let id = WorkerId::from_raw(reader.u64()?).ok_or_else(malformed)?;

@@ -1006,9 +1006,7 @@ mod tests {
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), Shutdown::default());
         let monitoring = monitoring();
-        let blocking = monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(
-            seismograph_runtime::WorkerRole::Blocking,
-        ));
+        let blocking = monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
         attach_thread(Arc::clone(&worker.pool.identity), blocking);
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 

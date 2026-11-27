@@ -7,9 +7,8 @@
 /// [`RuntimeBuilder::monitor`](crate::runtime::RuntimeBuilder::monitor).
 /// The automatic policy is the default.
 ///
-/// Building an enabled runtime starts a local monitor. Task collection and
-/// poll timing run only when requested. This policy does not enable event
-/// recording or install an allocator.
+/// Building an enabled runtime starts a local monitor. This policy does not
+/// enable event recording or install an allocator.
 ///
 /// The automatic policy disables monitoring for tests, doctests, documentation
 /// examples, and Miri. It enables monitoring in other environments. The exact

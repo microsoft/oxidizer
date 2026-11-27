@@ -128,6 +128,10 @@ impl ExecutorShared {
         self.inner.task_count.get()
     }
 
+    pub(crate) fn queued_task_count(&self) -> usize {
+        self.inner.new_tasks.borrow().len()
+    }
+
     pub(crate) fn shutdown_complete(&self) -> bool {
         debug_assert!(self.inner.new_tasks.borrow().is_empty());
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
@@ -155,10 +159,7 @@ impl ExecutorShared {
             Self::reject_task::<F::IntoFuture, _, _>(&identity, observer, completion, self.shutdown().cause());
             return;
         }
-        assert!(
-            monitoring.is_none() || self.monitoring().is_some(),
-            "a monitored task requires an executor monitoring worker"
-        );
+        let monitoring = monitoring.filter(|monitoring| self.monitoring().is_some_and(|worker| monitoring.belongs_to(worker)));
         self.register_task(allocate_task(
             &self.inner.task_storage,
             identity,
@@ -217,4 +218,3 @@ impl Drop for CurrentTask<'_> {
         self.slot.set(self.previous);
     }
 }
-

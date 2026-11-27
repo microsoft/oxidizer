@@ -99,9 +99,11 @@ fn older_tasks_emit_poll_events_only_after_they_are_polled() {
     let events = events(runtime_id);
     assert_eq!(events.iter().filter(|event| event.kind == EventKind::TaskPollStarted).count(), 1);
     assert_eq!(events.iter().filter(|event| event.kind == EventKind::TaskPollFinished).count(), 1);
-    assert!(!events.iter().any(|event| {
-        matches!(event.kind, EventKind::TaskEnqueued | EventKind::TaskMaterialized)
-    }));
+    assert!(
+        !events
+            .iter()
+            .any(|event| { matches!(event.kind, EventKind::TaskEnqueued | EventKind::TaskMaterialized) })
+    );
 
     runtime.stop().unwrap();
     assert!(active.join().unwrap_err().is_shutdown());

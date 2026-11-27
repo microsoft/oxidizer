@@ -12,4 +12,3 @@ mod worker;
 
 pub use task::{Poll, QueuedTask, Task, TaskHandle};
 pub use worker::Worker;
-

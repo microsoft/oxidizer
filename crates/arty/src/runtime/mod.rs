@@ -48,7 +48,7 @@
 //!   monitoring for tests, doctests, documentation examples, and Miri. It
 //!   enables monitoring in other environments. The exact automatic selection
 //!   can change in future releases.
-//!   Task collection runs on request. This does not enable event recording.
+//!   This does not enable event recording.
 //! - Without a [`TaskPanic`](hook::TaskPanic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
@@ -64,15 +64,9 @@
 //! Use [`policy::MonitorPolicy::enabled`] or [`policy::MonitorPolicy::disabled`] to override the
 //! automatic selection.
 //!
-//! Collection reads live async tasks and queued or running blocking functions
-//! from their native storage. Each request limits the number of tasks per worker.
-//! A blocked async worker can time out. The result reports incomplete collection
-//! rather than treating missing tasks as an empty worker.
-//!
-//! Poll timing runs only during a requested measurement interval or event recording.
-//! Completed tasks are not kept in a second task registry.
-//! History that was not recorded stays unknown. A blocking function that started
-//! before observation has no measured start time for that call.
+//! The runtime source reports runtime and worker state. Task state comes from
+//! retained lifecycle events. A task that does not emit an event after recording
+//! starts does not appear in the reconstructed model.
 //!
 //! Monitor connections are separate, but the recorder and diagnostic sources are
 //! process-wide. Recording, clearing event buffers, and snapshot capture through

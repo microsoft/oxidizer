@@ -165,7 +165,13 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let handle = current.spawn(future_factory, identity);
+            let options = crate::task::preparation::SpawnOptions::new(
+                self.dispatcher.monitoring(),
+                identity,
+                std::mem::size_of::<F>(),
+                current.tasks().current(),
+            );
+            let handle = current.spawn(future_factory, options);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }

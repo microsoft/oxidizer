@@ -176,7 +176,6 @@ impl Runtime {
     pub fn stop(&self) {
         self.owner.handle.stopped();
     }
-
 }
 
 impl Drop for RuntimeOwner {
@@ -373,8 +372,7 @@ fn snapshot_runtime(runtime: &Arc<RuntimeControl>) -> RuntimeSnapshot {
         lifecycle_backtraces: runtime.lifecycle_backtraces,
         state,
         created_at: runtime.created_at,
-        retired_at: (state == RuntimeState::Stopped)
-            .then(|| EventTimestamp::from_ticks(runtime.retired_at.load(Ordering::Acquire))),
+        retired_at: (state == RuntimeState::Stopped).then(|| EventTimestamp::from_ticks(runtime.retired_at.load(Ordering::Acquire))),
         workers: lock(&runtime.workers).iter().map(|worker| worker.snapshot()).collect(),
     }
 }

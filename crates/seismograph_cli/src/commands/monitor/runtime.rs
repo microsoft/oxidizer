@@ -203,7 +203,7 @@ const fn task_state(state: TaskState) -> &'static str {
         TaskState::Running => "Running",
         TaskState::Waiting => "Waiting",
         TaskState::Completed => "Completed",
-        TaskState::Canceled => "Canceled",
+        TaskState::Cancelled => "Canceled",
         TaskState::Panicked => "Panicked",
         _ => "Unknown",
     }
@@ -481,4 +481,3 @@ pub(super) fn runtime_task_id(kind: EventKind, subject_id: u64, related_id: u64)
         _ => None,
     }
 }
-

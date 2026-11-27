@@ -167,65 +167,11 @@ where
     I: TaskObserver,
 {
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
-        // SAFETY: The `Task` is single-threaded and we only ever create temporary references
-        // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
-        // reference to this field.
-        let payload_slot = unsafe { self.payload.get().as_mut().expect("UnsafeCell pointer cannot be null") };
+        self.poll_with::<false>(shared)
+    }
 
-        let Some(payload) = payload_slot.as_mut() else {
-            unreachable!("attempted to poll a task whose future was already dropped");
-        };
-
-        // SAFETY: Our future and the task that owns it are always pinned by design, the
-        // `Pin` annotation just gets lost in the type layering. We add it back here.
-        let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
-        let observer = &mut payload.observer;
-        if let Some(worker) = shared.monitoring()
-            && let Some(monitoring) = payload.monitoring.take()
-        {
-            payload.monitoring = Some(monitoring.poll_started(payload.identity, worker));
-        }
-
-        let wake_signal = self.pinned_wake_signal();
-
-        let poll_result = {
-            // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
-            // pinned pooled task allocation. Owner retirement empties its payload before a remote
-            // clone can release the final reference.
-            let waker = unsafe { wake_signal.waker_ref() };
-
-            let mut cx = task::Context::from_waker(&waker);
-            shared.with_current(payload.identity, || future_as_mut_pinned.as_mut().poll_observed(observer, &mut cx))
-        };
-
-        match poll_result {
-            Err(panic) => {
-                if let Some(worker) = shared.monitoring()
-                    && let Some(monitoring) = payload.monitoring.take()
-                {
-                    payload.monitoring = monitoring.poll_finished(worker, Some(seismograph_runtime::TaskOutcome::Panicked));
-                }
-                Self::finish_panicked(payload_slot, wake_signal, panic, shared)
-            }
-            Ok(task::Poll::Ready(result)) => {
-                if let Some(worker) = shared.monitoring()
-                    && let Some(monitoring) = payload.monitoring.take()
-                {
-                    payload.monitoring = monitoring.poll_finished(worker, Some(seismograph_runtime::TaskOutcome::Completed));
-                }
-                wake_signal.retire();
-                Self::finish_succeeded(payload_slot, result);
-                task::Poll::Ready(())
-            }
-            Ok(task::Poll::Pending) => {
-                if let Some(worker) = shared.monitoring()
-                    && let Some(monitoring) = payload.monitoring.take()
-                {
-                    payload.monitoring = monitoring.poll_finished(worker, None);
-                }
-                task::Poll::Pending
-            }
-        }
+    fn poll_recorded(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
+        self.poll_with::<true>(shared)
     }
 
     fn links(&self) -> &TaskLinks {
@@ -265,6 +211,76 @@ where
 
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {
         self.wake_signal.set(wake_signal).expect("task must be initialized exactly once");
+    }
+}
+
+impl<F, T, I> Task<F, T, I>
+where
+    F: Future + 'static,
+    F::Output: 'static,
+    T: TaskCompletion<F::Output>,
+    I: TaskObserver,
+{
+    fn poll_with<const RECORDING: bool>(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
+        // SAFETY: The `Task` is single-threaded and we only ever create temporary references
+        // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
+        // reference to this field.
+        let payload_slot = unsafe { self.payload.get().as_mut().expect("UnsafeCell pointer cannot be null") };
+
+        let Some(payload) = payload_slot.as_mut() else {
+            unreachable!("attempted to poll a task whose future was already dropped");
+        };
+
+        // SAFETY: Our future and the task that owns it are always pinned by design, the
+        // `Pin` annotation just gets lost in the type layering. We add it back here.
+        let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
+        let observer = &mut payload.observer;
+        if let Some(worker) = shared.monitoring()
+            && let Some(monitoring) = payload.monitoring.take()
+        {
+            payload.monitoring = Some(monitoring.poll_started::<RECORDING>(payload.identity, worker));
+        }
+
+        let wake_signal = self.pinned_wake_signal();
+
+        let poll_result = {
+            // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
+            // pinned pooled task allocation. Owner retirement empties its payload before a remote
+            // clone can release the final reference.
+            let waker = unsafe { wake_signal.waker_ref() };
+
+            let mut cx = task::Context::from_waker(&waker);
+            shared.with_current(payload.identity, || future_as_mut_pinned.as_mut().poll_observed(observer, &mut cx))
+        };
+
+        match poll_result {
+            Err(panic) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished::<RECORDING>(worker, Some(seismograph_runtime::TaskOutcome::Panicked));
+                }
+                Self::finish_panicked(payload_slot, wake_signal, panic, shared)
+            }
+            Ok(task::Poll::Ready(result)) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished::<RECORDING>(worker, Some(seismograph_runtime::TaskOutcome::Completed));
+                }
+                wake_signal.retire();
+                Self::finish_succeeded(payload_slot, result);
+                task::Poll::Ready(())
+            }
+            Ok(task::Poll::Pending) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished::<RECORDING>(worker, None);
+                }
+                task::Poll::Pending
+            }
+        }
     }
 }
 
@@ -527,6 +543,9 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     ///
     /// Panics if the task has already been completed.
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()>;
+
+    /// Polls the task and records its Seismograph lifecycle.
+    fn poll_recorded(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()>;
 
     /// Returns owner-thread intrusive-list links for this task.
     fn links(&self) -> &TaskLinks;

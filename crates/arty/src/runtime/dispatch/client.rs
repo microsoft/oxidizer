@@ -87,7 +87,13 @@ impl DispatcherClient {
         F: Future + 'static,
         F::Output: Send + 'static,
     {
-        self.core.spawn_on_worker(worker_index, future_factory, identity)
+        let options = crate::task::preparation::SpawnOptions::new(
+            self.monitoring(),
+            identity,
+            std::mem::size_of::<F>(),
+            crate::runtime::worker::asynchronous::LocalWorker::current_task(),
+        );
+        self.core.spawn_on_worker(worker_index, future_factory, options)
     }
 
     pub(crate) fn spawn<FF, F>(&self, future_factory: FF, options: crate::task::preparation::SpawnOptions) -> JoinHandle<F::Output>
@@ -110,7 +116,13 @@ impl DispatcherClient {
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        self.core.spawn_relocating(source, future_factory, identity)
+        let options = crate::task::preparation::SpawnOptions::new(
+            self.monitoring(),
+            identity,
+            std::mem::size_of::<F>(),
+            crate::runtime::worker::asynchronous::LocalWorker::current_task(),
+        );
+        self.core.spawn_relocating(source, future_factory, options)
     }
 
     pub(crate) fn spawn_at_worker_relocating<FF, F>(
@@ -124,7 +136,13 @@ impl DispatcherClient {
         F: Future + 'static,
         F::Output: ThreadAware + 'static,
     {
-        self.core.spawn_at_worker_relocating(worker_index, future_factory, identity)
+        let options = crate::task::preparation::SpawnOptions::new(
+            self.monitoring(),
+            identity,
+            std::mem::size_of::<F>(),
+            crate::runtime::worker::asynchronous::LocalWorker::current_task(),
+        );
+        self.core.spawn_at_worker_relocating(worker_index, future_factory, options)
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Context) + Send>) -> Result<(), Error> {

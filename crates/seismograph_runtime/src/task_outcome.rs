@@ -3,8 +3,8 @@
 
 /// Terminal outcome shared by asynchronous and blocking tasks.
 ///
-/// Pass this value to [`asynchronous::Poll::finished`] or
-/// [`blocking::Execution::finished`].
+/// Pass this value to [`crate::asynchronous::Poll::finished`] or
+/// [`crate::blocking::Execution::finished`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TaskOutcome {

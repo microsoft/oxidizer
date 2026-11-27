@@ -140,8 +140,21 @@ mod tests {
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::Executor;
+    use thread_aware::ThreadBuilder;
 
     use super::*;
+    use crate::runtime::dispatch::DispatcherClient;
+
+    fn spawn_options(future_size: usize) -> crate::task::preparation::SpawnOptions {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let dispatcher = DispatcherClient::for_test(&thread);
+        crate::task::preparation::SpawnOptions::new(
+            dispatcher.monitoring(),
+            seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
+            future_size,
+            None,
+        )
+    }
 
     #[test]
     fn gamma_survivor_private_commands_keep_distinct_debug_labels() {
@@ -222,11 +235,7 @@ mod tests {
         let (factory, join) = prepare_remote(
             &result_pool,
             |_| std::future::ready(42),
-            crate::task::preparation::SpawnOptions::new(
-                seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-                size_of::<std::future::Ready<i32>>(),
-                None,
-            ),
+            spawn_options(size_of::<std::future::Ready<i32>>()),
         );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));

@@ -283,32 +283,31 @@ impl SchedulerContext {
         &self.tasks
     }
 
-    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<FF, F>(&self, future_factory: FF, options: SpawnOptions) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         if self.has_spawn_hooks.get() {
-            return self.spawn_observed(future_factory, identity);
+            return self.spawn_observed(future_factory, options);
         }
 
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
         options.register(&self.thread, &self.tasks, inner, result_tx);
         handle
     }
 
     #[cold]
-    fn spawn_observed<FF, F>(&self, future_factory: FF, identity: TaskIdentity) -> JoinHandle<F::Output>
+    fn spawn_observed<FF, F>(&self, future_factory: FF, options: SpawnOptions) -> JoinHandle<F::Output>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future + 'static,
         F::Output: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let options = SpawnOptions::new(identity, size_of::<F>(), self.tasks.current());
+        let identity = options.identity();
         let observers = LocalWorker::execute_spawn_hooks(&self.thread, &self.thread, identity);
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         options.observed_by(observers).register(&self.thread, &self.tasks, inner, result_tx);
@@ -436,25 +435,39 @@ mod tests {
                 vec![hook.clone()],
                 None,
             );
+            let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let _prime = core.spawn_relocating(
                 &destination,
                 |_| async {},
-                TaskIdentity::from_location(std::panic::Location::caller()),
+                SpawnOptions::new(
+                    dispatcher.monitoring(),
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                    0,
+                    None,
+                ),
             );
             sources.lock().unwrap().clear();
-            let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
                 arty_io_host::IoRuntime::new(observed::Sink::noop()),
                 dispatcher.clone(),
                 source.clone(),
             );
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
-            let context = Context::new(dispatcher, clock, io, source.clone());
+            let context = Context::new(dispatcher.clone(), clock, io, source.clone());
             let executor = Executor::builder().thread(source.clone()).build();
             LocalWorker::attach(monitoring_worker());
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
 
-            let _task = core.spawn_relocating(&source, |_| async {}, TaskIdentity::from_location(std::panic::Location::caller()));
+            let _task = core.spawn_relocating(
+                &source,
+                |_| async {},
+                SpawnOptions::new(
+                    dispatcher.monitoring(),
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                    0,
+                    None,
+                ),
+            );
             let queued = destination_rx.spawn_receiver().try_recv().is_ok();
 
             LocalWorker::clear_scheduler();
@@ -510,7 +523,7 @@ mod tests {
                 thread.clone(),
             );
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
-            let context = Context::new(dispatcher, clock, io, thread.clone());
+            let context = Context::new(dispatcher.clone(), clock, io, thread.clone());
             let executor = Executor::builder().thread(thread.clone()).build();
             let relocation_saw_no_observers = Arc::new(AtomicBool::new(false));
             let callbacks = Arc::new(AtomicUsize::new(0));
@@ -569,12 +582,16 @@ mod tests {
                 thread.clone(),
             );
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
-            let context = Context::new(dispatcher, clock, io, thread.clone());
+            let context = Context::new(dispatcher.clone(), clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
             LocalWorker::attach(monitoring_worker());
             LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
-            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }, identity()));
+            let mut join = std::pin::pin!(core.spawn_relocating(
+                &thread,
+                |_| async { 42 },
+                SpawnOptions::new(dispatcher.monitoring(), identity(), 0, None),
+            ));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
             let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
             _ = executor.execute_cycle();
@@ -584,17 +601,22 @@ mod tests {
             );
 
             let nested_core = Arc::clone(&core);
+            let nested_dispatcher = dispatcher.clone();
             let source = thread.clone();
             let nested_wakes = std::sync::Arc::clone(&wakes);
             let mut parent = std::pin::pin!(core.spawn_relocating(
                 &thread,
                 move |_| async move {
                     let before = nested_wakes.0.load(Ordering::Relaxed);
-                    let child = nested_core.spawn_relocating(&source, |_| async { 7 }, identity());
+                    let child = nested_core.spawn_relocating(
+                        &source,
+                        |_| async { 7 },
+                        SpawnOptions::new(nested_dispatcher.monitoring(), identity(), 0, None),
+                    );
                     let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
                     (child.await.unwrap(), executing_worker_not_woken)
                 },
-                identity()
+                SpawnOptions::new(dispatcher.monitoring(), identity(), 0, None)
             ));
             _ = executor.execute_cycle();
             _ = executor.execute_cycle();
@@ -608,7 +630,11 @@ mod tests {
             let other_owner_not_registered = !executor.has_tasks();
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
-            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }, identity()));
+            let mut rejected = std::pin::pin!(core.spawn_relocating(
+                &thread,
+                |_| async { 11 },
+                SpawnOptions::new(dispatcher.monitoring(), identity(), 0, None),
+            ));
             let rejected_after_shutdown = matches!(
                 rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Err(error)) if error.is_shutdown()
@@ -656,10 +682,16 @@ mod tests {
             )),
             Shutdown::default(),
         );
+        let dispatcher = DispatcherClient::new(Arc::clone(&core));
         let _remote = core.spawn_relocating(
             &thread,
             |_| async { 9 },
-            TaskIdentity::from_location(std::panic::Location::caller()),
+            SpawnOptions::new(
+                dispatcher.monitoring(),
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                0,
+                None,
+            ),
         );
         matches!(receiver.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }))
     }

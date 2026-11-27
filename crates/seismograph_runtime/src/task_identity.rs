@@ -8,7 +8,7 @@ use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 /// Identifies one task and the source location used to create its identity.
 ///
 /// A runtime can retain this identity independently of monitoring and use it
-/// for task inspection and lifecycle events.
+/// for task lifecycle events.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TaskIdentity {
     id: TaskId,

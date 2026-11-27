@@ -30,7 +30,9 @@ where
     F: Future + 'static,
     F::Output: Send + 'static,
 {
+    let monitoring = seismograph_runtime::Runtime::builder("").build();
     let options = SpawnOptions::new(
+        &monitoring,
         seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
         size_of::<F>(),
         None,
@@ -51,7 +53,8 @@ fn remote_factory_defers_future_creation_until_polling() {
     let factory_invoked = Arc::clone(&invoked);
     let result_pool = JoinHandlePool::new(Shutdown::default());
     let identity = seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller());
-    let options = SpawnOptions::new(identity, size_of_val(&future()), None);
+    let monitoring = seismograph_runtime::Runtime::builder("").build();
+    let options = SpawnOptions::new(&monitoring, identity, size_of_val(&future()), None);
     let (factory, handle) = prepare_remote(
         &result_pool,
         move |_| {

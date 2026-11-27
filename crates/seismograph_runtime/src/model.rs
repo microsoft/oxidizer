@@ -14,6 +14,7 @@ use crate::{TaskOutcome, WorkerRole};
 
 /// Logical runtime state reconstructed from a source snapshot and retained events.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct RuntimeModel {
     /// Runtimes visible in either retained input.
     pub runtimes: Vec<Runtime>,
@@ -30,23 +31,29 @@ impl RuntimeModel {
                 entry.runtime.name.clone_from(&runtime.name);
                 entry.runtime.configured_workers = Some(runtime.configured_workers);
                 entry.runtime.state = runtime.state;
+                entry.state_from_source = true;
                 for worker in &runtime.workers {
                     entry.workers.insert(
                         worker.id,
-                        Worker {
-                            id: worker.id,
-                            role: Some(worker.role),
-                            state: worker.state,
-                            processor_index: worker.processor_index,
-                            thread_id: worker.thread_id,
-                            current_task: None,
-                            tasks: Vec::new(),
+                        WorkerBuilder {
+                            worker: Worker {
+                                id: worker.id,
+                                role: Some(worker.role),
+                                state: worker.state,
+                                processor_index: worker.processor_index,
+                                thread_id: worker.thread_id,
+                                current_task: None,
+                                tasks: Vec::new(),
+                            },
+                            state_from_source: true,
                         },
                     );
                 }
             }
         }
-        for event in &events.events {
+        let mut ordered = events.events.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|event| (event.timestamp, event.thread_id, event.sequence));
+        for event in ordered {
             let Some(payload) = event.runtime() else { continue };
             let runtime = runtimes
                 .entry(payload.runtime_id)
@@ -70,13 +77,17 @@ impl RuntimeModel {
                 .tasks
                 .entry(task_id)
                 .or_insert_with(|| TaskBuilder::new(payload.runtime_id, task_id));
-            if let Some(worker) = worker_id {
+            if let Some(worker) =
+                worker_id.filter(|_| !matches!(event.kind, EventKind::TaskSpawned | EventKind::TaskEnqueued | EventKind::TaskReady))
+            {
                 task.workers.insert(worker);
             }
+            let worker_role = worker_id.and_then(|worker| runtime.workers.get(&worker).and_then(|worker| worker.worker.role));
             task.observe(
                 event.kind,
                 event.timestamp,
                 worker_id,
+                worker_role,
                 payload.related_id,
                 payload.value_0,
                 payload.value_1,
@@ -91,6 +102,7 @@ impl RuntimeModel {
 
 /// One logical runtime.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Runtime {
     /// Runtime identity.
     pub id: RuntimeId,
@@ -108,6 +120,7 @@ pub struct Runtime {
 
 /// One logical worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Worker {
     /// Worker identity.
     pub id: WorkerId,
@@ -127,6 +140,7 @@ pub struct Worker {
 
 /// One logical task reconstructed from retained events.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Task {
     /// Runtime that owns this task.
     pub runtime_id: RuntimeId,
@@ -177,13 +191,14 @@ pub enum TaskState {
     /// The task completed.
     Completed,
     /// The task was canceled.
-    Canceled,
+    Cancelled,
     /// The task panicked.
     Panicked,
 }
 
 /// Asynchronous task history.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct AsynchronousTask {
     /// Retained completed or active polls.
     pub polls: Vec<TaskPoll>,
@@ -193,6 +208,7 @@ pub struct AsynchronousTask {
 
 /// One retained asynchronous poll.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct TaskPoll {
     /// Worker that executed the poll, when retained.
     pub worker: Option<WorkerId>,
@@ -208,6 +224,7 @@ pub struct TaskPoll {
 
 /// Blocking task history.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct BlockingTask {
     /// Execution start, when retained.
     pub started_at: Option<EventTimestamp>,
@@ -223,8 +240,9 @@ pub struct BlockingTask {
 
 struct RuntimeBuilder {
     runtime: Runtime,
-    workers: BTreeMap<WorkerId, Worker>,
+    workers: BTreeMap<WorkerId, WorkerBuilder>,
     tasks: BTreeMap<TaskId, TaskBuilder>,
+    state_from_source: bool,
 }
 
 impl RuntimeBuilder {
@@ -240,10 +258,14 @@ impl RuntimeBuilder {
             },
             workers: BTreeMap::new(),
             tasks: BTreeMap::new(),
+            state_from_source: false,
         }
     }
 
     fn observe_runtime(&mut self, kind: EventKind, value_0: u64) {
+        if self.state_from_source {
+            return;
+        }
         match kind {
             EventKind::RuntimeCreated => {
                 self.runtime.configured_workers = u32::try_from(value_0).ok();
@@ -255,34 +277,43 @@ impl RuntimeBuilder {
         }
     }
 
-    fn observe_worker(
-        &mut self,
-        id: WorkerId,
-        kind: EventKind,
-        thread_id: ThreadId,
-        subject: u64,
-        value_0: u64,
-        value_1: u64,
-    ) {
-        let worker = self.workers.entry(id).or_insert_with(|| Worker {
-            id,
-            role: None,
-            state: WorkerState::Running,
-            processor_index: None,
-            thread_id: Some(thread_id),
-            current_task: None,
-            tasks: Vec::new(),
+    fn observe_worker(&mut self, id: WorkerId, kind: EventKind, thread_id: ThreadId, subject: u64, value_0: u64, value_1: u64) {
+        let worker = self.workers.entry(id).or_insert_with(|| WorkerBuilder {
+            worker: Worker {
+                id,
+                role: None,
+                state: WorkerState::Running,
+                processor_index: None,
+                thread_id: None,
+                current_task: None,
+                tasks: Vec::new(),
+            },
+            state_from_source: false,
         });
-        worker.thread_id = Some(thread_id);
+        let update_thread = matches!(
+            kind,
+            EventKind::WorkerStarted
+                | EventKind::WorkerParked
+                | EventKind::WorkerUnparked
+                | EventKind::WorkerStopped
+                | EventKind::TaskMaterialized
+                | EventKind::TaskPollStarted
+                | EventKind::TaskPollFinished
+        );
+        if update_thread && worker.worker.thread_id.is_none() {
+            worker.worker.thread_id = Some(thread_id);
+        }
         match kind {
             EventKind::WorkerStarted => {
-                worker.role = u8::try_from(value_0).ok().and_then(WorkerRole::from_wire_value);
-                worker.processor_index = u32::try_from(value_1).ok().filter(|value| *value != u32::MAX);
-                worker.state = WorkerState::Running;
+                worker.worker.role = u8::try_from(value_0).ok().and_then(WorkerRole::from_wire_value);
+                worker.worker.processor_index = u32::try_from(value_1).ok().filter(|value| *value != u32::MAX);
+                if !worker.state_from_source {
+                    worker.worker.state = WorkerState::Running;
+                }
             }
-            EventKind::WorkerParked => worker.state = WorkerState::Parked,
-            EventKind::WorkerUnparked => worker.state = WorkerState::Running,
-            EventKind::WorkerStopped => worker.state = WorkerState::Stopped,
+            EventKind::WorkerParked if !worker.state_from_source => worker.worker.state = WorkerState::Parked,
+            EventKind::WorkerUnparked if !worker.state_from_source => worker.worker.state = WorkerState::Running,
+            EventKind::WorkerStopped => worker.worker.state = WorkerState::Stopped,
             _ => {
                 let _ = subject;
             }
@@ -291,27 +322,37 @@ impl RuntimeBuilder {
 
     fn update_current_task(&mut self, kind: EventKind, worker: Option<WorkerId>, task: TaskId) {
         let Some(worker_id) = worker else { return };
-        let worker = self.workers.entry(worker_id).or_insert_with(|| Worker {
-            id: worker_id,
-            role: None,
-            state: WorkerState::Running,
-            processor_index: None,
-            thread_id: None,
-            current_task: None,
-            tasks: Vec::new(),
+        let worker = self.workers.entry(worker_id).or_insert_with(|| WorkerBuilder {
+            worker: Worker {
+                id: worker_id,
+                role: None,
+                state: WorkerState::Running,
+                processor_index: None,
+                thread_id: None,
+                current_task: None,
+                tasks: Vec::new(),
+            },
+            state_from_source: false,
         });
-        if !worker.tasks.contains(&task) {
-            worker.tasks.push(task);
+        if !worker.worker.tasks.contains(&task) {
+            worker.worker.tasks.push(task);
         }
         match kind {
-            EventKind::TaskPollStarted => worker.current_task = Some(task),
-            EventKind::TaskPollFinished if worker.current_task == Some(task) => worker.current_task = None,
+            EventKind::TaskPollStarted => worker.worker.current_task = Some(task),
+            EventKind::TaskMaterialized if worker.worker.role == Some(WorkerRole::Blocking) => {
+                worker.worker.current_task = Some(task);
+            }
+            EventKind::TaskPollFinished | EventKind::TaskCompleted | EventKind::TaskCanceled | EventKind::TaskPanicked
+                if worker.worker.current_task == Some(task) =>
+            {
+                worker.worker.current_task = None;
+            }
             _ => {}
         }
     }
 
     fn finish(mut self) -> Runtime {
-        self.runtime.workers = self.workers.into_values().collect();
+        self.runtime.workers = self.workers.into_values().map(|worker| worker.worker).collect();
         self.runtime.tasks = self
             .tasks
             .into_values()
@@ -322,6 +363,11 @@ impl RuntimeBuilder {
             .collect();
         self.runtime
     }
+}
+
+struct WorkerBuilder {
+    worker: Worker,
+    state_from_source: bool,
 }
 
 struct TaskBuilder {
@@ -352,6 +398,7 @@ impl TaskBuilder {
         kind: EventKind,
         timestamp: EventTimestamp,
         worker: Option<WorkerId>,
+        worker_role: Option<WorkerRole>,
         related: u64,
         value_0: u64,
         value_1: u64,
@@ -369,6 +416,11 @@ impl TaskBuilder {
             EventKind::TaskMaterialized => {
                 self.task.body_size = value_1.checked_sub(1);
                 self.task.state = TaskState::Running;
+                if worker_role == Some(WorkerRole::Blocking) {
+                    let task = self.blocking();
+                    task.worker = worker;
+                    task.started_at = Some(timestamp);
+                }
             }
             EventKind::TaskPollStarted => {
                 self.task.state = TaskState::Running;
@@ -416,10 +468,18 @@ impl TaskBuilder {
                 task.outcome = Some(outcome);
             }
             EventKind::TaskCanceled => {
-                self.task.state = TaskState::Canceled;
+                self.task.state = TaskState::Cancelled;
                 match &mut self.task.kind {
                     TaskKind::Asynchronous(task) => task.outcome = Some(TaskOutcome::Cancelled),
                     TaskKind::Blocking(task) => {
+                        task.worker = worker;
+                        task.finished_at = Some(timestamp);
+                        task.duration_nanos = Some(value_0);
+                        task.started_at = timestamp.ticks().checked_sub(value_0).map(EventTimestamp::from_ticks);
+                        task.outcome = Some(TaskOutcome::Cancelled);
+                    }
+                    TaskKind::Unknown if worker_role == Some(WorkerRole::Blocking) => {
+                        let task = self.blocking();
                         task.worker = worker;
                         task.finished_at = Some(timestamp);
                         task.duration_nanos = Some(value_0);
@@ -466,7 +526,7 @@ fn poll_outcome(value: u64) -> Option<TaskOutcome> {
 fn state_from_outcome(outcome: &TaskOutcome) -> TaskState {
     match outcome {
         TaskOutcome::Completed => TaskState::Completed,
-        TaskOutcome::Cancelled => TaskState::Canceled,
+        TaskOutcome::Cancelled => TaskState::Cancelled,
         TaskOutcome::Panicked => TaskState::Panicked,
     }
 }
