@@ -265,13 +265,14 @@ const ALLOCATIONS: &Section = section!("ALLOCATION HOTSPOTS";
     "Allocations" => "Retained allocation-event count for this captured stack.",
     "Allocated" => "Sum of requested allocation bytes.",
     "Average" => "Allocated / Allocations in integer bytes; zero when the count is zero.",
+    "Maximum" => "Largest retained requested allocation size for this captured stack.",
     "Unmatched" => "Retained allocation count without a matched retained free.",
     "Unmatched B" => "Corresponding unmatched bytes. Neither unmatched metric proves process-live allocations or leaks, even with zero overwrites.",
     "Location" => "First displayed frame. Stack Trace shows this group's captured call stack.",
     "All-class source accepted / overwritten" => "Source counts spanning event classes, not allocation populations.",
     "Sampling / recording boundaries" => "Can omit a matching free and break live-allocation inference.",
     "Up/Down" => "Select a hotspot.",
-    "[ / ] / r" => "Change sort column / reverse sort.",
+    "Column headers / [ / ] / r" => "Click a metric header or use the keys to change the sort column and direction.",
     "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
     "e" => "Switch hotspots / individual allocation-free records. Records include actor names, requested sizes, addresses, operation stacks and view-local lifetime IDs.",
     "Orphan free" => "No retained allocation origin in the original capture. Filtering does not create orphan status or recompute lifetime IDs.",
@@ -304,7 +305,7 @@ const PRIMITIVE_OPERATIONS: &Section = section!("PRIMITIVE OPERATIONS";
     "Hotspots" => "Captured stack-group count.",
     "Highlighted contention" => "A recorded contention kind, not a latency or CPU measurement. Receive wait (empty) is normal channel waiting.",
     "Up/Down / Enter / Backspace" => "Select operation / enter Hotspots / go up.",
-    "[ / ] / r" => "Sort by Events, Objects, Threads or Hotspots / reverse.",
+    "Column headers / [ / ] / r" => "Click Events, Objects, Threads or Hotspots, or use the keys, to change sorting.",
 );
 
 const PRIMITIVE_HOTSPOTS: &Section = section!("PRIMITIVE HOTSPOTS";
@@ -332,7 +333,7 @@ const PRIMITIVE_VALUES: &Section = section!("OPERATION VALUES";
 );
 
 const THREADS: &Section = section!("THREADS";
-    "Thread" => "Recorder thread ID and available name, not necessarily OS thread ID. Sorted by recorder ID.",
+    "Thread" => "Recorder thread ID and available name, not necessarily OS thread ID. Threads with the most retained activity appear first.",
     "Retained" => "Retained source records for this thread; filtering can reduce this count.",
     "Overwritten" => "All-class source lost-record count for this thread; remains unfiltered.",
     "Up/Down / Enter" => "Select a thread / enter its Operations.",
@@ -727,7 +728,15 @@ mod tests {
         ),
         (
             Context::Allocations,
-            &["Allocations", "Allocated", "Average", "Unmatched", "Unmatched B", "Location"],
+            &[
+                "Allocations",
+                "Allocated",
+                "Average",
+                "Maximum",
+                "Unmatched",
+                "Unmatched B",
+                "Location",
+            ],
         ),
         (Context::PrimitiveTypes, &["Type", "Events", "Objects", "Contentions"]),
         (

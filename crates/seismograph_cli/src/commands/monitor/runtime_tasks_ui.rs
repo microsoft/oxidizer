@@ -10,7 +10,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use super::super::app::{RuntimeSectionFocus, RuntimeTaskTypeSort, RuntimeViewState, RuntimeWorkersFocus};
+use super::super::app::{RuntimeSectionFocus, RuntimeTaskTypeSort, RuntimeViewState, RuntimeWorkersFocus, selected_runtime_worker_id};
 use super::super::data::{AsynchronousTaskGroupSummary, BlockingTaskGroupSummary, RuntimeMonitorSnapshot};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
@@ -199,10 +199,12 @@ fn draw_asynchronous(
         return;
     }
     let runtime_id = runtime.selected_runtime(view.runtime_selected).map(|runtime| runtime.runtime_id);
+    let worker_id = selected_runtime_worker_id(runtime, &view);
     let mut groups = runtime
         .asynchronous_groups
         .iter()
         .filter(|group| Some(group.runtime_id) == runtime_id)
+        .filter(|group| group.worker_id == worker_id)
         .collect::<Vec<_>>();
     groups.sort_by(|left, right| compare_async_groups(left, right, view));
     let focused = view.section == RuntimeSectionFocus::TaskTypes;
@@ -220,7 +222,8 @@ fn draw_asynchronous(
     }));
     let polls = groups.iter().fold(0_u64, |total, group| total.saturating_add(group.polls));
     let title = format!(
-        " Async Task Types · {} types · {} spawned · {} live · {} succeeded · {} canceled · {} panicked · {} polls ",
+        " Async Task Types · {} · {} types · {} spawned · {} live · {} succeeded · {} canceled · {} panicked · {} polls ",
+        worker_id.map_or_else(|| "unassigned".into(), |worker| format!("w{worker}")),
         groups.len(),
         format_count(tasks),
         format_count(active),
@@ -368,10 +371,12 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
         return;
     }
     let runtime_id = runtime.selected_runtime(view.runtime_selected).map(|runtime| runtime.runtime_id);
+    let worker_id = selected_runtime_worker_id(runtime, &view);
     let mut groups = runtime
         .blocking_groups
         .iter()
         .filter(|group| Some(group.runtime_id) == runtime_id)
+        .filter(|group| group.worker_id == worker_id)
         .collect::<Vec<_>>();
     groups.sort_by(|left, right| compare_blocking_groups(left, right, view));
     let focused = view.section == RuntimeSectionFocus::TaskTypes;
@@ -389,7 +394,8 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
     }));
     let executions = groups.iter().fold(0_u64, |total, group| total.saturating_add(group.executions));
     let title = format!(
-        " Blocking Task Types · {} types · {} spawned · {} runs · {} live · {} succeeded · {} canceled · {} panicked · {} unclassified ",
+        " Blocking Task Types · {} · {} types · {} spawned · {} runs · {} live · {} succeeded · {} canceled · {} panicked · {} unclassified ",
+        worker_id.map_or_else(|| "unassigned".into(), |worker| format!("w{worker}")),
         groups.len(),
         format_count(tasks),
         format_count(executions),
@@ -546,6 +552,7 @@ mod tests {
             }],
             asynchronous_groups: vec![AsynchronousTaskGroupSummary {
                 runtime_id: 1,
+                worker_id: None,
                 type_descriptor_id: Some(42),
                 spawned_at: Some("src/async.rs:1:1".into()),
                 body_size_bytes: Some(128),
@@ -569,6 +576,7 @@ mod tests {
             }],
             blocking_groups: vec![BlockingTaskGroupSummary {
                 runtime_id: 1,
+                worker_id: None,
                 type_descriptor_id: Some(77),
                 spawned_at: Some("src/blocking.rs:2:1".into()),
                 body_size_bytes: Some(64),

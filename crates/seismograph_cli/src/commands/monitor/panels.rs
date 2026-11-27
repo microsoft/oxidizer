@@ -10,7 +10,7 @@ use super::app::{AllocatorBackend, App, MonitorTab, Screen};
 
 pub(super) const TABS: [(MonitorTab, &str); 9] = [
     (MonitorTab::Info, "  Info  "),
-    (MonitorTab::Heaps, " Native v4 "),
+    (MonitorTab::Heaps, " Allocator "),
     (MonitorTab::Allocations, "  Allocations  "),
     (MonitorTab::Primitives, "  Primitives  "),
     (MonitorTab::Threads, "  Threads  "),
@@ -140,7 +140,7 @@ impl Panels {
             }
             MonitorTab::Runtime => {
                 let [top, bottom] = split(Split::RuntimeRows, Direction::Vertical, area, Constraint::Percentage(38));
-                let [workers, activity] = split(Split::RuntimeColumns, Direction::Horizontal, top, Constraint::Percentage(68));
+                let [workers, activity] = split(Split::RuntimeColumns, Direction::Horizontal, top, Constraint::Percentage(60));
                 let [types, lower] = split(Split::RuntimeTaskColumns, Direction::Vertical, bottom, Constraint::Length(10));
                 let [tasks, preview] = split(Split::RuntimeTaskDetails, Direction::Horizontal, lower, Constraint::Percentage(55));
                 areas = [workers, activity, types, tasks, preview];

@@ -29,7 +29,7 @@ pub(super) fn draw_statistics(
         draw_empty_panel_with_message(frame, area, " Task Type Details ", unavailable);
         return;
     };
-    let Some((runtime_id, descriptor, _kind)) = selected_runtime_group(runtime, &view) else {
+    let Some((runtime_id, worker_id, descriptor, _kind)) = selected_runtime_group(runtime, &view) else {
         draw_empty_panel_with_message(frame, area, " Task Type Details ", Some("Select a task type."));
         return;
     };
@@ -39,6 +39,7 @@ pub(super) fn draw_statistics(
                 .asynchronous_groups
                 .iter()
                 .filter(|group| group.runtime_id == runtime_id)
+                .filter(|group| group.worker_id == worker_id)
                 .find(|group| group.type_descriptor_id == descriptor);
             draw_async_statistics(
                 frame,
@@ -53,6 +54,7 @@ pub(super) fn draw_statistics(
                 .blocking_groups
                 .iter()
                 .filter(|group| group.runtime_id == runtime_id)
+                .filter(|group| group.worker_id == worker_id)
                 .find(|group| group.type_descriptor_id == descriptor);
             draw_blocking_statistics(
                 frame,
@@ -77,11 +79,11 @@ pub(super) fn draw_task_list(
         draw_empty_panel_with_message(frame, area, " Tasks ", unavailable);
         return;
     };
-    let Some((runtime_id, descriptor, kind)) = selected_runtime_group(runtime, &view) else {
+    let Some((runtime_id, worker_id, descriptor, kind)) = selected_runtime_group(runtime, &view) else {
         draw_empty_panel_with_message(frame, area, " Tasks ", Some("Select a task type."));
         return;
     };
-    let tasks = runtime.tasks_for_group(runtime_id, descriptor, kind);
+    let tasks = runtime.tasks_for_group(runtime_id, worker_id, descriptor, kind);
     draw_tasks(frame, mouse, area, &tasks, view);
 }
 
@@ -326,10 +328,7 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
         ),
         (RuntimeWorkersFocus::Blocking, true) => (
             vec!["Task", "State", "Spawn", "Ops", "Queue", "Execution"],
-            vec![8, 11, 16, 7, 12, 12]
-                .into_iter()
-                .map(Constraint::Length)
-                .collect::<Vec<_>>(),
+            vec![8, 11, 16, 7, 12, 12].into_iter().map(Constraint::Length).collect::<Vec<_>>(),
             vec![
                 RuntimeTaskRowSort::Task,
                 RuntimeTaskRowSort::State,

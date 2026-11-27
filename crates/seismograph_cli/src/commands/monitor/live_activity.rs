@@ -39,6 +39,7 @@ pub(super) struct LiveActivity {
     pub(super) stale: bool,
     pub(super) samples: VecDeque<ClassRateSample>,
     pub(super) threads: Vec<ThreadActivity>,
+    pub(super) hidden_internal_threads: usize,
     previous: Option<(u64, [u64; 6], Instant)>,
 }
 
@@ -88,11 +89,21 @@ impl LiveActivity {
                 }
             })
             .collect();
+        self.hidden_internal_threads = self
+            .threads
+            .iter()
+            .filter(|thread| Self::internal_thread(&thread.statistics))
+            .count();
+        self.threads.retain(|thread| !Self::internal_thread(&thread.statistics));
         self.threads.sort_unstable_by_key(|thread| thread.statistics.thread_id);
         self.previous = Some((activity.session_id, counts, now));
         self.availability = Availability::Supported;
         self.stale = false;
         reset
+    }
+
+    fn internal_thread(statistics: &ThreadRecorderStatistics) -> bool {
+        statistics.name.starts_with("seismograph-monitor")
     }
 }
 
@@ -229,9 +240,52 @@ mod tests {
         for count in 0..130 {
             live.record(activity(1, [count; 6], &[(1, count)]), start + Duration::from_secs(count));
         }
+
         assert_eq!(
             (live.samples.len(), live.threads[0].history.len()),
             (HISTORY_LENGTH, HISTORY_LENGTH)
+        );
+    }
+
+    #[test]
+    fn telemetry_monitor_threads_are_summarized_instead_of_listed() {
+        let mut live = LiveActivity::default();
+        let start = Instant::now();
+        live.record(
+            RecorderActivity {
+                session_id: 1,
+                threads: vec![
+                    ThreadRecorderStatistics {
+                        thread_id: 1,
+                        name: "arty-async-0".into(),
+                        event_capacity: 64,
+                        ..ThreadRecorderStatistics::default()
+                    },
+                    ThreadRecorderStatistics {
+                        thread_id: 2,
+                        name: "seismograph-monitor".into(),
+                        event_capacity: 64,
+                        ..ThreadRecorderStatistics::default()
+                    },
+                    ThreadRecorderStatistics {
+                        thread_id: 3,
+                        name: "seismograph-monitor-client".into(),
+                        retired: true,
+                        ..ThreadRecorderStatistics::default()
+                    },
+                ],
+                ..RecorderActivity::default()
+            },
+            start,
+        );
+
+        assert_eq!(live.hidden_internal_threads, 2);
+        assert_eq!(
+            live.threads
+                .iter()
+                .map(|thread| thread.statistics.name.as_str())
+                .collect::<Vec<_>>(),
+            ["arty-async-0"]
         );
     }
 }

@@ -157,7 +157,7 @@ pub(super) fn recorder_activity(io: &MonitorIo, descriptor: &MonitorDescriptor) 
     let mut stream = connected_stream(io, descriptor)?;
     write_request(&mut stream, 2, &Request::ReadRecorderActivity).map_err(Error::Protocol)?;
     let mut activity = read_recorder_activity(&mut stream)?;
-    drop(stream);
+    stream.close().map_err(Error::Io)?;
     activity.statistics.recording = handshake(io, descriptor)?;
     Ok(activity)
 }
@@ -190,17 +190,27 @@ fn save_snapshot_to(io: &MonitorIo, directory: &std::path::Path, descriptor: &Mo
 pub(super) fn handshake(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<RecordingConfiguration, Error> {
     let mut stream = connect(io, descriptor)?;
     write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
-    match read_control_response(&mut stream).map_err(Error::Protocol)? {
+    let response = match read_control_response(&mut stream).map_err(Error::Protocol)? {
         (1, Response::Hello { instance_id, recording }) if instance_id == descriptor.instance_id => Ok(recording),
         (_, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
+    };
+    let close = stream.close().map_err(Error::Io);
+    match response {
+        Ok(recording) => close.map(|()| recording),
+        Err(error) => Err(error),
     }
 }
 
 fn server_version(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<String, Error> {
     let mut stream = connected_stream(io, descriptor)?;
     write_request(&mut stream, 2, &Request::ReadServerVersion).map_err(Error::Protocol)?;
-    read_server_version(&mut stream)
+    let response = read_server_version(&mut stream);
+    let close = stream.close().map_err(Error::Io);
+    match response {
+        Ok(version) => close.map(|()| version),
+        Err(error) => Err(error),
+    }
 }
 
 fn read_server_version(stream: &mut ClientConnection) -> Result<String, Error> {
@@ -232,6 +242,7 @@ fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) ->
     if request_id != 2 {
         return Err(Error::UnexpectedResponse);
     }
+    stream.close().map_err(Error::Io)?;
     match response {
         Response::Error(message) => Err(Error::Remote(message)),
         response => Ok(response),
@@ -290,6 +301,10 @@ impl ClientConnection {
                     .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "monitor response timed out"))
             })
             .transpose()
+    }
+
+    fn close(&self) -> io::Result<()> {
+        self.stream.close()
     }
 }
 

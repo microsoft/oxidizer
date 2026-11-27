@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailMode, RuntimeSectionFocus,
-    RuntimeTaskRowSort, RuntimeTaskTypeSort, RuntimeWorkersFocus, Screen, TaskEventsFocus, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailMode,
+    RuntimeSectionFocus, RuntimeTaskRowSort, RuntimeTaskTypeSort, RuntimeWorkersFocus, Screen, TaskEventsFocus, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,7 +21,9 @@ pub(super) enum ListTarget {
     NativeClasses,
     NativeMemory,
     Allocations,
+    AllocationHeader(super::data::AllocationSort),
     PrimitiveTypes,
+    PrimitiveOperationHeader(super::data::PrimitiveSort),
     PrimitiveOperations,
     PrimitiveHotspots,
     Threads,
@@ -40,9 +42,13 @@ pub(super) enum ListTarget {
     TaskOperations,
     TaskOccurrences,
     IoResources,
+    IoResourceHeader(super::app::IoResourceSort),
     IoOperations,
+    IoOperationHeader(super::app::IoOperationSort),
     CacheTiers,
+    CacheTierHeader(super::app::CacheTierSort),
     CacheOperations,
+    CacheOperationHeader(super::app::CacheOperationSort),
 }
 
 impl ListTarget {
@@ -51,8 +57,9 @@ impl ListTarget {
             Self::Applications => None,
             Self::InfoThreads => Some(MonitorTab::Info),
             Self::HeapBuckets | Self::NativeSubsystems | Self::NativeClasses | Self::NativeMemory => Some(MonitorTab::Heaps),
-            Self::Allocations => Some(MonitorTab::Allocations),
+            Self::Allocations | Self::AllocationHeader(_) => Some(MonitorTab::Allocations),
             Self::PrimitiveTypes | Self::PrimitiveOperations | Self::PrimitiveHotspots => Some(MonitorTab::Primitives),
+            Self::PrimitiveOperationHeader(_) => Some(MonitorTab::Primitives),
             Self::Threads | Self::ThreadOperations | Self::ThreadParticipants | Self::ThreadObjects => Some(MonitorTab::Threads),
             Self::AsynchronousWorkersTab | Self::BlockingWorkersTab | Self::AsynchronousWorkers | Self::BlockingWorkers => {
                 Some(MonitorTab::Runtime)
@@ -62,8 +69,8 @@ impl ListTarget {
             }
             Self::RuntimeTaskHeader(_) => Some(MonitorTab::Runtime),
             Self::TaskOperations | Self::TaskOccurrences => Some(MonitorTab::RuntimeTask),
-            Self::IoResources | Self::IoOperations => Some(MonitorTab::Io),
-            Self::CacheTiers | Self::CacheOperations => Some(MonitorTab::Cache),
+            Self::IoResources | Self::IoResourceHeader(_) | Self::IoOperations | Self::IoOperationHeader(_) => Some(MonitorTab::Io),
+            Self::CacheTiers | Self::CacheTierHeader(_) | Self::CacheOperations | Self::CacheOperationHeader(_) => Some(MonitorTab::Cache),
         }
     }
 }
@@ -141,6 +148,68 @@ impl App {
         }
         if target == ListTarget::InfoThreads {
             self.info_thread_selected = index.min(self.live_activity.threads.len().saturating_sub(1));
+            return;
+        }
+        if let ListTarget::AllocationHeader(sort) = target {
+            if self.allocation_view.sort == sort {
+                self.allocation_view.descending = !self.allocation_view.descending;
+            } else {
+                self.allocation_view.sort = sort;
+                self.allocation_view.descending = true;
+            }
+            self.allocation_view.reset_position();
+            return;
+        }
+        if let ListTarget::PrimitiveOperationHeader(sort) = target {
+            if self.primitive_view.sort == sort {
+                self.primitive_view.descending = !self.primitive_view.descending;
+            } else {
+                self.primitive_view.sort = sort;
+                self.primitive_view.descending = true;
+            }
+            self.primitive_view.reset_operations();
+            return;
+        }
+        if let ListTarget::IoResourceHeader(sort) = target {
+            if self.io_view.resource_sort == sort {
+                self.io_view.resource_descending = !self.io_view.resource_descending;
+            } else {
+                self.io_view.resource_sort = sort;
+                self.io_view.resource_descending = true;
+            }
+            self.io_view.resource_selected = 0;
+            self.io_view.operation_selected = 0;
+            return;
+        }
+        if let ListTarget::IoOperationHeader(sort) = target {
+            if self.io_view.operation_sort == sort {
+                self.io_view.operation_descending = !self.io_view.operation_descending;
+            } else {
+                self.io_view.operation_sort = sort;
+                self.io_view.operation_descending = true;
+            }
+            self.io_view.operation_selected = 0;
+            return;
+        }
+        if let ListTarget::CacheTierHeader(sort) = target {
+            if self.cache_view.tier_sort == sort {
+                self.cache_view.tier_descending = !self.cache_view.tier_descending;
+            } else {
+                self.cache_view.tier_sort = sort;
+                self.cache_view.tier_descending = true;
+            }
+            self.cache_view.tier_selected = 0;
+            self.cache_view.operation_selected = 0;
+            return;
+        }
+        if let ListTarget::CacheOperationHeader(sort) = target {
+            if self.cache_view.operation_sort == sort {
+                self.cache_view.operation_descending = !self.cache_view.operation_descending;
+            } else {
+                self.cache_view.operation_sort = sort;
+                self.cache_view.operation_descending = true;
+            }
+            self.cache_view.operation_selected = 0;
             return;
         }
         if matches!(
@@ -309,6 +378,12 @@ impl App {
             | ListTarget::NativeClasses
             | ListTarget::NativeMemory
             | ListTarget::InfoThreads
+            | ListTarget::AllocationHeader(_)
+            | ListTarget::PrimitiveOperationHeader(_)
+            | ListTarget::IoResourceHeader(_)
+            | ListTarget::IoOperationHeader(_)
+            | ListTarget::CacheTierHeader(_)
+            | ListTarget::CacheOperationHeader(_)
             | ListTarget::AsynchronousWorkersTab
             | ListTarget::BlockingWorkersTab
             | ListTarget::AsynchronousWorkers
@@ -473,5 +548,74 @@ mod tests {
             (app.runtime_view.task_selected, app.runtime_view.task_selected_explicitly),
             (3, true)
         );
+    }
+
+    #[test]
+    fn metric_header_clicks_select_and_reverse_sorting() {
+        let mut app = App::offline("capture.seismograph".into());
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Allocations;
+        }
+        app.activate_mouse_row(ListTarget::AllocationHeader(super::super::data::AllocationSort::MaximumBytes), 0);
+        assert_eq!(app.allocation_view.sort, super::super::data::AllocationSort::MaximumBytes);
+        assert!(app.allocation_view.descending);
+        app.activate_mouse_row(ListTarget::AllocationHeader(super::super::data::AllocationSort::MaximumBytes), 0);
+        assert!(!app.allocation_view.descending);
+
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Primitives;
+        }
+        app.activate_mouse_row(ListTarget::PrimitiveOperationHeader(super::super::data::PrimitiveSort::Objects), 0);
+        assert_eq!(app.primitive_view.sort, super::super::data::PrimitiveSort::Objects);
+        assert!(app.primitive_view.descending);
+
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Io;
+        }
+        app.activate_mouse_row(
+            ListTarget::IoResourceHeader(super::super::app::IoResourceSort::Errors),
+            0,
+        );
+        assert_eq!(
+            app.io_view.resource_sort,
+            super::super::app::IoResourceSort::Errors
+        );
+        assert!(app.io_view.resource_descending);
+        app.activate_mouse_row(
+            ListTarget::IoOperationHeader(super::super::app::IoOperationSort::Outcome),
+            0,
+        );
+        assert_eq!(
+            app.io_view.operation_sort,
+            super::super::app::IoOperationSort::Outcome
+        );
+        assert!(app.io_view.operation_descending);
+
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Cache;
+        }
+        app.activate_mouse_row(
+            ListTarget::CacheTierHeader(super::super::app::CacheTierSort::HitRate),
+            0,
+        );
+        assert_eq!(
+            app.cache_view.tier_sort,
+            super::super::app::CacheTierSort::HitRate
+        );
+        assert!(app.cache_view.tier_descending);
+        app.activate_mouse_row(
+            ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome),
+            0,
+        );
+        assert_eq!(
+            app.cache_view.operation_sort,
+            super::super::app::CacheOperationSort::Outcome
+        );
+        assert!(app.cache_view.operation_descending);
+        app.activate_mouse_row(
+            ListTarget::CacheOperationHeader(super::super::app::CacheOperationSort::Outcome),
+            0,
+        );
+        assert!(!app.cache_view.operation_descending);
     }
 }

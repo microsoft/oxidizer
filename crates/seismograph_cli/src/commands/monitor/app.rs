@@ -469,7 +469,7 @@ impl AllocationViewState {
         }
     }
 
-    fn reset_position(&mut self) {
+    pub(super) fn reset_position(&mut self) {
         self.selected = 0;
         self.stack_scroll = 0;
     }
@@ -501,7 +501,7 @@ impl PrimitiveViewState {
         }
     }
 
-    fn reset_operations(&mut self) {
+    pub(super) fn reset_operations(&mut self) {
         self.operation_selected = 0;
         self.reset_hotspots();
     }
@@ -852,6 +852,10 @@ pub(super) struct IoViewState {
     pub(super) focus: IoFocus,
     pub(super) resource_selected: usize,
     pub(super) operation_selected: usize,
+    pub(super) resource_sort: IoResourceSort,
+    pub(super) resource_descending: bool,
+    pub(super) operation_sort: IoOperationSort,
+    pub(super) operation_descending: bool,
 }
 
 impl IoViewState {
@@ -860,6 +864,10 @@ impl IoViewState {
             focus: IoFocus::Resources,
             resource_selected: 0,
             operation_selected: 0,
+            resource_sort: IoResourceSort::Completed,
+            resource_descending: true,
+            operation_sort: IoOperationSort::Duration,
+            operation_descending: true,
         }
     }
 
@@ -877,10 +885,36 @@ pub(super) enum IoFocus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IoResourceSort {
+    Resource,
+    Kind,
+    Reads,
+    Writes,
+    Requested,
+    Completed,
+    Errors,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IoOperationSort {
+    Operation,
+    Type,
+    Outcome,
+    Thread,
+    Requested,
+    Completed,
+    Duration,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct CacheViewState {
     pub(super) focus: CacheFocus,
     pub(super) tier_selected: usize,
     pub(super) operation_selected: usize,
+    pub(super) tier_sort: CacheTierSort,
+    pub(super) tier_descending: bool,
+    pub(super) operation_sort: CacheOperationSort,
+    pub(super) operation_descending: bool,
 }
 
 impl CacheViewState {
@@ -889,6 +923,10 @@ impl CacheViewState {
             focus: CacheFocus::Tiers,
             tier_selected: 0,
             operation_selected: 0,
+            tier_sort: CacheTierSort::Events,
+            tier_descending: true,
+            operation_sort: CacheOperationSort::Events,
+            operation_descending: true,
         }
     }
 
@@ -903,6 +941,23 @@ impl CacheViewState {
 pub(super) enum CacheFocus {
     Tiers,
     Operations,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CacheTierSort {
+    Identity,
+    Role,
+    Events,
+    Hits,
+    Misses,
+    Errors,
+    HitRate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CacheOperationSort {
+    Outcome,
+    Events,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2079,15 +2134,17 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
                 .asynchronous_groups
                 .iter()
                 .filter(|group| Some(group.runtime_id) == runtime_id)
+                .filter(|group| group.worker_id == selected_runtime_worker_id(runtime, view))
                 .count(),
             RuntimeWorkersFocus::Blocking => runtime
                 .blocking_groups
                 .iter()
                 .filter(|group| Some(group.runtime_id) == runtime_id)
+                .filter(|group| group.worker_id == selected_runtime_worker_id(runtime, view))
                 .count(),
         },
         RuntimeSectionFocus::GroupTasks => selected_runtime_group(runtime, view)
-            .map(|(runtime_id, descriptor, kind)| runtime.tasks_for_group(runtime_id, descriptor, kind).len())
+            .map(|(runtime_id, worker_id, descriptor, kind)| runtime.tasks_for_group(runtime_id, worker_id, descriptor, kind).len())
             .unwrap_or_default(),
     });
     match code {
@@ -2101,13 +2158,11 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
         }
         KeyCode::Char('a') => {
             view.focus = RuntimeWorkersFocus::Asynchronous;
-            view.group_selected_explicitly = false;
-            view.task_selected_explicitly = false;
+            reset_runtime_group_selection(view);
         }
         KeyCode::Char('b') => {
             view.focus = RuntimeWorkersFocus::Blocking;
-            view.group_selected_explicitly = false;
-            view.task_selected_explicitly = false;
+            reset_runtime_group_selection(view);
         }
         KeyCode::Enter => {
             view.section = match view.section {
@@ -2149,6 +2204,8 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
                 view.group_selected_explicitly = count != 0;
                 view.task_selected_explicitly = false;
                 view.detail_mode = RuntimeDetailMode::Group;
+            } else if view.section == RuntimeSectionFocus::Workers {
+                reset_runtime_group_selection(view);
             }
         }
         KeyCode::Down => {
@@ -2164,6 +2221,8 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
                 view.group_selected_explicitly = count != 0;
                 view.task_selected_explicitly = false;
                 view.detail_mode = RuntimeDetailMode::Group;
+            } else if view.section == RuntimeSectionFocus::Workers {
+                reset_runtime_group_selection(view);
             }
         }
         KeyCode::Home => {
@@ -2172,6 +2231,8 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
                 view.group_selected_explicitly = count != 0;
                 view.task_selected_explicitly = false;
                 view.detail_mode = RuntimeDetailMode::Group;
+            } else if view.section == RuntimeSectionFocus::Workers {
+                reset_runtime_group_selection(view);
             }
         }
         KeyCode::End => {
@@ -2180,6 +2241,8 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
                 view.group_selected_explicitly = count != 0;
                 view.task_selected_explicitly = false;
                 view.detail_mode = RuntimeDetailMode::Group;
+            } else if view.section == RuntimeSectionFocus::Workers {
+                reset_runtime_group_selection(view);
             }
         }
         _ => return false,
@@ -2200,6 +2263,16 @@ fn reset_runtime_selections(view: &mut RuntimeViewState) {
     view.events.reset();
 }
 
+fn reset_runtime_group_selection(view: &mut RuntimeViewState) {
+    view.asynchronous_task_selected = 0;
+    view.blocking_task_selected = 0;
+    view.group_selected_explicitly = false;
+    view.task_selected = 0;
+    view.task_selected_explicitly = false;
+    view.detail_mode = RuntimeDetailMode::Group;
+    view.events.reset();
+}
+
 fn runtime_selection(view: &mut RuntimeViewState) -> &mut usize {
     match (view.focus, view.section) {
         (RuntimeWorkersFocus::Asynchronous, RuntimeSectionFocus::Workers) => &mut view.asynchronous_selected,
@@ -2213,26 +2286,57 @@ fn runtime_selection(view: &mut RuntimeViewState) -> &mut usize {
 pub(super) fn selected_runtime_group(
     runtime: &super::data::RuntimeMonitorSnapshot,
     view: &RuntimeViewState,
-) -> Option<(u64, Option<u64>, super::runtime::RuntimeTaskKind)> {
+) -> Option<(u64, Option<u64>, Option<u64>, super::runtime::RuntimeTaskKind)> {
     let runtime_id = runtime.selected_runtime(view.runtime_selected)?.runtime_id;
+    let worker_id = selected_runtime_worker_id(runtime, view);
     match view.focus {
         RuntimeWorkersFocus::Asynchronous => {
             let group = runtime
                 .asynchronous_groups
                 .iter()
                 .filter(|group| group.runtime_id == runtime_id)
+                .filter(|group| group.worker_id == worker_id)
                 .nth(view.asynchronous_task_selected)?;
-            Some((runtime_id, group.type_descriptor_id, super::runtime::RuntimeTaskKind::Asynchronous))
+            Some((
+                runtime_id,
+                worker_id,
+                group.type_descriptor_id,
+                super::runtime::RuntimeTaskKind::Asynchronous,
+            ))
         }
         RuntimeWorkersFocus::Blocking => {
             let group = runtime
                 .blocking_groups
                 .iter()
                 .filter(|group| group.runtime_id == runtime_id)
+                .filter(|group| group.worker_id == worker_id)
                 .nth(view.blocking_task_selected)?;
-            Some((runtime_id, group.type_descriptor_id, super::runtime::RuntimeTaskKind::Blocking))
+            Some((
+                runtime_id,
+                worker_id,
+                group.type_descriptor_id,
+                super::runtime::RuntimeTaskKind::Blocking,
+            ))
         }
     }
+}
+
+pub(super) fn selected_runtime_worker_id(runtime: &super::data::RuntimeMonitorSnapshot, view: &RuntimeViewState) -> Option<u64> {
+    let runtime_id = runtime.selected_runtime(view.runtime_selected)?.runtime_id;
+    runtime
+        .workers
+        .iter()
+        .filter(|worker| worker.runtime_id == runtime_id)
+        .filter(|worker| worker.worker_id.is_some())
+        .filter(|worker| match view.focus {
+            RuntimeWorkersFocus::Asynchronous => worker.role != "Blocking" && worker.blocking.executions == 0,
+            RuntimeWorkersFocus::Blocking => worker.role == "Blocking" || worker.blocking.executions != 0,
+        })
+        .nth(match view.focus {
+            RuntimeWorkersFocus::Asynchronous => view.asynchronous_selected,
+            RuntimeWorkersFocus::Blocking => view.blocking_selected,
+        })
+        .and_then(|worker| worker.worker_id)
 }
 
 pub(super) fn selected_runtime_task<'a>(
@@ -2242,8 +2346,8 @@ pub(super) fn selected_runtime_task<'a>(
     if !view.task_selected_explicitly {
         return None;
     }
-    let (runtime_id, descriptor, kind) = selected_runtime_group(runtime, view)?;
-    let mut tasks = runtime.tasks_for_group(runtime_id, descriptor, kind);
+    let (runtime_id, worker_id, descriptor, kind) = selected_runtime_group(runtime, view)?;
+    let mut tasks = runtime.tasks_for_group(runtime_id, worker_id, descriptor, kind);
     sort_runtime_tasks(&mut tasks, *view);
     tasks.get(view.task_selected.min(tasks.len().saturating_sub(1))).copied()
 }
@@ -2801,8 +2905,8 @@ mod tests {
             assert!(handle_primitive_key(KeyCode::Down, &mut primitive, Some(&capture)));
             assert_eq!((primitive.hotspot_selected, primitive.stack_scroll), (0, 0));
             match focus {
-                PrimitiveFocus::Types => assert_eq!((primitive.primitive_selected, primitive.operation_selected), (1, 0)),
-                PrimitiveFocus::Operations => assert_eq!(primitive.operation_selected, 1),
+                PrimitiveFocus::Types => assert_eq!((primitive.primitive_selected, primitive.operation_selected), (0, 0)),
+                PrimitiveFocus::Operations => assert_eq!(primitive.operation_selected, 0),
                 PrimitiveFocus::Hotspots => unreachable!(),
             }
         }
@@ -2845,7 +2949,12 @@ mod tests {
             );
             match focus {
                 ThreadFocus::Threads => assert_eq!((thread.thread_selected, thread.operation_selected), (1, 0)),
-                ThreadFocus::Operations => assert_eq!(thread.operation_selected, 1),
+                ThreadFocus::Operations => {
+                    assert_eq!(
+                        thread.operation_selected,
+                        capture.threads.threads[0].operations.len().saturating_sub(1).min(1)
+                    );
+                }
                 _ => unreachable!(),
             }
         }
@@ -2972,7 +3081,10 @@ mod tests {
             task_events: super::super::task_events::TaskEventsSnapshot::default(),
             io: IoMonitorSnapshot::default(),
             cache: CacheMonitorSnapshot::default(),
-            threads: ThreadSnapshot { threads: Vec::new() },
+            threads: ThreadSnapshot {
+                threads: Vec::new(),
+                hidden_internal_threads: 0,
+            },
             captured_at: Some(SystemTime::UNIX_EPOCH),
             captured_instant: Some(Instant::now()),
             filter_index: None,
@@ -3141,12 +3253,14 @@ mod tests {
             focus: IoFocus::Operations,
             resource_selected: 2,
             operation_selected: 3,
+            ..IoViewState::new()
         };
         io.reset();
         let mut cache = CacheViewState {
             focus: CacheFocus::Operations,
             tier_selected: 2,
             operation_selected: 3,
+            ..CacheViewState::new()
         };
         cache.reset();
 

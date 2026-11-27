@@ -70,6 +70,7 @@ impl DurationSummary {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct AsynchronousTaskGroupSummary {
     pub(super) runtime_id: u64,
+    pub(super) worker_id: Option<u64>,
     pub(super) type_descriptor_id: Option<u64>,
     pub(super) spawned_at: Option<String>,
     pub(super) body_size_bytes: Option<u64>,
@@ -84,6 +85,7 @@ pub(super) struct AsynchronousTaskGroupSummary {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct BlockingTaskGroupSummary {
     pub(super) runtime_id: u64,
+    pub(super) worker_id: Option<u64>,
     pub(super) type_descriptor_id: Option<u64>,
     pub(super) spawned_at: Option<String>,
     pub(super) body_size_bytes: Option<u64>,
@@ -197,7 +199,7 @@ struct TaskOutcomeBuilder {
 }
 
 impl TaskOutcomeBuilder {
-    fn observe(&mut self, task: &seismograph_runtime::model::Task) {
+    fn observe(&mut self, task: &seismograph_runtime::model::Task, worker_id: Option<u64>) {
         self.summary.tasks = self.summary.tasks.saturating_add(1);
         match task.state {
             TaskState::Queued | TaskState::Running | TaskState::Waiting => {
@@ -208,7 +210,7 @@ impl TaskOutcomeBuilder {
             TaskState::Panicked => self.summary.panicked = self.summary.panicked.saturating_add(1),
             _ => {}
         }
-        self.workers.extend(task.workers.iter().map(|worker| worker.get()));
+        self.workers.extend(worker_id);
     }
 
     fn finish(mut self) -> TaskOutcomeSummary {
@@ -242,29 +244,40 @@ struct BlockingTaskGroupBuilder {
 fn observe_task_group(
     task: &seismograph_runtime::model::Task,
     descriptor: Option<u64>,
-    asynchronous_groups: &mut BTreeMap<(u64, Option<u64>), AsynchronousTaskGroupBuilder>,
-    blocking_groups: &mut BTreeMap<(u64, Option<u64>), BlockingTaskGroupBuilder>,
+    asynchronous_groups: &mut BTreeMap<(u64, Option<u64>, Option<u64>), AsynchronousTaskGroupBuilder>,
+    blocking_groups: &mut BTreeMap<(u64, Option<u64>, Option<u64>), BlockingTaskGroupBuilder>,
     unclassified_tasks: &mut u64,
 ) {
-    let key = (task.runtime_id.get(), descriptor);
     match &task.kind {
         TaskKind::Asynchronous(asynchronous) => {
-            let group = asynchronous_groups.entry(key).or_default();
-            group.outcomes.observe(task);
-            group.body_sizes.extend(task.body_size);
-            group.polls = group
-                .polls
-                .saturating_add(u64::try_from(asynchronous.polls.len()).unwrap_or(u64::MAX));
-            for poll in &asynchronous.polls {
-                group.poll_time.observe(poll.duration_nanos);
-                if let Some(duration) = poll.duration_nanos {
-                    group.poll_samples.push(duration);
+            let workers = if task.workers.is_empty() {
+                vec![None]
+            } else {
+                task.workers.iter().map(|worker| Some(worker.get())).collect()
+            };
+            for worker_id in workers {
+                let group = asynchronous_groups
+                    .entry((task.runtime_id.get(), worker_id, descriptor))
+                    .or_default();
+                group.outcomes.observe(task, worker_id);
+                group.body_sizes.extend(task.body_size);
+                for poll in asynchronous
+                    .polls
+                    .iter()
+                    .filter(|poll| poll.worker.map(seismograph::recorder::runtime::WorkerId::get) == worker_id)
+                {
+                    group.polls = group.polls.saturating_add(1);
+                    group.poll_time.observe(poll.duration_nanos);
+                    if let Some(duration) = poll.duration_nanos {
+                        group.poll_samples.push(duration);
+                    }
                 }
             }
         }
         TaskKind::Blocking(blocking) => {
-            let group = blocking_groups.entry(key).or_default();
-            group.outcomes.observe(task);
+            let worker_id = blocking.worker.map(seismograph::recorder::runtime::WorkerId::get);
+            let group = blocking_groups.entry((task.runtime_id.get(), worker_id, descriptor)).or_default();
+            group.outcomes.observe(task, worker_id);
             group.body_sizes.extend(task.body_size);
             group.executions = group.executions.saturating_add(u64::from(blocking.started_at.is_some()));
             group.queue_time.observe(blocking.queue_duration_nanos);
@@ -283,37 +296,42 @@ fn observe_task_group(
 }
 
 fn finish_task_groups(
-    asynchronous_groups: BTreeMap<(u64, Option<u64>), AsynchronousTaskGroupBuilder>,
-    blocking_groups: BTreeMap<(u64, Option<u64>), BlockingTaskGroupBuilder>,
+    asynchronous_groups: BTreeMap<(u64, Option<u64>, Option<u64>), AsynchronousTaskGroupBuilder>,
+    blocking_groups: BTreeMap<(u64, Option<u64>, Option<u64>), BlockingTaskGroupBuilder>,
     task_locations: &HashMap<(u64, u64), String>,
 ) -> (Vec<AsynchronousTaskGroupSummary>, Vec<BlockingTaskGroupSummary>) {
     let mut asynchronous = asynchronous_groups
         .into_iter()
-        .map(|((runtime_id, type_descriptor_id), group)| AsynchronousTaskGroupSummary {
-            runtime_id,
-            type_descriptor_id,
-            spawned_at: type_descriptor_id.and_then(|descriptor| task_locations.get(&(runtime_id, descriptor)).cloned()),
-            body_size_bytes: only_value(&group.body_sizes),
-            outcomes: group.outcomes.finish(),
-            polls: group.polls,
-            ready_time: group.ready_time,
-            poll_time: group.poll_time,
-            ready_samples: group.ready_samples,
-            poll_samples: group.poll_samples,
-        })
+        .map(
+            |((runtime_id, worker_id, type_descriptor_id), group)| AsynchronousTaskGroupSummary {
+                runtime_id,
+                worker_id,
+                type_descriptor_id,
+                spawned_at: type_descriptor_id.and_then(|descriptor| task_locations.get(&(runtime_id, descriptor)).cloned()),
+                body_size_bytes: only_value(&group.body_sizes),
+                outcomes: group.outcomes.finish(),
+                polls: group.polls,
+                ready_time: group.ready_time,
+                poll_time: group.poll_time,
+                ready_samples: group.ready_samples,
+                poll_samples: group.poll_samples,
+            },
+        )
         .collect::<Vec<_>>();
     asynchronous.sort_unstable_by_key(|group| {
         (
             std::cmp::Reverse(group.polls),
             std::cmp::Reverse(group.outcomes.tasks),
             group.runtime_id,
+            group.worker_id.unwrap_or(u64::MAX),
             group.type_descriptor_id.unwrap_or(u64::MAX),
         )
     });
     let mut blocking = blocking_groups
         .into_iter()
-        .map(|((runtime_id, type_descriptor_id), group)| BlockingTaskGroupSummary {
+        .map(|((runtime_id, worker_id, type_descriptor_id), group)| BlockingTaskGroupSummary {
             runtime_id,
+            worker_id,
             type_descriptor_id,
             spawned_at: type_descriptor_id.and_then(|descriptor| task_locations.get(&(runtime_id, descriptor)).cloned()),
             body_size_bytes: only_value(&group.body_sizes),
@@ -330,6 +348,7 @@ fn finish_task_groups(
             std::cmp::Reverse(group.executions),
             std::cmp::Reverse(group.outcomes.tasks),
             group.runtime_id,
+            group.worker_id.unwrap_or(u64::MAX),
             group.type_descriptor_id.unwrap_or(u64::MAX),
         )
     });
@@ -372,8 +391,8 @@ struct RuntimeSeed {
     runtimes: Vec<RuntimeSummary>,
     workers: Workers,
     tasks: BTreeMap<(u64, u64), TaskBuilder>,
-    asynchronous_groups: BTreeMap<(u64, Option<u64>), AsynchronousTaskGroupBuilder>,
-    blocking_groups: BTreeMap<(u64, Option<u64>), BlockingTaskGroupBuilder>,
+    asynchronous_groups: BTreeMap<(u64, Option<u64>, Option<u64>), AsynchronousTaskGroupBuilder>,
+    blocking_groups: BTreeMap<(u64, Option<u64>, Option<u64>), BlockingTaskGroupBuilder>,
     task_locations: HashMap<(u64, u64), String>,
     asynchronous_worker_types: BTreeMap<(u64, u64), BTreeSet<Option<u64>>>,
     blocking_worker_types: BTreeMap<(u64, u64), BTreeSet<Option<u64>>>,
@@ -517,6 +536,7 @@ impl RuntimeMonitorSnapshot {
     pub(super) fn tasks_for_group(
         &self,
         runtime_id: u64,
+        worker_id: Option<u64>,
         type_descriptor_id: Option<u64>,
         kind: RuntimeTaskKind,
     ) -> Vec<&RuntimeTaskSummary> {
@@ -527,6 +547,7 @@ impl RuntimeMonitorSnapshot {
             .filter(|worker| worker.runtime_id == runtime_id)
             .flat_map(|worker| &worker.tasks)
             .filter(|task| task.type_descriptor_id == type_descriptor_id && task.kind == kind)
+            .filter(|task| worker_id.is_none() || task.worker_ids.first().copied() == worker_id)
         {
             tasks.entry(task.task_id).or_insert(task);
         }
@@ -587,12 +608,12 @@ impl RuntimeMonitorSnapshot {
                     task.poll_started(worker_id, timestamp, runtime.value_0, runtime.value_1);
                     if runtime.value_1 == 2 {
                         asynchronous_groups
-                            .entry((runtime_id, task.row.type_descriptor_id))
+                            .entry((runtime_id, worker_id, task.row.type_descriptor_id))
                             .or_default()
                             .ready_time
                             .observe(Some(runtime.value_0));
                         asynchronous_groups
-                            .entry((runtime_id, task.row.type_descriptor_id))
+                            .entry((runtime_id, worker_id, task.row.type_descriptor_id))
                             .or_default()
                             .ready_samples
                             .push(runtime.value_0);

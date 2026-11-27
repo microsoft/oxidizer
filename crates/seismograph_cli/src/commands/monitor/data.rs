@@ -546,6 +546,7 @@ impl AllocationRecord {
 pub(super) struct AllocationHotspot {
     pub(super) allocations: u64,
     pub(super) allocated_bytes: u64,
+    pub(super) max_allocation_bytes: u64,
     pub(super) live_allocations: u64,
     pub(super) live_bytes: u64,
     application_stack: Vec<String>,
@@ -606,10 +607,18 @@ impl PrimitiveSnapshot {
                 selected.push(event);
             }
         }
-        let groups = PrimitiveKind::ALL
+        let mut groups = PrimitiveKind::ALL
             .into_iter()
             .map(|kind| PrimitiveGroup::from_events(kind, &events_by_kind, &lookups))
-            .collect();
+            .filter(|group| group.events != 0)
+            .collect::<Vec<_>>();
+        groups.sort_unstable_by_key(|group| {
+            (
+                std::cmp::Reverse(group.contentions),
+                std::cmp::Reverse(group.events),
+                group.kind.label(),
+            )
+        });
         Self {
             total_events,
             lost_events,
@@ -660,8 +669,9 @@ impl PrimitiveGroup {
     }
 
     pub(super) fn sorted_operations(&self, sort: PrimitiveSort, descending: bool) -> Vec<&PrimitiveOperation> {
-        let mut operations = self.operations.iter().collect::<Vec<_>>();
+        let mut operations = self.operations.iter().filter(|operation| operation.events != 0).collect::<Vec<_>>();
         operations.sort_unstable_by(|left, right| {
+            let contention = right.kind.is_contention().cmp(&left.kind.is_contention());
             let ordering = match sort {
                 PrimitiveSort::Events => left.events.cmp(&right.events),
                 PrimitiveSort::Objects => left.objects.cmp(&right.objects),
@@ -669,7 +679,7 @@ impl PrimitiveGroup {
                 PrimitiveSort::Hotspots => left.hotspots.len().cmp(&right.hotspots.len()),
             }
             .then_with(|| left.events.cmp(&right.events));
-            if descending { ordering.reverse() } else { ordering }
+            contention.then(if descending { ordering.reverse() } else { ordering })
         });
         operations
     }
@@ -1007,6 +1017,7 @@ impl PrimitiveSort {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ThreadSnapshot {
     pub(super) threads: Vec<ThreadSummary>,
+    pub(super) hidden_internal_threads: usize,
 }
 
 impl ThreadSnapshot {
@@ -1029,9 +1040,16 @@ impl ThreadSnapshot {
                 .collect()
         });
         let operations_by_kind = &*OPERATIONS;
+        let hidden_internal_thread_ids = decoded
+            .threads
+            .iter()
+            .filter(|thread| thread.name.starts_with("seismograph-monitor"))
+            .map(|thread| thread.thread_id)
+            .collect::<HashSet<_>>();
         let mut threads = decoded
             .threads
             .iter()
+            .filter(|thread| !hidden_internal_thread_ids.contains(&thread.thread_id))
             .map(|thread| {
                 let mut summary = empty_thread_summary(thread.thread_id.get());
                 summary.name.clone_from(&thread.name);
@@ -1042,6 +1060,9 @@ impl ThreadSnapshot {
             .collect::<HashMap<_, _>>();
         let mut objects = Vec::new();
         for event in &decoded.events {
+            if hidden_internal_thread_ids.contains(&event.thread_id) {
+                continue;
+            }
             let id = event.thread_id.get();
             let thread = threads.entry(id).or_insert_with(|| empty_thread_summary(id));
             thread.retained_events += 1;
@@ -1090,11 +1111,21 @@ impl ThreadSnapshot {
                 for operation in &mut thread.operations {
                     operation.participants.sort_unstable_by_key(|participant| participant.thread_id);
                 }
+                thread.operations.retain(|operation| operation.events != 0);
                 thread
             })
             .collect::<Vec<_>>();
-        threads.sort_unstable_by_key(|thread| thread.thread_id);
-        Self { threads }
+        threads.sort_unstable_by_key(|thread| {
+            (
+                std::cmp::Reverse(thread.retained_events),
+                std::cmp::Reverse(thread.lost_events),
+                thread.thread_id,
+            )
+        });
+        Self {
+            threads,
+            hidden_internal_threads: hidden_internal_thread_ids.len(),
+        }
     }
 
     #[cfg(test)]
@@ -1110,9 +1141,16 @@ impl ThreadSnapshot {
         }
 
         let mut stacks = ThreadStacks::new(addresses);
+        let hidden_internal_thread_ids = decoded
+            .threads
+            .iter()
+            .filter(|thread| thread.name.starts_with("seismograph-monitor"))
+            .map(|thread| thread.thread_id)
+            .collect::<HashSet<_>>();
         let mut metadata = decoded
             .threads
             .iter()
+            .filter(|thread| !hidden_internal_thread_ids.contains(&thread.thread_id))
             .map(|thread| {
                 (
                     thread.thread_id.get(),
@@ -1127,13 +1165,16 @@ impl ThreadSnapshot {
         let mut events_by_thread = HashMap::<u64, Vec<&seismograph::recorder::event::Event>>::new();
         let mut events_by_object = HashMap::<u64, Vec<&seismograph::recorder::event::Event>>::new();
         for event in &decoded.events {
+            if hidden_internal_thread_ids.contains(&event.thread_id) {
+                continue;
+            }
             metadata.entry(event.thread_id.get()).or_default();
             events_by_thread.entry(event.thread_id.get()).or_default().push(event);
             if let Some(object_id) = event.object_id() {
                 events_by_object.entry(object_id.get()).or_default().push(event);
             }
         }
-        let threads = metadata
+        let mut threads = metadata
             .into_iter()
             .map(|(thread_id, metadata)| {
                 let events = events_by_thread.get(&thread_id).map_or(&[][..], Vec::as_slice);
@@ -1141,6 +1182,7 @@ impl ThreadSnapshot {
                 let operations = ThreadOperationKind::ALL
                     .into_iter()
                     .map(|kind| ThreadOperation::from_events(kind, events, &events_by_object, &decoded.threads, &mut stacks))
+                    .filter(|operation| operation.events != 0)
                     .collect();
                 ThreadSummary {
                     thread_id,
@@ -1151,8 +1193,18 @@ impl ThreadSnapshot {
                     operations,
                 }
             })
-            .collect();
-        Self { threads }
+            .collect::<Vec<_>>();
+        threads.sort_unstable_by_key(|thread| {
+            (
+                std::cmp::Reverse(thread.retained_events),
+                std::cmp::Reverse(thread.lost_events),
+                thread.thread_id,
+            )
+        });
+        Self {
+            threads,
+            hidden_internal_threads: hidden_internal_thread_ids.len(),
+        }
     }
 }
 
@@ -1821,6 +1873,7 @@ pub(super) enum AllocationSort {
     Allocations,
     AllocatedBytes,
     AverageBytes,
+    MaximumBytes,
     LiveAllocations,
     LiveBytes,
 }
@@ -1830,7 +1883,8 @@ impl AllocationSort {
         match self {
             Self::Allocations => Self::AllocatedBytes,
             Self::AllocatedBytes => Self::AverageBytes,
-            Self::AverageBytes => Self::LiveAllocations,
+            Self::AverageBytes => Self::MaximumBytes,
+            Self::MaximumBytes => Self::LiveAllocations,
             Self::LiveAllocations => Self::LiveBytes,
             Self::LiveBytes => Self::Allocations,
         }
@@ -1841,7 +1895,8 @@ impl AllocationSort {
             Self::Allocations => Self::LiveBytes,
             Self::AllocatedBytes => Self::Allocations,
             Self::AverageBytes => Self::AllocatedBytes,
-            Self::LiveAllocations => Self::AverageBytes,
+            Self::MaximumBytes => Self::AverageBytes,
+            Self::LiveAllocations => Self::MaximumBytes,
             Self::LiveBytes => Self::LiveAllocations,
         }
     }
@@ -1948,6 +2003,7 @@ pub(super) struct MemoryBucket {
 struct MemoryHotspotTotal {
     allocations: u64,
     allocated_bytes: u64,
+    max_allocation_bytes: u64,
     live_allocations: u64,
     live_bytes: u64,
 }
@@ -2161,6 +2217,7 @@ fn retained_memory_totals<'a>(
         let hotspot = total.hotspots.entry(&event.call_stack).or_default();
         hotspot.allocations = hotspot.allocations.saturating_add(1);
         hotspot.allocated_bytes = hotspot.allocated_bytes.saturating_add(event.size);
+        hotspot.max_allocation_bytes = hotspot.max_allocation_bytes.max(event.size);
         if !deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
             let size = event.resized_size.unwrap_or(event.size);
             let (tier, bucket) = classify(size, event.align);
@@ -2226,6 +2283,7 @@ fn memory_bucket(
         .map(|(stack, total)| AllocationHotspot {
             allocations: total.allocations,
             allocated_bytes: total.allocated_bytes,
+            max_allocation_bytes: total.max_allocation_bytes,
             live_allocations: total.live_allocations,
             live_bytes: total.live_bytes,
             application_stack: hotspot_stack(stack, lookups, AllocationStackFilter::Application),
@@ -2350,6 +2408,7 @@ impl AllocationSnapshot {
         struct Total {
             allocations: u64,
             allocated_bytes: u64,
+            max_allocation_bytes: u64,
             live_allocations: u64,
             live_bytes: u64,
         }
@@ -2369,6 +2428,7 @@ impl AllocationSnapshot {
             let total = totals.entry(&event.call_stack).or_default();
             total.allocations = total.allocations.saturating_add(1);
             total.allocated_bytes = total.allocated_bytes.saturating_add(event.size);
+            total.max_allocation_bytes = total.max_allocation_bytes.max(event.size);
             if !deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
                 total.live_allocations = total.live_allocations.saturating_add(1);
                 total.live_bytes = total.live_bytes.saturating_add(event.resized_size.unwrap_or(event.size));
@@ -2388,6 +2448,7 @@ impl AllocationSnapshot {
                 AllocationHotspot {
                     allocations: total.allocations,
                     allocated_bytes: total.allocated_bytes,
+                    max_allocation_bytes: total.max_allocation_bytes,
                     live_allocations: total.live_allocations,
                     live_bytes: total.live_bytes,
                     application_stack,
@@ -2419,6 +2480,7 @@ impl AllocationSnapshot {
                 AllocationSort::Allocations => left.allocations.cmp(&right.allocations),
                 AllocationSort::AllocatedBytes => left.allocated_bytes.cmp(&right.allocated_bytes),
                 AllocationSort::AverageBytes => average_bytes(left).cmp(&average_bytes(right)),
+                AllocationSort::MaximumBytes => left.max_allocation_bytes.cmp(&right.max_allocation_bytes),
                 AllocationSort::LiveAllocations => left.live_allocations.cmp(&right.live_allocations),
                 AllocationSort::LiveBytes => left.live_bytes.cmp(&right.live_bytes),
             }
@@ -3022,6 +3084,7 @@ mod tests {
                 AllocationSort::Allocations,
                 AllocationSort::AllocatedBytes,
                 AllocationSort::AverageBytes,
+                AllocationSort::MaximumBytes,
                 AllocationSort::LiveAllocations,
                 AllocationSort::LiveBytes,
             ]
@@ -3029,8 +3092,9 @@ mod tests {
             [
                 (AllocationSort::AllocatedBytes, AllocationSort::LiveBytes),
                 (AllocationSort::AverageBytes, AllocationSort::Allocations),
-                (AllocationSort::LiveAllocations, AllocationSort::AllocatedBytes),
-                (AllocationSort::LiveBytes, AllocationSort::AverageBytes),
+                (AllocationSort::MaximumBytes, AllocationSort::AllocatedBytes),
+                (AllocationSort::LiveAllocations, AllocationSort::AverageBytes),
+                (AllocationSort::LiveBytes, AllocationSort::MaximumBytes),
                 (AllocationSort::Allocations, AllocationSort::LiveAllocations),
             ]
         );
@@ -3460,6 +3524,49 @@ mod tests {
     }
 
     #[test]
+    fn thread_snapshot_hides_monitor_internal_threads() {
+        let events = Events {
+            threads: vec![
+                ThreadLog {
+                    thread_id: ThreadId::new(1),
+                    name: "arty-async-0".into(),
+                    total_events: 1,
+                    ..ThreadLog::default()
+                },
+                ThreadLog {
+                    thread_id: ThreadId::new(2),
+                    name: "seismograph-monitor-client".into(),
+                    total_events: 1,
+                    ..ThreadLog::default()
+                },
+            ],
+            events: [1_u64, 2]
+                .map(|thread| RuntimeEvent {
+                    thread_id: ThreadId::new(thread),
+                    sequence: EventSequence::new(1),
+                    timestamp: EventTimestamp::from_ticks(1),
+                    kind: RuntimeEventKind::ArcClone,
+                    payload: EventPayload::Object(ObjectId::new(thread)),
+                    call_stack: Vec::new(),
+                })
+                .to_vec(),
+            ..Events::default()
+        };
+
+        let snapshot = ThreadSnapshot::from_events(&events, &[]);
+
+        assert_eq!(snapshot.hidden_internal_threads, 1);
+        assert_eq!(
+            snapshot
+                .threads
+                .iter()
+                .map(|thread| (thread.name.as_str(), thread.retained_events))
+                .collect::<Vec<_>>(),
+            [("arty-async-0", 1)]
+        );
+    }
+
+    #[test]
     fn allocation_routing_and_histogram_bounds_cover_edges() {
         assert_eq!(
             (
@@ -3589,6 +3696,7 @@ mod tests {
         let hotspot = |allocations, allocated_bytes, live_allocations, live_bytes| AllocationHotspot {
             allocations,
             allocated_bytes,
+            max_allocation_bytes: allocated_bytes.checked_div(allocations).unwrap_or_default(),
             live_allocations,
             live_bytes,
             application_stack: Vec::new(),
@@ -3606,6 +3714,7 @@ mod tests {
             AllocationSort::Allocations,
             AllocationSort::AllocatedBytes,
             AllocationSort::AverageBytes,
+            AllocationSort::MaximumBytes,
             AllocationSort::LiveAllocations,
             AllocationSort::LiveBytes,
         ] {
@@ -3620,6 +3729,7 @@ mod tests {
         let allocation = AllocationHotspot {
             allocations: 1,
             allocated_bytes: 1,
+            max_allocation_bytes: 1,
             live_allocations: 1,
             live_bytes: 1,
             application_stack: vec!["app".into()],
@@ -4373,6 +4483,7 @@ mod tests {
                     AllocationHotspot {
                         allocations: 2,
                         allocated_bytes: 96,
+                        max_allocation_bytes: 64,
                         live_allocations: 1,
                         live_bytes: 32,
                         application_stack: vec!["app::small_allocations (app.rs:42)".into()],
@@ -4384,6 +4495,7 @@ mod tests {
                     AllocationHotspot {
                         allocations: 1,
                         allocated_bytes: 4_096,
+                        max_allocation_bytes: 4_096,
                         live_allocations: 1,
                         live_bytes: 4_096,
                         application_stack: vec!["app::large_allocation (large.rs:9)".into()],
@@ -4515,8 +4627,37 @@ mod tests {
         let snapshot = PrimitiveSnapshot::from_events(5, 0, &events, &[]);
 
         assert_eq!(
-            snapshot.groups.iter().map(|group| group.contentions).collect::<Vec<_>>(),
-            vec![0, 2, 2, 0, 0, 0, 0, 0]
+            snapshot
+                .groups
+                .iter()
+                .map(|group| (group.kind, group.contentions))
+                .collect::<Vec<_>>(),
+            vec![(PrimitiveKind::RwLock, 2), (PrimitiveKind::Mutex, 2)]
+        );
+    }
+
+    #[test]
+    fn primitive_snapshot_omits_empty_types_and_operations() {
+        let event = RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(1),
+            timestamp: EventTimestamp::from_ticks(1),
+            kind: RuntimeEventKind::MutexContention,
+            payload: EventPayload::Object(ObjectId::new(10)),
+            call_stack: Vec::new(),
+        };
+
+        let snapshot = PrimitiveSnapshot::from_events(1, 0, &[event], &[]);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].kind, PrimitiveKind::Mutex);
+        assert_eq!(
+            snapshot.groups[0]
+                .sorted_operations(PrimitiveSort::Events, true)
+                .iter()
+                .map(|operation| operation.kind)
+                .collect::<Vec<_>>(),
+            [PrimitiveOperationKind::MutexContention]
         );
     }
 
@@ -5097,35 +5238,30 @@ mod tests {
             &[],
         );
 
+        assert_eq!(snapshot.asynchronous_groups.len(), 2);
         assert_eq!(
-            snapshot.asynchronous_groups,
-            vec![AsynchronousTaskGroupSummary {
-                runtime_id: 1,
-                type_descriptor_id: Some(42),
-                spawned_at: None,
-                body_size_bytes: Some(8),
-                outcomes: TaskOutcomeSummary {
-                    tasks: 2,
-                    completed: 1,
-                    canceled: 1,
-                    workers: 2,
-                    ..TaskOutcomeSummary::default()
-                },
-                polls: 2,
-                ready_time: DurationSummary::default(),
-                poll_time: DurationSummary {
-                    samples: 2,
-                    total_nanos: 80,
-                    max_nanos: Some(50),
-                },
-                ready_samples: Vec::new(),
-                poll_samples: vec![30, 50],
-            }]
+            snapshot
+                .asynchronous_groups
+                .iter()
+                .map(|group| {
+                    (
+                        group.runtime_id,
+                        group.worker_id,
+                        group.type_descriptor_id,
+                        group.body_size_bytes,
+                        group.outcomes.tasks,
+                        group.polls,
+                        group.poll_time.total_nanos,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [(1, Some(2), Some(42), Some(8), 1, 1, 30), (1, Some(3), Some(42), Some(8), 1, 1, 50),]
         );
         assert_eq!(
             snapshot.blocking_groups,
             vec![BlockingTaskGroupSummary {
                 runtime_id: 1,
+                worker_id: Some(4),
                 type_descriptor_id: Some(77),
                 spawned_at: None,
                 body_size_bytes: Some(16),

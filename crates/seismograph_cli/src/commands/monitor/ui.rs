@@ -17,9 +17,10 @@ use seismograph_protocol::monitor::MonitorDescriptor;
 #[cfg(test)]
 use super::app::HeapFocus;
 use super::app::{
-    ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState,
-    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen,
-    ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
+    ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheOperationSort, CacheTierSort, CacheViewState, CaptureMode,
+    CaptureStep, HeapViewState, IoFocus, IoOperationSort, IoResourceSort, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState,
+    RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus, ThreadViewState, format_sampling_percentage,
+    recording_policy_label,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
@@ -500,21 +501,65 @@ fn draw_io(
         draw_empty_panel_with_message(frame, operations_area, " Operations ", unavailable);
         return;
     };
+    if io.resources.is_empty() {
+        draw_empty_panel_with_message(
+            frame,
+            resources_area,
+            " I/O Resources ",
+            Some("No instrumented I/O was retained in this capture."),
+        );
+        draw_empty_panel_with_message(
+            frame,
+            operations_area,
+            " Operations ",
+            Some("Capture a workload that performs instrumented I/O."),
+        );
+        return;
+    }
 
-    let resource_selected = view.resource_selected.min(io.resources.len().saturating_sub(1));
-    let resource = io.resources.get(resource_selected);
+    let mut resources = io.resources.iter().collect::<Vec<_>>();
+    resources.sort_unstable_by(|left, right| {
+        let ordering = match view.resource_sort {
+            IoResourceSort::Resource => left.resource_id.cmp(&right.resource_id),
+            IoResourceSort::Kind => io_resource_kind_label(left.kind).cmp(io_resource_kind_label(right.kind)),
+            IoResourceSort::Reads => left.reads.cmp(&right.reads),
+            IoResourceSort::Writes => left.writes.cmp(&right.writes),
+            IoResourceSort::Requested => left.requested_bytes.cmp(&right.requested_bytes),
+            IoResourceSort::Completed => left.completed_bytes.cmp(&right.completed_bytes),
+            IoResourceSort::Errors => left
+                .errors
+                .saturating_add(left.canceled)
+                .cmp(&right.errors.saturating_add(right.canceled)),
+        };
+        if view.resource_descending { ordering.reverse() } else { ordering }
+    });
+    let resource_selected = view.resource_selected.min(resources.len().saturating_sub(1));
+    let resource = resources.get(resource_selected).copied();
     let visible_resources = usize::from(resources_area.height.saturating_sub(3));
     let first_resource = resource_selected.saturating_sub(visible_resources.saturating_sub(1));
-    mouse_rows.register(resources_area, 1, first_resource, io.resources.len(), ListTarget::IoResources);
+    mouse_rows.register(resources_area, 1, first_resource, resources.len(), ListTarget::IoResources);
+    let resource_heading = |label: &str, sort| {
+        if view.resource_sort == sort {
+            format!("{label} {}", if view.resource_descending { "▼" } else { "▲" })
+        } else {
+            label.into()
+        }
+    };
     let mut resource_lines = vec![Line::from(Span::styled(
         format!(
             "{:<12} {:<12} {:>7} {:>7} {:>10} {:>10} {:>7}",
-            "Resource", "Kind", "Reads", "Writes", "Requested", "Completed", "Errors"
+            resource_heading("Resource", IoResourceSort::Resource),
+            resource_heading("Kind", IoResourceSort::Kind),
+            resource_heading("Reads", IoResourceSort::Reads),
+            resource_heading("Writes", IoResourceSort::Writes),
+            resource_heading("Requested", IoResourceSort::Requested),
+            resource_heading("Completed", IoResourceSort::Completed),
+            resource_heading("Errors", IoResourceSort::Errors),
         ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     resource_lines.extend(
-        io.resources
+        resources
             .iter()
             .skip(first_resource)
             .take(visible_resources)
@@ -554,16 +599,61 @@ fn draw_io(
         ),
         resources_area,
     );
+    register_fixed_headers(
+        mouse_rows,
+        resources_area,
+        &[12, 12, 7, 7, 10, 10, 7],
+        &[
+            ListTarget::IoResourceHeader(IoResourceSort::Resource),
+            ListTarget::IoResourceHeader(IoResourceSort::Kind),
+            ListTarget::IoResourceHeader(IoResourceSort::Reads),
+            ListTarget::IoResourceHeader(IoResourceSort::Writes),
+            ListTarget::IoResourceHeader(IoResourceSort::Requested),
+            ListTarget::IoResourceHeader(IoResourceSort::Completed),
+            ListTarget::IoResourceHeader(IoResourceSort::Errors),
+        ],
+    );
 
-    let operations = resource.map_or(&[][..], |resource| resource.operations.as_slice());
+    let mut operations = resource.map_or_else(Vec::new, |resource| resource.operations.iter().collect::<Vec<_>>());
+    operations.sort_unstable_by(|left, right| {
+        let optional = |left: Option<u64>, right: Option<u64>| match (left, right) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        let ordering = match view.operation_sort {
+            IoOperationSort::Operation => left.operation_id.cmp(&right.operation_id),
+            IoOperationSort::Type => left.kind.label().cmp(right.kind.label()),
+            IoOperationSort::Outcome => io_outcome_label(left.outcome).cmp(io_outcome_label(right.outcome)),
+            IoOperationSort::Thread => left.thread_id.cmp(&right.thread_id),
+            IoOperationSort::Requested => left.requested_bytes.cmp(&right.requested_bytes),
+            IoOperationSort::Completed => left.completed_bytes.cmp(&right.completed_bytes),
+            IoOperationSort::Duration => optional(left.duration_nanos, right.duration_nanos),
+        };
+        if view.operation_descending { ordering.reverse() } else { ordering }
+    });
     let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
     let visible_operations = usize::from(operations_area.height.saturating_sub(3));
     let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::IoOperations);
+    let operation_heading = |label: &str, sort| {
+        if view.operation_sort == sort {
+            format!("{label} {}", if view.operation_descending { "▼" } else { "▲" })
+        } else {
+            label.into()
+        }
+    };
     let mut operation_lines = vec![Line::from(Span::styled(
         format!(
             "{:<11} {:<6} {:<12} {:>8} {:>10} {:>10} {:>10}",
-            "Operation", "Type", "Outcome", "Thread", "Requested", "Completed", "Duration"
+            operation_heading("Operation", IoOperationSort::Operation),
+            operation_heading("Type", IoOperationSort::Type),
+            operation_heading("Outcome", IoOperationSort::Outcome),
+            operation_heading("Thread", IoOperationSort::Thread),
+            operation_heading("Requested", IoOperationSort::Requested),
+            operation_heading("Completed", IoOperationSort::Completed),
+            operation_heading("Duration", IoOperationSort::Duration),
         ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
@@ -615,6 +705,20 @@ fn draw_io(
         ),
         operations_area,
     );
+    register_fixed_headers(
+        mouse_rows,
+        operations_area,
+        &[11, 6, 12, 8, 10, 10, 10],
+        &[
+            ListTarget::IoOperationHeader(IoOperationSort::Operation),
+            ListTarget::IoOperationHeader(IoOperationSort::Type),
+            ListTarget::IoOperationHeader(IoOperationSort::Outcome),
+            ListTarget::IoOperationHeader(IoOperationSort::Thread),
+            ListTarget::IoOperationHeader(IoOperationSort::Requested),
+            ListTarget::IoOperationHeader(IoOperationSort::Completed),
+            ListTarget::IoOperationHeader(IoOperationSort::Duration),
+        ],
+    );
 }
 
 #[expect(
@@ -634,49 +738,86 @@ fn draw_cache(
         draw_empty_panel_with_message(frame, operations_area, " Outcomes ", unavailable);
         return;
     };
+    if cache.tiers.is_empty() {
+        draw_empty_panel_with_message(
+            frame,
+            tiers_area,
+            " Cache Tiers ",
+            Some("No instrumented cache activity was retained in this capture."),
+        );
+        draw_empty_panel_with_message(
+            frame,
+            operations_area,
+            " Outcomes ",
+            Some("Capture a workload that uses an instrumented cache."),
+        );
+        return;
+    }
 
-    let tier_selected = view.tier_selected.min(cache.tiers.len().saturating_sub(1));
-    let tier = cache.tiers.get(tier_selected);
+    let mut tiers = cache.tiers.iter().collect::<Vec<_>>();
+    tiers.sort_unstable_by(|left, right| {
+        let left_lookups = left.hits.saturating_add(left.misses).saturating_add(left.errors);
+        let right_lookups = right.hits.saturating_add(right.misses).saturating_add(right.errors);
+        let ordering = match view.tier_sort {
+            CacheTierSort::Identity => left.tier_id.cmp(&right.tier_id),
+            CacheTierSort::Role => left.fallback.cmp(&right.fallback),
+            CacheTierSort::Events => left.events.cmp(&right.events),
+            CacheTierSort::Hits => left.hits.cmp(&right.hits),
+            CacheTierSort::Misses => left.misses.cmp(&right.misses),
+            CacheTierSort::Errors => left.errors.cmp(&right.errors),
+            CacheTierSort::HitRate => {
+                (u128::from(left.hits) * u128::from(right_lookups.max(1))).cmp(&(u128::from(right.hits) * u128::from(left_lookups.max(1))))
+            }
+        };
+        if view.tier_descending { ordering.reverse() } else { ordering }
+    });
+    let tier_selected = view.tier_selected.min(tiers.len().saturating_sub(1));
+    let tier = tiers.get(tier_selected).copied();
     let visible_tiers = usize::from(tiers_area.height.saturating_sub(3));
     let first_tier = tier_selected.saturating_sub(visible_tiers.saturating_sub(1));
-    mouse_rows.register(tiers_area, 1, first_tier, cache.tiers.len(), ListTarget::CacheTiers);
+    mouse_rows.register(tiers_area, 1, first_tier, tiers.len(), ListTarget::CacheTiers);
+    let tier_heading = |label: &str, sort| {
+        if view.tier_sort == sort {
+            format!("{label} {}", if view.tier_descending { "▼" } else { "▲" })
+        } else {
+            label.into()
+        }
+    };
     let mut tier_lines = vec![Line::from(Span::styled(
         format!(
             "{:<19} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
-            "Tier identity", "Role", "Events", "Hits", "Misses", "Errors", "Hit rate"
+            tier_heading("Tier identity", CacheTierSort::Identity),
+            tier_heading("Role", CacheTierSort::Role),
+            tier_heading("Events", CacheTierSort::Events),
+            tier_heading("Hits", CacheTierSort::Hits),
+            tier_heading("Misses", CacheTierSort::Misses),
+            tier_heading("Errors", CacheTierSort::Errors),
+            tier_heading("Hit rate", CacheTierSort::HitRate),
         ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
-    tier_lines.extend(
-        cache
-            .tiers
-            .iter()
-            .skip(first_tier)
-            .take(visible_tiers)
-            .enumerate()
-            .map(|(index, tier)| {
-                let lookups = tier.hits.saturating_add(tier.misses).saturating_add(tier.errors);
-                let hit_rate = if lookups == 0 {
-                    "-".into()
-                } else {
-                    format_hit_rate(tier.hits, lookups)
-                };
-                primitive_selection_line(
-                    Line::from(format!(
-                        "0x{:<17x} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
-                        tier.tier_id,
-                        if tier.fallback { "fallback" } else { "primary" },
-                        format_count(tier.events),
-                        format_count(tier.hits),
-                        format_count(tier.misses),
-                        format_count(tier.errors),
-                        hit_rate,
-                    )),
-                    row_is_selected(first_tier, index, tier_selected),
-                    view.focus == CacheFocus::Tiers,
-                )
-            }),
-    );
+    tier_lines.extend(tiers.iter().skip(first_tier).take(visible_tiers).enumerate().map(|(index, tier)| {
+        let lookups = tier.hits.saturating_add(tier.misses).saturating_add(tier.errors);
+        let hit_rate = if lookups == 0 {
+            "-".into()
+        } else {
+            format_hit_rate(tier.hits, lookups)
+        };
+        primitive_selection_line(
+            Line::from(format!(
+                "0x{:<17x} {:<10} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                tier.tier_id,
+                if tier.fallback { "fallback" } else { "primary" },
+                format_count(tier.events),
+                format_count(tier.hits),
+                format_count(tier.misses),
+                format_count(tier.errors),
+                hit_rate,
+            )),
+            row_is_selected(first_tier, index, tier_selected),
+            view.focus == CacheFocus::Tiers,
+        )
+    }));
     frame.render_widget(
         Paragraph::new(tier_lines).block(
             Block::default()
@@ -695,14 +836,46 @@ fn draw_cache(
         ),
         tiers_area,
     );
+    register_fixed_headers(
+        mouse_rows,
+        tiers_area,
+        &[19, 10, 9, 9, 9, 9, 9],
+        &[
+            ListTarget::CacheTierHeader(CacheTierSort::Identity),
+            ListTarget::CacheTierHeader(CacheTierSort::Role),
+            ListTarget::CacheTierHeader(CacheTierSort::Events),
+            ListTarget::CacheTierHeader(CacheTierSort::Hits),
+            ListTarget::CacheTierHeader(CacheTierSort::Misses),
+            ListTarget::CacheTierHeader(CacheTierSort::Errors),
+            ListTarget::CacheTierHeader(CacheTierSort::HitRate),
+        ],
+    );
 
-    let operations = tier.map_or(&[][..], |tier| tier.operations.as_slice());
+    let mut operations = tier.map_or_else(Vec::new, |tier| tier.operations.iter().collect::<Vec<_>>());
+    operations.sort_unstable_by(|left, right| {
+        let ordering = match view.operation_sort {
+            CacheOperationSort::Outcome => cache_event_label(left.kind).cmp(cache_event_label(right.kind)),
+            CacheOperationSort::Events => left.events.cmp(&right.events),
+        };
+        if view.operation_descending { ordering.reverse() } else { ordering }
+    });
     let operation_selected = view.operation_selected.min(operations.len().saturating_sub(1));
     let visible_operations = usize::from(operations_area.height.saturating_sub(3));
     let first_operation = operation_selected.saturating_sub(visible_operations.saturating_sub(1));
     mouse_rows.register(operations_area, 1, first_operation, operations.len(), ListTarget::CacheOperations);
+    let operation_heading = |label: &str, sort| {
+        if view.operation_sort == sort {
+            format!("{label} {}", if view.operation_descending { "▼" } else { "▲" })
+        } else {
+            label.into()
+        }
+    };
     let mut operation_lines = vec![Line::from(Span::styled(
-        format!("{:<28} {:>12}", "Outcome", "Events"),
+        format!(
+            "{:<28} {:>12}",
+            operation_heading("Outcome", CacheOperationSort::Outcome),
+            operation_heading("Events", CacheOperationSort::Events)
+        ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     operation_lines.extend(
@@ -731,6 +904,15 @@ fn draw_cache(
                 .borders(Borders::ALL),
         ),
         operations_area,
+    );
+    register_fixed_headers(
+        mouse_rows,
+        operations_area,
+        &[28, 12],
+        &[
+            ListTarget::CacheOperationHeader(CacheOperationSort::Outcome),
+            ListTarget::CacheOperationHeader(CacheOperationSort::Events),
+        ],
     );
 }
 
@@ -818,6 +1000,15 @@ fn format_event_loss(lost_events: u64, total_events: u64) -> String {
     format!("{}.{:01}%", tenths / 10, tenths % 10)
 }
 
+fn register_fixed_headers(mouse: &MouseRows, area: Rect, widths: &[u16], targets: &[ListTarget]) {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    let mut x = inner.x;
+    for (width, target) in widths.iter().copied().zip(targets.iter().copied()) {
+        mouse.register_item(Rect::new(x, inner.y, width.min(inner.right().saturating_sub(x)), 1), target, 0);
+        x = x.saturating_add(width).saturating_add(1);
+    }
+}
+
 fn draw_allocations(
     frame: &mut ratatui::Frame<'_>,
     mouse_rows: &MouseRows,
@@ -842,11 +1033,16 @@ fn draw_allocations(
     let visible_hotspots = usize::from(hotspots_area.height.saturating_sub(3));
     let first_hotspot = selected.saturating_sub(visible_hotspots.saturating_sub(1));
     mouse_rows.register(hotspots_area, 1, first_hotspot, allocations.hotspots.len(), ListTarget::Allocations);
-    let heading = |label, width, column| {
+    let heading = |label: &str, width: usize, column: AllocationSort| {
         let style = if view.sort == column {
             key_style()
         } else {
             Style::default().add_modifier(Modifier::BOLD)
+        };
+        let label = if view.sort == column {
+            format!("{label} {}", if view.descending { "▼" } else { "▲" })
+        } else {
+            label.into()
         };
         Span::styled(format!("{label:>width$}"), style)
     };
@@ -856,6 +1052,8 @@ fn draw_allocations(
         heading("Allocated", BYTES_WIDTH, AllocationSort::AllocatedBytes),
         Span::raw(" "),
         heading("Average", BYTES_WIDTH, AllocationSort::AverageBytes),
+        Span::raw(" "),
+        heading("Maximum", BYTES_WIDTH, AllocationSort::MaximumBytes),
         Span::raw(" "),
         heading("Unmatched", COUNT_WIDTH, AllocationSort::LiveAllocations),
         Span::raw(" "),
@@ -871,11 +1069,12 @@ fn draw_allocations(
             .map(|(index, hotspot)| {
                 let hotspot_index = first_hotspot + index;
                 let line = Line::from(format!(
-                    "{count:>COUNT_WIDTH$} {bytes:>BYTES_WIDTH$} {average:>BYTES_WIDTH$} \
+                    "{count:>COUNT_WIDTH$} {bytes:>BYTES_WIDTH$} {average:>BYTES_WIDTH$} {maximum:>BYTES_WIDTH$} \
                      {live:>COUNT_WIDTH$} {live_bytes:>BYTES_WIDTH$}  {location}",
                     count = format_count(hotspot.allocations),
                     bytes = format_bytes(hotspot.allocated_bytes),
                     average = format_bytes(hotspot.allocated_bytes.checked_div(hotspot.allocations).unwrap_or_default()),
+                    maximum = format_bytes(hotspot.max_allocation_bytes),
                     live = format_count(hotspot.live_allocations),
                     live_bytes = format_bytes(hotspot.live_bytes),
                     location = hotspot.location(view.stack_filter),
@@ -896,7 +1095,7 @@ fn draw_allocations(
         Paragraph::new(lines).block(
             Block::default()
                 .title(Line::from(vec![
-                    Span::raw(" Hotspots · e events • sort "),
+                    Span::raw(" Hotspots · e events • click headers or sort "),
                     key_span("["),
                     Span::raw(" previous • "),
                     key_span("]"),
@@ -915,6 +1114,24 @@ fn draw_allocations(
         ),
         hotspots_area,
     );
+    let inner = Block::default().borders(Borders::ALL).inner(hotspots_area);
+    let allocation_columns = [
+        (AllocationSort::Allocations, u16::try_from(COUNT_WIDTH).unwrap_or(u16::MAX)),
+        (AllocationSort::AllocatedBytes, u16::try_from(BYTES_WIDTH).unwrap_or(u16::MAX)),
+        (AllocationSort::AverageBytes, u16::try_from(BYTES_WIDTH).unwrap_or(u16::MAX)),
+        (AllocationSort::MaximumBytes, u16::try_from(BYTES_WIDTH).unwrap_or(u16::MAX)),
+        (AllocationSort::LiveAllocations, u16::try_from(COUNT_WIDTH).unwrap_or(u16::MAX)),
+        (AllocationSort::LiveBytes, u16::try_from(BYTES_WIDTH).unwrap_or(u16::MAX)),
+    ];
+    let mut x = inner.x;
+    for (sort, width) in allocation_columns {
+        mouse_rows.register_item(
+            Rect::new(x, inner.y, width.min(inner.right().saturating_sub(x)), 1),
+            ListTarget::AllocationHeader(sort),
+            0,
+        );
+        x = x.saturating_add(width).saturating_add(1);
+    }
     let Some(hotspot) = hotspots.get(selected) else {
         draw_empty_panel(frame, stack_area, " Stack Trace ");
         return;
@@ -1275,7 +1492,7 @@ fn draw_primitive_operations(
 
     let heading = |label: &str, sort| {
         if view.sort == sort {
-            format!("{label} {}", if view.descending { "↓" } else { "↑" })
+            format!("{label} {}", if view.descending { "▼" } else { "▲" })
         } else {
             label.to_owned()
         }
@@ -1337,6 +1554,25 @@ fn draw_primitive_operations(
         ),
         area,
     );
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    let primitive_columns = [
+        (PrimitiveSort::Events, u16::try_from(OPERATION_WIDTH).unwrap_or(u16::MAX)),
+        (PrimitiveSort::Events, 14),
+        (PrimitiveSort::Objects, 12),
+        (PrimitiveSort::Threads, 12),
+        (PrimitiveSort::Hotspots, 12),
+    ];
+    let mut x = inner.x;
+    for (index, (sort, width)) in primitive_columns.into_iter().enumerate() {
+        if index != 0 {
+            mouse_rows.register_item(
+                Rect::new(x, inner.y, width.min(inner.right().saturating_sub(x)), 1),
+                ListTarget::PrimitiveOperationHeader(sort),
+                0,
+            );
+        }
+        x = x.saturating_add(width).saturating_add(1);
+    }
 }
 
 fn draw_primitive_hotspots(
@@ -1505,6 +1741,9 @@ fn draw_thread_list(frame: &mut ratatui::Frame<'_>, mouse_rows: &MouseRows, area
             view.focus == ThreadFocus::Threads,
         )
     }));
+    let hidden = (threads.hidden_internal_threads != 0)
+        .then(|| format!(" · {} telemetry threads hidden", threads.hidden_internal_threads))
+        .unwrap_or_default();
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
@@ -1513,7 +1752,7 @@ fn draw_thread_list(frame: &mut ratatui::Frame<'_>, mouse_rows: &MouseRows, area
                     key_span("↑/↓"),
                     Span::raw(" select · "),
                     key_span("Enter"),
-                    Span::raw(" operations · sorted by recorder ID "),
+                    Span::raw(format!(" operations · busy first{hidden} ")),
                 ]))
                 .borders(Borders::ALL),
         ),
@@ -1787,6 +2026,18 @@ fn draw_allocator(
     unavailable: Option<&str>,
     view: HeapViewState,
 ) {
+    if snapshot.is_some_and(|capture| capture.native.is_none() && capture.mimalloc.is_none()) {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(unavailable.unwrap_or("The selected allocator does not expose a native state snapshot.")),
+                Line::from("Native allocator state is not available for the selected allocator."),
+                Line::from("Use the Allocations tab to inspect allocation events and stacks."),
+            ])
+            .block(Block::default().title(" Native allocator unavailable ").borders(Borders::ALL)),
+            area,
+        );
+        return;
+    }
     let backend = view.backend(snapshot);
     let area = if snapshot.is_some_and(|capture| capture.native.is_some() && capture.mimalloc.is_some()) {
         let [selector, content] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
@@ -3178,7 +3429,8 @@ mod tests {
             snapshot: Some(capture),
         };
         let output = render(&app);
-        assert!(output.contains("[Error]") && output.contains("native payload decode failed: invalid class tag"));
+        assert!(output.contains("native payload decode failed: invalid class tag"));
+        assert!(output.contains("Native allocator unavailable"));
         app.snapshot_error = Some("capture unavailable: transport disconnected".into());
         let output = render(&app);
         assert!(output.contains("capture unavailable: transport disconnected"));
@@ -3252,8 +3504,7 @@ mod tests {
     }
 
     #[test]
-    fn native_missing_source_navigation_preserves_unknown_and_back_hierarchy() {
-        use crossterm::event::KeyCode;
+    fn native_missing_source_renders_compact_unavailable_state() {
         let mut capture = representative_capture();
         capture.native = None;
         let mut app = App::offline("missing-native.seismograph".into());
@@ -3262,16 +3513,9 @@ mod tests {
             tab: MonitorTab::Heaps,
             snapshot: Some(capture),
         };
-        app.handle_key(KeyCode::Enter);
-        app.handle_key(KeyCode::End);
-        assert!(render(&app).contains("Swapped · F1"));
-        assert!(render(&app).contains("— [Unknown]"));
-        assert!(!app.handle_key(KeyCode::Esc));
-        app.handle_key(KeyCode::Down);
-        app.handle_key(KeyCode::Enter);
-        assert!(render(&app).contains("Global backend"));
-        assert!(!app.handle_key(KeyCode::Backspace));
-        assert!(app.handle_key(KeyCode::Esc));
+        let output = render(&app);
+        assert!(output.contains("Native allocator unavailable"));
+        assert!(output.contains("Use the Allocations tab"));
     }
 
     #[test]
@@ -4086,7 +4330,12 @@ mod tests {
         assert!(render(&app).contains("Stack Trace"));
 
         let capture = representative_capture();
-        let operation = capture.primitives.groups[0]
+        let operation = capture
+            .primitives
+            .groups
+            .iter()
+            .find(|group| group.kind == super::super::data::PrimitiveKind::Arc)
+            .unwrap()
             .operations
             .iter()
             .find(|operation| operation.kind == super::super::data::PrimitiveOperationKind::ArcDrop)
@@ -4374,7 +4623,7 @@ mod tests {
                 tab: MonitorTab::Heaps,
                 snapshot: Some(representative_capture()),
             };
-            assert!(render(&app).contains("Native v4"));
+            assert!(render(&app).contains("Allocator"));
         }
 
         app.allocation_view.stack_filter = AllocationStackFilter::All;
@@ -4560,6 +4809,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (496_016, 7_059_420_894_111_241_525));
+        assert_eq!(stable_digest(&output), (494_791, 2_806_078_083_635_909_899));
     }
 }
