@@ -382,6 +382,9 @@ fn equal_signal_does_not_notify() {
     block_on(component.changed());
 
     publisher.publish(Health::Degraded, [("b", "2"), ("a", "1")]);
+    let mut probe = aggregator.component("probe");
+    let _probe_publisher = probe.publisher();
+    block_on(probe.changed());
     component.changed().unwrap_pending();
 }
 
