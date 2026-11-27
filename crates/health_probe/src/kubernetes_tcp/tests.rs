@@ -192,6 +192,7 @@ async fn health_change_after_rebind_failure_stops_rebinding() {
     control.advance(ACCEPT_RETRY_DELAY);
     io.wait_for_bind_calls(2).await;
     publish_and_wait(&mut publisher, &mut monitor, Health::Unhealthy).await;
+    control.advance(ACCEPT_RETRY_DELAY);
     tokio::task::yield_now().await;
     assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 2);
     assert!(!server.is_finished());
