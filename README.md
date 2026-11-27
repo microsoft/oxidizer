@@ -57,6 +57,7 @@ These are the primary crates built out of this repo:
 - [`observed_destination_memory`](./crates/observed_destination_memory/README.md) - In-memory destination for Observed pipeline.
 - [`observed_destination_stdout`](./crates/observed_destination_stdout/README.md) - stdout destination for Observed pipeline.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
+- [`process_health`](./crates/process_health/README.md) - Application health aggregation with component reports.
 - [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`rallocator`](./crates/rallocator/README.md) - Windows, Linux and macOS x64/ARM64 owner-return allocator with Seismograph allocation events.

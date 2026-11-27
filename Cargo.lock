@@ -4386,6 +4386,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "process_health"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "data_privacy",
+ "foldhash 0.2.0",
+ "future_assert",
+ "futures",
+ "observed",
+ "observed_testing",
+ "performables",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
+ "tick",
+]
+
+[[package]]
 name = "prost"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
