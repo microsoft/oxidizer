@@ -49,13 +49,8 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
     }
 
     /// Attaches native Seismograph lifecycle state.
-    ///
-    /// # Panics
-    ///
-    /// [`register`](Self::register) panics if this builder belongs to an
-    /// executor that has no Seismograph worker.
     pub fn monitor(mut self, task: Option<seismograph_runtime::asynchronous::QueuedTask>) -> Self {
-        self.monitoring = Some(TaskMonitoring::new(task));
+        self.monitoring = task.map(TaskMonitoring::new);
         self
     }
 }

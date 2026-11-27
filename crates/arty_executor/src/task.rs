@@ -235,10 +235,16 @@ where
         // `Pin` annotation just gets lost in the type layering. We add it back here.
         let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
         let observer = &mut payload.observer;
-        if let Some(worker) = shared.monitoring()
-            && let Some(monitoring) = payload.monitoring.take()
-        {
-            payload.monitoring = Some(monitoring.poll_started::<RECORDING>(payload.identity, worker));
+        if let Some(worker) = shared.monitoring() {
+            if RECORDING {
+                payload.monitoring = Some(payload.monitoring.take().map_or_else(
+                    || TaskMonitoring::unrecorded(payload.identity, worker),
+                    |monitoring| monitoring.poll_started::<true>(worker),
+                ));
+            } else if payload.monitoring.is_some() {
+                let monitoring = payload.monitoring.take().expect("the monitoring state was checked above");
+                payload.monitoring = Some(monitoring.poll_started::<false>(worker));
+            }
         }
 
         let wake_signal = self.pinned_wake_signal();

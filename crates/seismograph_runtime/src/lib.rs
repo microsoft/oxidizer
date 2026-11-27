@@ -78,10 +78,7 @@
 //! let runtime = Runtime::builder("primary").configured_workers(1).build();
 //! let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 //! let identity = TaskIdentity::from_location(std::panic::Location::caller());
-//! let queued = runtime
-//!     .async_task(None, identity, None, 0)
-//!     .unwrap()
-//!     .enqueued(0);
+//! let queued = runtime.async_task(identity, 0).unwrap().enqueued(0);
 //! let task = queued.activated(&worker);
 //! let poll = task.poll_started(&worker);
 //! assert!(

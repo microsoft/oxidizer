@@ -64,12 +64,7 @@ impl Queue {
         loop {
             #[cfg(all(test, feature = "test-util"))]
             self.ready.check_progress();
-            if let Some(mut job) = state.jobs.pop_front() {
-                LocalWorker::with_monitoring(|worker| {
-                    if let Some(worker) = worker {
-                        job.body.started_on(worker);
-                    }
-                });
+            if let Some(job) = state.jobs.pop_front() {
                 return Some(job);
             }
             if state.stopped {

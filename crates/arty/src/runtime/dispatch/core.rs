@@ -321,12 +321,12 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         let runtime = self.monitoring();
-        let monitoring = runtime.blocking_task(
-            crate::runtime::monitoring::current_origin(),
-            identity,
-            LocalWorker::current_task().map(TaskIdentity::id),
-            std::mem::size_of::<F>(),
-        );
+        let monitoring = runtime.blocking_task(identity, std::mem::size_of::<F>()).map(|task| {
+            task.with_context(
+                crate::runtime::monitoring::current_origin(),
+                LocalWorker::current_task().map(TaskIdentity::id),
+            )
+        });
         worker.spawn_blocking(body, monitoring, runtime)
     }
 

@@ -41,8 +41,9 @@ fn async_queue_activation_poll_and_outcome_preserve_the_supplied_context() {
     let identity = TaskIdentity::from_location(std::panic::Location::caller());
 
     let queued = runtime
-        .async_task(Some(origin.origin()), identity, Some(parent.id()), 64)
+        .async_task(identity, 64)
         .unwrap()
+        .with_context(Some(origin.origin()), Some(parent.id()))
         .enqueued(3);
     let task = queued.activated(&executor);
     let poll = task.poll_started(&executor);
@@ -53,7 +54,11 @@ fn async_queue_activation_poll_and_outcome_preserve_the_supplied_context() {
         .filter(|event| {
             matches!(
                 event.kind,
-                EventKind::TaskEnqueued | EventKind::TaskMaterialized | EventKind::TaskPollStarted | EventKind::TaskPollFinished
+                EventKind::TaskEnqueued
+                    | EventKind::TaskMaterialized
+                    | EventKind::TaskPollStarted
+                    | EventKind::TaskPollFinished
+                    | EventKind::TaskCanceled
             )
         })
         .collect::<Vec<_>>();
@@ -108,8 +113,8 @@ fn dropping_queued_tasks_records_implicit_cancellation() {
     let async_identity = TaskIdentity::from_location(std::panic::Location::caller());
     let blocking_identity = TaskIdentity::from_location(std::panic::Location::caller());
 
-    drop(runtime.async_task(None, async_identity, None, 0).unwrap().enqueued(7));
-    drop(runtime.blocking_task(None, blocking_identity, None, 0).unwrap().enqueued(11));
+    drop(runtime.async_task(async_identity, 0).unwrap().enqueued(7));
+    drop(runtime.blocking_task(blocking_identity, 0).unwrap().enqueued(11));
 
     let events = runtime_events(runtime.id());
     seismograph::recorder(Configuration::default());
@@ -141,8 +146,9 @@ fn blocking_start_and_finish_record_queue_and_execution_context() {
     let identity = TaskIdentity::from_location(std::panic::Location::caller());
 
     let queued = runtime
-        .blocking_task(Some(origin.origin()), identity, None, 32)
+        .blocking_task(identity, 32)
         .unwrap()
+        .with_context(Some(origin.origin()), None)
         .enqueued(5);
     let execution = queued.started(&executor);
     execution.finished(&executor, TaskOutcome::Panicked);

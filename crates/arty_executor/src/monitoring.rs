@@ -5,21 +5,16 @@ use seismograph_runtime::TaskOutcome;
 use seismograph_runtime::asynchronous::{Poll, QueuedTask, Task, Worker};
 
 impl TaskMonitoring {
-    pub(crate) fn new(queued: Option<QueuedTask>) -> Self {
-        queued.map_or(Self::Dormant, Self::Queued)
+    pub(crate) fn new(queued: QueuedTask) -> Self {
+        Self::Queued(queued)
     }
 
-    pub(crate) fn belongs_to(&self, worker: &Worker) -> bool {
-        match self {
-            Self::Dormant => true,
-            Self::Queued(task) => task.belongs_to(worker),
-            Self::Active(_) | Self::Polling(_) => true,
-        }
+    pub(crate) fn unrecorded(identity: seismograph_runtime::TaskIdentity, worker: &Worker) -> Self {
+        Self::Polling(Task::unrecorded(identity, worker).poll_started_with::<true>(worker))
     }
 
-    pub(crate) fn poll_started<const RECORDING: bool>(self, identity: seismograph_runtime::TaskIdentity, worker: &Worker) -> Self {
+    pub(crate) fn poll_started<const RECORDING: bool>(self, worker: &Worker) -> Self {
         let task = match self {
-            Self::Dormant => Task::unrecorded(identity, worker),
             Self::Queued(queued) => queued.activated_with::<RECORDING>(worker),
             Self::Active(task) => task,
             Self::Polling(_) => unreachable!("a task cannot start another poll before finishing its current poll"),
@@ -37,7 +32,6 @@ impl TaskMonitoring {
 
 #[derive(Debug)]
 pub(crate) enum TaskMonitoring {
-    Dormant,
     Queued(QueuedTask),
     Active(Task),
     Polling(Poll),

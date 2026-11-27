@@ -127,7 +127,7 @@ pub struct Runtime {
 /// Runtime source payload decoded from one snapshot.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Snapshot {
-    /// Active and retained retired logical runtimes.
+    /// Active logical runtimes.
     pub runtimes: Vec<Runtime>,
 }
 

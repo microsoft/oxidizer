@@ -28,27 +28,28 @@ pub struct TaskHandle {
 }
 
 impl TaskHandle {
-    pub(crate) fn new(
-        runtime: RuntimeId,
-        backtrace: BacktraceCapture,
-        origin: Option<crate::WorkerOrigin>,
-        identity: TaskIdentity,
-        parent: Option<TaskId>,
-        body_size: usize,
-    ) -> Option<Self> {
+    pub(crate) fn new(runtime: RuntimeId, backtrace: BacktraceCapture, identity: TaskIdentity, body_size: usize) -> Option<Self> {
         is_enabled(EventClass::RuntimeTask).then(|| Self {
             data: TaskData {
                 identity,
                 runtime,
                 backtrace,
                 last_worker: None,
-                parent,
+                parent: None,
                 body_size: encode_body_size(body_size),
                 enqueued_at: None,
                 recorded: false,
             },
-            origin: origin.and_then(|origin| origin.worker_for(runtime)),
+            origin: None,
         })
+    }
+
+    /// Attaches queue context to this task.
+    #[must_use]
+    pub fn with_context(mut self, origin: Option<crate::WorkerOrigin>, parent: Option<TaskId>) -> Self {
+        self.origin = origin.and_then(|origin| origin.worker_for(self.data.runtime));
+        self.data.parent = parent;
+        self
     }
 
     /// Records the task entering a queue.
@@ -87,12 +88,6 @@ pub struct QueuedTask {
 }
 
 impl QueuedTask {
-    #[doc(hidden)]
-    #[must_use]
-    pub fn belongs_to(&self, worker: &super::Worker) -> bool {
-        self.data.runtime == worker.runtime().id()
-    }
-
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
@@ -257,13 +252,13 @@ impl Poll {
             "finish an asynchronous poll on the worker that started it"
         );
         if !RECORDING {
-            return outcome.is_none().then_some(Task {
+            return outcome.is_none().then(|| Task {
                 data: self.data,
                 cancel_on_drop: self.data.recorded,
             });
         }
         let Some(started_at) = self.started_at else {
-            return outcome.is_none().then_some(Task {
+            return outcome.is_none().then(|| Task {
                 data: self.data,
                 cancel_on_drop: self.data.recorded,
             });
@@ -283,7 +278,7 @@ impl Poll {
             outcome.as_ref().map_or(0, TaskOutcome::event_value),
             backtrace,
         );
-        outcome.is_none().then_some(Task {
+        outcome.is_none().then(|| Task {
             data: self.data,
             cancel_on_drop: self.data.recorded,
         })

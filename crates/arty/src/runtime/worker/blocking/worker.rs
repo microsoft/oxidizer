@@ -90,13 +90,26 @@ impl JoinableThreadPool {
     }
 
     fn set_num_threads_with_monitoring(&mut self, thread_count: usize, monitoring: &seismograph_runtime::Runtime) {
+        self.add_threads_with_monitoring(thread_count, monitoring, true);
+    }
+
+    fn grow_to_with_monitoring(&mut self, thread_count: usize, monitoring: &seismograph_runtime::Runtime) {
+        self.add_threads_with_monitoring(thread_count, monitoring, false);
+    }
+
+    fn add_threads_with_monitoring(&mut self, thread_count: usize, monitoring: &seismograph_runtime::Runtime, wait_for_attachment: bool) {
         while self.workers.len() < thread_count {
             let receiver = std::sync::Arc::clone(&self.receiver);
             let queued_count = Arc::clone(&self.queued_count);
             let active_count = Arc::clone(&self.active_count);
             let identity = Arc::clone(&self.identity);
             let monitoring = monitoring.clone();
-            let (attached_tx, attached_rx) = std::sync::mpsc::sync_channel(0);
+            let (attached_tx, attached_rx) = if wait_for_attachment {
+                let (tx, rx) = std::sync::mpsc::sync_channel(0);
+                (Some(tx), Some(rx))
+            } else {
+                (None, None)
+            };
             let name = self.name.blocking_worker(self.async_worker_index, self.workers.len());
             let worker = thread::Builder::new()
                 .name(name)
@@ -105,14 +118,23 @@ impl JoinableThreadPool {
                         monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
                     // #[gamma::skip(call_result.default, reason = "attach_thread returns unit; default_after preserves its side effects and unit result.")]
                     attach_thread(identity, monitoring);
-                    attached_tx.send(()).expect("the blocking pool owns the worker startup receiver");
-                    while let Some(job) = receiver.pop() {
+                    if let Some(attached_tx) = attached_tx {
+                        attached_tx.send(()).expect("the blocking pool owns the worker startup receiver");
+                    }
+                    while let Some(mut job) = receiver.pop() {
                         active_count.fetch_add(1, Ordering::SeqCst);
                         queued_count.fetch_sub(1, Ordering::SeqCst);
                         let canceled = job
                             .shutdown
                             .as_ref()
                             .is_some_and(|shutdown| matches!(shutdown.state(), ShutdownState::Started));
+                        if !canceled {
+                            LocalWorker::with_monitoring(|worker| {
+                                if let Some(worker) = worker {
+                                    job.body.started_on(worker);
+                                }
+                            });
+                        }
                         let outcome = job.body.run(canceled);
                         active_count.fetch_sub(1, Ordering::SeqCst);
                         if let Err(panic) = outcome {
@@ -122,7 +144,9 @@ impl JoinableThreadPool {
                     }
                 })
                 .expect("blocking worker thread creation must succeed");
-            attached_rx.recv().expect("a blocking worker must attach before its pool starts");
+            if let Some(attached_rx) = attached_rx {
+                attached_rx.recv().expect("a blocking worker must attach before its pool starts");
+            }
             // #[gamma::skip(stmt.delete_call, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
             self.workers.push(worker);
         }
@@ -317,7 +341,7 @@ impl Pool {
 
         let new_thread_count = pool.max_count().saturating_add(1);
         if new_thread_count <= self.max_thread_count.get() {
-            pool.set_num_threads_with_monitoring(new_thread_count, monitoring);
+            pool.grow_to_with_monitoring(new_thread_count, monitoring);
         }
     }
 

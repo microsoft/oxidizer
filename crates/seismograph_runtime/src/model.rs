@@ -46,6 +46,7 @@ impl RuntimeModel {
                                 tasks: Vec::new(),
                             },
                             state_from_source: true,
+                            tasks: BTreeSet::new(),
                         },
                     );
                 }
@@ -289,6 +290,7 @@ impl RuntimeBuilder {
                 tasks: Vec::new(),
             },
             state_from_source: false,
+            tasks: BTreeSet::new(),
         });
         let update_thread = matches!(
             kind,
@@ -333,8 +335,9 @@ impl RuntimeBuilder {
                 tasks: Vec::new(),
             },
             state_from_source: false,
+            tasks: BTreeSet::new(),
         });
-        if !worker.worker.tasks.contains(&task) {
+        if worker.tasks.insert(task) {
             worker.worker.tasks.push(task);
         }
         match kind {
@@ -368,6 +371,7 @@ impl RuntimeBuilder {
 struct WorkerBuilder {
     worker: Worker,
     state_from_source: bool,
+    tasks: BTreeSet<TaskId>,
 }
 
 struct TaskBuilder {

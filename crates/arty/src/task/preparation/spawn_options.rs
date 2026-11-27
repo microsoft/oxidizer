@@ -22,12 +22,9 @@ impl SpawnOptions {
     ) -> Self {
         Self {
             identity,
-            task: runtime.async_task(
-                crate::runtime::monitoring::current_origin(),
-                identity,
-                parent.map(TaskIdentity::id),
-                future_size,
-            ),
+            task: runtime
+                .async_task(identity, future_size)
+                .map(|task| task.with_context(crate::runtime::monitoring::current_origin(), parent.map(TaskIdentity::id))),
             observers: None,
         }
     }

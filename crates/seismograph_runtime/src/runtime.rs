@@ -12,7 +12,7 @@ use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, WorkerId};
 use seismograph::recorder::without_recording;
 
 use crate::snapshot::{Runtime as RuntimeSnapshot, RuntimeState, Snapshot, Worker, WorkerState};
-use crate::{TaskIdentity, WorkerMetadata, WorkerOrigin, WorkerRole, asynchronous, blocking, snapshot, worker};
+use crate::{TaskIdentity, WorkerMetadata, WorkerRole, asynchronous, blocking, snapshot, worker};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
@@ -125,40 +125,14 @@ impl Runtime {
 
     /// Creates an asynchronous task handle before queue insertion.
     #[must_use]
-    pub fn async_task(
-        &self,
-        origin: Option<WorkerOrigin>,
-        identity: TaskIdentity,
-        parent: Option<TaskId>,
-        body_size: usize,
-    ) -> Option<asynchronous::TaskHandle> {
-        asynchronous::TaskHandle::new(
-            self.id(),
-            self.owner.handle.control.lifecycle_backtraces,
-            origin,
-            identity,
-            parent,
-            body_size,
-        )
+    pub fn async_task(&self, identity: TaskIdentity, body_size: usize) -> Option<asynchronous::TaskHandle> {
+        asynchronous::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size)
     }
 
     /// Creates a blocking task handle before queue insertion.
     #[must_use]
-    pub fn blocking_task(
-        &self,
-        origin: Option<WorkerOrigin>,
-        identity: TaskIdentity,
-        parent: Option<TaskId>,
-        body_size: usize,
-    ) -> Option<blocking::TaskHandle> {
-        blocking::TaskHandle::new(
-            self.id(),
-            self.owner.handle.control.lifecycle_backtraces,
-            origin,
-            identity,
-            parent,
-            body_size,
-        )
+    pub fn blocking_task(&self, identity: TaskIdentity, body_size: usize) -> Option<blocking::TaskHandle> {
+        blocking::TaskHandle::new(self.id(), self.owner.handle.control.lifecycle_backtraces, identity, body_size)
     }
 
     /// Captures the runtime and its registered workers.
@@ -271,6 +245,7 @@ impl RuntimeHandle {
             0,
             self.control.lifecycle_backtraces,
         );
+        lock(&REGISTRY).retain(|runtime| !Arc::ptr_eq(runtime, &self.control));
     }
 
     fn retire_at(&self, retired_at: EventTimestamp) -> bool {
@@ -596,6 +571,17 @@ pub(crate) mod tests {
             assert!(!runtime.owner.handle.retire_at(EventTimestamp::from_ticks(99)));
             assert_eq!(runtime.owner.handle.control.retired_at.load(Ordering::Acquire), expected);
         }
+    }
+
+    #[test]
+    fn stopped_runtime_is_removed_from_the_live_source_registry() {
+        let _test = test_lock();
+        let runtime = Runtime::builder("retired-source").build();
+        let control = Arc::clone(&runtime.owner.handle.control);
+
+        drop(runtime);
+
+        assert!(!lock(&REGISTRY).iter().any(|runtime| Arc::ptr_eq(runtime, &control)));
     }
 
     pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {

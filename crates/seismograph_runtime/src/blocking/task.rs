@@ -27,26 +27,27 @@ pub struct TaskHandle {
 }
 
 impl TaskHandle {
-    pub(crate) fn new(
-        runtime: RuntimeId,
-        backtrace: BacktraceCapture,
-        origin: Option<crate::WorkerOrigin>,
-        identity: TaskIdentity,
-        parent: Option<TaskId>,
-        body_size: usize,
-    ) -> Option<Self> {
+    pub(crate) fn new(runtime: RuntimeId, backtrace: BacktraceCapture, identity: TaskIdentity, body_size: usize) -> Option<Self> {
         is_enabled(EventClass::RuntimeTask).then(|| Self {
             data: TaskData {
                 identity,
                 runtime,
                 backtrace,
-                parent,
+                parent: None,
                 body_size: encode_body_size(body_size),
                 enqueued_at: None,
                 recorded: false,
             },
-            origin: origin.and_then(|origin| origin.worker_for(runtime)),
+            origin: None,
         })
+    }
+
+    /// Attaches queue context to this task.
+    #[must_use]
+    pub fn with_context(mut self, origin: Option<crate::WorkerOrigin>, parent: Option<TaskId>) -> Self {
+        self.origin = origin.and_then(|origin| origin.worker_for(self.data.runtime));
+        self.data.parent = parent;
+        self
     }
 
     /// Records the task entering a queue.

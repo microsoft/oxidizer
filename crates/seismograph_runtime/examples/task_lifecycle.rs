@@ -20,8 +20,11 @@ fn main() {
 
     let mut async_queue = VecDeque::new();
     let async_identity = TaskIdentity::from_location(std::panic::Location::caller());
-    let task = runtime.async_task(Some(async_worker.origin()), async_identity, None, size_of::<u64>());
-    let queued = task.expect("runtime task recording is enabled").enqueued(async_queue.len() as u64);
+    let task = runtime.async_task(async_identity, size_of::<u64>());
+    let queued = task
+        .expect("runtime task recording is enabled")
+        .with_context(Some(async_worker.origin()), None)
+        .enqueued(async_queue.len() as u64);
     async_queue.push_back(queued);
 
     let queued = async_queue.pop_front().expect("the task was queued above");
@@ -33,9 +36,10 @@ fn main() {
 
     let mut blocking_queue = VecDeque::new();
     let blocking_identity = TaskIdentity::from_location(std::panic::Location::caller());
-    let task = runtime.blocking_task(Some(async_worker.origin()), blocking_identity, None, size_of::<u64>());
+    let task = runtime.blocking_task(blocking_identity, size_of::<u64>());
     let queued = task
         .expect("runtime task recording is enabled")
+        .with_context(Some(async_worker.origin()), None)
         .enqueued(blocking_queue.len() as u64);
     blocking_queue.push_back(queued);
 

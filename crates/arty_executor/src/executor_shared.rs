@@ -159,7 +159,6 @@ impl ExecutorShared {
             Self::reject_task::<F::IntoFuture, _, _>(&identity, observer, completion, self.shutdown().cause());
             return;
         }
-        let monitoring = monitoring.filter(|monitoring| self.monitoring().is_some_and(|worker| monitoring.belongs_to(worker)));
         self.register_task(allocate_task(
             &self.inner.task_storage,
             identity,
