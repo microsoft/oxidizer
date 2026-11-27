@@ -8,7 +8,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table, TableState};
 
-use super::super::app::{RuntimeFocus, RuntimeViewState, TaskEventsFocus, TaskEventsViewState};
+use super::super::app::{RuntimeDetailMode, RuntimeViewState, TaskEventsFocus, TaskEventsViewState};
 use super::super::data::{AllocationStackFilter, RuntimeTaskSummary};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::task_events::{TaskEvent, TaskEventSummary, TaskEventsSnapshot, TaskObject, TaskOperation};
@@ -50,7 +50,7 @@ pub(super) fn draw(
     let occurrence =
         operation.and_then(|operation| operation.occurrence(view.event_selected.min(operation.occurrences().len().saturating_sub(1))));
     let [operations, occurrences, stack] = areas(content, view.focus);
-    let focused = runtime_view.focus == RuntimeFocus::Events;
+    let focused = runtime_view.detail_mode == RuntimeDetailMode::Events;
     draw_operations(frame, mouse, operations, events, view, focused);
     draw_occurrences(frame, mouse, occurrences, operation, view, focused);
     draw_stack(frame, stack, occurrence, view);

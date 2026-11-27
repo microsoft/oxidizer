@@ -14,13 +14,13 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Clear, Dataset, Gauge, Graph
 use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, RecordingPolicy};
 use seismograph_protocol::monitor::MonitorDescriptor;
 
+#[cfg(test)]
+use super::app::HeapFocus;
 use super::app::{
     ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState,
-    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeTasksViewState,
-    RuntimeViewState, Screen, ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
+    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen,
+    ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
 };
-#[cfg(test)]
-use super::app::{HeapFocus, RuntimeTasksFocus};
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
     ThreadSnapshot, cache_event_label,
@@ -32,6 +32,10 @@ use super::mouse::{ListTarget, MouseRows};
 
 #[path = "info_ui.rs"]
 mod info_ui;
+#[path = "runtime_group_ui.rs"]
+mod runtime_group_ui;
+#[path = "runtime_task_detail_ui.rs"]
+mod runtime_task_detail_ui;
 #[path = "runtime_tasks_ui.rs"]
 mod runtime_tasks_ui;
 #[path = "runtime_ui.rs"]
@@ -105,7 +109,6 @@ impl App {
                     primitive_view: self.primitive_view,
                     thread_view: self.thread_view,
                     runtime_view: self.runtime_view,
-                    runtime_tasks_view: self.runtime_tasks_view,
                     io_view: self.io_view,
                     cache_view: self.cache_view,
                     panels: &self.panels,
@@ -246,7 +249,6 @@ struct ConnectedView<'a> {
     primitive_view: PrimitiveViewState,
     thread_view: ThreadViewState,
     runtime_view: RuntimeViewState,
-    runtime_tasks_view: RuntimeTasksViewState,
     io_view: IoViewState,
     cache_view: CacheViewState,
     panels: &'a super::panels::Panels,
@@ -350,22 +352,76 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
             view.snapshot_error,
             view.thread_view,
         ),
-        MonitorTab::Runtime => runtime_ui::draw(
-            frame,
-            &view.panels.rows,
-            view.panels.arrange_runtime(content, view.runtime_view.focus).areas,
-            view.snapshot,
-            view.snapshot_error,
-            view.runtime_view,
-        ),
-        MonitorTab::Tasks => runtime_tasks_ui::draw(
-            frame,
-            &view.panels.rows,
-            [panels[0], panels[1]],
-            view.snapshot.map(|snapshot| &snapshot.runtime),
-            view.snapshot_error,
-            view.runtime_tasks_view,
-        ),
+        MonitorTab::Runtime => {
+            let areas = view.panels.arrange_runtime(content).areas;
+            let runtime = view.snapshot.map(|snapshot| &snapshot.runtime);
+            runtime_ui::draw(
+                frame,
+                &view.panels.rows,
+                [areas[0], areas[1]],
+                runtime,
+                view.snapshot_error,
+                view.runtime_view,
+            );
+            runtime_tasks_ui::draw(frame, &view.panels.rows, areas[2], runtime, view.snapshot_error, view.runtime_view);
+            runtime_group_ui::draw_task_list(frame, &view.panels.rows, areas[3], runtime, view.snapshot_error, view.runtime_view);
+            if view.runtime_view.detail_mode == super::app::RuntimeDetailMode::Task {
+                let task = view
+                    .snapshot
+                    .and_then(|snapshot| super::app::selected_runtime_task(&snapshot.runtime, &view.runtime_view));
+                let window = task.and_then(|task| {
+                    let worker = task.worker_ids.first()?;
+                    view.snapshot?
+                        .runtime
+                        .workers
+                        .iter()
+                        .find(|candidate| candidate.runtime_id == task.runtime_id && candidate.worker_id == Some(*worker))
+                        .and_then(|worker| worker.window)
+                });
+                runtime_task_detail_ui::draw(frame, areas[4], task, window, view.runtime_view);
+            } else if view.runtime_view.group_selected_explicitly {
+                runtime_group_ui::draw_statistics(frame, areas[4], runtime, view.snapshot_error, view.runtime_view);
+            } else {
+                draw_empty_panel_with_message(frame, areas[4], " Selection Details ", Some("Select a task type or task."));
+            }
+        }
+        MonitorTab::RuntimeTask => {
+            let runtime = view.snapshot.map(|snapshot| &snapshot.runtime);
+            if view.runtime_view.detail_mode == super::app::RuntimeDetailMode::Group && view.runtime_view.group_selected_explicitly {
+                runtime_group_ui::draw_statistics(frame, content, runtime, view.snapshot_error, view.runtime_view);
+                return;
+            }
+            let Some(task) = view
+                .snapshot
+                .and_then(|snapshot| super::app::selected_runtime_task(&snapshot.runtime, &view.runtime_view))
+            else {
+                draw_empty_panel_with_message(
+                    frame,
+                    content,
+                    " Runtime Task ",
+                    Some("Select a task type or task in the Runtime tab."),
+                );
+                return;
+            };
+            let areas = view.panels.arrange(MonitorTab::RuntimeTask, content).areas;
+            let window = task.worker_ids.first().and_then(|worker| {
+                view.snapshot?
+                    .runtime
+                    .workers
+                    .iter()
+                    .find(|candidate| candidate.runtime_id == task.runtime_id && candidate.worker_id == Some(*worker))
+                    .and_then(|worker| worker.window)
+            });
+            runtime_task_detail_ui::draw(frame, areas[0], Some(task), window, view.runtime_view);
+            task_events_ui::draw(
+                frame,
+                &view.panels.rows,
+                areas[1],
+                Some(task),
+                view.snapshot.map(|snapshot| &snapshot.task_events),
+                view.runtime_view,
+            );
+        }
         MonitorTab::Io => draw_io(
             frame,
             &view.panels.rows,
@@ -2260,7 +2316,7 @@ mod tests {
         EventKind as AllocationEventKind, HeapKind,
     };
 
-    use super::super::app::{RuntimeFocus, TaskEventsFocus, TaskHistogram};
+    use super::super::app::RuntimeWorkersFocus;
     use super::*;
     use crate::allocator_topology::{Segment, Slice, SliceKind, TopologyRegion};
     use crate::allocator_view::{Estimate, Region, SizeClass, Snapshot};
@@ -2715,94 +2771,6 @@ mod tests {
     }
 
     #[test]
-    fn mouse_scrolled_rows_follow_resized_panes_and_filter_banner() {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let mut capture = representative_capture();
-        let worker = capture.runtime.workers[0].clone();
-        capture.runtime.workers = (0..60)
-            .map(|index| {
-                let mut worker = worker.clone();
-                worker.runtime_name = format!("worker-{index:02}");
-                let task = worker.tasks[0].clone();
-                worker.tasks = (0..70)
-                    .map(|index| {
-                        let mut task = task.clone();
-                        task.task_id = 1000 + index;
-                        task
-                    })
-                    .collect();
-                worker
-            })
-            .collect();
-        let mut app = App::offline("click-test.seismograph".into());
-        app.screen = Screen::Offline {
-            path: "click-test.seismograph".into(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        app.runtime_view.worker_selected = 45;
-        app.runtime_view.task_selected = 55;
-        app.filters.applied =
-            super::super::filter::FilterSpec::parse("crate:worker", "", true, super::super::filter::RuntimeStackMode::Event).unwrap();
-        let area = Rect::new(0, 0, 180, 60);
-        let content = Rect::new(0, 3, 180, 52);
-        let panels = app.panels.arrange(MonitorTab::Runtime, content).areas;
-        for (kind, column, row) in [
-            (MouseEventKind::Down(MouseButton::Left), 5, panels[1].y),
-            (MouseEventKind::Drag(MouseButton::Left), 5, 14),
-            (MouseEventKind::Up(MouseButton::Left), 5, 14),
-        ] {
-            app.handle_mouse(mouse_event(kind, column, row), area);
-        }
-        let panels = app.panels.arrange(MonitorTab::Runtime, content).areas;
-        for (kind, column) in [
-            (MouseEventKind::Down(MouseButton::Left), panels[2].x),
-            (MouseEventKind::Drag(MouseButton::Left), 68),
-            (MouseEventKind::Up(MouseButton::Left), 68),
-        ] {
-            app.handle_mouse(mouse_event(kind, column, panels[1].y + 2), area);
-        }
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal.draw(|frame| app.draw(frame)).unwrap();
-        let panels = app.panels.arrange(MonitorTab::Runtime, content).areas;
-        assert_eq!(panels[1].width, 68);
-        for (pane, target) in [(panels[0], ListTarget::RuntimeWorkers), (panels[1], ListTarget::RuntimeTasks)] {
-            let first_row = pane.y + 2;
-            let first_column = pane.x + 1;
-            assert_eq!(app.panels.rows.at(area, first_column, first_row - 1), None);
-            let mut visible = 0;
-            for row in first_row..pane.bottom() - 1 {
-                let (found, index) = app.panels.rows.at(area, first_column, row).unwrap();
-                assert_eq!(found, target);
-                assert!(index > 0);
-                let text = (pane.x..pane.right())
-                    .map(|column| terminal.backend().buffer()[(column, row)].symbol())
-                    .collect::<String>();
-                let label = if target == ListTarget::RuntimeWorkers {
-                    format!("worker-{index:02}")
-                } else {
-                    format!("#{}", 1000 + index)
-                };
-                assert!(text.contains(&label), "{target:?} index {index}: {text}");
-                visible += 1;
-            }
-            assert!(visible > 0);
-        }
-        for row in 55..60 {
-            assert_eq!(app.panels.rows.at(area, 1, row), None);
-        }
-        let (_, index) = app.panels.rows.at(area, panels[1].x + 1, panels[1].y + 2).unwrap();
-        app.handle_mouse(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), panels[1].x + 1, panels[1].y + 2),
-            area,
-        );
-        assert_eq!(
-            (app.runtime_view.task_selected, app.runtime_view.focus),
-            (index, RuntimeFocus::Activity)
-        );
-    }
-
-    #[test]
     fn mouse_heap_table_tracks_actual_visible_rows() {
         let mut capture = representative_capture();
         let native = std::sync::Arc::make_mut(capture.native.as_mut().unwrap());
@@ -2867,8 +2835,6 @@ mod tests {
             (MonitorTab::Threads, ListTarget::ThreadOperations),
             (MonitorTab::Threads, ListTarget::ThreadParticipants),
             (MonitorTab::Threads, ListTarget::ThreadObjects),
-            (MonitorTab::Runtime, ListTarget::RuntimeWorkers),
-            (MonitorTab::Runtime, ListTarget::RuntimeTasks),
             (MonitorTab::Io, ListTarget::IoResources),
             (MonitorTab::Io, ListTarget::IoOperations),
             (MonitorTab::Cache, ListTarget::CacheTiers),
@@ -2891,7 +2857,6 @@ mod tests {
                 ListTarget::ThreadOperations => keyboard.thread_view.focus = ThreadFocus::Operations,
                 ListTarget::ThreadParticipants => keyboard.thread_view.focus = ThreadFocus::Participants,
                 ListTarget::ThreadObjects => keyboard.thread_view.focus = ThreadFocus::Objects,
-                ListTarget::RuntimeTasks => keyboard.runtime_view.focus = RuntimeFocus::Tasks,
                 ListTarget::IoOperations => keyboard.io_view.focus = IoFocus::Operations,
                 ListTarget::CacheOperations => keyboard.cache_view.focus = CacheFocus::Operations,
                 _ => {}
@@ -3390,7 +3355,7 @@ mod tests {
         };
         let area = Rect::new(0, 0, 180, 60);
         render(&app);
-        let (column, row, _) = rendered_target(&app, ListTarget::RuntimeWorkers);
+        let (column, row, _) = rendered_target(&app, ListTarget::AsynchronousWorkers);
         for kind in [
             MouseEventKind::Moved,
             MouseEventKind::Up(MouseButton::Left),
@@ -3399,14 +3364,14 @@ mod tests {
         ] {
             app.handle_mouse(mouse_event(kind, column, row), area);
         }
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
+        assert_eq!(app.runtime_view.focus, RuntimeWorkersFocus::Asynchronous);
         app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
         app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
+        assert_eq!(app.runtime_view.focus, RuntimeWorkersFocus::Asynchronous);
         app.recording_configuration_popup = None;
         app.capture_started_at = Some(Instant::now());
         app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
+        assert_eq!(app.runtime_view.focus, RuntimeWorkersFocus::Asynchronous);
         app.capture_started_at = None;
         if let Screen::Offline {
             snapshot: Some(snapshot), ..
@@ -3423,7 +3388,7 @@ mod tests {
         app.handle_key(KeyCode::Char('F'));
         assert!(app.filters.popup.is_some());
         app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
+        assert_eq!(app.runtime_view.focus, RuntimeWorkersFocus::Asynchronous);
     }
 
     #[test]
@@ -3435,6 +3400,7 @@ mod tests {
             MonitorTab::Primitives,
             MonitorTab::Threads,
             MonitorTab::Runtime,
+            MonitorTab::RuntimeTask,
             MonitorTab::Io,
             MonitorTab::Cache,
         ] {
@@ -3522,7 +3488,6 @@ mod tests {
             primitive_view: app.primitive_view,
             thread_view: app.thread_view,
             runtime_view: app.runtime_view,
-            runtime_tasks_view: app.runtime_tasks_view,
             io_view: app.io_view,
             cache_view: app.cache_view,
             panels: &app.panels,
@@ -3756,535 +3721,6 @@ mod tests {
     #[test]
     fn disabled_recording_state_is_readable() {
         assert_eq!(recording_label(RecordingPolicy::default()), "off");
-    }
-
-    #[test]
-    fn runtime_medians_distinguish_missing_samples_from_measured_zero() {
-        for (median, expected, samples) in [(None, "-", Vec::new()), (Some(0), "0ns", vec![0]), (Some(7), "7ns", vec![7; 3])] {
-            let mut capture = representative_capture();
-            let runtime = &mut capture.runtime;
-            runtime.workers.truncate(1);
-            runtime.workers[0].tasks.truncate(1);
-            let task = &mut runtime.workers[0].tasks[0];
-            task.metrics.poll_count = u64::try_from(samples.len()).unwrap();
-            task.metrics.median_poll_nanos = median;
-            task.metrics.max_poll_nanos = median;
-            task.metrics.poll_samples = samples;
-            let output = render_frame(|frame| {
-                runtime_ui::draw(
-                    frame,
-                    &MouseRows::default(),
-                    [
-                        Rect::new(0, 0, 180, 4),
-                        Rect::new(0, 4, 180, 6),
-                        Rect::default(),
-                        Rect::new(0, 10, 180, 50),
-                        Rect::default(),
-                    ],
-                    Some(&capture),
-                    None,
-                    App::new().runtime_view,
-                );
-            });
-            assert!(output.contains("Median poll"));
-            assert!(output.contains(expected));
-            assert!(!output.contains("Median resume"));
-            assert!(!output.contains("Median stall"));
-        }
-    }
-
-    #[test]
-    fn runtime_task_columns_align_across_states_and_large_values() {
-        use super::super::data::RuntimeTaskSort;
-
-        let mut capture = representative_capture();
-        let runtime = &mut capture.runtime;
-        runtime.workers.truncate(1);
-        let template = runtime.workers[0].tasks[0].clone();
-        runtime.workers[0].tasks = [(1, "Pending", 12), (2, "Materialized", 345), (u64::MAX, "Completed", u64::MAX)]
-            .map(|(task_id, state, poll_count)| {
-                let mut task = template.clone();
-                task.task_id = task_id;
-                task.state = state.into();
-                task.activity.state = state.into();
-                task.metrics.poll_count = poll_count;
-                task.metrics.median_poll_nanos = Some(11);
-                task.metrics.max_poll_nanos = Some(22);
-                task
-            })
-            .to_vec();
-        let mut view = App::new().runtime_view;
-        view.focus = RuntimeFocus::Tasks;
-        view.task_sort = RuntimeTaskSort::Task;
-        view.task_sort_descending = false;
-        let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
-        let mouse_rows = MouseRows::default();
-        terminal
-            .draw(|frame| {
-                mouse_rows.begin(frame.area());
-                runtime_ui::draw(
-                    frame,
-                    &mouse_rows,
-                    [
-                        Rect::new(0, 0, 120, 3),
-                        Rect::new(0, 3, 120, 8),
-                        Rect::default(),
-                        Rect::default(),
-                        Rect::default(),
-                    ],
-                    Some(&capture),
-                    None,
-                    view,
-                );
-            })
-            .unwrap();
-        let line = |y| (0..120).map(|x| terminal.backend().buffer()[(x, y)].symbol()).collect::<String>();
-        let header = line(4);
-        let rows = [line(5), line(6), line(7)];
-        let expected = (
-            header.find("State").unwrap(),
-            header.find("Median poll").unwrap() + "Median poll".len(),
-            header.find("Max poll").unwrap() + "Max poll".len(),
-        );
-        assert_eq!(
-            std::array::from_fn::<_, 3, _>(|index| {
-                let row = &rows[index];
-                (
-                    row.find(["Pending", "Materialized", "Completed"][index]).unwrap(),
-                    row.find("11ns").unwrap() + "11ns".len(),
-                    row.find("22ns").unwrap() + "22ns".len(),
-                )
-            }),
-            [expected; 3],
-        );
-        assert_eq!(
-            [5, 6, 7].map(|y| mouse_rows.at(Rect::new(0, 0, 120, 12), 2, y)),
-            [0, 1, 2].map(|index| Some((ListTarget::RuntimeTasks, index))),
-        );
-    }
-
-    #[test]
-    fn future_size_column_shows_exact_bytes_and_unknown() {
-        let mut capture = representative_capture();
-        let template = capture.runtime.workers[0].tasks[0].clone();
-        capture.runtime.workers.truncate(1);
-        capture.runtime.workers[0].tasks = [Some(0), Some(16384), None]
-            .into_iter()
-            .enumerate()
-            .map(|(index, future_size_bytes)| super::super::data::RuntimeTaskSummary {
-                task_id: u64::try_from(index).unwrap() + 1,
-                future_size_bytes,
-                ..template.clone()
-            })
-            .collect();
-        let mut app = App::offline("sizes.seismograph".into());
-        app.screen = Screen::Offline {
-            path: "sizes.seismograph".into(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        app.runtime_view.focus = RuntimeFocus::Tasks;
-        app.runtime_view.task_sort = super::super::data::RuntimeTaskSort::FutureSize;
-        app.runtime_view.task_sort_descending = false;
-        let text = render(&app);
-        assert!(text.contains("Future B"));
-        let lines = text.chars().collect::<Vec<_>>();
-        let rows = lines
-            .chunks(180)
-            .map(|line| line.iter().collect::<String>())
-            .filter(|line| line.contains("Completed") && line.contains('#'))
-            .collect::<Vec<_>>();
-        assert_eq!(rows.len(), 3);
-        assert!(rows[0].contains("#1") && rows[0].contains(" 0 "));
-        assert!(rows[1].contains("#2") && rows[1].contains("16384"));
-        assert!(rows[2].contains("#3") && rows[2].contains(" - "));
-    }
-
-    fn task_event_capture() -> Box<CapturedSnapshot> {
-        let poll = |sequence, kind, task, duration| {
-            runtime_event(
-                1,
-                sequence,
-                kind,
-                EventPayload::Runtime(RuntimeEvent {
-                    runtime_id: RuntimeId::from_raw(1).unwrap(),
-                    worker_id: WorkerId::from_raw(1),
-                    subject_id: task,
-                    related_id: 0,
-                    value_0: duration,
-                    value_1: 0,
-                }),
-                &[0x7770, 0x9000, 0x9001],
-            )
-        };
-        let operation = |sequence, kind| {
-            let frame = if kind == EventKind::MutexContention { 0x1001 } else { 0x1000 };
-            runtime_event(
-                1,
-                sequence,
-                kind,
-                EventPayload::Object(ObjectId::new(8)),
-                &[frame, 0x2000, 0x9000, 0x9001],
-            )
-        };
-        let decoded = seismograph::snapshot::DecodedSnapshot {
-            events: Events {
-                clock: EventClock::ProcessMonotonic,
-                total_events: 8,
-                recording: Policies {
-                    runtime_tasks: seismograph::recorder::Policy::all(true),
-                    general_events: seismograph::recorder::Policy::all(true),
-                    ..Policies::default()
-                },
-                threads: vec![ThreadLog {
-                    thread_id: ThreadId::new(1),
-                    total_events: 8,
-                    lost_events: 0,
-                    name: "worker".into(),
-                }],
-                events: vec![
-                    poll(1, EventKind::TaskPollStarted, 1, 0),
-                    operation(2, EventKind::MutexAccess),
-                    operation(3, EventKind::MutexContention),
-                    poll(4, EventKind::TaskPollFinished, 1, 300),
-                    poll(5, EventKind::TaskPollStarted, 2, 0),
-                    operation(6, EventKind::MutexAccess),
-                    operation(7, EventKind::MutexRelease),
-                    poll(8, EventKind::TaskPollFinished, 2, 300),
-                ],
-                ..Events::default()
-            },
-            ..seismograph::snapshot::DecodedSnapshot::default()
-        };
-        let addresses = [
-            (0x1000, "app::operation"),
-            (0x1001, "app::contended_operation"),
-            (0x2000, "app::task_future::poll"),
-            (0x7770, "seismograph_runtime::worker::poll_started"),
-            (0x9000, "oxidizer_executor::ExecutorCore::poll"),
-            (0x9001, "oxidizer_executor::ExecutorCore::run"),
-        ]
-        .map(|(address, symbol)| {
-            AddressLookup::from_fields(AddressLookupFields {
-                address,
-                symbol: Some(symbol.into()),
-                filename: None,
-                line: None,
-                column: None,
-            })
-        });
-        let runtime = super::super::data::RuntimeSnapshot::from_events(&decoded, &addresses, None);
-        assert_eq!(runtime.task_events.tasks.get(&(1, 1)).map(|task| task.inferred_events), Some(2),);
-        let mut capture = representative_capture();
-        capture.runtime = runtime.runtime;
-        capture.task_events = runtime.task_events;
-        capture
-    }
-
-    #[test]
-    fn dashboard_occurrences_and_stacks_include_only_this_task_and_operation() {
-        use crossterm::event::KeyCode;
-
-        let mut app = App::offline("tasks.seismograph".into());
-        app.screen = Screen::Offline {
-            path: "tasks.seismograph".into(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(task_event_capture()),
-        };
-        app.runtime_view.focus = RuntimeFocus::Tasks;
-        app.handle_key(KeyCode::Char('e'));
-        let text = render(&app);
-        assert!(text.contains("2 inferred events across workers"));
-        assert!(text.contains("Mutex"));
-        app.handle_key(KeyCode::Enter);
-        assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
-        let text = render(&app);
-        assert!(text.contains("app::task_future::poll"));
-        assert!(text.contains("Task-relative application stack"));
-        assert!(!text.contains("oxidizer_executor::ExecutorCore::run"));
-        app.handle_key(KeyCode::Char('f'));
-        assert!(render(&app).contains("oxidizer_executor::ExecutorCore::run"));
-        app.handle_key(KeyCode::Down);
-        app.handle_key(KeyCode::Down);
-        let text = render(&app);
-        assert_eq!(app.runtime_view.events.event_selected, 0);
-        assert!(text.contains("MutexAccess"));
-        assert!(!text.contains("MutexRelease"));
-        assert!(text.contains("Worker Activity"));
-        assert!(text.contains("Statistics"));
-        assert!(!text.contains("Object history"));
-        let rows = text.chars().collect::<Vec<_>>();
-        let lines = rows.chunks(180).map(|row| row.iter().collect::<String>()).collect::<Vec<_>>();
-        let header = lines.iter().find(|line| line.contains("Task occurrences")).unwrap();
-        assert!(header.find("Operations").unwrap() < header.find("Task occurrences").unwrap());
-        assert!(header.find("Task occurrences").unwrap() < header.find("Event stack").unwrap());
-        let area = Rect::new(0, 0, 180, 60);
-        let occurrences = (0..60)
-            .filter_map(|y| {
-                (0..180).find_map(|x| match app.panels.rows.at(area, x, y) {
-                    Some((ListTarget::TaskOccurrences, index)) => Some(index),
-                    _ => None,
-                })
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(occurrences, [0]);
-        app.handle_key(KeyCode::Backspace);
-        app.handle_key(KeyCode::Down);
-        app.handle_key(KeyCode::Enter);
-        let text = render(&app);
-        assert!(text.contains("MutexContention") && text.contains("app::contended_operation"));
-        assert!(!text.contains("app::operation"));
-        assert_eq!(
-            (app.runtime_view.events.event_selected, app.runtime_view.events.stack_scroll),
-            (0, 0)
-        );
-    }
-
-    #[test]
-    fn dashboard_mouse_targets_toggle_histograms_and_select_task_occurrences_at_all_sizes() {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let mut app = App::offline("tasks.seismograph".into());
-        app.screen = Screen::Offline {
-            path: "tasks.seismograph".into(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(task_event_capture()),
-        };
-        for (width, height) in [(180, 60), (80, 24)] {
-            app.runtime_view.focus = RuntimeFocus::Activity;
-            app.runtime_view.task_histogram = TaskHistogram::Poll;
-            app.runtime_view.events.focus = TaskEventsFocus::Operations;
-            let area = Rect::new(0, 0, width, height);
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let target = (0..height)
-                .find_map(|y| {
-                    (0..width).find_map(|x| {
-                        (app.panels.rows.at(area, x, y) == Some((ListTarget::RuntimeHistogram(TaskHistogram::Ready), 0))).then_some((x, y))
-                    })
-                })
-                .unwrap();
-            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
-            assert_eq!(app.runtime_view.task_histogram, TaskHistogram::Ready);
-            app.handle_key(crossterm::event::KeyCode::Char('e'));
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let target = (0..height)
-                .find_map(|y| {
-                    (0..width).find_map(|x| (app.panels.rows.at(area, x, y) == Some((ListTarget::TaskOperations, 0))).then_some((x, y)))
-                })
-                .unwrap();
-            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
-            assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let target = (0..height)
-                .find_map(|y| {
-                    (0..width).find_map(|x| (app.panels.rows.at(area, x, y) == Some((ListTarget::TaskOccurrences, 0))).then_some((x, y)))
-                })
-                .unwrap();
-            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), target.0, target.1), area);
-            assert_eq!(
-                (app.runtime_view.events.focus, app.runtime_view.events.event_selected),
-                (TaskEventsFocus::Occurrences, 0)
-            );
-        }
-    }
-
-    #[test]
-    fn empty_runtime_view_explains_missing_instrumentation() {
-        let mut capture = representative_capture();
-        capture.runtime = super::super::data::RuntimeMonitorSnapshot::default();
-        let mut app = App::new();
-        app.screen = Screen::Connected {
-            descriptor: descriptor(),
-            recording: RecordingConfiguration::default(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        let text = render(&app);
-        assert!(text.contains("0 runtime events"));
-        assert!(text.contains("No runtime source or runtime events"));
-        assert!(text.contains("the recorder alone does not instrument executors"));
-        if let Screen::Connected {
-            snapshot: Some(snapshot), ..
-        } = &mut app.screen
-        {
-            snapshot.runtime.source_present = true;
-        }
-        let text = render(&app);
-        assert!(text.contains("capture instrumented activity"));
-        assert!(!text.contains("No runtime source or runtime events"));
-    }
-
-    #[test]
-    fn empty_filtered_runtime_view_explains_selection_not_instrumentation() {
-        for source_present in [false, true] {
-            let mut capture = representative_capture();
-            capture.runtime = super::super::data::RuntimeMonitorSnapshot {
-                source_present,
-                ..super::super::data::RuntimeMonitorSnapshot::default()
-            };
-            capture.filter_summary.active = true;
-            let mut app = App::new();
-            app.screen = Screen::Offline {
-                path: "filtered.seismograph".into(),
-                tab: MonitorTab::Runtime,
-                snapshot: Some(capture),
-            };
-            let text = render(&app);
-            assert!(text.contains("No matching runtime activity."));
-            assert!(text.contains("Press F to change or clear stack filters"));
-            assert!(!text.contains("No runtime source or runtime events"));
-            assert!(!text.contains("instrument executors"));
-            assert!(!text.contains("Capture while instrumented"));
-        }
-    }
-
-    #[test]
-    fn unassigned_runtime_tasks_render_without_inventing_worker_metrics() {
-        let mut capture = representative_capture();
-        let worker = &mut capture.runtime.workers[0];
-        worker.worker_id = None;
-        worker.thread_id = None;
-        worker.role = "Unbound".into();
-        worker.observed_tasks = 0;
-        worker.window = None;
-        worker.metrics.executing_fraction = None;
-        worker.metrics.poll_count = 0;
-        worker.metrics.median_poll_nanos = None;
-        worker.metrics.max_poll_nanos = None;
-        worker.metrics.polls.clear();
-        worker.metrics.poll_samples.clear();
-        let mut app = App::new();
-        app.screen = Screen::Offline {
-            path: "capture.seismograph".into(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        let text = render(&app);
-        assert!(text.contains("unassigned"));
-        assert!(text.contains("Unbound"));
-        assert!(text.contains("Task Statistics"));
-        assert!(text.contains("Window unobserved"));
-        assert!(text.contains("No completed samples"));
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one render fixture exercises wide and compact geometry with matching mouse navigation"
-    )]
-    fn runtime_layouts_render_observed_execution_and_preserve_mouse_navigation() {
-        use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
-
-        use super::super::runtime_timeline::{Interval, TimeWindow};
-
-        for (width, height) in [(80, 24), (180, 60)] {
-            let mut capture = representative_capture();
-            capture.runtime.workers.truncate(1);
-            let worker = &mut capture.runtime.workers[0];
-            worker.window = Some(TimeWindow {
-                start: 100,
-                end: 12_000_000_200,
-            });
-            worker.observed_tasks = 1;
-            worker.metrics.polls = vec![Interval {
-                start: 200,
-                end: 12_000_000_200,
-            }];
-            worker.metrics.executing_fraction = Some(12_000_000_000.0 / 12_000_000_100.0);
-            worker.metrics.poll_count = 0;
-            worker.metrics.median_poll_nanos = None;
-            worker.metrics.max_poll_nanos = None;
-            worker.metrics.poll_samples.clear();
-            worker.tasks.truncate(1);
-            let task = &mut worker.tasks[0];
-            task.state = "Running".into();
-            task.metrics.polls = worker.metrics.polls.clone();
-            task.metrics.ready = vec![Interval { start: 100, end: 200 }].into();
-            task.metrics.poll_count = 0;
-            task.metrics.median_poll_nanos = None;
-            task.metrics.max_poll_nanos = None;
-            task.metrics.executing_fraction = worker.metrics.executing_fraction;
-            task.metrics.poll_samples.clear();
-            task.metrics.ready_samples = vec![0, 3, 7, 63].into();
-            task.activity.state = "Running".into();
-            task.activity.running_for = Some(12_000_000_000);
-            task.activity.ready_for = None;
-            task.activity.repoll_requested = true;
-            let mut app = App::offline("runtime-ui.seismograph".into());
-            app.screen = Screen::Offline {
-                path: "runtime-ui.seismograph".into(),
-                tab: MonitorTab::Runtime,
-                snapshot: Some(capture),
-            };
-            let area = Rect::new(0, 0, width, height);
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            for (focus, target, next) in [
-                (RuntimeFocus::Workers, ListTarget::RuntimeWorkers, RuntimeFocus::Tasks),
-                (RuntimeFocus::Tasks, ListTarget::RuntimeTasks, RuntimeFocus::Activity),
-            ] {
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                assert_eq!(app.runtime_view.focus, focus);
-                let (column, row) = (0..height)
-                    .find_map(|row| {
-                        (0..width).find_map(|column| (app.panels.rows.at(area, column, row) == Some((target, 0))).then_some((column, row)))
-                    })
-                    .unwrap();
-                app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
-                assert_eq!(app.runtime_view.focus, next);
-            }
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let text = (0..height)
-                .map(|row| {
-                    (0..width)
-                        .map(|column| terminal.backend().buffer()[(column, row)].symbol())
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            println!("{width}x{height} Runtime Activity:\n{text}");
-            for expected in [
-                "Running for 12s",
-                "State global · repoll",
-                "Window 12.00s · lower bound",
-                "Ready global",
-                "No completed samples",
-                "log10 100s+",
-            ] {
-                assert!(text.contains(expected), "{width}x{height}: missing {expected}\n{text}");
-            }
-            assert!(!text.contains("Spawn Stack"));
-            let (column, row, index) = (0..height)
-                .rev()
-                .find_map(|row| {
-                    (0..width).find_map(|column| {
-                        app.panels
-                            .rows
-                            .at(area, column, row)
-                            .and_then(|(target, index)| (target == ListTarget::RuntimeActivity).then_some((column, row, index)))
-                    })
-                })
-                .unwrap();
-            app.handle_mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), column, row), area);
-            assert_eq!(app.runtime_view.activity_scroll, index);
-            let before = app.runtime_view;
-            app.handle_key(KeyCode::F(1));
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            assert!(app.help.is_some());
-            let help_text = terminal
-                .backend()
-                .buffer()
-                .content
-                .iter()
-                .map(ratatui::buffer::Cell::symbol)
-                .collect::<String>();
-            assert!(help_text.contains("F1 Help: Runtime task details"));
-            app.handle_key(KeyCode::F(1));
-            assert_eq!(app.runtime_view, before);
-            app.handle_key(KeyCode::Backspace);
-            assert_eq!(app.runtime_view.focus, RuntimeFocus::Tasks);
-            app.handle_key(KeyCode::Backspace);
-            assert_eq!(app.runtime_view.focus, RuntimeFocus::Workers);
-        }
     }
 
     #[test]
@@ -4718,52 +4154,6 @@ mod tests {
         assert!(stack_lines.len() >= 4);
 
         let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks[0].activity.state = "Running".into();
-        capture.runtime.workers[0].tasks[0].activity.running_for = Some(5_000_000_000);
-        app.runtime_view.focus = RuntimeFocus::Activity;
-        app.screen = Screen::Connected {
-            descriptor: descriptor(),
-            recording: RecordingConfiguration::default(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        assert!(render(&app).contains("Running for 5s"));
-
-        let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks[0].spawn_stack = vec!["app::spawn".into()];
-        app.screen = Screen::Connected {
-            descriptor: descriptor(),
-            recording: RecordingConfiguration::default(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        let rendered = render(&app);
-        assert!(rendered.contains("Task Statistics"));
-        assert!(!rendered.contains("app::spawn"));
-        assert!(!rendered.contains("Backtrace not captured"));
-
-        let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks[0].spawn_stack.clear();
-        app.screen = Screen::Connected {
-            descriptor: descriptor(),
-            recording: RecordingConfiguration::default(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        app.runtime_view.task_histogram = TaskHistogram::Ready;
-        assert!(render(&app).contains("Wake-to-poll (raw)"));
-
-        let mut capture = representative_capture();
-        capture.runtime.workers[0].tasks.clear();
-        app.screen = Screen::Connected {
-            descriptor: descriptor(),
-            recording: RecordingConfiguration::default(),
-            tab: MonitorTab::Runtime,
-            snapshot: Some(capture),
-        };
-        assert!(!render(&app).is_empty());
-
-        let mut capture = representative_capture();
         capture.io.resources[0].operations.clear();
         app.screen = Screen::Connected {
             descriptor: descriptor(),
@@ -5028,12 +4418,7 @@ mod tests {
             assert!(render(&app).contains("Threads"));
         }
 
-        for focus in [
-            RuntimeFocus::Workers,
-            RuntimeFocus::Tasks,
-            RuntimeFocus::Activity,
-            RuntimeFocus::Events,
-        ] {
+        for focus in [RuntimeWorkersFocus::Asynchronous, RuntimeWorkersFocus::Blocking] {
             app.runtime_view.focus = focus;
             app.runtime_view.activity_scroll = usize::MAX;
             app.screen = Screen::Connected {
@@ -5138,29 +4523,12 @@ mod tests {
                 app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
             }));
         }
-        for focus in [
-            RuntimeFocus::Workers,
-            RuntimeFocus::Tasks,
-            RuntimeFocus::Activity,
-            RuntimeFocus::Events,
-        ] {
+        for focus in [RuntimeWorkersFocus::Asynchronous, RuntimeWorkersFocus::Blocking] {
             app.runtime_view.focus = focus;
             app.screen = Screen::Connected {
                 descriptor: descriptor(),
                 recording: RecordingConfiguration::default(),
                 tab: MonitorTab::Runtime,
-                snapshot: Some(representative_capture()),
-            };
-            output.push_str(&render_debug(|frame| {
-                app.draw_with_version(frame, |_| "12:34:56 (now)".into(), "98.76.54");
-            }));
-        }
-        for focus in [RuntimeTasksFocus::Asynchronous, RuntimeTasksFocus::Blocking] {
-            app.runtime_tasks_view.focus = focus;
-            app.screen = Screen::Connected {
-                descriptor: descriptor(),
-                recording: RecordingConfiguration::default(),
-                tab: MonitorTab::Tasks,
                 snapshot: Some(representative_capture()),
             };
             output.push_str(&render_debug(|frame| {
@@ -5192,6 +4560,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (737_895, 5_498_159_947_541_016_229));
+        assert_eq!(stable_digest(&output), (496_016, 7_059_420_894_111_241_525));
     }
 }

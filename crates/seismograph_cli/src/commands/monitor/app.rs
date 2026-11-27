@@ -18,7 +18,7 @@ use super::client::{
     Discovery, capture_snapshot, capture_snapshot_and_stop, clear_event_buffers, discover, handshake, recorder_activity, save_snapshot,
     set_recording,
 };
-use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
+use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort};
 use super::live_activity::{LiveActivity, RecorderUpdate};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -668,87 +668,101 @@ pub(super) enum ThreadFocus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct RuntimeViewState {
-    pub(super) focus: RuntimeFocus,
-    pub(super) worker_selected: usize,
+    pub(super) runtime_selected: usize,
+    pub(super) focus: RuntimeWorkersFocus,
+    pub(super) section: RuntimeSectionFocus,
+    pub(super) asynchronous_selected: usize,
+    pub(super) blocking_selected: usize,
+    pub(super) asynchronous_task_selected: usize,
+    pub(super) blocking_task_selected: usize,
+    pub(super) group_selected_explicitly: bool,
     pub(super) task_selected: usize,
+    pub(super) task_selected_explicitly: bool,
     pub(super) activity_scroll: usize,
-    pub(super) task_sort: RuntimeTaskSort,
-    pub(super) task_sort_descending: bool,
+    pub(super) group_histogram: GroupHistogram,
     pub(super) task_histogram: TaskHistogram,
+    pub(super) task_type_sort: RuntimeTaskTypeSort,
+    pub(super) task_type_sort_descending: bool,
+    pub(super) task_sort: RuntimeTaskRowSort,
+    pub(super) task_sort_descending: bool,
+    pub(super) detail_mode: RuntimeDetailMode,
     pub(super) events: TaskEventsViewState,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct RuntimeTasksViewState {
-    pub(super) focus: RuntimeTasksFocus,
-    pub(super) asynchronous_selected: usize,
-    pub(super) blocking_selected: usize,
-}
-
-impl RuntimeTasksViewState {
-    const fn new() -> Self {
+impl RuntimeViewState {
+    pub(super) const fn new() -> Self {
         Self {
-            focus: RuntimeTasksFocus::Asynchronous,
+            runtime_selected: 0,
+            focus: RuntimeWorkersFocus::Asynchronous,
+            section: RuntimeSectionFocus::Workers,
             asynchronous_selected: 0,
             blocking_selected: 0,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.focus = RuntimeTasksFocus::Asynchronous;
-        self.asynchronous_selected = 0;
-        self.blocking_selected = 0;
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RuntimeTasksFocus {
-    Asynchronous,
-    Blocking,
-}
-
-/// Fits readable duration buckets in the activity panes while keeping keyboard bounds stable.
-pub(super) const RUNTIME_HISTOGRAM_BINS: usize = super::runtime_timeline::HISTOGRAM_BINS;
-
-impl RuntimeViewState {
-    const fn new() -> Self {
-        Self {
-            focus: RuntimeFocus::Workers,
-            worker_selected: 0,
+            asynchronous_task_selected: 0,
+            blocking_task_selected: 0,
+            group_selected_explicitly: false,
             task_selected: 0,
+            task_selected_explicitly: false,
             activity_scroll: 0,
-            task_sort: RuntimeTaskSort::Polls,
-            task_sort_descending: true,
+            group_histogram: GroupHistogram::Primary,
             task_histogram: TaskHistogram::Poll,
+            task_type_sort: RuntimeTaskTypeSort::Spawned,
+            task_type_sort_descending: true,
+            task_sort: RuntimeTaskRowSort::Task,
+            task_sort_descending: false,
+            detail_mode: RuntimeDetailMode::Group,
             events: TaskEventsViewState::new(),
         }
     }
 
     fn reset(&mut self) {
-        self.focus = RuntimeFocus::Workers;
-        self.worker_selected = 0;
-        self.reset_task();
-    }
-
-    fn reset_task(&mut self) {
+        self.runtime_selected = 0;
+        self.focus = RuntimeWorkersFocus::Asynchronous;
+        self.section = RuntimeSectionFocus::Workers;
+        self.asynchronous_selected = 0;
+        self.blocking_selected = 0;
+        self.asynchronous_task_selected = 0;
+        self.blocking_task_selected = 0;
+        self.group_selected_explicitly = false;
         self.task_selected = 0;
-        self.reset_details();
-    }
-
-    fn reset_details(&mut self) {
+        self.task_selected_explicitly = false;
         self.activity_scroll = 0;
+        self.detail_mode = RuntimeDetailMode::Group;
         self.events.reset();
     }
+}
 
-    pub(super) fn selected_task<'a>(
-        &self,
-        runtime: &'a super::data::RuntimeMonitorSnapshot,
-    ) -> Option<&'a super::data::RuntimeTaskSummary> {
-        let worker = runtime
-            .workers
-            .get(self.worker_selected.min(runtime.workers.len().saturating_sub(1)))?;
-        let tasks = worker.sorted_tasks(self.task_sort, self.task_sort_descending);
-        tasks.get(self.task_selected.min(tasks.len().saturating_sub(1))).copied()
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeWorkersFocus {
+    Asynchronous,
+    Blocking,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeSectionFocus {
+    Workers,
+    TaskTypes,
+    GroupTasks,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeDetailMode {
+    Group,
+    Task,
+    Events,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GroupHistogram {
+    Primary,
+    Secondary,
+}
+
+impl GroupHistogram {
+    const fn toggle(self) -> Self {
+        match self {
+            Self::Primary => Self::Secondary,
+            Self::Secondary => Self::Primary,
+        }
     }
 }
 
@@ -756,6 +770,36 @@ impl RuntimeViewState {
 pub(super) enum TaskHistogram {
     Poll,
     Ready,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeTaskTypeSort {
+    SpawnedAt,
+    Spawned,
+    Live,
+    Succeeded,
+    Canceled,
+    Panicked,
+    Workers,
+    PollsOrRuns,
+    AverageReadyOrQueue,
+    MaximumReadyOrQueue,
+    AverageDuration,
+    MaximumDuration,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeTaskRowSort {
+    Task,
+    State,
+    Worker,
+    Spawn,
+    FutureSize,
+    Operations,
+    Polls,
+    MaximumPoll,
+    Queue,
+    Execution,
 }
 
 impl TaskHistogram {
@@ -792,10 +836,6 @@ impl TaskEventsViewState {
     fn reset(&mut self) {
         self.focus = TaskEventsFocus::Operations;
         self.operation_selected = 0;
-        self.reset_event();
-    }
-
-    fn reset_event(&mut self) {
         self.event_selected = 0;
         self.stack_scroll = 0;
         self.stack_horizontal_scroll = 0;
@@ -806,32 +846,6 @@ impl TaskEventsViewState {
 pub(super) enum TaskEventsFocus {
     Operations,
     Occurrences,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RuntimeFocus {
-    Workers,
-    Tasks,
-    Activity,
-    Events,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RuntimeDashboardFocus {
-    Workers,
-    Tasks,
-    Activity,
-}
-
-impl RuntimeFocus {
-    const fn dashboard(self) -> Option<RuntimeDashboardFocus> {
-        match self {
-            Self::Workers => Some(RuntimeDashboardFocus::Workers),
-            Self::Tasks => Some(RuntimeDashboardFocus::Tasks),
-            Self::Activity => Some(RuntimeDashboardFocus::Activity),
-            Self::Events => None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -900,7 +914,7 @@ pub(super) enum MonitorTab {
     Primitives,
     Threads,
     Runtime,
-    Tasks,
+    RuntimeTask,
     Io,
     Cache,
 }
@@ -914,7 +928,7 @@ impl MonitorTab {
             Self::Primitives => 3,
             Self::Threads => 4,
             Self::Runtime => 5,
-            Self::Tasks => 6,
+            Self::RuntimeTask => 6,
             Self::Io => 7,
             Self::Cache => 8,
         }
@@ -927,8 +941,8 @@ impl MonitorTab {
             Self::Allocations => Self::Primitives,
             Self::Primitives => Self::Threads,
             Self::Threads => Self::Runtime,
-            Self::Runtime => Self::Tasks,
-            Self::Tasks => Self::Io,
+            Self::Runtime => Self::RuntimeTask,
+            Self::RuntimeTask => Self::Io,
             Self::Io => Self::Cache,
             Self::Cache => Self::Info,
         }
@@ -942,8 +956,8 @@ impl MonitorTab {
             Self::Primitives => Self::Allocations,
             Self::Threads => Self::Primitives,
             Self::Runtime => Self::Threads,
-            Self::Tasks => Self::Runtime,
-            Self::Io => Self::Tasks,
+            Self::RuntimeTask => Self::Runtime,
+            Self::Io => Self::RuntimeTask,
             Self::Cache => Self::Io,
         }
     }
@@ -976,7 +990,6 @@ pub(super) struct App {
     pub(super) primitive_view: PrimitiveViewState,
     pub(super) thread_view: ThreadViewState,
     pub(super) runtime_view: RuntimeViewState,
-    pub(super) runtime_tasks_view: RuntimeTasksViewState,
     pub(super) io_view: IoViewState,
     pub(super) cache_view: CacheViewState,
     pub(super) panels: super::panels::Panels,
@@ -1003,6 +1016,7 @@ pub(super) struct App {
     connection_generation: u64,
     recording_generation: u64,
     next_refresh: Instant,
+    pub(super) last_runtime_task_click: Option<(usize, Instant)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1097,7 +1111,6 @@ impl App {
             primitive_view: PrimitiveViewState::new(),
             thread_view: ThreadViewState::new(),
             runtime_view: RuntimeViewState::new(),
-            runtime_tasks_view: RuntimeTasksViewState::new(),
             io_view: IoViewState::new(),
             cache_view: CacheViewState::new(),
             panels: super::panels::Panels::default(),
@@ -1124,6 +1137,7 @@ impl App {
             connection_generation: 0,
             recording_generation: 0,
             next_refresh,
+            last_runtime_task_click: None,
         }
     }
 
@@ -1244,7 +1258,7 @@ impl App {
                     MonitorTab::Primitives => handle_primitive_key(code, &mut self.primitive_view, snapshot.as_deref()),
                     MonitorTab::Threads => handle_thread_key(code, &mut self.thread_view, snapshot.as_deref()),
                     MonitorTab::Runtime => handle_runtime_key(code, &mut self.runtime_view, snapshot.as_deref()),
-                    MonitorTab::Tasks => handle_runtime_tasks_key(code, &mut self.runtime_tasks_view, snapshot.as_deref()),
+                    MonitorTab::RuntimeTask => handle_runtime_task_key(code, &mut self.runtime_view, snapshot.as_deref()),
                     MonitorTab::Io => handle_io_key(code, &mut self.io_view, snapshot.as_deref()),
                     MonitorTab::Cache => handle_cache_key(code, &mut self.cache_view, snapshot.as_deref()),
                     MonitorTab::Info => handle_info_key(code, &mut self.info_thread_selected, self.live_activity.threads.len()),
@@ -1269,7 +1283,7 @@ impl App {
                     KeyCode::Char('4') => *tab = MonitorTab::Primitives,
                     KeyCode::Char('5') => *tab = MonitorTab::Threads,
                     KeyCode::Char('6') => *tab = MonitorTab::Runtime,
-                    KeyCode::Char('7') => *tab = MonitorTab::Tasks,
+                    KeyCode::Char('7') => *tab = MonitorTab::RuntimeTask,
                     KeyCode::Char('8') => *tab = MonitorTab::Io,
                     KeyCode::Char('9') => *tab = MonitorTab::Cache,
                     KeyCode::Char('d') => {
@@ -1509,7 +1523,6 @@ impl App {
                     self.allocation_view.reset_position();
                     self.thread_view.reset();
                     self.runtime_view.reset();
-                    self.runtime_tasks_view.reset();
                     self.io_view.reset();
                     self.cache_view.reset();
                     self.filter_snapshot_arrived();
@@ -1543,7 +1556,6 @@ impl App {
         self.primitive_view.reset_operations();
         self.thread_view.reset();
         self.runtime_view.reset();
-        self.runtime_tasks_view.reset();
         self.io_view.reset();
         self.cache_view.reset();
     }
@@ -2051,133 +2063,264 @@ fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option
 
 fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let runtime = snapshot.map(|snapshot| &snapshot.runtime);
-    let worker = runtime.and_then(|runtime| runtime.workers.get(view.worker_selected));
-    if code == KeyCode::Char('e') {
-        view.focus = RuntimeFocus::Events;
-        return true;
-    }
-    if code == KeyCode::Char('t') {
-        view.task_histogram = view.task_histogram.toggle();
-        view.focus = RuntimeFocus::Activity;
-        return true;
-    }
-    if view.focus == RuntimeFocus::Events {
-        let task = runtime.and_then(|runtime| view.selected_task(runtime));
-        let events = snapshot.and_then(|snapshot| task.and_then(|task| snapshot.task_events.tasks.get(&(task.runtime_id, task.task_id))));
-        if code == KeyCode::Backspace && view.events.focus == TaskEventsFocus::Operations {
-            view.focus = RuntimeFocus::Activity;
-            return true;
-        }
-        return handle_task_events_key(code, &mut view.events, events);
-    }
-    let focus = view.focus.dashboard().expect("event focus returns above");
+    let runtime_id = runtime.and_then(|runtime| runtime.selected_runtime(view.runtime_selected).map(|runtime| runtime.runtime_id));
+    let count = runtime.map_or(0, |runtime| match view.section {
+        RuntimeSectionFocus::Workers => runtime
+            .workers
+            .iter()
+            .filter(|worker| Some(worker.runtime_id) == runtime_id)
+            .filter(|worker| worker.worker_id.is_some())
+            .filter(|worker| match view.focus {
+                RuntimeWorkersFocus::Asynchronous => worker.role != "Blocking" && worker.blocking.executions == 0,
+                RuntimeWorkersFocus::Blocking => worker.role == "Blocking" || worker.blocking.executions != 0,
+            })
+            .count(),
+        RuntimeSectionFocus::TaskTypes => match view.focus {
+            RuntimeWorkersFocus::Asynchronous => runtime
+                .asynchronous_groups
+                .iter()
+                .filter(|group| Some(group.runtime_id) == runtime_id)
+                .count(),
+            RuntimeWorkersFocus::Blocking => runtime
+                .blocking_groups
+                .iter()
+                .filter(|group| Some(group.runtime_id) == runtime_id)
+                .count(),
+        },
+        RuntimeSectionFocus::GroupTasks => selected_runtime_group(runtime, view)
+            .map(|(runtime_id, descriptor, kind)| runtime.tasks_for_group(runtime_id, descriptor, kind).len())
+            .unwrap_or_default(),
+    });
     match code {
-        KeyCode::Left if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
-        KeyCode::Right if focus == RuntimeDashboardFocus::Activity => {
-            view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
+        KeyCode::Char('[') if runtime.is_some_and(|runtime| runtime.runtimes.len() > 1) => {
+            view.runtime_selected = view.runtime_selected.saturating_sub(1);
+            reset_runtime_selections(view);
         }
-        KeyCode::Up => match focus {
-            RuntimeDashboardFocus::Workers => {
-                view.worker_selected = view.worker_selected.saturating_sub(1);
-                view.reset_task();
-            }
-            RuntimeDashboardFocus::Tasks => {
-                view.task_selected = view.task_selected.saturating_sub(1);
-                view.reset_details();
-            }
-            RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(1),
-        },
-        KeyCode::Down => match focus {
-            RuntimeDashboardFocus::Workers => {
-                let count = runtime.map_or(0, |runtime| runtime.workers.len());
-                view.worker_selected = advance_selection(view.worker_selected, count);
-                view.reset_task();
-            }
-            RuntimeDashboardFocus::Tasks => {
-                let count = worker.map_or(0, |worker| worker.tasks.len());
-                view.task_selected = advance_selection(view.task_selected, count);
-                view.reset_details();
-            }
-            RuntimeDashboardFocus::Activity => {
-                view.activity_scroll = view.activity_scroll.saturating_add(1).min(RUNTIME_HISTOGRAM_BINS - 1);
-            }
-        },
+        KeyCode::Char(']') if runtime.is_some_and(|runtime| runtime.runtimes.len() > 1) => {
+            view.runtime_selected = advance_selection(view.runtime_selected, runtime.map_or(0, |runtime| runtime.runtimes.len()));
+            reset_runtime_selections(view);
+        }
+        KeyCode::Char('a') => {
+            view.focus = RuntimeWorkersFocus::Asynchronous;
+            view.group_selected_explicitly = false;
+            view.task_selected_explicitly = false;
+        }
+        KeyCode::Char('b') => {
+            view.focus = RuntimeWorkersFocus::Blocking;
+            view.group_selected_explicitly = false;
+            view.task_selected_explicitly = false;
+        }
         KeyCode::Enter => {
-            view.focus = match focus {
-                RuntimeDashboardFocus::Workers => RuntimeFocus::Tasks,
-                RuntimeDashboardFocus::Tasks => RuntimeFocus::Activity,
-                RuntimeDashboardFocus::Activity => RuntimeFocus::Events,
+            view.section = match view.section {
+                RuntimeSectionFocus::Workers => RuntimeSectionFocus::TaskTypes,
+                RuntimeSectionFocus::TaskTypes => {
+                    view.task_selected = 0;
+                    view.group_selected_explicitly = count != 0;
+                    view.task_selected_explicitly = false;
+                    view.detail_mode = RuntimeDetailMode::Group;
+                    RuntimeSectionFocus::GroupTasks
+                }
+                RuntimeSectionFocus::GroupTasks => {
+                    if count == 0 {
+                        return true;
+                    }
+                    view.task_selected_explicitly = true;
+                    view.detail_mode = RuntimeDetailMode::Task;
+                    RuntimeSectionFocus::GroupTasks
+                }
             };
         }
         KeyCode::Backspace => {
-            view.focus = match focus {
-                RuntimeDashboardFocus::Workers => return false,
-                RuntimeDashboardFocus::Tasks => RuntimeFocus::Workers,
-                RuntimeDashboardFocus::Activity => RuntimeFocus::Tasks,
+            view.section = match view.section {
+                RuntimeSectionFocus::Workers => return false,
+                RuntimeSectionFocus::TaskTypes => RuntimeSectionFocus::Workers,
+                RuntimeSectionFocus::GroupTasks => RuntimeSectionFocus::TaskTypes,
             };
         }
-        KeyCode::PageUp if focus == RuntimeDashboardFocus::Activity => view.activity_scroll = view.activity_scroll.saturating_sub(5),
-        KeyCode::PageDown if focus == RuntimeDashboardFocus::Activity => {
-            view.activity_scroll = view.activity_scroll.saturating_add(5).min(RUNTIME_HISTOGRAM_BINS - 1);
+        KeyCode::Up => {
+            let group_tasks = view.section == RuntimeSectionFocus::GroupTasks;
+            {
+                let selected = runtime_selection(view);
+                *selected = selected.saturating_sub(1);
+            }
+            if group_tasks {
+                view.task_selected_explicitly = true;
+                view.detail_mode = RuntimeDetailMode::Task;
+            } else if view.section == RuntimeSectionFocus::TaskTypes {
+                view.group_selected_explicitly = count != 0;
+                view.task_selected_explicitly = false;
+                view.detail_mode = RuntimeDetailMode::Group;
+            }
         }
-        KeyCode::Char('[') => {
-            view.task_sort = view.task_sort.previous();
-            view.reset_task();
+        KeyCode::Down => {
+            let group_tasks = view.section == RuntimeSectionFocus::GroupTasks;
+            {
+                let selected = runtime_selection(view);
+                *selected = advance_selection(*selected, count);
+            }
+            if group_tasks && count != 0 {
+                view.task_selected_explicitly = true;
+                view.detail_mode = RuntimeDetailMode::Task;
+            } else if view.section == RuntimeSectionFocus::TaskTypes {
+                view.group_selected_explicitly = count != 0;
+                view.task_selected_explicitly = false;
+                view.detail_mode = RuntimeDetailMode::Group;
+            }
         }
-        KeyCode::Char(']') => {
-            view.task_sort = view.task_sort.next();
-            view.reset_task();
+        KeyCode::Home => {
+            *runtime_selection(view) = 0;
+            if view.section == RuntimeSectionFocus::TaskTypes {
+                view.group_selected_explicitly = count != 0;
+                view.task_selected_explicitly = false;
+                view.detail_mode = RuntimeDetailMode::Group;
+            }
         }
-        KeyCode::Char('r') => {
-            view.task_sort_descending = !view.task_sort_descending;
-            view.reset_task();
+        KeyCode::End => {
+            *runtime_selection(view) = count.saturating_sub(1);
+            if view.section == RuntimeSectionFocus::TaskTypes {
+                view.group_selected_explicitly = count != 0;
+                view.task_selected_explicitly = false;
+                view.detail_mode = RuntimeDetailMode::Group;
+            }
         }
         _ => return false,
     }
     true
 }
 
-fn handle_runtime_tasks_key(code: KeyCode, view: &mut RuntimeTasksViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
-    let runtime = snapshot.map(|snapshot| &snapshot.runtime);
-    match code {
-        KeyCode::Char('a') => view.focus = RuntimeTasksFocus::Asynchronous,
-        KeyCode::Char('b') => view.focus = RuntimeTasksFocus::Blocking,
-        KeyCode::Enter => {
-            view.focus = match view.focus {
-                RuntimeTasksFocus::Asynchronous => RuntimeTasksFocus::Blocking,
-                RuntimeTasksFocus::Blocking => RuntimeTasksFocus::Asynchronous,
-            };
+fn reset_runtime_selections(view: &mut RuntimeViewState) {
+    view.section = RuntimeSectionFocus::Workers;
+    view.asynchronous_selected = 0;
+    view.blocking_selected = 0;
+    view.asynchronous_task_selected = 0;
+    view.blocking_task_selected = 0;
+    view.group_selected_explicitly = false;
+    view.task_selected = 0;
+    view.task_selected_explicitly = false;
+    view.activity_scroll = 0;
+    view.events.reset();
+}
+
+fn runtime_selection(view: &mut RuntimeViewState) -> &mut usize {
+    match (view.focus, view.section) {
+        (RuntimeWorkersFocus::Asynchronous, RuntimeSectionFocus::Workers) => &mut view.asynchronous_selected,
+        (RuntimeWorkersFocus::Blocking, RuntimeSectionFocus::Workers) => &mut view.blocking_selected,
+        (RuntimeWorkersFocus::Asynchronous, RuntimeSectionFocus::TaskTypes) => &mut view.asynchronous_task_selected,
+        (RuntimeWorkersFocus::Blocking, RuntimeSectionFocus::TaskTypes) => &mut view.blocking_task_selected,
+        (_, RuntimeSectionFocus::GroupTasks) => &mut view.task_selected,
+    }
+}
+
+pub(super) fn selected_runtime_group(
+    runtime: &super::data::RuntimeMonitorSnapshot,
+    view: &RuntimeViewState,
+) -> Option<(u64, Option<u64>, super::runtime::RuntimeTaskKind)> {
+    let runtime_id = runtime.selected_runtime(view.runtime_selected)?.runtime_id;
+    match view.focus {
+        RuntimeWorkersFocus::Asynchronous => {
+            let group = runtime
+                .asynchronous_groups
+                .iter()
+                .filter(|group| group.runtime_id == runtime_id)
+                .nth(view.asynchronous_task_selected)?;
+            Some((runtime_id, group.type_descriptor_id, super::runtime::RuntimeTaskKind::Asynchronous))
         }
-        KeyCode::Up => match view.focus {
-            RuntimeTasksFocus::Asynchronous => {
-                view.asynchronous_selected = view.asynchronous_selected.saturating_sub(1);
-            }
-            RuntimeTasksFocus::Blocking => {
-                view.blocking_selected = view.blocking_selected.saturating_sub(1);
-            }
-        },
-        KeyCode::Down => match view.focus {
-            RuntimeTasksFocus::Asynchronous => {
-                let count = runtime.map_or(0, |runtime| runtime.asynchronous_groups.len());
-                view.asynchronous_selected = advance_selection(view.asynchronous_selected, count);
-            }
-            RuntimeTasksFocus::Blocking => {
-                let count = runtime.map_or(0, |runtime| runtime.blocking_groups.len());
-                view.blocking_selected = advance_selection(view.blocking_selected, count);
-            }
-        },
-        KeyCode::Home => match view.focus {
-            RuntimeTasksFocus::Asynchronous => view.asynchronous_selected = 0,
-            RuntimeTasksFocus::Blocking => view.blocking_selected = 0,
-        },
-        KeyCode::End => match view.focus {
-            RuntimeTasksFocus::Asynchronous => {
-                view.asynchronous_selected = runtime.map_or(0, |runtime| runtime.asynchronous_groups.len().saturating_sub(1));
-            }
-            RuntimeTasksFocus::Blocking => {
-                view.blocking_selected = runtime.map_or(0, |runtime| runtime.blocking_groups.len().saturating_sub(1));
-            }
-        },
+        RuntimeWorkersFocus::Blocking => {
+            let group = runtime
+                .blocking_groups
+                .iter()
+                .filter(|group| group.runtime_id == runtime_id)
+                .nth(view.blocking_task_selected)?;
+            Some((runtime_id, group.type_descriptor_id, super::runtime::RuntimeTaskKind::Blocking))
+        }
+    }
+}
+
+pub(super) fn selected_runtime_task<'a>(
+    runtime: &'a super::data::RuntimeMonitorSnapshot,
+    view: &RuntimeViewState,
+) -> Option<&'a super::data::RuntimeTaskSummary> {
+    if !view.task_selected_explicitly {
+        return None;
+    }
+    let (runtime_id, descriptor, kind) = selected_runtime_group(runtime, view)?;
+    let mut tasks = runtime.tasks_for_group(runtime_id, descriptor, kind);
+    sort_runtime_tasks(&mut tasks, *view);
+    tasks.get(view.task_selected.min(tasks.len().saturating_sub(1))).copied()
+}
+
+pub(super) fn sort_runtime_tasks(tasks: &mut Vec<&super::data::RuntimeTaskSummary>, view: RuntimeViewState) {
+    let directed = |ordering: std::cmp::Ordering| {
+        if view.task_sort_descending { ordering.reverse() } else { ordering }
+    };
+    let optional = |left: Option<u64>, right: Option<u64>| match (left, right) {
+        (Some(left), Some(right)) => directed(left.cmp(&right)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    };
+    let spawn = |task: &super::data::RuntimeTaskSummary| match (task.origin_worker_id, task.worker_ids.first().copied()) {
+        (None, _) => "external".into(),
+        (Some(origin), Some(worker)) if origin == worker => format!("local w{worker}"),
+        (Some(origin), Some(worker)) => format!("w{origin} -> w{worker}"),
+        (Some(origin), None) => format!("w{origin} -> ?"),
+    };
+    tasks.sort_by(|left, right| {
+        let ordering = match view.task_sort {
+            RuntimeTaskRowSort::Task => directed(left.task_id.cmp(&right.task_id)),
+            RuntimeTaskRowSort::State => directed(left.state.cmp(&right.state)),
+            RuntimeTaskRowSort::Worker => optional(left.worker_ids.first().copied(), right.worker_ids.first().copied()),
+            RuntimeTaskRowSort::Spawn => directed(spawn(left).cmp(&spawn(right))),
+            RuntimeTaskRowSort::FutureSize => optional(left.future_size_bytes, right.future_size_bytes),
+            RuntimeTaskRowSort::Operations => directed(left.operations.cmp(&right.operations)),
+            RuntimeTaskRowSort::Polls => directed(left.metrics.poll_count.cmp(&right.metrics.poll_count)),
+            RuntimeTaskRowSort::MaximumPoll => optional(left.metrics.max_poll_nanos, right.metrics.max_poll_nanos),
+            RuntimeTaskRowSort::Queue => optional(left.blocking.queue_duration_nanos, right.blocking.queue_duration_nanos),
+            RuntimeTaskRowSort::Execution => optional(left.blocking.execution_duration_nanos, right.blocking.execution_duration_nanos),
+        };
+        ordering.then_with(|| left.task_id.cmp(&right.task_id))
+    });
+}
+
+fn handle_runtime_task_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
+    if code == KeyCode::Char('g') && view.group_selected_explicitly {
+        view.detail_mode = RuntimeDetailMode::Group;
+        view.group_histogram = view.group_histogram.toggle();
+        view.activity_scroll = 0;
+        return true;
+    }
+    let task = snapshot.and_then(|snapshot| selected_runtime_task(&snapshot.runtime, view));
+    if view.detail_mode == RuntimeDetailMode::Group && !view.group_selected_explicitly {
+        return false;
+    }
+    if view.detail_mode == RuntimeDetailMode::Events {
+        let events = snapshot.and_then(|snapshot| task.and_then(|task| snapshot.task_events.tasks.get(&(task.runtime_id, task.task_id))));
+        if code == KeyCode::Backspace && view.events.focus == TaskEventsFocus::Operations {
+            view.detail_mode = RuntimeDetailMode::Task;
+            return true;
+        }
+        return handle_task_events_key(code, &mut view.events, events);
+    }
+    if task.is_none() {
+        return false;
+    }
+    match code {
+        KeyCode::Char('t') => {
+            view.detail_mode = RuntimeDetailMode::Task;
+            view.task_histogram = view.task_histogram.toggle();
+            view.activity_scroll = 0;
+        }
+        KeyCode::Char('e') => {
+            view.detail_mode = RuntimeDetailMode::Events;
+            view.events.reset();
+        }
+        KeyCode::Left => view.activity_scroll = view.activity_scroll.saturating_sub(1),
+        KeyCode::Right => {
+            view.activity_scroll = view
+                .activity_scroll
+                .saturating_add(1)
+                .min(super::runtime_timeline::HISTOGRAM_BINS - 1);
+        }
         _ => return false,
     }
     true
@@ -2200,7 +2343,9 @@ fn handle_task_events_key(code: KeyCode, view: &mut TaskEventsViewState, task: O
             match view.focus {
                 TaskEventsFocus::Operations => {
                     view.operation_selected = next(view.operation_selected, task.map_or(0, |task| task.operations.len()));
-                    view.reset_event();
+                    view.event_selected = 0;
+                    view.stack_scroll = 0;
+                    view.stack_horizontal_scroll = 0;
                 }
                 TaskEventsFocus::Occurrences => {
                     view.event_selected = next(view.event_selected, operation.map_or(0, |operation| operation.occurrences().len()));
@@ -2209,9 +2354,7 @@ fn handle_task_events_key(code: KeyCode, view: &mut TaskEventsViewState, task: O
                 }
             }
         }
-        KeyCode::Enter => {
-            view.focus = TaskEventsFocus::Occurrences;
-        }
+        KeyCode::Enter => view.focus = TaskEventsFocus::Occurrences,
         KeyCode::Backspace => {
             view.focus = match view.focus {
                 TaskEventsFocus::Operations => return false,
@@ -2391,30 +2534,19 @@ mod tests {
     }
 
     #[test]
-    fn gamma_survivor_runtime_key_routing_and_histogram_scrolling() {
+    fn runtime_keys_switch_worker_category_and_section() {
         let mut view = RuntimeViewState::new();
-        assert!(handle_runtime_key(KeyCode::Char('e'), &mut view, None));
-        assert_eq!(view.focus, RuntimeFocus::Events);
-        view.events.focus = TaskEventsFocus::Operations;
+        assert!(handle_runtime_key(KeyCode::Char('b'), &mut view, None));
+        assert_eq!(view.focus, RuntimeWorkersFocus::Blocking);
+        assert!(handle_runtime_key(KeyCode::Enter, &mut view, None));
+        assert_eq!(view.section, RuntimeSectionFocus::TaskTypes);
+        assert!(handle_runtime_key(KeyCode::Char('a'), &mut view, None));
+        assert_eq!(view.focus, RuntimeWorkersFocus::Asynchronous);
+        assert!(handle_runtime_key(KeyCode::Enter, &mut view, None));
+        assert_eq!(view.section, RuntimeSectionFocus::GroupTasks);
         assert!(handle_runtime_key(KeyCode::Backspace, &mut view, None));
-        assert_eq!(view.focus, RuntimeFocus::Activity);
-        view.activity_scroll = 3;
-        assert!(handle_runtime_key(KeyCode::Left, &mut view, None));
-        assert_eq!(view.activity_scroll, 2);
-        assert!(handle_runtime_key(KeyCode::Right, &mut view, None));
-        assert_eq!(view.activity_scroll, 3);
-        view.activity_scroll = RUNTIME_HISTOGRAM_BINS - 1;
-        handle_runtime_key(KeyCode::Right, &mut view, None);
-        assert_eq!(view.activity_scroll, RUNTIME_HISTOGRAM_BINS - 1);
-        view.focus = RuntimeFocus::Workers;
-        view.activity_scroll = 3;
-        assert!(!handle_runtime_key(KeyCode::Left, &mut view, None));
-        assert!(!handle_runtime_key(KeyCode::Right, &mut view, None));
-        assert_eq!(view.activity_scroll, 3);
-        let before = view.task_histogram;
-        assert!(handle_runtime_key(KeyCode::Char('t'), &mut view, None));
-        assert_eq!(view.focus, RuntimeFocus::Activity);
-        assert_eq!(view.task_histogram, before.toggle());
+        assert_eq!(view.section, RuntimeSectionFocus::TaskTypes);
+        assert!(!handle_runtime_key(KeyCode::Char('x'), &mut view, None));
     }
 
     #[test]
@@ -2807,15 +2939,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             [3, 1, 1, 3]
         );
-        for (operation_selected, expected) in [(1, 0), (usize::MAX, 1)] {
-            let mut view = TaskEventsViewState {
-                focus: TaskEventsFocus::Occurrences,
-                operation_selected,
-                ..TaskEventsViewState::new()
-            };
-            assert!(handle_task_events_key(KeyCode::Down, &mut view, Some(task)));
-            assert_eq!(view.event_selected, expected);
-        }
     }
 
     fn descriptor(id: u8) -> MonitorDescriptor {
@@ -3008,9 +3131,13 @@ mod tests {
         thread.stack_scroll = 6;
         thread.reset();
         let mut runtime = RuntimeViewState::new();
-        runtime.focus = RuntimeFocus::Activity;
-        runtime.worker_selected = 2;
+        runtime.runtime_selected = 2;
+        runtime.focus = RuntimeWorkersFocus::Blocking;
+        runtime.section = RuntimeSectionFocus::GroupTasks;
+        runtime.blocking_selected = 2;
+        runtime.blocking_task_selected = 3;
         runtime.task_selected = 3;
+        runtime.task_selected_explicitly = true;
         runtime.activity_scroll = 4;
         runtime.reset();
         let mut io = IoViewState {
@@ -3260,7 +3387,7 @@ mod tests {
                 MonitorTab::Primitives,
                 MonitorTab::Threads,
                 MonitorTab::Runtime,
-                MonitorTab::Tasks,
+                MonitorTab::RuntimeTask,
                 MonitorTab::Io,
                 MonitorTab::Cache,
             ]
@@ -3271,9 +3398,9 @@ mod tests {
                 (2, MonitorTab::Primitives, MonitorTab::Heaps),
                 (3, MonitorTab::Threads, MonitorTab::Allocations),
                 (4, MonitorTab::Runtime, MonitorTab::Primitives),
-                (5, MonitorTab::Tasks, MonitorTab::Threads),
+                (5, MonitorTab::RuntimeTask, MonitorTab::Threads),
                 (6, MonitorTab::Io, MonitorTab::Runtime),
-                (7, MonitorTab::Cache, MonitorTab::Tasks),
+                (7, MonitorTab::Cache, MonitorTab::RuntimeTask),
                 (8, MonitorTab::Info, MonitorTab::Io),
             ]
         );
@@ -3549,7 +3676,7 @@ mod tests {
             (KeyCode::Char('4'), MonitorTab::Primitives),
             (KeyCode::Char('5'), MonitorTab::Threads),
             (KeyCode::Char('6'), MonitorTab::Runtime),
-            (KeyCode::Char('7'), MonitorTab::Tasks),
+            (KeyCode::Char('7'), MonitorTab::RuntimeTask),
             (KeyCode::Char('8'), MonitorTab::Io),
             (KeyCode::Char('9'), MonitorTab::Cache),
             (KeyCode::Char('1'), MonitorTab::Info),
@@ -3581,7 +3708,7 @@ mod tests {
             (MonitorTab::Allocations, KeyCode::Char(']')),
             (MonitorTab::Primitives, KeyCode::Char(']')),
             (MonitorTab::Threads, KeyCode::Char('f')),
-            (MonitorTab::Runtime, KeyCode::Char(']')),
+            (MonitorTab::Runtime, KeyCode::Char('b')),
             (MonitorTab::Io, KeyCode::Enter),
             (MonitorTab::Cache, KeyCode::Enter),
         ];
@@ -3594,7 +3721,7 @@ mod tests {
                 app.allocation_view.sort,
                 app.primitive_view.sort,
                 app.thread_view.stack_filter,
-                app.runtime_view.task_sort,
+                app.runtime_view.focus,
                 app.io_view.focus,
                 app.cache_view.focus,
                 connected_fields(&app.screen).unwrap().2,
@@ -3609,7 +3736,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Heaps,
@@ -3619,7 +3746,7 @@ mod tests {
                     AllocationSort::AllocatedBytes,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Allocations,
@@ -3629,7 +3756,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Objects,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Primitives,
@@ -3639,7 +3766,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::All,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Threads,
@@ -3649,7 +3776,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Executing,
+                    RuntimeWorkersFocus::Blocking,
                     IoFocus::Resources,
                     CacheFocus::Tiers,
                     MonitorTab::Runtime,
@@ -3659,7 +3786,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Operations,
                     CacheFocus::Tiers,
                     MonitorTab::Io,
@@ -3669,7 +3796,7 @@ mod tests {
                     AllocationSort::Allocations,
                     PrimitiveSort::Events,
                     AllocationStackFilter::Application,
-                    RuntimeTaskSort::Polls,
+                    RuntimeWorkersFocus::Asynchronous,
                     IoFocus::Resources,
                     CacheFocus::Operations,
                     MonitorTab::Cache,
@@ -4093,7 +4220,8 @@ mod tests {
         app.heap_view.focus = HeapFocus::Hotspots;
         app.allocation_view.selected = 3;
         app.thread_view.focus = ThreadFocus::Objects;
-        app.runtime_view.focus = RuntimeFocus::Activity;
+        app.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+        app.runtime_view.section = RuntimeSectionFocus::GroupTasks;
         app.io_view.focus = IoFocus::Operations;
         app.cache_view.focus = CacheFocus::Operations;
         app.finish_snapshot_capture(Ok(CaptureOutcome {
@@ -4874,146 +5002,52 @@ mod tests {
     }
 
     #[test]
-    fn runtime_activity_tab_always_changes_the_main_tab() {
-        for focus in [
-            RuntimeFocus::Workers,
-            RuntimeFocus::Tasks,
-            RuntimeFocus::Activity,
-            RuntimeFocus::Events,
-        ] {
-            let mut app = App::offline("capture.seismograph".into());
-            if let Screen::Offline { tab, .. } = &mut app.screen {
-                *tab = MonitorTab::Runtime;
-            }
-            app.runtime_view.focus = focus;
-            app.handle_key(KeyCode::Tab);
-            assert!(matches!(
-                app.screen,
-                Screen::Offline {
-                    tab: MonitorTab::Tasks,
-                    ..
-                }
-            ));
-            app.handle_key(KeyCode::BackTab);
-            assert!(matches!(
-                app.screen,
-                Screen::Offline {
-                    tab: MonitorTab::Runtime,
-                    ..
-                }
-            ));
-            assert_eq!(app.runtime_view.focus, focus);
+    fn runtime_and_runtime_task_tabs_preserve_runtime_selection() {
+        let mut app = App::offline("capture.seismograph".into());
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Runtime;
         }
-    }
-
-    #[test]
-    fn dashboard_keeps_main_tab_navigation_and_independent_chart_and_event_focus() {
-        let mut app = connected_app(MonitorTab::Runtime);
-        app.runtime_view.focus = RuntimeFocus::Tasks;
-        app.runtime_view.activity_scroll = 4;
-        app.handle_key(KeyCode::Char('e'));
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Events);
-        app.handle_key(KeyCode::Enter);
-        app.handle_key(KeyCode::Enter);
-        assert_eq!(app.runtime_view.events.focus, TaskEventsFocus::Occurrences);
-        app.handle_key(KeyCode::Char('f'));
-        app.handle_key(KeyCode::PageDown);
-        app.handle_key(KeyCode::Right);
-        assert_eq!(
-            (
-                app.runtime_view.events.stack_filter,
-                app.runtime_view.events.stack_scroll,
-                app.runtime_view.events.stack_horizontal_scroll
-            ),
-            (AllocationStackFilter::All, 5, 8)
-        );
+        app.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+        app.runtime_view.runtime_selected = 2;
         app.handle_key(KeyCode::Tab);
         assert!(matches!(
             app.screen,
-            Screen::Connected {
-                tab: MonitorTab::Tasks,
+            Screen::Offline {
+                tab: MonitorTab::RuntimeTask,
                 ..
             }
         ));
         app.handle_key(KeyCode::BackTab);
-        app.handle_key(KeyCode::Char('t'));
+        assert!(matches!(
+            app.screen,
+            Screen::Offline {
+                tab: MonitorTab::Runtime,
+                ..
+            }
+        ));
         assert_eq!(
-            (
-                app.runtime_view.focus,
-                app.runtime_view.task_histogram,
-                app.runtime_view.activity_scroll
-            ),
-            (RuntimeFocus::Activity, TaskHistogram::Ready, 4)
-        );
-        app.handle_key(KeyCode::Char('e'));
-        for _ in 0..3 {
-            app.handle_key(KeyCode::Backspace);
-        }
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Tasks);
-        app.handle_key(KeyCode::Down);
-        assert_eq!(
-            (
-                app.runtime_view.events.event_selected,
-                app.runtime_view.events.stack_scroll,
-                app.runtime_view.events.stack_horizontal_scroll
-            ),
-            (0, 0, 0)
+            (app.runtime_view.focus, app.runtime_view.runtime_selected),
+            (RuntimeWorkersFocus::Blocking, 2)
         );
     }
 
     #[test]
-    fn runtime_keys_cover_navigation_sorting_and_scroll() {
-        assert_eq!(RuntimeFocus::Events.dashboard(), None);
-        let mut selected = 2;
-        assert!(handle_info_key(KeyCode::Up, &mut selected, 3));
-        assert_eq!(selected, 1);
-        let mut activity = RuntimeViewState::new();
-        activity.focus = RuntimeFocus::Activity;
-        assert!(handle_runtime_key(KeyCode::Enter, &mut activity, None));
-        assert_eq!(activity.focus, RuntimeFocus::Events);
-
+    fn runtime_keys_cover_stable_panel_navigation() {
         let mut view = RuntimeViewState::new();
-        view.worker_selected = 2;
-        view.task_selected = 2;
-        view.activity_scroll = 6;
-        for key in [
-            KeyCode::Up,
-            KeyCode::Down,
-            KeyCode::Enter,
-            KeyCode::Up,
-            KeyCode::Down,
-            KeyCode::Enter,
-            KeyCode::Up,
-            KeyCode::Down,
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::PageUp,
-            KeyCode::PageDown,
-            KeyCode::Char('['),
-            KeyCode::Char(']'),
-            KeyCode::Char('r'),
-            KeyCode::Backspace,
-            KeyCode::Backspace,
-        ] {
-            assert!(handle_runtime_key(key, &mut view, None));
-        }
-        assert!(!handle_runtime_key(KeyCode::Backspace, &mut view, None));
+        assert!(handle_runtime_key(KeyCode::Char('b'), &mut view, None));
+        assert_eq!(view.focus, RuntimeWorkersFocus::Blocking);
+        assert!(handle_runtime_key(KeyCode::Enter, &mut view, None));
+        assert_eq!(view.section, RuntimeSectionFocus::TaskTypes);
+        assert!(handle_runtime_key(KeyCode::Enter, &mut view, None));
+        assert_eq!(view.section, RuntimeSectionFocus::GroupTasks);
+        assert!(handle_runtime_key(KeyCode::Backspace, &mut view, None));
+        assert_eq!(view.section, RuntimeSectionFocus::TaskTypes);
         assert!(!handle_runtime_key(KeyCode::Char('x'), &mut view, None));
-        assert!(!view.task_sort_descending);
 
         let original = RuntimeViewState::new();
         let mut unchanged = original;
         assert!(!handle_runtime_key(KeyCode::Tab, &mut unchanged, None));
         assert_eq!(unchanged, original);
-
-        let mut events = TaskEventsViewState::new();
-        assert!(!handle_task_events_key(KeyCode::Backspace, &mut events, None));
-        events.focus = TaskEventsFocus::Occurrences;
-        events.stack_scroll = 6;
-        events.stack_horizontal_scroll = 9;
-        assert!(handle_task_events_key(KeyCode::PageUp, &mut events, None));
-        assert!(handle_task_events_key(KeyCode::Left, &mut events, None));
-        assert_eq!((events.stack_scroll, events.stack_horizontal_scroll), (1, 1));
     }
 
     #[test]

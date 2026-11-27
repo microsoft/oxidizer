@@ -22,7 +22,6 @@ pub(super) struct ExecutionMetrics {
     pub(super) poll_count: u64,
     pub(super) median_poll_nanos: Option<u64>,
     pub(super) max_poll_nanos: Option<u64>,
-    pub(super) executing_fraction: Option<f64>,
     pub(super) polls: Vec<Interval>,
     pub(super) ready: Arc<[Interval]>,
     pub(super) poll_samples: Vec<u64>,
@@ -31,12 +30,11 @@ pub(super) struct ExecutionMetrics {
 }
 
 impl ExecutionMetrics {
-    pub(super) fn finish(&mut self, window: Option<TimeWindow>) {
+    pub(super) fn finish(&mut self, _window: Option<TimeWindow>) {
         self.poll_count = u64::try_from(self.poll_samples.len()).unwrap_or(u64::MAX);
         self.max_poll_nanos = self.poll_samples.iter().copied().max();
         self.median_poll_nanos = median_nanos(&mut self.poll_samples);
         self.polls = union(&self.polls);
-        self.executing_fraction = window.and_then(|window| occupancy(&self.polls, window));
     }
 }
 

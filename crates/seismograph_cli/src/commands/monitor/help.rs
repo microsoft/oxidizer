@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::app::{AllocatorBackend, App, CacheFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
+use super::app::{AllocatorBackend, App, CacheFocus, IoFocus, MonitorTab, PrimitiveFocus, Screen, ThreadFocus};
 use super::help_content::Section;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,10 +36,7 @@ pub(super) enum Context {
     ThreadParticipants,
     ThreadObjects,
     RuntimeWorkers,
-    RuntimeTasks,
-    RuntimeTaskGroups,
-    RuntimeActivity,
-    RuntimeEvents,
+    RuntimeTask,
     IoResources,
     IoOperations,
     CacheTiers,
@@ -122,13 +119,8 @@ impl App {
                 ThreadFocus::Participants => Context::ThreadParticipants,
                 ThreadFocus::Objects => Context::ThreadObjects,
             },
-            MonitorTab::Runtime => match self.runtime_view.focus {
-                RuntimeFocus::Workers => Context::RuntimeWorkers,
-                RuntimeFocus::Tasks => Context::RuntimeTasks,
-                RuntimeFocus::Activity => Context::RuntimeActivity,
-                RuntimeFocus::Events => Context::RuntimeEvents,
-            },
-            MonitorTab::Tasks => Context::RuntimeTaskGroups,
+            MonitorTab::Runtime => Context::RuntimeWorkers,
+            MonitorTab::RuntimeTask => Context::RuntimeTask,
             MonitorTab::Io => match self.io_view.focus {
                 IoFocus::Resources => Context::IoResources,
                 IoFocus::Operations => Context::IoOperations,
@@ -418,15 +410,8 @@ mod tests {
             app.thread_view.focus = focus;
             assert_eq!(app.panel_help_context(MonitorTab::Threads), expected);
         }
-        for (focus, expected) in [
-            (RuntimeFocus::Workers, Context::RuntimeWorkers),
-            (RuntimeFocus::Tasks, Context::RuntimeTasks),
-            (RuntimeFocus::Activity, Context::RuntimeActivity),
-            (RuntimeFocus::Events, Context::RuntimeEvents),
-        ] {
-            app.runtime_view.focus = focus;
-            assert_eq!(app.panel_help_context(MonitorTab::Runtime), expected);
-        }
+        assert_eq!(app.panel_help_context(MonitorTab::Runtime), Context::RuntimeWorkers);
+        assert_eq!(app.panel_help_context(MonitorTab::RuntimeTask), Context::RuntimeTask);
         for (focus, expected) in [
             (IoFocus::Resources, Context::IoResources),
             (IoFocus::Operations, Context::IoOperations),
@@ -569,7 +554,7 @@ mod tests {
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Runtime;
         }
-        app.runtime_view.focus = RuntimeFocus::Activity;
+        app.runtime_view.section = super::super::app::RuntimeSectionFocus::GroupTasks;
         app.open_filter_popup();
         for character in "crate:example".chars() {
             app.handle_key(KeyCode::Char(character));
@@ -583,7 +568,7 @@ mod tests {
             app.poll_filter();
             std::thread::yield_now();
         }
-        assert_eq!(app.help.as_ref().unwrap().context, Context::RuntimeActivity);
+        assert_eq!(app.help.as_ref().unwrap().context, Context::RuntimeWorkers);
         assert_eq!(app.help.as_ref().unwrap().document, before);
     }
 
@@ -742,7 +727,7 @@ mod tests {
 
     #[test]
     fn styled_layout_preserves_all_content_at_tiny_widths_and_separates_sections() {
-        let sections = super::super::help_content::document(Context::RuntimeTasks, false);
+        let sections = super::super::help_content::document(Context::RuntimeTask, false);
         for width in [1, 2, 3, 4, 5, 12, 80] {
             let lines = styled_lines(&sections, width);
             assert!(lines.iter().all(|line| line.width() <= width));
@@ -762,7 +747,7 @@ mod tests {
             assert_eq!(without_layout, expected);
         }
         let lines = styled_lines(&sections, 80);
-        let details_header = lines.iter().position(|line| line.to_string() == "TASK STATE VALUES").unwrap();
+        let details_header = lines.iter().position(|line| line.to_string() == "HELP CONTROLS").unwrap();
         assert!(lines[details_header - 1].spans.is_empty());
         assert!(lines[details_header - 2].spans.is_empty());
     }

@@ -8,8 +8,8 @@ use std::time::{Instant, SystemTime};
 use seismograph::recorder::event::{Event, EventKind};
 
 pub(super) use super::runtime::{
-    AsynchronousTaskGroupSummary, BlockingTaskGroupSummary, RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary,
-    RuntimeWorkerSummary, runtime_task_id,
+    AsynchronousTaskGroupSummary, BlockingTaskGroupSummary, RuntimeMonitorSnapshot, RuntimeTaskSummary, RuntimeWorkerSummary,
+    runtime_task_id,
 };
 
 pub(super) struct CapturedSnapshot {
@@ -79,7 +79,13 @@ impl RuntimeSnapshot {
             addresses,
         );
         progress(Phase::Runtime);
-        let runtime = RuntimeMonitorSnapshot::from_events(&decoded.events, runtime_source, addresses);
+        let mut runtime = RuntimeMonitorSnapshot::from_events(&decoded.events, runtime_source, addresses);
+        for task in runtime.workers.iter_mut().flat_map(|worker| &mut worker.tasks) {
+            task.operations = task_events
+                .tasks
+                .get(&(task.runtime_id, task.task_id))
+                .map_or(0, |events| events.inferred_events);
+        }
         progress(Phase::Io);
         let io = IoMonitorSnapshot::from_events(&decoded.events);
         progress(Phase::Cache);
@@ -3044,25 +3050,6 @@ mod tests {
             ]
         );
         assert_eq!(
-            [
-                RuntimeTaskSort::Task,
-                RuntimeTaskSort::FutureSize,
-                RuntimeTaskSort::Polls,
-                RuntimeTaskSort::Executing,
-                RuntimeTaskSort::MedianPoll,
-                RuntimeTaskSort::MaximumPoll,
-            ]
-            .map(|sort| (sort.next(), sort.previous(), sort.label())),
-            [
-                (RuntimeTaskSort::FutureSize, RuntimeTaskSort::MaximumPoll, "task"),
-                (RuntimeTaskSort::Polls, RuntimeTaskSort::Task, "future bytes"),
-                (RuntimeTaskSort::Executing, RuntimeTaskSort::FutureSize, "polls"),
-                (RuntimeTaskSort::MedianPoll, RuntimeTaskSort::Polls, "observed execution"),
-                (RuntimeTaskSort::MaximumPoll, RuntimeTaskSort::Executing, "median poll"),
-                (RuntimeTaskSort::Task, RuntimeTaskSort::MedianPoll, "maximum poll"),
-            ]
-        );
-        assert_eq!(
             (AllocationStackFilter::Application.toggle(), AllocationStackFilter::All.toggle()),
             (AllocationStackFilter::All, AllocationStackFilter::Application)
         );
@@ -3498,22 +3485,6 @@ mod tests {
         );
     }
 
-    fn runtime_task(task_id: u64) -> RuntimeTaskSummary {
-        RuntimeTaskSummary {
-            task_id,
-            runtime_id: 1,
-            state: "Unknown".into(),
-            metrics: ExecutionMetrics {
-                poll_count: task_id,
-                median_poll_nanos: Some(task_id * 2),
-                max_poll_nanos: Some(task_id * 3),
-                executing_fraction: Some(if task_id == 1 { 0.25 } else { 0.5 }),
-                ..ExecutionMetrics::default()
-            },
-            ..RuntimeTaskSummary::default()
-        }
-    }
-
     #[test]
     fn runtime_tasks_resolve_spawn_locations_from_the_runtime_source() {
         let runtime_id = RuntimeId::from_raw(1).unwrap();
@@ -3567,44 +3538,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "one table-driven test covers every sort key and both directions")]
     fn sorting_helpers_cover_every_column_and_direction() {
-        let worker = RuntimeWorkerSummary {
-            runtime_id: 1,
-            runtime_name: String::new(),
-            worker_id: Some(1),
-            role: String::new(),
-            state: String::new(),
-            thread_id: None,
-            current_task: None,
-            tasks: vec![runtime_task(1), runtime_task(2)],
-            ..RuntimeWorkerSummary::default()
-        };
-        for sort in [
-            RuntimeTaskSort::Task,
-            RuntimeTaskSort::Polls,
-            RuntimeTaskSort::Executing,
-            RuntimeTaskSort::MedianPoll,
-            RuntimeTaskSort::MaximumPoll,
-        ] {
-            assert_eq!(
-                worker
-                    .sorted_tasks(sort, false)
-                    .into_iter()
-                    .map(|task| task.task_id)
-                    .collect::<Vec<_>>(),
-                vec![1, 2]
-            );
-            assert_eq!(
-                worker
-                    .sorted_tasks(sort, true)
-                    .into_iter()
-                    .map(|task| task.task_id)
-                    .collect::<Vec<_>>(),
-                vec![2, 1]
-            );
-        }
-
         let operations = PrimitiveGroup {
             kind: PrimitiveKind::Arc,
             events: 0,
@@ -3779,45 +3713,6 @@ mod tests {
                 median_nanos(&mut [u64::MAX, 0]),
             ],
             [Some(u64::MAX), Some(u64::MAX), Some(u64::MAX - 1), Some(u64::MAX / 2)]
-        );
-    }
-
-    #[test]
-    fn median_sorts_keep_missing_samples_last_and_break_ties_by_task_id() {
-        let worker = RuntimeWorkerSummary {
-            tasks: [(6, None), (5, Some(10)), (4, Some(10)), (3, None), (2, Some(0)), (1, Some(20))]
-                .into_iter()
-                .map(|(task_id, median)| RuntimeTaskSummary {
-                    metrics: ExecutionMetrics {
-                        median_poll_nanos: median,
-                        max_poll_nanos: median,
-                        ..ExecutionMetrics::default()
-                    },
-                    ..runtime_task(task_id)
-                })
-                .collect(),
-            ..RuntimeWorkerSummary::default()
-        };
-        assert_eq!(
-            [
-                (RuntimeTaskSort::MedianPoll, false),
-                (RuntimeTaskSort::MedianPoll, true),
-                (RuntimeTaskSort::MaximumPoll, false),
-                (RuntimeTaskSort::MaximumPoll, true),
-            ]
-            .map(|(sort, descending)| {
-                worker
-                    .sorted_tasks(sort, descending)
-                    .into_iter()
-                    .map(|task| task.task_id)
-                    .collect::<Vec<_>>()
-            }),
-            [
-                vec![2, 4, 5, 1, 3, 6],
-                vec![1, 4, 5, 2, 3, 6],
-                vec![2, 4, 5, 1, 3, 6],
-                vec![1, 4, 5, 2, 3, 6],
-            ]
         );
     }
 
@@ -5158,21 +5053,6 @@ mod tests {
                 None
             )
         );
-        assert!((worker.metrics.executing_fraction.unwrap() - 600.0 / 850.0).abs() < f64::EPSILON);
-
-        let mut worker = worker.clone();
-        let mut other = task.clone();
-        other.task_id = 11;
-        other.metrics.max_poll_nanos = Some(20);
-        worker.tasks.push(other);
-        assert_eq!(
-            worker
-                .sorted_tasks(RuntimeTaskSort::MaximumPoll, true)
-                .into_iter()
-                .map(|task| task.task_id)
-                .collect::<Vec<_>>(),
-            vec![10, 11]
-        );
     }
 
     #[test]
@@ -5220,7 +5100,9 @@ mod tests {
         assert_eq!(
             snapshot.asynchronous_groups,
             vec![AsynchronousTaskGroupSummary {
+                runtime_id: 1,
                 type_descriptor_id: Some(42),
+                spawned_at: None,
                 outcomes: TaskOutcomeSummary {
                     tasks: 2,
                     completed: 1,
@@ -5229,17 +5111,22 @@ mod tests {
                     ..TaskOutcomeSummary::default()
                 },
                 polls: 2,
+                ready_time: DurationSummary::default(),
                 poll_time: DurationSummary {
                     samples: 2,
                     total_nanos: 80,
                     max_nanos: Some(50),
                 },
+                ready_samples: Vec::new(),
+                poll_samples: vec![30, 50],
             }]
         );
         assert_eq!(
             snapshot.blocking_groups,
             vec![BlockingTaskGroupSummary {
+                runtime_id: 1,
                 type_descriptor_id: Some(77),
+                spawned_at: None,
                 outcomes: TaskOutcomeSummary {
                     tasks: 2,
                     completed: 1,
@@ -5258,6 +5145,8 @@ mod tests {
                     total_nanos: 250,
                     max_nanos: Some(200),
                 },
+                queue_samples: vec![80, 100],
+                execution_samples: vec![200, 50],
             }]
         );
         assert_eq!(snapshot.unclassified_tasks, 1);

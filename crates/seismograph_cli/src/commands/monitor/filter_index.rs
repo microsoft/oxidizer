@@ -800,9 +800,6 @@ mod tests {
             (original.runtime.workers[0].window, 1, 1)
         );
         assert_eq!(worker.window, Some(TimeWindow { start: 80, end: 200 }));
-        for metrics in [&worker.metrics, &worker.tasks[0].metrics] {
-            assert!((metrics.executing_fraction.unwrap() - 1.0 / 6.0).abs() < f64::EPSILON);
-        }
     }
 
     #[test]

@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, RuntimeTasksFocus, Screen,
-    TaskEventsFocus, TaskHistogram, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeDetailMode, RuntimeSectionFocus,
+    RuntimeTaskRowSort, RuntimeTaskTypeSort, RuntimeWorkersFocus, Screen, TaskEventsFocus, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,12 +28,15 @@ pub(super) enum ListTarget {
     ThreadOperations,
     ThreadParticipants,
     ThreadObjects,
-    RuntimeWorkers,
-    RuntimeTasks,
-    RuntimeActivity,
-    RuntimeHistogram(TaskHistogram),
+    AsynchronousWorkersTab,
+    BlockingWorkersTab,
+    AsynchronousWorkers,
+    BlockingWorkers,
     AsynchronousTaskGroups,
     BlockingTaskGroups,
+    RuntimeTaskTypeHeader(RuntimeTaskTypeSort),
+    RuntimeGroupTasks,
+    RuntimeTaskHeader(RuntimeTaskRowSort),
     TaskOperations,
     TaskOccurrences,
     IoResources,
@@ -51,13 +54,14 @@ impl ListTarget {
             Self::Allocations => Some(MonitorTab::Allocations),
             Self::PrimitiveTypes | Self::PrimitiveOperations | Self::PrimitiveHotspots => Some(MonitorTab::Primitives),
             Self::Threads | Self::ThreadOperations | Self::ThreadParticipants | Self::ThreadObjects => Some(MonitorTab::Threads),
-            Self::RuntimeWorkers
-            | Self::RuntimeTasks
-            | Self::RuntimeActivity
-            | Self::RuntimeHistogram(_)
-            | Self::TaskOperations
-            | Self::TaskOccurrences => Some(MonitorTab::Runtime),
-            Self::AsynchronousTaskGroups | Self::BlockingTaskGroups => Some(MonitorTab::Tasks),
+            Self::AsynchronousWorkersTab | Self::BlockingWorkersTab | Self::AsynchronousWorkers | Self::BlockingWorkers => {
+                Some(MonitorTab::Runtime)
+            }
+            Self::AsynchronousTaskGroups | Self::BlockingTaskGroups | Self::RuntimeTaskTypeHeader(_) | Self::RuntimeGroupTasks => {
+                Some(MonitorTab::Runtime)
+            }
+            Self::RuntimeTaskHeader(_) => Some(MonitorTab::Runtime),
+            Self::TaskOperations | Self::TaskOccurrences => Some(MonitorTab::RuntimeTask),
             Self::IoResources | Self::IoOperations => Some(MonitorTab::Io),
             Self::CacheTiers | Self::CacheOperations => Some(MonitorTab::Cache),
         }
@@ -91,19 +95,6 @@ impl MouseRows {
                 .intersection(*self.frame.borrow());
             if !row.is_empty() {
                 rows.push((row, target, index));
-            }
-        }
-    }
-
-    /// Records only the bars and their baselines, not the intervening gaps.
-    pub(super) fn register_columns(&self, area: Rect, width: u16, gap: u16, count: usize, target: ListTarget) {
-        let mut rows = self.rows.borrow_mut();
-        let stride = width.saturating_add(gap).max(1);
-        for index in 0..usize::from(area.width.saturating_add(gap) / stride).min(count) {
-            let offset = u16::try_from(index).unwrap_or(u16::MAX).saturating_mul(stride);
-            let column = Rect::new(area.x.saturating_add(offset), area.y, width, area.height).intersection(*self.frame.borrow());
-            if !column.is_empty() {
-                rows.push((column, target, index));
             }
         }
     }
@@ -170,20 +161,99 @@ impl App {
             }
             return;
         }
-        if target == ListTarget::RuntimeActivity {
-            self.runtime_view.focus = RuntimeFocus::Activity;
-            self.runtime_view.activity_scroll = index;
+        if target == ListTarget::AsynchronousWorkersTab {
+            self.runtime_view.focus = RuntimeWorkersFocus::Asynchronous;
             return;
         }
-        if let ListTarget::RuntimeHistogram(histogram) = target {
-            self.runtime_view.focus = RuntimeFocus::Activity;
-            self.runtime_view.task_histogram = histogram;
+        if target == ListTarget::BlockingWorkersTab {
+            self.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+            return;
+        }
+        if let ListTarget::RuntimeTaskTypeHeader(sort) = target {
+            if self.runtime_view.task_type_sort == sort {
+                self.runtime_view.task_type_sort_descending = !self.runtime_view.task_type_sort_descending;
+            } else {
+                self.runtime_view.task_type_sort = sort;
+                self.runtime_view.task_type_sort_descending = true;
+            }
+            self.runtime_view.asynchronous_task_selected = 0;
+            self.runtime_view.blocking_task_selected = 0;
+            self.runtime_view.task_selected = 0;
+            self.runtime_view.task_selected_explicitly = false;
+            return;
+        }
+        if let ListTarget::RuntimeTaskHeader(sort) = target {
+            if self.runtime_view.task_sort == sort {
+                self.runtime_view.task_sort_descending = !self.runtime_view.task_sort_descending;
+            } else {
+                self.runtime_view.task_sort = sort;
+                self.runtime_view.task_sort_descending = false;
+            }
+            self.runtime_view.task_selected = 0;
+            self.runtime_view.task_selected_explicitly = false;
             return;
         }
         self.activate_selectable_mouse_row(target, index);
     }
 
     fn activate_selectable_mouse_row(&mut self, target: ListTarget, index: usize) {
+        match target {
+            ListTarget::AsynchronousWorkers => {
+                self.runtime_view.focus = RuntimeWorkersFocus::Asynchronous;
+                self.runtime_view.section = RuntimeSectionFocus::Workers;
+                self.runtime_view.asynchronous_selected = index;
+                return;
+            }
+            ListTarget::BlockingWorkers => {
+                self.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+                self.runtime_view.section = RuntimeSectionFocus::Workers;
+                self.runtime_view.blocking_selected = index;
+                return;
+            }
+            ListTarget::AsynchronousTaskGroups => {
+                self.runtime_view.focus = RuntimeWorkersFocus::Asynchronous;
+                self.runtime_view.section = RuntimeSectionFocus::TaskTypes;
+                self.runtime_view.detail_mode = RuntimeDetailMode::Group;
+                self.runtime_view.asynchronous_task_selected = index;
+                self.runtime_view.group_selected_explicitly = true;
+                self.runtime_view.task_selected = 0;
+                self.last_runtime_task_click = None;
+                return;
+            }
+            ListTarget::BlockingTaskGroups => {
+                self.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+                self.runtime_view.section = RuntimeSectionFocus::TaskTypes;
+                self.runtime_view.detail_mode = RuntimeDetailMode::Group;
+                self.runtime_view.blocking_task_selected = index;
+                self.runtime_view.group_selected_explicitly = true;
+                self.runtime_view.task_selected = 0;
+                self.last_runtime_task_click = None;
+                return;
+            }
+            ListTarget::RuntimeGroupTasks => {
+                self.runtime_view.section = RuntimeSectionFocus::GroupTasks;
+                self.runtime_view.detail_mode = RuntimeDetailMode::Task;
+                self.runtime_view.task_selected = index;
+                self.runtime_view.task_selected_explicitly = true;
+                let now = self.io.instant();
+                let double_click = self.last_runtime_task_click.is_some_and(|(previous, at)| {
+                    previous == index && now.saturating_duration_since(at) <= std::time::Duration::from_millis(500)
+                });
+                if double_click {
+                    self.last_runtime_task_click = None;
+                    match &mut self.screen {
+                        Screen::Connected { tab, .. } | Screen::Offline { tab, .. } => {
+                            *tab = MonitorTab::RuntimeTask;
+                        }
+                        Screen::Browse => {}
+                    }
+                } else {
+                    self.last_runtime_task_click = Some((index, now));
+                }
+                return;
+            }
+            _ => {}
+        }
         let selected = match target {
             ListTarget::HeapBuckets => {
                 self.heap_view.focus = HeapFocus::Buckets;
@@ -218,33 +288,6 @@ impl App {
                 self.thread_view.focus = ThreadFocus::Objects;
                 &mut self.thread_view.object_selected
             }
-            ListTarget::RuntimeWorkers => {
-                self.runtime_view.focus = RuntimeFocus::Workers;
-                &mut self.runtime_view.worker_selected
-            }
-            ListTarget::RuntimeTasks => {
-                self.runtime_view.focus = RuntimeFocus::Tasks;
-                &mut self.runtime_view.task_selected
-            }
-            ListTarget::AsynchronousTaskGroups => {
-                self.runtime_tasks_view.focus = RuntimeTasksFocus::Asynchronous;
-                &mut self.runtime_tasks_view.asynchronous_selected
-            }
-            ListTarget::BlockingTaskGroups => {
-                self.runtime_tasks_view.focus = RuntimeTasksFocus::Blocking;
-                &mut self.runtime_tasks_view.blocking_selected
-            }
-            ListTarget::TaskOperations | ListTarget::TaskOccurrences => {
-                self.runtime_view.focus = RuntimeFocus::Events;
-                let view = &mut self.runtime_view.events;
-                if target == ListTarget::TaskOperations {
-                    view.focus = TaskEventsFocus::Operations;
-                    &mut view.operation_selected
-                } else {
-                    view.focus = TaskEventsFocus::Occurrences;
-                    &mut view.event_selected
-                }
-            }
             ListTarget::IoResources => {
                 self.io_view.focus = IoFocus::Resources;
                 &mut self.io_view.resource_selected
@@ -266,8 +309,26 @@ impl App {
             | ListTarget::NativeClasses
             | ListTarget::NativeMemory
             | ListTarget::InfoThreads
-            | ListTarget::RuntimeActivity
-            | ListTarget::RuntimeHistogram(_) => return,
+            | ListTarget::AsynchronousWorkersTab
+            | ListTarget::BlockingWorkersTab
+            | ListTarget::AsynchronousWorkers
+            | ListTarget::BlockingWorkers
+            | ListTarget::AsynchronousTaskGroups
+            | ListTarget::BlockingTaskGroups
+            | ListTarget::RuntimeTaskTypeHeader(_)
+            | ListTarget::RuntimeGroupTasks => return,
+            ListTarget::RuntimeTaskHeader(_) => return,
+            ListTarget::TaskOperations | ListTarget::TaskOccurrences => {
+                self.runtime_view.detail_mode = RuntimeDetailMode::Events;
+                let view = &mut self.runtime_view.events;
+                if target == ListTarget::TaskOperations {
+                    view.focus = TaskEventsFocus::Operations;
+                    &mut view.operation_selected
+                } else {
+                    view.focus = TaskEventsFocus::Occurrences;
+                    &mut view.event_selected
+                }
+            }
         };
         // Reuse keyboard selection (including dependent selections and scroll resets),
         // then the exact same Enter action as keyboard navigation.
@@ -282,32 +343,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thin_histogram_columns_exclude_gaps_and_include_each_baseline() {
-        let rows = MouseRows::default();
-        let frame = Rect::new(0, 0, 30, 10);
-        rows.begin(frame);
-        rows.register_columns(Rect::new(2, 2, 23, 5), 1, 1, 12, ListTarget::RuntimeActivity);
-        for x in 0..30 {
-            let expected = ((2..=24).contains(&x) && x % 2 == 0).then(|| (ListTarget::RuntimeActivity, usize::from((x - 2) / 2)));
-            assert_eq!(rows.at(frame, x, 6), expected);
-        }
-        assert_eq!((rows.at(frame, 2, 1), rows.at(frame, 2, 7)), (None, None));
-    }
-
-    #[test]
     fn scrolled_rows_exclude_headers_borders_and_blank_space() {
         let rows = MouseRows::default();
         let frame = Rect::new(0, 0, 80, 30);
         rows.begin(frame);
-        rows.register(Rect::new(5, 4, 20, 8), 1, 10, 13, ListTarget::RuntimeTasks);
+        rows.register(Rect::new(5, 4, 20, 8), 1, 10, 13, ListTarget::AsynchronousTaskGroups);
         assert_eq!(
             (4..12).map(|y| rows.at(frame, 6, y)).collect::<Vec<_>>(),
             vec![
                 None,
                 None,
-                Some((ListTarget::RuntimeTasks, 10)),
-                Some((ListTarget::RuntimeTasks, 11)),
-                Some((ListTarget::RuntimeTasks, 12)),
+                Some((ListTarget::AsynchronousTaskGroups, 10)),
+                Some((ListTarget::AsynchronousTaskGroups, 11)),
+                Some((ListTarget::AsynchronousTaskGroups, 12)),
                 None,
                 None,
                 None,
@@ -343,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn mouse_dispatch_rejects_stale_tabs_and_selects_runtime_histograms() {
+    fn mouse_dispatch_rejects_stale_tabs_and_selects_runtime_categories() {
         let mut app = App::new();
         app.screen = Screen::Offline {
             path: "capture.seismograph".into(),
@@ -361,11 +409,17 @@ mod tests {
         }
         app.activate_mouse_row(ListTarget::InfoThreads, 7);
         assert_eq!(app.info_thread_selected, 0);
-        app.activate_mouse_row(ListTarget::RuntimeActivity, 7);
-        assert_eq!(app.runtime_view.activity_scroll, 7);
-        app.activate_mouse_row(ListTarget::RuntimeHistogram(TaskHistogram::Poll), 0);
-        assert_eq!(app.runtime_view.task_histogram, TaskHistogram::Poll);
-        assert_eq!(app.runtime_view.focus, RuntimeFocus::Activity);
+        app.activate_mouse_row(ListTarget::BlockingWorkersTab, 0);
+        assert_eq!(app.runtime_view.focus, RuntimeWorkersFocus::Blocking);
+        app.activate_mouse_row(ListTarget::AsynchronousTaskGroups, 2);
+        assert_eq!(
+            (
+                app.runtime_view.focus,
+                app.runtime_view.asynchronous_task_selected,
+                app.runtime_view.group_selected_explicitly,
+            ),
+            (RuntimeWorkersFocus::Asynchronous, 2, true)
+        );
         if let Screen::Offline { tab, .. } = &mut app.screen {
             *tab = MonitorTab::Info;
         }
@@ -382,12 +436,42 @@ mod tests {
         for target in [
             ListTarget::Applications,
             ListTarget::InfoThreads,
-            ListTarget::RuntimeActivity,
-            ListTarget::RuntimeHistogram(TaskHistogram::Poll),
+            ListTarget::AsynchronousWorkersTab,
+            ListTarget::BlockingWorkersTab,
         ] {
             app.activate_selectable_mouse_row(target, 9);
         }
 
         assert_eq!(app.selected, 7);
+    }
+
+    #[test]
+    fn double_clicking_a_runtime_task_opens_the_detail_tab() {
+        let mut app = App::offline("capture.seismograph".into());
+        if let Screen::Offline { tab, .. } = &mut app.screen {
+            *tab = MonitorTab::Runtime;
+        }
+
+        app.activate_selectable_mouse_row(ListTarget::RuntimeGroupTasks, 3);
+        assert!(matches!(
+            app.screen,
+            Screen::Offline {
+                tab: MonitorTab::Runtime,
+                ..
+            }
+        ));
+        app.activate_selectable_mouse_row(ListTarget::RuntimeGroupTasks, 3);
+
+        assert!(matches!(
+            app.screen,
+            Screen::Offline {
+                tab: MonitorTab::RuntimeTask,
+                ..
+            }
+        ));
+        assert_eq!(
+            (app.runtime_view.task_selected, app.runtime_view.task_selected_explicitly),
+            (3, true)
+        );
     }
 }

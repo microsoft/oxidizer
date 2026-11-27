@@ -611,7 +611,8 @@ mod tests {
     #[test]
     fn applying_filter_resets_panel_positions_but_preserves_display_options() {
         use super::super::app::{
-            CacheFocus, HeapFocus, IoFocus, PrimitiveFocus, RuntimeFocus, TaskEventsFocus, TaskHistogram, ThreadFocus,
+            CacheFocus, GroupHistogram, HeapFocus, IoFocus, PrimitiveFocus, RuntimeDetailMode, RuntimeSectionFocus, RuntimeWorkersFocus,
+            TaskEventsFocus, TaskHistogram, ThreadFocus,
         };
         use super::super::data::AllocationStackFilter;
 
@@ -622,7 +623,7 @@ mod tests {
         app.primitive_view.descending = false;
         app.primitive_view.stack_filter = AllocationStackFilter::All;
         app.thread_view.stack_filter = AllocationStackFilter::All;
-        app.runtime_view.task_sort_descending = false;
+        app.runtime_view.group_histogram = GroupHistogram::Secondary;
         app.runtime_view.task_histogram = TaskHistogram::Ready;
         app.runtime_view.events.stack_filter = AllocationStackFilter::All;
         let expected = (
@@ -651,9 +652,14 @@ mod tests {
         app.thread_view.participant_selected = 2;
         app.thread_view.object_selected = 1;
         app.thread_view.stack_scroll = 2;
-        app.runtime_view.focus = RuntimeFocus::Events;
-        app.runtime_view.worker_selected = 4;
+        app.runtime_view.focus = RuntimeWorkersFocus::Blocking;
+        app.runtime_view.section = RuntimeSectionFocus::GroupTasks;
+        app.runtime_view.detail_mode = RuntimeDetailMode::Events;
+        app.runtime_view.runtime_selected = 4;
+        app.runtime_view.blocking_selected = 4;
+        app.runtime_view.blocking_task_selected = 3;
         app.runtime_view.task_selected = 3;
+        app.runtime_view.task_selected_explicitly = true;
         app.runtime_view.activity_scroll = 2;
         app.runtime_view.events.focus = TaskEventsFocus::Occurrences;
         app.runtime_view.events.operation_selected = 4;
