@@ -68,8 +68,8 @@
 //! use std::num::NonZeroU64;
 //!
 //! use bytesbuf::mem::GlobalPool;
-//! use compressors::{DecompressorLimits, Resources};
 //! use compressors::format::Format;
+//! use compressors::{DecompressorLimits, Resources};
 //! use http_compression::Compression;
 //! let resources = Resources::new(GlobalPool::new());
 //! let client = Compression::client(resources.clone())
@@ -137,13 +137,15 @@ mod negotiate;
 pub(crate) const CONTENT_DIGEST_HEADER: &str = "content-digest";
 pub(crate) const REPR_DIGEST_HEADER: &str = "repr-digest";
 
-pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
-pub use error::CompressibleTypeError;
+#[cfg(test)]
+use std::sync::LazyLock;
 
 /// Supplies the one general-purpose resource set used by unit tests.
 #[cfg(test)]
-pub(crate) fn test_resources() -> &'static compressors::Resources {
-    static RESOURCES: std::sync::OnceLock<compressors::Resources> = std::sync::OnceLock::new();
-
-    RESOURCES.get_or_init(|| compressors::Resources::new(bytesbuf::mem::GlobalPool::new()))
-}
+use bytesbuf::mem::GlobalPool;
+pub use compression::{Client, Compression, CompressionLayer, DEFAULT_COMPRESSIBLE_TYPES, OriginalBody, Server, UnsupportedCompression};
+#[cfg(test)]
+use compressors::Resources;
+pub use error::CompressibleTypeError;
+#[cfg(test)]
+pub(crate) static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));

@@ -5,6 +5,9 @@
 
 #![cfg(feature = "test-util")]
 
+use std::sync::LazyLock;
+
+use bytesbuf::mem::GlobalPool;
 use fetch::fake::FakeHandler;
 use fetch::handlers::Buffering;
 use fetch::{HttpBodyBuilder, HttpClient, HttpError, HttpResponseBuilder};
@@ -15,11 +18,7 @@ use tick::Clock;
 
 testing_aids::init_tracing!();
 
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 #[test]
 fn gamma_survivor_buffering_preserves_stream_error() {
@@ -200,7 +199,7 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     let expected_tls = format!("{tls:?}");
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: memory().clone().into(),
+        memory: MEMORY.clone().into(),
         extras: (),
     };
     let builder = create_builder(

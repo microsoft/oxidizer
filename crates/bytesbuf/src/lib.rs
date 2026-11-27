@@ -610,6 +610,7 @@
 //! ```
 //! # #[cfg(feature = "std")] {
 //! use std::sync::LazyLock;
+//!
 //! use bytesbuf::mem::GlobalPool;
 //!
 //! static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);

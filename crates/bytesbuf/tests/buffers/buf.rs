@@ -43,7 +43,7 @@ fn _can_use_in_dyn_traits(mem: &dyn Memory) {
 fn seismograph_identity_follows_consumed_data() {
     use seismograph_io::Buffer;
 
-    let memory = crate::memory();
+    let memory = &*crate::MEMORY;
     let mut buffer = memory.reserve(16);
     buffer.put_slice(*b"abcd");
     let original_id = buffer.recording_state().id();
@@ -813,7 +813,7 @@ fn vectored_write_abort() {
 #[test]
 #[cfg(feature = "std")]
 fn from_view() {
-    let memory = crate::memory();
+    let memory = &*crate::MEMORY;
 
     let view1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
 

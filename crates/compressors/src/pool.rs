@@ -330,11 +330,12 @@ impl fmt::Debug for Pool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::RESOURCES;
 
     #[test]
     fn nov6_zero_capacity_resources_reuse_the_process_wide_disabled_pool() {
-        let first = crate::testing::resources().clone().with_pool_capacity(0);
-        let second = crate::testing::resources().clone().with_pool_capacity(0);
+        let first = RESOURCES.clone().with_pool_capacity(0);
+        let second = RESOURCES.clone().with_pool_capacity(0);
         assert!(Arc::ptr_eq(&first.pool().inner, &Pool::disabled().inner));
         assert!(Arc::ptr_eq(&first.pool().inner, &second.pool().inner));
         assert_eq!(first.pool().capacity(), 0);

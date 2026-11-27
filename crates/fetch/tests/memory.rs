@@ -5,7 +5,7 @@
 //!
 //! Explicit reservations use different ordinary sizes to distinguish access paths, not pool boundaries.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
@@ -18,11 +18,7 @@ use ohno::Labeled as _;
 use thread_aware::{Relocator, Thread, ThreadAware};
 use tick::Clock;
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: LazyLock<GlobalPool> = LazyLock::new(GlobalPool::new);
 
 /// Observes allocations without depending on any global memory-pool metrics.
 #[derive(Debug)]
@@ -60,7 +56,7 @@ impl Memory for ObservedMemory {
             generation: self.generation,
             relocated: self.relocated,
         });
-        memory().reserve(min_bytes)
+        MEMORY.reserve(min_bytes)
     }
 }
 

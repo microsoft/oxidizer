@@ -496,7 +496,7 @@ mod tests {
             }
             Ok(())
         });
-        let memory = crate::test_memory().clone().into();
+        let memory = crate::MEMORY.clone().into();
         let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
         let error = crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err();
         assert!(error.to_string().contains("invalid status information"), "{error}");
@@ -528,7 +528,7 @@ mod tests {
             }
             Ok(())
         });
-        let memory = crate::test_memory().clone().into();
+        let memory = crate::MEMORY.clone().into();
         let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
         for _ in 0..2 {
             crate::mocks::drive(writer.end_automatic_chunking()).unwrap();
@@ -559,12 +559,12 @@ mod tests {
                 drop(active);
                 Ok(())
             });
-            let memory = crate::test_memory().clone().into();
+            let memory = crate::MEMORY.clone().into();
             let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
             let error = if final_write {
                 crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err()
             } else {
-                crate::mocks::drive(writer.write_view(BytesView::copied_from_slice(b"data", &crate::test_memory().clone()))).unwrap_err()
+                crate::mocks::drive(writer.write_view(BytesView::copied_from_slice(b"data", &*crate::MEMORY))).unwrap_err()
             };
             let expected = if final_write {
                 "the final request write completion channel disconnected"
@@ -800,7 +800,7 @@ mod tests {
 
     #[test]
     fn a_successful_write_completion_advances_the_view_past_the_written_bytes() {
-        let buffer = BytesView::copied_from_slice(b"abcdef", &crate::test_memory().clone());
+        let buffer = BytesView::copied_from_slice(b"abcdef", &*crate::MEMORY);
 
         let remaining = write_completion(CompletionResult::WriteComplete {
             buffer: buffer.clone(),
@@ -822,7 +822,7 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
             requests.lock().unwrap().push(min_bytes);
-            crate::test_memory().clone().reserve(min_bytes)
+            crate::MEMORY.clone().reserve(min_bytes)
         }));
         let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), &memory);
 
@@ -846,7 +846,7 @@ mod tests {
         assert!(error.to_string().contains("unexpected completion for Write"));
 
         let error = write_completion(CompletionResult::WriteComplete {
-            buffer: BytesView::copied_from_slice(b"x", &crate::test_memory().clone()),
+            buffer: BytesView::copied_from_slice(b"x", &*crate::MEMORY),
             len: 0,
         })
         .unwrap_err();

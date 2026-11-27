@@ -26,7 +26,7 @@
 )]
 
 use std::num::{NonZeroU64, NonZeroUsize};
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use bolero::TypeGenerator;
 use bytesbuf::BytesView;
@@ -47,11 +47,7 @@ const MAX_COPIES: usize = 4;
 /// top of this, never instead of it.
 const HARD_OUTPUT_CEILING: u64 = 1 << 20;
 
-fn resources() -> &'static Resources {
-    static RESOURCES: OnceLock<Resources> = OnceLock::new();
-
-    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
-}
+static RESOURCES: LazyLock<Resources> = LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 /// What to do to a valid stream before decompressing it.
 #[derive(Debug, Clone, Copy, TypeGenerator)]
@@ -132,7 +128,7 @@ fn run(scenario: &Scenario) {
         return;
     };
 
-    let resources = resources();
+    let resources = &RESOURCES;
     let mut payload = scenario.payload.clone();
     payload.truncate(MAX_PAYLOAD);
 

@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_success() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data = BytesView::copied_from_slice(b"test data", &memory);
         let stream = futures::stream::iter(vec![Ok(data)]);
 
@@ -890,7 +890,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_exceeds() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data1 = BytesView::copied_from_slice(b"test data 1", &memory);
         let data2 = BytesView::copied_from_slice(b"test data 2", &memory);
         let stream = futures::stream::iter(vec![Ok(data1), Ok(data2)]);
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_stream_error() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
 
         let error_stream = futures::stream::iter(vec![
             Ok(BytesView::copied_from_slice(b"valid data", &memory)),
@@ -921,7 +921,7 @@ mod tests {
 
     #[test]
     fn collect_with_custom_limit() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data = BytesView::copied_from_slice(&[0u8; 1000], &memory);
         let stream = futures::stream::iter(vec![Ok(data)]);
 
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_default() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data = BytesView::copied_from_slice(b"test", &memory);
         let stream = futures::stream::iter(vec![Ok(data)]);
 
@@ -1016,7 +1016,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_at_boundary() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data = BytesView::copied_from_slice(&[0u8; 100], &memory);
         let stream = futures::stream::iter(vec![Ok(data)]);
 
@@ -1026,7 +1026,7 @@ mod tests {
 
     #[test]
     fn collect_with_limit_exceeds_boundary() {
-        let memory = crate::test_memory().clone();
+        let memory = crate::MEMORY.clone();
         let data = BytesView::copied_from_slice(&[0u8; 101], &memory);
         let stream = futures::stream::iter(vec![Ok(data)]);
 

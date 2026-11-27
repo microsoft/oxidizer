@@ -226,7 +226,7 @@ mod tests {
             unaware(Arc::clone(&reservations)),
             |reservations, min_bytes| {
                 reservations.lock().unwrap().push(min_bytes);
-                crate::test_memory().clone().reserve(min_bytes)
+                crate::MEMORY.clone().reserve(min_bytes)
             },
         ));
         let deps = WinHttpDeps::builder(clock(), memory, Sink::noop()).build();
@@ -348,7 +348,7 @@ mod tests {
     }
 
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder(clock(), crate::test_memory().clone(), Sink::noop())
+        WinHttpDeps::builder(clock(), crate::MEMORY.clone(), Sink::noop())
     }
 
     fn clock() -> Clock {
