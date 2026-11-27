@@ -7,8 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::future::poll_fn;
 use std::panic::{RefUnwindSafe, UnwindSafe, catch_unwind};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
 use arty_executor::{ExecutorBuilder, PanicPolicy, ShutdownCause, TaskBuilder, TaskObserver, TaskSet, discard_task_panic_payload};
@@ -20,6 +20,8 @@ use super::support::{DiscardCompletion, TaskBuilderExt as _};
 assert_not_impl_any!(TaskSet: Send, Sync);
 // Captured enrichment can contain user-defined interior state.
 assert_not_impl_any!(TaskBuilder<'static, std::future::Ready<()>>: UnwindSafe, RefUnwindSafe);
+
+static RECORDING: Mutex<()> = Mutex::new(());
 
 #[test]
 fn default_builder() {
@@ -89,6 +91,70 @@ fn current_identity_follows_each_poll_and_child_submission_without_monitoring() 
     assert!(child_polled.get());
     assert!(sibling_polled.get());
     assert!(!executor.has_tasks());
+}
+
+#[test]
+fn task_runs_without_false_cancellation_when_executor_monitoring_is_absent() {
+    let _recording = RECORDING.lock().unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration {
+        runtime_tasks: seismograph::recorder::Policy::all(false),
+        ..seismograph::recorder::Configuration::default()
+    });
+    let runtime = seismograph_runtime::Runtime::builder("executor-without-monitoring").build();
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    let queued = runtime.async_task(identity, 0).unwrap().enqueued(0);
+    let completed = Rc::new(Cell::new(false));
+    let observed = Rc::clone(&completed);
+    let mut executor = ExecutorBuilder::new().build();
+    executor
+        .tasks()
+        .task(identity, async move {
+            observed.set(true);
+        })
+        .monitor(queued)
+        .register(DiscardCompletion);
+
+    let _ = executor.execute_cycle();
+
+    let events = seismograph::recorder::current_thread_events().unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    assert!(completed.get());
+    assert!(!events.iter().any(|event| {
+        event.kind == seismograph::recorder::event::EventKind::TaskCanceled
+            && event.runtime().is_some_and(|payload| payload.subject_id == identity.id().get())
+    }));
+}
+
+#[test]
+fn task_created_without_monitoring_emits_poll_events_after_recording_starts() {
+    let _recording = RECORDING.lock().unwrap();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    let runtime = seismograph_runtime::Runtime::builder("late-recording").build();
+    let worker = runtime.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+    let identity = TaskIdentity::from_location(std::panic::Location::caller());
+    let mut executor = ExecutorBuilder::new().monitoring(worker).build();
+    executor.tasks().task(identity, std::future::ready(())).register(DiscardCompletion);
+    seismograph::recorder(seismograph::recorder::Configuration {
+        runtime_tasks: seismograph::recorder::Policy::all(false),
+        ..seismograph::recorder::Configuration::default()
+    });
+
+    let _ = executor.execute_cycle();
+
+    let kinds = seismograph::recorder::current_thread_events()
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.runtime().is_some_and(|payload| payload.subject_id == identity.id().get()))
+        .map(|event| event.kind)
+        .collect::<Vec<_>>();
+    seismograph::recorder(seismograph::recorder::Configuration::default());
+    assert_eq!(
+        kinds,
+        [
+            seismograph::recorder::event::EventKind::TaskPollStarted,
+            seismograph::recorder::event::EventKind::TaskPollFinished,
+        ]
+    );
 }
 
 #[test]

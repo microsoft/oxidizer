@@ -12,31 +12,38 @@ struct TaskData {
     identity: TaskIdentity,
     runtime: RuntimeId,
     backtrace: BacktraceCapture,
+    recorded: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct QueueData {
+    task: TaskData,
     parent: Option<TaskId>,
     body_size: u64,
     enqueued_at: Option<EventTimestamp>,
-    recorded: bool,
 }
 
 /// A blocking task created before it enters a queue.
 #[derive(Debug)]
 #[must_use = "enqueue the task handle or drop it without recording a lifecycle"]
 pub struct TaskHandle {
-    data: TaskData,
+    data: QueueData,
     origin: Option<WorkerId>,
 }
 
 impl TaskHandle {
     pub(crate) fn new(runtime: RuntimeId, backtrace: BacktraceCapture, identity: TaskIdentity, body_size: usize) -> Option<Self> {
         is_enabled(EventClass::RuntimeTask).then(|| Self {
-            data: TaskData {
-                identity,
-                runtime,
-                backtrace,
+            data: QueueData {
+                task: TaskData {
+                    identity,
+                    runtime,
+                    backtrace,
+                    recorded: false,
+                },
                 parent: None,
                 body_size: encode_body_size(body_size),
                 enqueued_at: None,
-                recorded: false,
             },
             origin: None,
         })
@@ -44,7 +51,7 @@ impl TaskHandle {
 
     /// Attaches queue context to this task.
     pub fn with_context(mut self, origin: Option<crate::WorkerOrigin>, parent: Option<TaskId>) -> Self {
-        self.origin = origin.and_then(|origin| origin.worker_for(self.data.runtime));
+        self.origin = origin.and_then(|origin| origin.worker_for(self.data.task.runtime));
         self.data.parent = parent;
         self
     }
@@ -54,20 +61,20 @@ impl TaskHandle {
         seismograph::record(EventClass::RuntimeTask, || {
             let enqueued_at = EventTimestamp::now();
             self.data.enqueued_at = Some(enqueued_at);
-            self.data.recorded = true;
+            self.data.task.recorded = true;
             Some(runtime_record(
                 enqueued_at,
                 EventKind::TaskEnqueued,
-                self.data.runtime,
+                self.data.task.runtime,
                 self.origin,
-                self.data.identity.id().get(),
+                self.data.task.identity.id().get(),
                 self.data.parent.map_or(0, TaskId::get),
-                self.data.identity.descriptor().get(),
+                self.data.task.identity.descriptor().get(),
                 queue_len,
-                self.data.backtrace,
+                self.data.task.backtrace,
             ))
         });
-        let cancel_on_drop = self.data.recorded;
+        let cancel_on_drop = self.data.task.recorded;
         QueuedTask {
             data: self.data,
             cancel_on_drop,
@@ -79,7 +86,7 @@ impl TaskHandle {
 #[derive(Debug)]
 #[must_use = "start the queued task or drop it to record cancellation"]
 pub struct QueuedTask {
-    data: TaskData,
+    data: QueueData,
     cancel_on_drop: bool,
 }
 
@@ -87,7 +94,7 @@ impl QueuedTask {
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
-        self.data.identity
+        self.data.task.identity
     }
 
     /// Starts execution on a blocking worker.
@@ -96,13 +103,13 @@ impl QueuedTask {
     ///
     /// Panics if `worker` belongs to another runtime.
     pub fn started(mut self, worker: &super::Worker) -> Execution {
-        worker.validate_runtime(self.data.runtime);
-        let started_at = (self.data.recorded && is_enabled(EventClass::RuntimeTask)).then(EventTimestamp::now);
+        worker.validate_runtime(self.data.task.runtime);
+        let started_at = (self.data.task.recorded && is_enabled(EventClass::RuntimeTask)).then(EventTimestamp::now);
         if let Some(started_at) = started_at {
             record(
                 started_at,
                 EventKind::TaskMaterialized,
-                self.data,
+                self.data.task,
                 Some(worker.id()),
                 self.data
                     .enqueued_at
@@ -113,10 +120,10 @@ impl QueuedTask {
         }
         self.cancel_on_drop = false;
         Execution {
-            data: self.data,
+            data: self.data.task,
             worker: worker.id(),
             started_at,
-            finish_on_drop: self.data.recorded,
+            finish_on_drop: self.data.task.recorded,
         }
     }
 }
@@ -125,7 +132,7 @@ impl Drop for QueuedTask {
     fn drop(&mut self) {
         if self.cancel_on_drop {
             record_finished(
-                self.data,
+                self.data.task,
                 None,
                 EventTimestamp::now(),
                 0,
@@ -154,17 +161,11 @@ impl Execution {
     }
 
     /// Records the task outcome and execution duration.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `worker` belongs to another runtime or did not start this task.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "the affine execution transition consumes its terminal outcome"
     )]
-    pub fn finished(mut self, worker: &super::Worker, outcome: TaskOutcome) {
-        worker.validate_runtime(self.data.runtime);
-        assert_eq!(worker.id(), self.worker, "finish a blocking task on the worker that started it");
+    pub fn finished(mut self, outcome: TaskOutcome) {
         let Some(started_at) = self.started_at else {
             self.finish_on_drop = false;
             return;
@@ -181,7 +182,7 @@ impl Execution {
         };
         record_finished(
             self.data,
-            Some(worker.id()),
+            Some(self.worker),
             finished_at,
             crate::runtime::duration_nanos(finished_at, started_at),
             &outcome,

@@ -81,10 +81,7 @@
 //! let queued = runtime.async_task(identity, 0).unwrap().enqueued(0);
 //! let task = queued.activated(&worker);
 //! let poll = task.poll_started(&worker);
-//! assert!(
-//!     poll.finished(&worker, Some(TaskOutcome::Completed))
-//!         .is_none()
-//! );
+//! assert!(poll.finished(Some(TaskOutcome::Completed)).is_none());
 //! ```
 
 pub mod asynchronous;

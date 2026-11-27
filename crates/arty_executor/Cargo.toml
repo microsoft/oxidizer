@@ -37,6 +37,7 @@ thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true, features = ["coarse-time"] }
 
 [dev-dependencies]
+seismograph = { path = "../seismograph", features = ["test-util"] }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }

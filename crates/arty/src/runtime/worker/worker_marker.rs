@@ -25,8 +25,10 @@ impl WorkerMarker {
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 // Public APIs cannot attach or inspect the worker-classification TLS marker.
 mod tests {
+    use performables::arc::Arc;
+
     use super::*;
-    use crate::runtime::worker::asynchronous;
+    use crate::runtime::worker::blocking;
 
     thread_local! {
         static OWNER: Owner = const { Owner };
@@ -52,8 +54,8 @@ mod tests {
             OWNER.with(|_| {});
             let monitoring = seismograph_runtime::Runtime::builder("")
                 .build()
-                .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
-            asynchronous::LocalWorker::attach(monitoring);
+                .blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
+            blocking::LocalWorker::install(Arc::new(()), monitoring);
         })
         .join()
         .unwrap();

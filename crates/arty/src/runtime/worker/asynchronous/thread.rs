@@ -162,9 +162,9 @@ impl ThreadEntry {
         let monitoring_worker = dispatcher
             .monitoring()
             .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
-        asynchronous::LocalWorker::attach(monitoring_worker.clone());
         let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
-        let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));
+        let (driver_host, driver_waker) =
+            RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));
         // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         signal.set_driver_waker(driver_waker);
 
@@ -175,7 +175,8 @@ impl ThreadEntry {
             io,
             clock,
             asynchronous::WorkerSignal(signal),
-            Some(monitoring_worker),
+            monitoring_worker,
+            driver_host,
             hook_registrations,
         );
 

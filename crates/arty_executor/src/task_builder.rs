@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::monitoring::TaskMonitoring;
 use crate::{ExecutorShared, TaskCompletion, TaskIdentity, TaskObserver};
 
 /// Configures a task before registering it with an executor.
@@ -18,7 +17,7 @@ pub struct TaskBuilder<'a, F, I = ()> {
     future: F,
     #[debug(skip)]
     observer: I,
-    monitoring: Option<TaskMonitoring>,
+    monitoring: Option<seismograph_runtime::asynchronous::QueuedTask>,
 }
 
 impl<'a, F> TaskBuilder<'a, F> {
@@ -49,8 +48,8 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
     }
 
     /// Attaches native Seismograph lifecycle state.
-    pub fn monitor(mut self, task: Option<seismograph_runtime::asynchronous::QueuedTask>) -> Self {
-        self.monitoring = task.map(TaskMonitoring::new);
+    pub fn monitor(mut self, task: seismograph_runtime::asynchronous::QueuedTask) -> Self {
+        self.monitoring = Some(task);
         self
     }
 }

@@ -20,7 +20,7 @@ pub(crate) struct LocalWorker {
 }
 
 impl LocalWorker {
-    pub(crate) fn attach(pool: PoolIdentity, monitoring: seismograph_runtime::blocking::Worker) {
+    pub(crate) fn install(pool: PoolIdentity, monitoring: seismograph_runtime::blocking::Worker) {
         worker::WorkerMarker::attach();
         CURRENT.with_borrow_mut(|current| {
             assert!(current.is_none(), "a blocking local worker is already attached to this thread");

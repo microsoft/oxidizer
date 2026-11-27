@@ -22,10 +22,6 @@ use crate::task::preparation::prepare_blocking;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
-fn attach_thread(pool: PoolIdentity, monitoring: seismograph_runtime::blocking::Worker) {
-    LocalWorker::attach(pool, monitoring);
-}
-
 /// Grow-only blocking pool that retains worker handles for deterministic shutdown.
 #[derive(derive_more::Debug)]
 #[debug(
@@ -116,8 +112,8 @@ impl JoinableThreadPool {
                 .spawn(move || {
                     let monitoring =
                         monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
-                    // #[gamma::skip(call_result.default, reason = "attach_thread returns unit; default_after preserves its side effects and unit result.")]
-                    attach_thread(identity, monitoring);
+                    // #[gamma::skip(call_result.default, reason = "install returns unit; default_after preserves its side effects and unit result.")]
+                    LocalWorker::install(identity, monitoring);
                     if let Some(attached_tx) = attached_tx {
                         attached_tx.send(()).expect("the blocking pool owns the worker startup receiver");
                     }
@@ -216,7 +212,7 @@ impl Worker {
     pub(crate) fn spawn_blocking<F, R>(
         &self,
         body: F,
-        monitoring: impl Into<Option<seismograph_runtime::blocking::TaskHandle>>,
+        monitoring: Option<seismograph_runtime::blocking::TaskHandle>,
         runtime: &seismograph_runtime::Runtime,
     ) -> JoinHandle<R>
     where
@@ -224,7 +220,7 @@ impl Worker {
         R: Send + 'static,
     {
         let runtime_shutdown = self.remote_results.shutdown().clone();
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring.into());
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, monitoring);
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -365,7 +361,7 @@ mod tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use super::{JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};
+    use super::{JoinableThreadPool, LocalWorker, Pool, Worker};
     use crate::runtime::config::RuntimeName;
     use crate::runtime::shutdown::Shutdown;
 
@@ -1031,7 +1027,7 @@ mod tests {
         let worker = Worker::new(Pool::new(RuntimeName::default(), None, Some(limit(1))), Shutdown::default());
         let monitoring = monitoring();
         let blocking = monitoring.blocking_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Blocking));
-        attach_thread(Arc::clone(&worker.pool.identity), blocking);
+        LocalWorker::install(Arc::clone(&worker.pool.identity), blocking);
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
         let rejected = worker.spawn_blocking(|| 7, None, &monitoring).join().unwrap_err();

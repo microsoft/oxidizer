@@ -13,7 +13,7 @@ use std::thread::ThreadId;
 use performables::sync::channel;
 use plurality::{Arc as PoolArc, MultiPool};
 
-use crate::monitoring::TaskMonitoring;
+use crate::monitoring::{Monitored, Unmonitored};
 use crate::wake::RemoteWake;
 use crate::{
     PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskIdentity, TaskObserver, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
@@ -142,7 +142,7 @@ impl ExecutorShared {
         identity: TaskIdentity,
         future: F,
         observer: I,
-        monitoring: Option<TaskMonitoring>,
+        monitoring: Option<seismograph_runtime::asynchronous::QueuedTask>,
         completion: T,
     ) where
         F: IntoFuture + 'static,
@@ -159,14 +159,25 @@ impl ExecutorShared {
             Self::reject_task::<F::IntoFuture, _, _>(&identity, observer, completion, self.shutdown().cause());
             return;
         }
-        self.register_task(allocate_task(
-            &self.inner.task_storage,
-            identity,
-            future,
-            observer,
-            monitoring,
-            completion,
-        ));
+        if let Some(monitoring) = monitoring {
+            self.register_task(allocate_task(
+                &self.inner.task_storage,
+                identity,
+                future,
+                observer,
+                Monitored::new(monitoring),
+                completion,
+            ));
+        } else {
+            self.register_task(allocate_task(
+                &self.inner.task_storage,
+                identity,
+                future,
+                observer,
+                Unmonitored,
+                completion,
+            ));
+        }
     }
 
     fn reject_task<F, T, I>(_identity: &TaskIdentity, observer: I, completion: T, cause: crate::ShutdownCause)

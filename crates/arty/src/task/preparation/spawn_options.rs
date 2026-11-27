@@ -67,6 +67,11 @@ impl SpawnOptions {
         let queued = self
             .task
             .map(|task| task.enqueued(u64::try_from(tasks.queue_len()).expect("task queue length fits the platform address space")));
-        task.monitor(queued).observe(instrumentation).register(completion);
+        let task = task.observe(instrumentation);
+        if let Some(queued) = queued {
+            task.monitor(queued).register(completion);
+        } else {
+            task.register(completion);
+        }
     }
 }

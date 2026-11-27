@@ -27,20 +27,21 @@ pub(crate) struct RuntimeDriverHost {
 }
 
 impl RuntimeDriverHost {
-    pub(crate) fn install(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Waker {
+    pub(crate) fn new(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> (Self, Waker) {
         let driver_host = runtime
             .clone()
             .driver_host(thread.clone(), owner_waker)
             .expect("the worker creates its I/O host on the thread identified by its own coordinate");
         let waker = driver_host.waker();
-        let host = Self {
-            runtime: runtime.to_owned(),
-            dispatcher,
-            thread: thread.to_owned(),
-            host: driver_host,
-        };
-        LocalWorker::install_driver_host(host);
-        waker
+        (
+            Self {
+                runtime: runtime.to_owned(),
+                dispatcher,
+                thread: thread.to_owned(),
+                host: driver_host,
+            },
+            waker,
+        )
     }
 
     pub(crate) fn uninstall() -> Self {
@@ -86,10 +87,14 @@ impl RuntimeDriverHost {
 mod tests {
     use std::error::Error as _;
 
+    use arty_executor::Executor;
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions};
     use thread_aware::{ThreadAware, ThreadBuilder};
+    use tick::runtime::InactiveClock;
 
     use super::*;
+    use crate::io::Io;
+    use crate::task::Context;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct TestContext {
@@ -138,10 +143,16 @@ mod tests {
 
     struct InstalledHost {
         installed: bool,
+        executor: Option<Executor>,
     }
 
     impl Drop for InstalledHost {
         fn drop(&mut self) {
+            LocalWorker::clear_scheduler();
+            if let Some(executor) = self.executor.take() {
+                executor.shutdown().trigger(arty_executor::ShutdownCause::default());
+                drop(executor);
+            }
             if self.installed {
                 drop(RuntimeDriverHost::uninstall());
             }
@@ -149,15 +160,26 @@ mod tests {
     }
 
     fn host() -> (IoRuntime, Thread, InstalledHost) {
-        let monitoring = seismograph_runtime::Runtime::builder("")
-            .build()
-            .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
-        LocalWorker::attach(monitoring);
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);
-        let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
-        (runtime, thread, InstalledHost { installed: true })
+        let monitoring = dispatcher
+            .monitoring()
+            .async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
+        let io = Io::new(runtime.clone(), dispatcher.clone(), thread.clone());
+        let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+        let context = Context::new(dispatcher.clone(), clock, io, thread.clone());
+        let executor = Executor::builder().thread(thread.clone()).build();
+        let (driver_host, _driver_waker) = RuntimeDriverHost::new(&runtime, dispatcher, &thread, Waker::noop().clone());
+        LocalWorker::install(monitoring, context, executor.tasks(), executor.shutdown(), driver_host, Vec::new());
+        (
+            runtime,
+            thread,
+            InstalledHost {
+                installed: true,
+                executor: Some(executor),
+            },
+        )
     }
 
     #[test]

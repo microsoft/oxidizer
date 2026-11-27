@@ -38,28 +38,12 @@ pub(crate) struct LocalWorker {
 }
 
 impl LocalWorker {
-    fn new(monitoring: seismograph_runtime::asynchronous::Worker) -> Self {
-        Self {
-            monitoring,
-            scheduler: None,
-            driver_host: None,
-            spawn_hooks: None,
-            panic_hooks: None,
-        }
-    }
-
-    pub(crate) fn attach(monitoring: seismograph_runtime::asynchronous::Worker) {
-        worker::WorkerMarker::attach();
-        CURRENT.with_borrow_mut(|current| {
-            assert!(current.is_none(), "a task local worker is already attached to this thread");
-            *current = Some(Self::new(monitoring));
-        });
-    }
-
-    pub(super) fn install_scheduler(
+    pub(crate) fn install(
+        monitoring: seismograph_runtime::asynchronous::Worker,
         context: Context,
         tasks: TaskSet,
         executor_shutdown: ExecutorShutdown,
+        driver_host: RuntimeDriverHost,
         hook_registrations: Vec<HookRegistration>,
     ) {
         let results = JoinHandlePool::new(context.dispatcher().shutdown().clone());
@@ -73,12 +57,25 @@ impl LocalWorker {
         };
         let spawn_hooks = LOCAL_SPAWN_HOOK.initialize();
         let panic_hooks = LOCAL_PANIC_HOOK.initialize();
-        Self::with_current_mut(|current| {
-            let current = current.expect("task worker startup attaches its local worker before installing the scheduler");
-            assert!(current.scheduler.is_none(), "a scheduler is already installed on this task worker");
-            current.scheduler = Some(scheduler);
-            current.spawn_hooks = Some(spawn_hooks);
-            current.panic_hooks = Some(panic_hooks);
+        CURRENT.with_borrow_mut(|current| {
+            if let Some(current) = current.as_ref() {
+                assert!(
+                    current.scheduler.is_none()
+                        && current.driver_host.is_none()
+                        && current.spawn_hooks.is_none()
+                        && current.panic_hooks.is_none(),
+                    "a task local worker is already installed on this thread"
+                );
+            } else {
+                worker::WorkerMarker::attach();
+            }
+            *current = Some(Self {
+                monitoring,
+                scheduler: Some(scheduler),
+                driver_host: Some(driver_host),
+                spawn_hooks: Some(spawn_hooks),
+                panic_hooks: Some(panic_hooks),
+            });
         });
         for hook in hook_registrations {
             Self::install_hook(hook, None);
@@ -177,7 +174,7 @@ impl LocalWorker {
         }
     }
 
-    pub(super) fn clear_scheduler() {
+    pub(crate) fn clear_scheduler() {
         let (scheduler, spawn_hooks, panic_hooks) = Self::with_current_mut(|current| {
             current
                 .map(|current| (current.scheduler.take(), current.spawn_hooks.take(), current.panic_hooks.take()))
@@ -186,17 +183,6 @@ impl LocalWorker {
         drop(scheduler);
         drop(spawn_hooks);
         drop(panic_hooks);
-    }
-
-    pub(crate) fn install_driver_host(driver_host: RuntimeDriverHost) {
-        Self::with_current_mut(|current| {
-            let current = current.expect("task worker startup attaches its local worker before installing the I/O driver host");
-            assert!(
-                current.driver_host.is_none(),
-                "an I/O driver host is already installed on this task worker"
-            );
-            current.driver_host = Some(driver_host);
-        });
     }
 
     pub(crate) fn uninstall_driver_host() -> RuntimeDriverHost {
@@ -447,16 +433,20 @@ mod tests {
                 ),
             );
             sources.lock().unwrap().clear();
-            let io = crate::io::Io::new(
-                arty_io_host::IoRuntime::new(observed::Sink::noop()),
-                dispatcher.clone(),
-                source.clone(),
-            );
+            let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
+            let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), source.clone());
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher.clone(), clock, io, source.clone());
             let executor = Executor::builder().thread(source.clone()).build();
-            LocalWorker::attach(monitoring_worker());
-            LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), vec![hook]);
+            let (driver_host, _driver_waker) = RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &source, Waker::noop().clone());
+            LocalWorker::install(
+                monitoring_worker(),
+                context,
+                executor.tasks(),
+                executor.shutdown(),
+                driver_host,
+                vec![hook],
+            );
 
             let _task = core.spawn_relocating(
                 &source,
@@ -517,18 +507,22 @@ mod tests {
                 shutdown,
             );
             let dispatcher = DispatcherClient::new(core);
-            let io = crate::io::Io::new(
-                arty_io_host::IoRuntime::new(observed::Sink::noop()),
-                dispatcher.clone(),
-                thread.clone(),
-            );
+            let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
+            let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher.clone(), clock, io, thread.clone());
             let executor = Executor::builder().thread(thread.clone()).build();
             let relocation_saw_no_observers = Arc::new(AtomicBool::new(false));
             let callbacks = Arc::new(AtomicUsize::new(0));
-            LocalWorker::attach(monitoring_worker());
-            LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
+            let (driver_host, _driver_waker) = RuntimeDriverHost::new(&io_runtime, dispatcher, &thread, Waker::noop().clone());
+            LocalWorker::install(
+                monitoring_worker(),
+                context,
+                executor.tasks(),
+                executor.shutdown(),
+                driver_host,
+                Vec::new(),
+            );
 
             assert!(LocalWorker::on_spawn(&thread, TaskIdentity::from_location(std::panic::Location::caller())).is_none());
             LocalWorker::install_hook(
@@ -576,16 +570,20 @@ mod tests {
                 shutdown.clone(),
             );
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
-            let io = crate::io::Io::new(
-                arty_io_host::IoRuntime::new(observed::Sink::noop()),
-                dispatcher.clone(),
-                thread.clone(),
-            );
+            let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
+            let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
             let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
             let context = Context::new(dispatcher.clone(), clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
-            LocalWorker::attach(monitoring_worker());
-            LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
+            let (driver_host, _driver_waker) = RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &thread, Waker::noop().clone());
+            LocalWorker::install(
+                monitoring_worker(),
+                context,
+                executor.tasks(),
+                executor.shutdown(),
+                driver_host,
+                Vec::new(),
+            );
 
             let mut join = std::pin::pin!(core.spawn_relocating(
                 &thread,

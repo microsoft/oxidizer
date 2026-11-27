@@ -86,11 +86,9 @@ where
         let task = self.task.take().expect("a blocking callback runs exactly once");
         let execution = self.execution.take();
         task.run(move |outcome| {
-            crate::runtime::worker::blocking::LocalWorker::with_monitoring(|worker| {
-                if let (Some(worker), Some(execution)) = (worker, execution) {
-                    execution.finished(worker, outcome);
-                }
-            });
+            if let Some(execution) = execution {
+                execution.finished(outcome);
+            }
         });
     }
 }

@@ -30,9 +30,9 @@ fn main() {
     let queued = async_queue.pop_front().expect("the task was queued above");
     let task = queued.activated(&async_worker);
     let poll = task.poll_started(&async_worker);
-    let task = poll.finished(&async_worker, None).expect("a pending poll returns its task");
+    let task = poll.finished(None).expect("a pending poll returns its task");
     let poll = task.poll_started(&async_worker);
-    assert!(poll.finished(&async_worker, Some(TaskOutcome::Completed)).is_none());
+    assert!(poll.finished(Some(TaskOutcome::Completed)).is_none());
 
     let mut blocking_queue = VecDeque::new();
     let blocking_identity = TaskIdentity::from_location(std::panic::Location::caller());
@@ -45,5 +45,5 @@ fn main() {
 
     let queued = blocking_queue.pop_front().expect("the task was queued above");
     let execution = queued.started(&blocking_worker);
-    execution.finished(&blocking_worker, TaskOutcome::Completed);
+    execution.finished(TaskOutcome::Completed);
 }

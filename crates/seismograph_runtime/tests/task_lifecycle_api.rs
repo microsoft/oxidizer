@@ -47,7 +47,7 @@ fn async_queue_activation_poll_and_outcome_preserve_the_supplied_context() {
         .enqueued(3);
     let task = queued.activated(&executor);
     let poll = task.poll_started(&executor);
-    assert!(poll.finished(&executor, Some(TaskOutcome::Completed)).is_none());
+    assert!(poll.finished(Some(TaskOutcome::Completed)).is_none());
 
     let events = runtime_events(runtime.id())
         .into_iter()
@@ -151,7 +151,7 @@ fn blocking_start_and_finish_record_queue_and_execution_context() {
         .with_context(Some(origin.origin()), None)
         .enqueued(5);
     let execution = queued.started(&executor);
-    execution.finished(&executor, TaskOutcome::Panicked);
+    execution.finished(TaskOutcome::Panicked);
 
     let events = runtime_events(runtime.id())
         .into_iter()

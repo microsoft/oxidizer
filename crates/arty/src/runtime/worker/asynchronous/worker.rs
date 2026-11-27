@@ -137,7 +137,8 @@ impl Worker {
         io: Io,
         clock: InactiveClock,
         signal: WorkerSignal,
-        monitoring: Option<seismograph_runtime::asynchronous::Worker>,
+        monitoring: seismograph_runtime::asynchronous::Worker,
+        driver_host: RuntimeDriverHost,
         hook_registrations: Vec<HookRegistration>,
     ) -> Self {
         let WorkerSignal(signal) = signal;
@@ -146,19 +147,24 @@ impl Worker {
         let (clock, clock_driver) = clock.activate(worker_waker.clone());
         let cycle_clock = SimpleClock::new_system();
 
-        let mut executor = Executor::builder()
+        let executor = Executor::builder()
             .owner_waker(worker_waker)
             .thread(thread.clone())
-            .panic_policy(arty_executor::PanicPolicy::dynamic(resolve_task_panic));
-        if let Some(monitoring) = monitoring {
-            executor = executor.monitoring(monitoring);
-        }
+            .panic_policy(arty_executor::PanicPolicy::dynamic(resolve_task_panic))
+            .monitoring(monitoring.clone());
         let executor = executor.build();
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
         let context = Context::new(dispatcher, clock, io, thread);
-        LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hook_registrations);
+        LocalWorker::install(
+            monitoring,
+            context.clone(),
+            tasks.clone(),
+            executor_shutdown,
+            driver_host,
+            hook_registrations,
+        );
 
         Self {
             state: Some(ReadyWorkerState {
@@ -920,10 +926,8 @@ mod tests {
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         let monitoring_worker = monitoring.async_worker(seismograph_runtime::WorkerMetadata::new(seismograph_runtime::WorkerRole::Core));
-        if !LocalWorker::is_current() {
-            LocalWorker::attach(monitoring_worker.clone());
-        }
-        let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
+        let (driver_host, driver_waker) =
+            crate::io::RuntimeDriverHost::new(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
         Worker::new(
@@ -933,7 +937,8 @@ mod tests {
             io,
             clock,
             WorkerSignal(signal),
-            Some(monitoring_worker),
+            monitoring_worker,
+            driver_host,
             Vec::new(),
         )
     }
