@@ -39,7 +39,7 @@ futures = { workspace = true, features = ["executor"] }
 observed_testing = { path = "../observed_testing" }
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
-tick.workspace = true
+tick = { path = "../tick" }
 
 # >>> anvil-managed: anvil-lints
 [lints]
