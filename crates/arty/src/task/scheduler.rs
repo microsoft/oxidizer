@@ -366,9 +366,8 @@ impl Scheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.binding
-            .blocking_worker
-            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
+        self.dispatcher
+            .spawn_blocking(&self.binding.blocking_worker, body, TaskIdentity::from_location(Location::caller()))
     }
 
     #[cfg(test)]

@@ -4,19 +4,20 @@
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::pin::Pin;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task;
 use std::thread::ThreadId;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use seismograph_runtime::asynchronous::TaskRequest;
+use seismograph_runtime::snapshot::{TaskActivityState, TaskCollection};
 use tick::{SimpleClock, Stopwatch};
 
 #[cfg(test)]
 use crate::TaskIdentity;
 use crate::{
-    CycleOutcome, ExecutorBuilder, ExecutorShared, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskHandle,
-    TaskList, TaskPtr, TaskSet, TaskState, TypeErasedTask, discard_task_panic_payload, executor_context,
+    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskPtr, TaskSet,
+    discard_task_panic_payload, executor_context,
 };
 
 /// An async task executor that runs on one thread.
@@ -77,50 +78,6 @@ pub struct Executor {
     stopwatch: Stopwatch,
 }
 
-/// Selects ordinary or observed polling at monomorphization, not inside the poll loop.
-trait ObservePoll: Copy {
-    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()>;
-}
-
-impl ObservePoll for () {
-    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
-        task.poll(shared)
-    }
-}
-
-impl ObservePoll for &dyn PollObserver {
-    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
-        let mut observed = 0_usize;
-        let mut in_callback = false;
-        let description = catch_unwind(AssertUnwindSafe(|| {
-            task.inspect(TaskState::Running, &mut |description| {
-                in_callback = true;
-                self.poll_started(description);
-                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                in_callback = false;
-                observed = observed.saturating_add(1);
-            });
-        }));
-        match description {
-            Ok(()) => {}
-            Err(panic) if in_callback => resume_unwind(panic),
-            Err(panic) => {
-                // Observer failures propagate; inspector and description-drop failures
-                // cancel the observation before the task itself is polled.
-                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
-                observed = 0;
-                discard_task_panic_payload(panic);
-                self.inspection_failed();
-            }
-        }
-        let outcome = task.poll(shared);
-        for _ in 0..observed {
-            self.poll_finished();
-        }
-        outcome
-    }
-}
-
 impl Executor {
     /// Starts building a new instance of [`Executor`].
     pub fn builder() -> ExecutorBuilder {
@@ -128,8 +85,13 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
-        let shared = ExecutorShared::new(owner_waker, thread_id, panic_policy);
+    pub(crate) fn new(
+        owner_waker: task::Waker,
+        thread_id: ThreadId,
+        panic_policy: crate::PanicPolicy,
+        monitoring: Option<seismograph_runtime::asynchronous::Worker>,
+    ) -> Self {
+        let shared = ExecutorShared::new_with_monitoring(owner_waker, thread_id, panic_policy, monitoring);
         let stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
         // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
@@ -179,100 +141,72 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
-        self.execute_cycle_with(())
-    }
-
-    /// Executes one cycle with runtime-owned poll observation.
-    ///
-    /// Select this entry point only when diagnostics are requested. The ordinary
-    /// [`execute_cycle`](Self::execute_cycle) path does not check or call an observer.
-    ///
-    /// # Panics
-    ///
-    /// Observer panics propagate. An inspector panic is reported through
-    /// [`PollObserver::inspection_failed`](crate::PollObserver::inspection_failed)
-    /// and does not prevent the affected task from running.
-    #[must_use]
-    pub fn execute_cycle_observed(&mut self, observer: &dyn PollObserver) -> CycleOutcome {
-        self.execute_cycle_with(observer)
-    }
-
-    fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
-        self.poll_active_tasks(observer);
+        self.poll_active_tasks();
         self.cancel_if_shutting_down();
         let outcome = self.cycle_outcome();
         self.finish_cycle();
         outcome
     }
 
-    /// Visits at most `limit` native live tasks between execution cycles.
-    ///
-    /// Tasks without a matching description still count toward the work limit.
-    /// Inspection does not consume wakes or move futures. The visitor must not
-    /// submit tasks or recursively enter this executor.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a zero limit, borrowed submission storage, or a panic
-    /// from a task inspector or the visitor.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "exclusive owner access prevents inspection from overlapping a poll"
-    )]
-    pub fn inspect<D: 'static>(&mut self, limit: usize, mut visitor: impl FnMut(&D)) -> Result<InspectionStatus, InspectionError> {
-        if limit == 0 {
-            return Err(InspectionError::InvalidLimit);
+    /// Answers one native Seismograph task collection request.
+    pub fn collect(&mut self, request: TaskRequest) {
+        if request.is_canceled() || self.shared.monitoring().is_none() {
+            return;
         }
+        let limit = request.limit();
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
-        let inspected = catch_unwind(AssertUnwindSafe(|| {
-            let mut count = 0;
+        let collected = catch_unwind(AssertUnwindSafe(|| {
+            let mut tasks = Vec::new();
             let mut visited = HashSet::new();
             let truncated = std::cell::Cell::new(false);
-            let mut inspect = |pointer: TaskPtr, state| {
-                // An unwinding observer can leave a runnable task linked in pending.
+            let mut collect = |pointer: TaskPtr, state| {
                 if !visited.insert(pointer) {
                     return ControlFlow::Continue(());
                 }
-                if count == limit {
+                if tasks.len() == limit {
                     truncated.set(true);
                     return ControlFlow::Break(());
                 }
-                count += 1;
                 // SAFETY: Each queue retains the task throughout this owner-only visit.
                 let task = unsafe { pointer.as_task() };
-                let state = if task.is_notified() { TaskState::Ready } else { state };
-                task.inspect(state, &mut |description| {
-                    if let Some(description) = description.downcast_ref::<D>() {
-                        visitor(description);
-                    }
-                });
+                let state = if task.is_notified() { TaskActivityState::Ready } else { state };
+                if let Some(task) = task.snapshot(state) {
+                    tasks.push(task);
+                }
                 ControlFlow::Continue(())
             };
-            // #[gamma::skip(try.propagate_to_unwrap, reason = "The owner-only submission queue has no mutable borrow at entry: all queue mutations release their borrows before callbacks, and inspection has not invoked a callback yet.")]
-            self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
-            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
-            if !truncated.get() {
-                let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
+            if self
+                .shared
+                .inspect_new_tasks(|handle| collect(handle.as_ptr(), TaskActivityState::Ready))
+                .is_err()
+            {
+                return (tasks, TaskCollection::Busy);
             }
-            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
             if !truncated.get() {
-                self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
+                let _traversal = self
+                    .active
+                    .iter()
+                    .try_for_each(|handle| collect(handle.as_ptr(), TaskActivityState::Ready));
             }
-            Ok(if truncated.get() {
-                InspectionStatus::Truncated
+            if !truncated.get() {
+                self.pending.inspect_until(|pointer| collect(pointer, TaskActivityState::Waiting));
+            }
+            let status = if truncated.get() {
+                TaskCollection::Truncated
             } else {
-                InspectionStatus::Complete
-            })
+                TaskCollection::Complete
+            };
+            (tasks, status)
         }));
-        match inspected {
-            Ok(result) => result,
+        match collected {
+            Ok((tasks, status)) => request.respond(tasks, status),
             Err(panic) => {
                 discard_task_panic_payload(panic);
-                Err(InspectionError::Panicked)
+                request.respond(Vec::new(), TaskCollection::Failed);
             }
         }
     }
@@ -333,7 +267,7 @@ impl Executor {
         }
     }
 
-    fn poll_active_tasks(&mut self, observer: impl ObservePoll) {
+    fn poll_active_tasks(&mut self) {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
@@ -357,7 +291,7 @@ impl Executor {
                 continue;
             }
 
-            let outcome = observer.poll(task, &self.shared);
+            let outcome = task.poll(&self.shared);
             let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
             match outcome {
                 task::Poll::Ready(()) => {
@@ -734,7 +668,7 @@ mod gamma_round2_tests {
         executor.accept_new_tasks();
         let completed = metric(&TASKS_COMPLETED);
         let dropped = metric(&TASKS_DROPPED);
-        executor.poll_active_tasks(());
+        executor.poll_active_tasks();
         assert_eq!(polled.get(), 0);
         assert!(executor.active.is_empty());
         assert!(executor.pending.is_empty());

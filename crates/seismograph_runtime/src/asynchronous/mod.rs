@@ -10,7 +10,7 @@
 mod task;
 mod worker;
 
-pub use task::{Poll, QueuedTask, Task};
+pub use task::{Poll, QueuedTask, Task, TaskHandle};
 pub use worker::Worker;
 
 pub use crate::task::TaskRequest;

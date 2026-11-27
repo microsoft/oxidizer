@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::Any;
 use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::fmt::Debug;
 use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::task;
 
@@ -15,8 +14,9 @@ use plurality::{Arc as PoolArc, MultiPool};
 
 #[cfg(test)]
 use crate::TaskHandle;
+use crate::monitoring::TaskMonitoring;
 use crate::{
-    ExecutorShared, ShutdownCause, TaskHandleSlot, TaskIdentity, TaskInstrumentation, TaskPanicPayload, TaskPtr, TaskState, WakeSignal,
+    ExecutorShared, ShutdownCause, TaskHandleSlot, TaskIdentity, TaskObserver, TaskPanicPayload, TaskPtr, WakeSignal,
     discard_task_panic_payload,
 };
 
@@ -38,7 +38,7 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
     /// Empty after the task completes or the executor abandons it during shutdown.
     ///
@@ -67,7 +67,7 @@ where
 // private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
 // final scheduling reference, so remote final reclamation cannot drop user state.
-// The optional instrumentation belongs to that payload and is also retired on the owner thread.
+// The optional observer belongs to that payload and is also retired on the owner thread.
 // The owner initializes the handle cell before publishing pointers. Remote owners read only
 // its immutable template through those pointers, never the cell's initialization state.
 unsafe impl<F, T, I> Send for Task<F, T, I>
@@ -75,7 +75,7 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
 }
 
@@ -85,7 +85,7 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
 }
 
@@ -94,15 +94,16 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
-    fn new(identity: TaskIdentity, future: F, result_target: T, instrumentation: I) -> Self {
+    fn new(identity: TaskIdentity, future: F, result_target: T, observer: I, monitoring: Option<TaskMonitoring>) -> Self {
         Self {
             payload: UnsafeCell::new(PayloadSlot::new(Payload {
                 identity,
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
-                instrumentation,
+                observer,
+                monitoring,
             })),
             wake_signal: OnceCell::new(),
             handle_slot: TaskHandleSlot::new(),
@@ -116,16 +117,17 @@ pub(crate) fn allocate_task<F, T, I>(
     pool: &MultiPool,
     identity: TaskIdentity,
     future: F,
-    instrumentation: I,
+    observer: I,
+    monitoring: Option<TaskMonitoring>,
     completion: T,
 ) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
 where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
-    pool.alloc_arc_pin_with(|| Task::new(identity, future, completion, instrumentation))
+    pool.alloc_arc_pin_with(|| Task::new(identity, future, completion, observer, monitoring))
 }
 
 #[cfg(test)]
@@ -152,6 +154,7 @@ pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
         TaskIdentity::from_location(std::panic::Location::caller()),
         std::future::pending::<()>(),
         (),
+        None,
         TestCompletion,
     ))
 }
@@ -161,14 +164,14 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
-    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
-        // SAFETY: Inspection runs on the owner between cycles or immediately before polling.
+    fn snapshot(&self, state: seismograph_runtime::snapshot::TaskActivityState) -> Option<seismograph_runtime::snapshot::Task> {
+        // SAFETY: Inspection runs on the owner between cycles.
         let payload = unsafe { &*self.payload.get() };
-        if let Some(payload) = payload.as_ref() {
-            payload.instrumentation.inspect(&payload.identity, state, visitor);
-        }
+        payload
+            .as_ref()
+            .and_then(|payload| payload.monitoring.as_ref().and_then(|monitoring| monitoring.describe(state)))
     }
 
     fn is_notified(&self) -> bool {
@@ -188,7 +191,12 @@ where
         // SAFETY: Our future and the task that owns it are always pinned by design, the
         // `Pin` annotation just gets lost in the type layering. We add it back here.
         let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
-        let instrumentation = &mut payload.instrumentation;
+        let observer = &mut payload.observer;
+        if let Some(worker) = shared.monitoring()
+            && let Some(monitoring) = payload.monitoring.take()
+        {
+            payload.monitoring = Some(monitoring.poll_started(worker));
+        }
 
         let wake_signal = self.pinned_wake_signal();
 
@@ -199,19 +207,36 @@ where
             let waker = unsafe { wake_signal.waker_ref() };
 
             let mut cx = task::Context::from_waker(&waker);
-            shared.with_current(payload.identity, || {
-                future_as_mut_pinned.as_mut().poll_instrumented(instrumentation, &mut cx)
-            })
+            shared.with_current(payload.identity, || future_as_mut_pinned.as_mut().poll_observed(observer, &mut cx))
         };
 
         match poll_result {
-            Err(panic) => Self::finish_panicked(payload_slot, wake_signal, panic, shared),
+            Err(panic) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished(worker, Some(seismograph_runtime::TaskOutcome::Panicked));
+                }
+                Self::finish_panicked(payload_slot, wake_signal, panic, shared)
+            }
             Ok(task::Poll::Ready(result)) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished(worker, Some(seismograph_runtime::TaskOutcome::Completed));
+                }
                 wake_signal.retire();
                 Self::finish_succeeded(payload_slot, result);
                 task::Poll::Ready(())
             }
-            Ok(task::Poll::Pending) => task::Poll::Pending,
+            Ok(task::Poll::Pending) => {
+                if let Some(worker) = shared.monitoring()
+                    && let Some(monitoring) = payload.monitoring.take()
+                {
+                    payload.monitoring = monitoring.poll_finished(worker, None);
+                }
+                task::Poll::Pending
+            }
         }
     }
 
@@ -260,7 +285,7 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
     fn pinned_wake_signal(self: Pin<&Self>) -> Pin<&WakeSignal> {
         let signal = self.get_ref().wake_signal.get().expect("task must be initialized before poll()");
@@ -276,8 +301,6 @@ where
     ) -> task::Poll<()> {
         let payload = payload_slot.as_mut().expect("a polled task retains its payload");
         let result_target = payload.result_target.take().expect("a polled task retains its result target");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.panicked(&payload.identity))).err();
-
         wake_signal.retire();
         // SAFETY: The future remains pinned with its task and is destroyed in place.
         if let Err(disposal) = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned() {
@@ -291,9 +314,6 @@ where
         }
         let cause = shutdown.is_triggered().then(|| shutdown.cause());
         result_target.panicked(panic, cause);
-        if let Some(panic) = instrumentation_panic {
-            resume_unwind(panic);
-        }
         task::Poll::Ready(())
     }
 
@@ -303,12 +323,8 @@ where
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.completed(&payload.identity))).err();
         Self::retire_payload(payload_slot);
         result_target.completed(result);
-        if let Some(panic) = instrumentation_panic {
-            resume_unwind(panic);
-        }
     }
 
     fn finish_cancelled(payload_slot: &mut PayloadSlot<Payload<F, T, I>>, cause: ShutdownCause) {
@@ -319,16 +335,12 @@ where
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
-        let instrumentation_panic = catch_unwind(AssertUnwindSafe(|| payload.instrumentation.cancelled(&payload.identity))).err();
         // SAFETY: The future is pinned with Task and destroyed in place.
         let future_panic = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err();
         Self::retire_payload(payload_slot);
         result_target.cancelled(cause);
         if let Some(panic) = future_panic {
             discard_task_panic_payload(panic);
-        }
-        if let Some(panic) = instrumentation_panic {
-            resume_unwind(panic);
         }
     }
 
@@ -368,7 +380,7 @@ where
     F: Future + 'static,
     F::Output: 'static,
     T: TaskCompletion<F::Output>,
-    I: TaskInstrumentation,
+    I: TaskObserver,
 {
     identity: TaskIdentity,
 
@@ -379,7 +391,9 @@ where
     result_target: Option<T>,
 
     /// The runtime-owned value that observes each top-level task poll.
-    instrumentation: I,
+    observer: I,
+
+    monitoring: Option<TaskMonitoring>,
 }
 
 #[derive(Debug)]
@@ -477,15 +491,15 @@ impl<F> FutureStorage<F> {
 }
 
 impl<F: Future> FutureStorage<F> {
-    fn poll_instrumented<I>(
+    fn poll_observed<I>(
         mut self: Pin<&mut Self>,
-        instrumentation: &mut I,
+        observer: &mut I,
         cx: &mut task::Context<'_>,
     ) -> Result<task::Poll<F::Output>, TaskPanicPayload>
     where
-        I: TaskInstrumentation,
+        I: TaskObserver,
     {
-        instrumentation.poll_start();
+        observer.poll_start();
         let outcome = {
             let mut projected = self.as_mut().project();
             let future = projected
@@ -495,11 +509,11 @@ impl<F: Future> FutureStorage<F> {
                 .expect("task future must not be polled after completion");
             catch_unwind(AssertUnwindSafe(|| future.poll(cx)))
         };
-        let instrumentation_outcome = match &outcome {
+        let observer_outcome = match &outcome {
             Ok(task::Poll::Pending) => task::Poll::Pending,
             Ok(task::Poll::Ready(_)) | Err(_) => task::Poll::Ready(()),
         };
-        instrumentation.poll_end(instrumentation_outcome);
+        observer.poll_end(observer_outcome);
         let outcome = outcome?;
         if outcome.is_ready() {
             self.destroy_pinned()?;
@@ -558,7 +572,7 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
 
     // Keep diagnostics last so they do not shift ordinary hot-path vtable entries.
-    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
+    fn snapshot(&self, state: seismograph_runtime::snapshot::TaskActivityState) -> Option<seismograph_runtime::snapshot::Task>;
 
     fn is_notified(&self) -> bool;
 }
@@ -579,6 +593,7 @@ mod tests {
             TaskIdentity::from_location(std::panic::Location::caller()),
             future,
             (),
+            None,
             TestCompletion,
         ));
         let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
@@ -631,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn uninitialized_task_can_be_aborted_and_has_no_description() {
+    fn uninitialized_task_can_be_aborted() {
         let pool = MultiPool::new();
         let drops = Arc::new(AtomicUsize::new(0));
         let handle = allocate_task(
@@ -639,16 +654,15 @@ mod tests {
             TaskIdentity::from_location(std::panic::Location::caller()),
             DropCountingFuture(Arc::clone(&drops)),
             (),
+            None,
             TestCompletion,
         );
         let task = handle.as_ref();
-        let mut descriptions = 0;
 
         task.abort(ShutdownCause::default());
-        task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
         drop(handle);
 
-        assert_eq!((drops.load(Ordering::Relaxed), descriptions), (1, 0));
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
         assert!(pool.is_empty());
     }
 
@@ -691,7 +705,7 @@ mod tests {
                 if completes {
                     storage
                         .as_mut()
-                        .poll_instrumented(&mut (), &mut Context::from_waker(Waker::noop()))
+                        .poll_observed(&mut (), &mut Context::from_waker(Waker::noop()))
                         .unwrap_err();
                 } else {
                     storage.as_mut().destroy_pinned().unwrap_err();

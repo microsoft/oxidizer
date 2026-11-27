@@ -41,8 +41,8 @@ fn async_queue_activation_poll_and_outcome_preserve_the_supplied_context() {
     let identity = TaskIdentity::from_location(std::panic::Location::caller());
 
     let queued = runtime
-        .enqueue_async(Some(origin.origin()), identity, Some(parent.id()), 64, 3)
-        .unwrap();
+        .async_task(Some(origin.origin()), identity, Some(parent.id()), 64)
+        .enqueued(3);
     let task = queued.activated(&executor);
     let poll = task.poll_started(&executor);
     assert!(poll.finished(&executor, Some(TaskOutcome::Completed)).is_none());
@@ -107,8 +107,8 @@ fn dropping_queued_tasks_records_implicit_cancellation() {
     let async_identity = TaskIdentity::from_location(std::panic::Location::caller());
     let blocking_identity = TaskIdentity::from_location(std::panic::Location::caller());
 
-    drop(runtime.enqueue_async(None, async_identity, None, 0, 7).unwrap());
-    drop(runtime.enqueue_blocking(None, blocking_identity, None, 0, 11).unwrap());
+    drop(runtime.async_task(None, async_identity, None, 0).enqueued(7));
+    drop(runtime.blocking_task(None, blocking_identity, None, 0).enqueued(11));
 
     let events = runtime_events(runtime.id());
     seismograph::recorder(Configuration::default());
@@ -139,7 +139,7 @@ fn blocking_start_and_finish_record_queue_and_execution_context() {
     let executor = runtime.blocking_worker(WorkerMetadata::new(WorkerRole::Blocking));
     let identity = TaskIdentity::from_location(std::panic::Location::caller());
 
-    let queued = runtime.enqueue_blocking(Some(origin.origin()), identity, None, 32, 5).unwrap();
+    let queued = runtime.blocking_task(Some(origin.origin()), identity, None, 32).enqueued(5);
     let execution = queued.started(&executor);
     execution.finished(&executor, TaskOutcome::Panicked);
 

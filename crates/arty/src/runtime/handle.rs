@@ -4,7 +4,6 @@
 use crate::runtime::builder::RuntimeBuilder;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::error::Error;
-use crate::runtime::monitoring::Monitoring;
 use crate::runtime::worker::WorkerJoiner;
 use crate::task::RuntimeScheduler;
 
@@ -57,7 +56,6 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
-    monitoring: Option<Monitoring>,
 }
 
 impl Runtime {
@@ -145,7 +143,7 @@ impl Runtime {
     #[cfg(all(test, not(miri)))]
     #[must_use]
     pub(crate) fn monitoring(&self) -> Option<seismograph_runtime::Runtime> {
-        self.monitoring.as_ref().map(Monitoring::runtime)
+        self.scheduler.dispatcher.monitoring().cloned()
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
@@ -213,19 +211,18 @@ impl Runtime {
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
         self.scheduler.dispatcher.release_retained_hooks();
-        let monitor_error = self.monitoring.take().and_then(|monitoring| monitoring.finish().err());
+        let monitor_error = self.scheduler.dispatcher.finish_monitoring().err();
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
         monitor_result(wait_error, monitor_error)
     }
 
-    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner, monitoring: Option<Monitoring>) -> Self {
+    pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner) -> Self {
         Self {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
-            monitoring,
         }
     }
 }
@@ -288,12 +285,12 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(thread::current().id()),
             Worker::new(
-                Pool::new(crate::runtime::config::RuntimeName::default(), None, None, None),
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
                 shutdown.clone(),
             ),
         );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new(), None));
-        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()), None);
+        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
         }));
@@ -326,7 +323,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None, None),
+                Pool::new(RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );
@@ -336,7 +333,7 @@ mod tests {
             Vec::new(),
             None,
         ));
-        let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]), None);
+        let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
     }
 
@@ -349,7 +346,7 @@ mod tests {
             Waker::noop().clone(),
             ThreadBuilder::default().build(worker.thread().id()),
             Worker::new(
-                Pool::new(RuntimeName::default(), None, None, None),
+                Pool::new(RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
             ),
         );
@@ -359,7 +356,7 @@ mod tests {
             Vec::new(),
             None,
         ));
-        let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]), None);
+        let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));
         dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());
 
         assert_eq!(runtime.stop().unwrap_err().to_string(), "first runtime failure");

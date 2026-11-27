@@ -41,7 +41,7 @@ fn build_with_processors(
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         prepared.shutdown,
         prepared.hook_registrations,
-        prepared.monitoring.as_ref().map(Monitoring::runtime),
+        prepared.monitoring,
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
     let mut join_handles = Vec::with_capacity(workers.len());
@@ -49,7 +49,7 @@ fn build_with_processors(
         join_handles.push(worker.activate(dispatcher_client.clone()));
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
-    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner, prepared.monitoring))
+    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
 }
 
 struct PreparedWorkers<W> {
@@ -86,7 +86,7 @@ fn prepare_workers<W>(
     let hook_registrations = hook_registrations.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
-    let blocking_pools = blocking_pool_policy.into_pools(name.clone(), monitoring.as_ref().map(Monitoring::runtime).as_ref())?;
+    let blocking_pools = blocking_pool_policy.into_pools(name.clone())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(start(asynchronous::StartOptions {
@@ -99,7 +99,6 @@ fn prepare_workers<W>(
             blocking_pools: blocking_pools.clone(),
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
-            monitoring: monitoring.as_ref().map(Monitoring::runtime),
             hook_registrations: hook_registrations.clone(),
         }));
     }

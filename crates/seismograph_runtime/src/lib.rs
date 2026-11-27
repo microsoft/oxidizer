@@ -14,10 +14,10 @@
 //! storage. A blocking worker reports lifecycle events only. Blocking tasks do
 //! not appear in task snapshots.
 //!
-//! Both task types use the shared `Task*` event kinds. The enqueue methods
-//! return lightweight tokens when runtime task recording is enabled. The caller
-//! moves each token through queue, execution, poll, and outcome transitions.
-//! Dropping an unfinished token records cancellation.
+//! Both task types use the shared `Task*` event kinds. Task methods return
+//! lightweight handles when runtime task recording is enabled. The caller
+//! records queue insertion and moves each token through execution, poll, and
+//! outcome transitions. Dropping an unfinished queued token records cancellation.
 //!
 //! [`TaskIdentity`] lets the runtime assign an identity before it records the
 //! task. Event recording retains only events emitted after recording starts.
@@ -35,7 +35,7 @@
 //! let runtime = Runtime::builder("primary").configured_workers(1).build();
 //! let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 //! let identity = TaskIdentity::from_location(std::panic::Location::caller());
-//! let queued = runtime.enqueue_async(None, identity, None, 0, 0).unwrap();
+//! let queued = runtime.async_task(None, identity, None, 0).enqueued(0);
 //! let task = queued.activated(&worker);
 //! let poll = task.poll_started(&worker);
 //! assert!(

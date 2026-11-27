@@ -10,5 +10,5 @@
 mod task;
 mod worker;
 
-pub use task::{Execution, QueuedTask};
+pub use task::{Execution, QueuedTask, TaskHandle};
 pub use worker::Worker;

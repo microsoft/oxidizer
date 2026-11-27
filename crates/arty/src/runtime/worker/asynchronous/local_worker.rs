@@ -97,8 +97,13 @@ impl LocalWorker {
         Self::with_scheduler(|current| current.and_then(|current| current.tasks().current()))
     }
 
+    pub(crate) fn with_monitoring<R>(run: impl FnOnce(Option<&seismograph_runtime::asynchronous::Worker>) -> R) -> R {
+        Self::with_current(|current| run(current.and_then(|current| current.monitoring.as_ref())))
+    }
+
+    #[cfg(test)]
     pub(crate) fn monitoring() -> Option<seismograph_runtime::asynchronous::Worker> {
-        Self::with_current(|current| current.and_then(|current| current.monitoring.clone()))
+        Self::with_monitoring(|worker| worker.cloned())
     }
 
     pub(crate) fn with_scheduler<R>(f: impl FnOnce(Option<&SchedulerContext>) -> R) -> R {
@@ -416,13 +421,13 @@ mod tests {
                         source_commands,
                         Waker::noop().clone(),
                         source.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                     ),
                     worker_endpoint(
                         destination_commands,
                         Waker::noop().clone(),
                         destination.clone(),
-                        Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
+                        Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                     ),
                 ])
                 .unwrap(),
@@ -493,7 +498,7 @@ mod tests {
                     commands,
                     Waker::noop().clone(),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                 )),
                 shutdown,
             );
@@ -552,7 +557,7 @@ mod tests {
                     commands,
                     Waker::from(std::sync::Arc::clone(&wakes)),
                     thread.clone(),
-                    Worker::new(Pool::new(RuntimeName::default(), None, None, None), shutdown.clone()),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                 )),
                 shutdown.clone(),
             );
@@ -646,7 +651,7 @@ mod tests {
                 commands,
                 Waker::noop().clone(),
                 thread.clone(),
-                Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
+                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
             )),
             Shutdown::default(),
         );

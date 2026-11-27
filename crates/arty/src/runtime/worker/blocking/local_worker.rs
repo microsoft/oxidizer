@@ -28,14 +28,16 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn monitoring() -> Option<seismograph_runtime::blocking::Worker> {
+    pub(crate) fn with_monitoring<R>(run: impl FnOnce(Option<&seismograph_runtime::blocking::Worker>) -> R) -> R {
+        let mut run = Some(run);
         CURRENT
             .try_with(|current| {
                 let current = current.borrow();
-                current.as_ref().and_then(|current| current.monitoring.clone())
+                run.take().expect("the local-worker callback is invoked exactly once")(
+                    current.as_ref().and_then(|current| current.monitoring.as_ref()),
+                )
             })
-            .ok()
-            .flatten()
+            .unwrap_or_else(|_| run.take().expect("the local-worker callback is invoked exactly once")(None))
     }
 
     fn owns_pool(&self, pool: &PoolIdentity) -> bool {

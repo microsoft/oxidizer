@@ -23,10 +23,10 @@ An asynchronous worker can provide snapshots of tasks in its native task
 storage. A blocking worker reports lifecycle events only. Blocking tasks do
 not appear in task snapshots.
 
-Both task types use the shared `Task*` event kinds. The enqueue methods
-return lightweight tokens when runtime task recording is enabled. The caller
-moves each token through queue, execution, poll, and outcome transitions.
-Dropping an unfinished token records cancellation.
+Both task types use the shared `Task*` event kinds. Task methods return
+lightweight handles when runtime task recording is enabled. The caller
+records queue insertion and moves each token through execution, poll, and
+outcome transitions. Dropping an unfinished queued token records cancellation.
 
 [`TaskIdentity`][__link5] lets the runtime assign an identity before it records the
 task. Event recording retains only events emitted after recording starts.
@@ -44,7 +44,7 @@ seismograph::recorder(seismograph::recorder::Configuration {
 let runtime = Runtime::builder("primary").configured_workers(1).build();
 let worker = runtime.async_worker(WorkerMetadata::new(WorkerRole::Core));
 let identity = TaskIdentity::from_location(std::panic::Location::caller());
-let queued = runtime.enqueue_async(None, identity, None, 0, 0).unwrap();
+let queued = runtime.async_task(None, identity, None, 0).enqueued(0);
 let task = queued.activated(&worker);
 let poll = task.poll_started(&worker);
 assert!(
@@ -59,10 +59,10 @@ assert!(
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb7vIJdZ0I5O8bU0HndxO0ld8b_naw_GxFrb8bcXdL1rgYTxxhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbr_Mfr0KyUy0b282lrahKA4kb8QXucZ_wMSsbT-EI43MyaMxhZIKCa3NlaXNtb2dyYXBoZTAuNi4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNi4w
  [__link0]: https://crates.io/crates/seismograph/0.6.0
- [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/struct.RuntimeBuilder.html
- [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/struct.Runtime.html
+ [__link1]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=RuntimeBuilder
+ [__link2]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=Runtime
  [__link3]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=asynchronous::Worker
  [__link4]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=blocking::Worker
  [__link5]: https://docs.rs/seismograph_runtime/0.6.0/seismograph_runtime/?search=TaskIdentity

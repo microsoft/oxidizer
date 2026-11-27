@@ -97,10 +97,6 @@ impl Runtime {
         self.owner.handle.id()
     }
 
-    pub(crate) fn lifecycle_backtraces(&self) -> BacktraceCapture {
-        self.owner.handle.control.lifecycle_backtraces
-    }
-
     /// Creates an asynchronous worker on the current thread.
     ///
     /// # Panics
@@ -127,63 +123,41 @@ impl Runtime {
         blocking::Worker::new(self.clone(), self.owner.handle.register_worker(metadata))
     }
 
-    /// Records an asynchronous task entering its initial queue.
-    ///
-    /// `origin` identifies the worker that submitted the task. `parent`
-    /// identifies its logical parent task. `queue_len` is the queue length
-    /// before the caller adds this task.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `origin` belongs to another runtime or `body_size` cannot be
-    /// encoded below `u64::MAX`.
+    /// Creates an asynchronous task handle before queue insertion.
     #[must_use]
-    pub fn enqueue_async(
+    pub fn async_task(
         &self,
         origin: Option<WorkerOrigin>,
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-        queue_len: u64,
-    ) -> Option<asynchronous::QueuedTask> {
-        asynchronous::QueuedTask::enqueue(
+    ) -> asynchronous::TaskHandle {
+        asynchronous::TaskHandle::new(
             self.id(),
             self.owner.handle.control.lifecycle_backtraces,
             origin,
             identity,
             parent,
             body_size,
-            queue_len,
         )
     }
 
-    /// Records a blocking task entering its queue.
-    ///
-    /// `origin` identifies the asynchronous or blocking worker that submitted
-    /// the task. `parent` identifies its logical parent task. `queue_len` is the
-    /// queue length before the caller adds this task.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `origin` belongs to another runtime or `body_size` cannot be
-    /// encoded below `u64::MAX`.
+    /// Creates a blocking task handle before queue insertion.
     #[must_use]
-    pub fn enqueue_blocking(
+    pub fn blocking_task(
         &self,
         origin: Option<WorkerOrigin>,
         identity: TaskIdentity,
         parent: Option<TaskId>,
         body_size: usize,
-        queue_len: u64,
-    ) -> Option<blocking::QueuedTask> {
-        blocking::QueuedTask::enqueue(
+    ) -> blocking::TaskHandle {
+        blocking::TaskHandle::new(
             self.id(),
             self.owner.handle.control.lifecycle_backtraces,
             origin,
             identity,
             parent,
             body_size,
-            queue_len,
         )
     }
 

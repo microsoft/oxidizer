@@ -244,9 +244,9 @@ impl RuntimeScheduler {
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        let worker = self.dispatcher.next_blocking_worker();
         self.dispatcher
-            .next_blocking_worker()
-            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
+            .spawn_blocking(&worker, body, TaskIdentity::from_location(Location::caller()))
     }
 }
 

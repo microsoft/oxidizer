@@ -11,7 +11,7 @@ use std::sync::Mutex;
 #[cfg(all(test, feature = "test-util"))]
 use tests::ScriptedCondvar as Condvar;
 
-use crate::runtime::monitoring::{BlockingJob, BlockingPoolMonitoring};
+use crate::runtime::monitoring::BlockingJob;
 use crate::runtime::worker::blocking::LocalWorker;
 
 pub(super) struct QueuedJob {
@@ -28,15 +28,13 @@ struct State {
 pub(super) struct Queue {
     state: Mutex<State>,
     ready: Condvar,
-    pub(super) monitoring: BlockingPoolMonitoring,
 }
 
 impl Queue {
-    pub(super) fn new(runtime: Option<seismograph_runtime::Runtime>) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             state: Mutex::new(State::default()),
             ready: Condvar::default(),
-            monitoring: BlockingPoolMonitoring::new(runtime),
         }
     }
 
@@ -67,24 +65,30 @@ impl Queue {
             #[cfg(all(test, feature = "test-util"))]
             self.ready.check_progress();
             if let Some(mut job) = state.jobs.pop_front() {
-                if let Some(worker) = LocalWorker::monitoring() {
-                    job.body.started_on(&worker);
-                }
+                LocalWorker::with_monitoring(|worker| {
+                    if let Some(worker) = worker {
+                        job.body.started_on(worker);
+                    }
+                });
                 return Some(job);
             }
             if state.stopped {
                 return None;
             }
-            if let Some(worker) = LocalWorker::monitoring() {
-                worker.parked();
-            }
+            LocalWorker::with_monitoring(|worker| {
+                if let Some(worker) = worker {
+                    worker.parked();
+                }
+            });
             state = self
                 .ready
                 .wait(state)
                 .expect("a blocking queue operation must not panic while holding its lock");
-            if let Some(worker) = LocalWorker::monitoring() {
-                worker.unparked();
-            }
+            LocalWorker::with_monitoring(|worker| {
+                if let Some(worker) = worker {
+                    worker.unparked();
+                }
+            });
         }
     }
 
@@ -99,7 +103,7 @@ impl Queue {
 
 impl Default for Queue {
     fn default() -> Self {
-        Self::new(None)
+        Self::new()
     }
 }
 

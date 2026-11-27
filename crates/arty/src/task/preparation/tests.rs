@@ -13,7 +13,6 @@ use arty_executor::{CycleOutcome, Executor};
 use futures::executor::block_on;
 
 use super::*;
-use crate::runtime::monitoring::BlockingTaskMonitoring;
 use crate::runtime::policy::WorkersPolicy;
 use crate::runtime::{Runtime, Shutdown};
 use crate::task::handle::JoinHandlePool;
@@ -66,11 +65,6 @@ fn remote_factory_defers_future_creation_until_polling() {
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
     let (_runtime, cx) = test_context();
     factory.register(cx, &executor.tasks());
-    let mut identities = Vec::new();
-    executor
-        .inspect(1, |identity: &seismograph_runtime::TaskIdentity| identities.push(*identity))
-        .unwrap();
-    assert_eq!(identities, [identity]);
     let before_poll = invoked.load(Ordering::Relaxed);
     run_to_completion(&mut executor);
     let result = block_on(handle).unwrap();
@@ -94,12 +88,7 @@ impl Wake for PanicWake {
 #[test]
 fn blocking_task_delivers_its_result() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(
-        &result_pool,
-        || 42,
-        BlockingTaskMonitoring::default(),
-        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-    );
+    let (task, handle) = prepare_blocking(&result_pool, || 42, None);
     task.run(false).unwrap();
 
     assert_eq!(block_on(handle).unwrap(), 42);
@@ -109,12 +98,7 @@ fn blocking_task_delivers_its_result() {
 #[test]
 fn blocking_panic_is_delivered_to_joiner() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(
-        &result_pool,
-        || panic!("blocking task"),
-        BlockingTaskMonitoring::default(),
-        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-    );
+    let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"), None);
     task.run(false).unwrap();
 
     assert!(block_on(handle).unwrap_err().is_panic());
@@ -140,12 +124,7 @@ fn discarded_preparation_reports_the_shutdown_cause() {
     let shutdown = Shutdown::default();
     shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
     let result_pool = JoinHandlePool::new(shutdown);
-    let (task, handle) = prepare_blocking(
-        &result_pool,
-        || 42,
-        BlockingTaskMonitoring::default(),
-        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-    );
+    let (task, handle) = prepare_blocking(&result_pool, || 42, None);
     drop(task);
     let mut handle = pin!(handle);
     let mut context = PollContext::from_waker(Waker::noop());
@@ -183,12 +162,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 
     let capture = PanicOnDrop;
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(
-        &result_pool,
-        move || drop(capture),
-        BlockingTaskMonitoring::default(),
-        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-    );
+    let (task, handle) = prepare_blocking(&result_pool, move || drop(capture), None);
     catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     assert!(block_on(handle).unwrap_err().is_shutdown());
 }
@@ -196,12 +170,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 #[test]
 fn discarded_blocking_task_contains_join_waker_panic() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(
-        &result_pool,
-        || 42,
-        BlockingTaskMonitoring::default(),
-        seismograph_runtime::TaskIdentity::from_location(std::panic::Location::caller()),
-    );
+    let (task, handle) = prepare_blocking(&result_pool, || 42, None);
     let mut handle = pin!(handle);
     let waker = Waker::from(Arc::new(PanicWake));
     assert!(handle.as_mut().poll(&mut PollContext::from_waker(&waker)).is_pending());

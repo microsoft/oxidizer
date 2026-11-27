@@ -16,6 +16,7 @@ use seismograph_runtime::TaskIdentity;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::hook::{HookRegistration, RetainedHooks, TaskObservers, TaskSpawn};
+use crate::runtime::monitoring::{MonitorHandle, Monitoring};
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
@@ -72,7 +73,7 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
-    monitoring: Option<seismograph_runtime::Runtime>,
+    monitoring: Option<Monitoring>,
 }
 
 impl DispatcherCore {
@@ -80,7 +81,7 @@ impl DispatcherCore {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         shutdown: Shutdown,
         hook_registrations: Vec<HookRegistration>,
-        monitoring: Option<seismograph_runtime::Runtime>,
+        monitoring: Option<Monitoring>,
     ) -> Arc<Self> {
         // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
@@ -132,9 +133,17 @@ impl DispatcherCore {
             .expect("bootstrap registers providers before their workers can stop");
     }
 
+    pub(crate) fn monitoring(&self) -> MonitorHandle<'_> {
+        self.monitoring.as_ref().map(Monitoring::runtime)
+    }
+
+    pub(crate) fn finish_monitoring(&self) -> Result<(), Error> {
+        self.monitoring.as_ref().map_or(Ok(()), Monitoring::finish)
+    }
+
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
-        if let Some(runtime) = &self.monitoring {
+        if let Some(runtime) = self.monitoring() {
             runtime.stopping();
         }
         let cause = self.shutdown().cause().unwrap_or_default();
@@ -325,6 +334,23 @@ impl DispatcherCore {
         )
     }
 
+    pub(crate) fn spawn_blocking<F, R>(&self, worker: &Worker, body: F, identity: TaskIdentity) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let runtime = self.monitoring();
+        let monitoring = runtime.map(|runtime| {
+            runtime.blocking_task(
+                crate::runtime::monitoring::current_origin(),
+                identity,
+                LocalWorker::current_task().map(TaskIdentity::id),
+                std::mem::size_of::<F>(),
+            )
+        });
+        worker.spawn_blocking(body, monitoring, runtime)
+    }
+
     pub(crate) fn wake_worker(&self, worker_index: WorkerIndex) {
         self.worker_endpoints
             .get(usize::from(worker_index))
@@ -375,6 +401,7 @@ impl DispatcherCore {
             drop(future_factory);
             return join_handle;
         }
+        let options = options.monitor(self.monitoring());
         let target = &self.worker_endpoints[usize::from(worker_index)].thread;
         let identity = options.identity();
         let options = options.observed_by(self.submission_observers(target, identity));
@@ -468,7 +495,7 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None, None), Shutdown::default()),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
             },
             command_rx,
         )
@@ -777,7 +804,12 @@ mod tests {
             .build();
         let threads = test_threads(1);
         let (worker, _worker_rx) = endpoint(&threads[0]);
-        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new(), Some(runtime.clone()));
+        let core = DispatcherCore::new(
+            NonEmpty::new(worker),
+            Shutdown::default(),
+            Vec::new(),
+            Some(crate::runtime::monitoring::Monitoring::from_runtime(runtime.clone())),
+        );
         let client = DispatcherClient::new(core);
 
         client.stop(ShutdownCause::default());

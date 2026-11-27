@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::Mutex;
+
 use seismograph::monitor::Monitor;
 use seismograph_runtime::Runtime;
 
@@ -14,7 +16,7 @@ thread_local! {
 
 #[derive(Debug)]
 pub(crate) struct Monitoring {
-    monitor: Monitor,
+    monitor: Mutex<Option<Monitor>>,
     runtime: Runtime,
 }
 
@@ -36,19 +38,30 @@ impl Monitoring {
             .unwrap_or_else(|| seismograph_protocol::io::MonitorIo::new_mocked().0));
         let monitor = builder.start().map_err(Error::new)?;
         let runtime = Runtime::builder(config.name.as_str()).configured_workers(workers).build();
-        Ok(Some(Self { monitor, runtime }))
+        Ok(Some(Self {
+            monitor: Mutex::new(Some(monitor)),
+            runtime,
+        }))
     }
 
-    pub(crate) fn runtime(&self) -> Runtime {
-        self.runtime.clone()
+    pub(crate) const fn runtime(&self) -> &Runtime {
+        &self.runtime
     }
 
-    pub(crate) fn finish(self) -> Result<(), Error> {
-        // #[gamma::skip(stmt.delete_call, reason = "Dropping self below also stops the runtime.")]
+    pub(crate) fn finish(&self) -> Result<(), Error> {
         self.runtime.stop();
-        let error = self.monitor.last_error();
-        drop(self);
+        let monitor = self.monitor.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let error = monitor.as_ref().and_then(Monitor::last_error);
+        drop(monitor);
         error.map_or(Ok(()), |message| Err(Error::new(MonitorFailure::new(message))))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_runtime(runtime: Runtime) -> Self {
+        Self {
+            monitor: Mutex::new(None),
+            runtime,
+        }
     }
 
     #[cfg(test)]
@@ -114,7 +127,7 @@ mod tests {
         let monitoring = Monitoring::with_test_io(io, || Monitoring::from_config(&config(""), 1))
             .unwrap()
             .unwrap();
-        while monitoring.monitor.last_error().is_none() {
+        while monitoring.monitor.lock().unwrap().as_ref().unwrap().last_error().is_none() {
             std::thread::yield_now();
         }
 
@@ -133,7 +146,10 @@ mod tests {
         for (name, connection_name) in [("requests", "requests"), ("", "arty")] {
             let monitoring = Monitoring::from_config(&config(name), 1).unwrap().unwrap();
 
-            assert_eq!(monitoring.monitor.descriptor().name, connection_name);
+            assert_eq!(
+                monitoring.monitor.lock().unwrap().as_ref().unwrap().descriptor().name,
+                connection_name
+            );
             monitoring.finish().unwrap();
         }
     }

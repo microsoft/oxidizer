@@ -11,6 +11,68 @@ struct TaskData {
     identity: TaskIdentity,
     runtime: RuntimeId,
     backtrace: BacktraceCapture,
+    parent: Option<TaskId>,
+    body_size: u64,
+    enqueued_at: Option<EventTimestamp>,
+    recorded: bool,
+}
+
+/// A blocking task created before it enters a queue.
+#[derive(Debug)]
+#[must_use = "enqueue the task handle or drop it without recording a lifecycle"]
+pub struct TaskHandle {
+    data: TaskData,
+    origin: Option<WorkerId>,
+}
+
+impl TaskHandle {
+    pub(crate) fn new(
+        runtime: RuntimeId,
+        backtrace: BacktraceCapture,
+        origin: Option<crate::WorkerOrigin>,
+        identity: TaskIdentity,
+        parent: Option<TaskId>,
+        body_size: usize,
+    ) -> Self {
+        Self {
+            data: TaskData {
+                identity,
+                runtime,
+                backtrace,
+                parent,
+                body_size: encode_body_size(body_size),
+                enqueued_at: None,
+                recorded: false,
+            },
+            origin: origin.map(|origin| origin.worker_for(runtime)),
+        }
+    }
+
+    /// Records the task entering a queue.
+    #[must_use]
+    pub fn enqueued(mut self, queue_len: u64) -> QueuedTask {
+        seismograph::record(EventClass::RuntimeTask, || {
+            let enqueued_at = EventTimestamp::now();
+            self.data.enqueued_at = Some(enqueued_at);
+            self.data.recorded = true;
+            Some(runtime_record(
+                enqueued_at,
+                EventKind::TaskEnqueued,
+                self.data.runtime,
+                self.origin,
+                self.data.identity.id().get(),
+                self.data.parent.map_or(0, TaskId::get),
+                self.data.identity.descriptor().get(),
+                queue_len,
+                self.data.backtrace,
+            ))
+        });
+        let cancel_on_drop = self.data.recorded;
+        QueuedTask {
+            data: self.data,
+            cancel_on_drop,
+        }
+    }
 }
 
 /// A blocking task waiting in its queue.
@@ -18,51 +80,10 @@ struct TaskData {
 #[must_use = "start the queued task or drop it to record cancellation"]
 pub struct QueuedTask {
     data: TaskData,
-    enqueued_at: EventTimestamp,
-    body_size: u64,
     cancel_on_drop: bool,
 }
 
 impl QueuedTask {
-    pub(crate) fn enqueue(
-        runtime: RuntimeId,
-        backtrace: BacktraceCapture,
-        origin: Option<crate::WorkerOrigin>,
-        identity: TaskIdentity,
-        parent: Option<TaskId>,
-        body_size: usize,
-        queue_len: u64,
-    ) -> Option<Self> {
-        let origin = origin.map(|origin| origin.worker_for(runtime));
-        let mut queued = None;
-        seismograph::record(EventClass::RuntimeTask, || {
-            let body_size = encode_body_size(body_size);
-            let enqueued_at = EventTimestamp::now();
-            queued = Some(Self {
-                data: TaskData {
-                    identity,
-                    runtime,
-                    backtrace,
-                },
-                enqueued_at,
-                body_size,
-                cancel_on_drop: true,
-            });
-            Some(runtime_record(
-                enqueued_at,
-                EventKind::TaskEnqueued,
-                runtime,
-                origin,
-                identity.id().get(),
-                parent.map_or(0, TaskId::get),
-                identity.descriptor().get(),
-                queue_len,
-                backtrace,
-            ))
-        });
-        queued
-    }
-
     /// Returns the caller-assigned task identity.
     #[must_use]
     pub const fn identity(&self) -> TaskIdentity {
@@ -82,8 +103,10 @@ impl QueuedTask {
             EventKind::TaskMaterialized,
             self.data,
             Some(worker.id()),
-            crate::runtime::duration_nanos(started_at, self.enqueued_at),
-            self.body_size,
+            self.data
+                .enqueued_at
+                .map_or(0, |enqueued_at| crate::runtime::duration_nanos(started_at, enqueued_at)),
+            self.data.body_size,
             BacktraceCapture::Never,
         );
         self.cancel_on_drop = false;
@@ -178,6 +201,9 @@ fn record_finished(
     outcome: TaskOutcome,
     backtrace: BacktraceCapture,
 ) {
+    if !data.recorded {
+        return;
+    }
     let kind = match outcome {
         TaskOutcome::Completed => EventKind::TaskCompleted,
         TaskOutcome::Cancelled => EventKind::TaskCanceled,
@@ -202,6 +228,9 @@ fn record(
     value_1: u64,
     backtrace: BacktraceCapture,
 ) {
+    if !data.recorded {
+        return;
+    }
     seismograph::record(EventClass::RuntimeTask, || {
         Some(runtime_record(
             at,

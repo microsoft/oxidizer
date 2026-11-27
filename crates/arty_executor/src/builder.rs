@@ -14,6 +14,7 @@ pub struct ExecutorBuilder {
     owner_waker: Waker,
     thread: Option<Thread>,
     panic_policy: PanicPolicy,
+    monitoring: Option<seismograph_runtime::asynchronous::Worker>,
 }
 
 impl ExecutorBuilder {
@@ -23,6 +24,7 @@ impl ExecutorBuilder {
             owner_waker: Waker::noop().clone(),
             thread: None,
             panic_policy: PanicPolicy::default(),
+            monitoring: None,
         }
     }
 
@@ -54,6 +56,12 @@ impl ExecutorBuilder {
         self
     }
 
+    /// Attaches the Seismograph worker that owns the executor task lifecycle.
+    pub fn monitoring(mut self, worker: seismograph_runtime::asynchronous::Worker) -> Self {
+        self.monitoring = Some(worker);
+        self
+    }
+
     /// Builds the executor with this configuration.
     ///
     /// # Panics
@@ -71,7 +79,7 @@ impl ExecutorBuilder {
             );
             thread.id()
         });
-        Executor::new(self.owner_waker, thread_id, self.panic_policy)
+        Executor::new(self.owner_waker, thread_id, self.panic_policy, self.monitoring)
     }
 }
 

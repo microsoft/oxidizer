@@ -11,7 +11,6 @@
 //! Blocking tasks report their queue and execution lifecycle without task inspection.
 //! Handles provide access to these registrations but do not own runtime shutdown.
 
-mod asynchronous;
 mod blocking;
 mod runtime;
 mod task;
@@ -25,7 +24,8 @@ mod tests;
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub(crate) use asynchronous::InspectionObserver;
-pub(crate) use blocking::{BlockingJob, BlockingPoolMonitoring, BlockingTaskMonitoring};
+pub(crate) type MonitorHandle<'a> = Option<&'a seismograph_runtime::Runtime>;
+
+pub(crate) use blocking::BlockingJob;
 pub(crate) use runtime::Monitoring;
-pub(crate) use task::{TaskSubmission, current_origin, register_monitored};
+pub(crate) use task::current_origin;
