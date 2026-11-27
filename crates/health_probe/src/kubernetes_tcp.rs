@@ -18,13 +18,36 @@ use std::time::Duration;
 
 use health::{Health, Monitor};
 use tick::Clock;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 /// Delay before retrying an accept failure.
 ///
 /// The delay prevents resource-exhaustion errors from causing a tight loop. A short
 /// delay keeps the readiness outage visible while allowing the process to recover.
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+trait TcpIo {
+    type Listener: Sync;
+    type Stream: Send;
+
+    fn bind(&self, address: SocketAddr) -> impl Future<Output = io::Result<Self::Listener>> + Send;
+    fn accept<'a>(&'a self, listener: &'a Self::Listener) -> impl Future<Output = io::Result<Self::Stream>> + Send + 'a;
+}
+
+struct TokioTcp;
+
+impl TcpIo for TokioTcp {
+    type Listener = TcpListener;
+    type Stream = TcpStream;
+
+    async fn bind(&self, address: SocketAddr) -> io::Result<Self::Listener> {
+        TcpListener::bind(address).await
+    }
+
+    async fn accept(&self, listener: &Self::Listener) -> io::Result<Self::Stream> {
+        listener.accept().await.map(|(stream, _)| stream)
+    }
+}
 
 /// Serves TCP readiness for `monitor` on `address`.
 ///
@@ -52,6 +75,10 @@ const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Returns an error when the server cannot bind `address` before it has listened
 /// successfully. Later bind failures are retried while the process remains healthy.
 pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> io::Result<()> {
+    serve_with(TokioTcp, &mut monitor, address, &clock).await
+}
+
+async fn serve_with<I: TcpIo + Send + Sync>(io: I, monitor: &mut Monitor, address: SocketAddr, clock: &Clock) -> io::Result<()> {
     let mut bound_once = false;
 
     'server: loop {
@@ -60,14 +87,14 @@ pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> i
         }
 
         let listener = loop {
-            match TcpListener::bind(address).await {
+            match io.bind(address).await {
                 Ok(listener) => {
                     bound_once = true;
                     break listener;
                 }
                 Err(error) if !bound_once => return Err(error),
                 Err(_) => {
-                    wait_before_retry(&mut monitor, &clock).await;
+                    wait_before_retry(monitor, clock).await;
                     if monitor.state() != Health::Healthy {
                         continue 'server;
                     }
@@ -86,9 +113,9 @@ pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> i
                         break false;
                     }
                 }
-                accepted = listener.accept() => {
+                accepted = io.accept(&listener) => {
                     match accepted {
-                        Ok((stream, _)) => drop(stream),
+                        Ok(stream) => drop(stream),
                         Err(_) => break true,
                     }
                 }
@@ -97,7 +124,7 @@ pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> i
         drop(listener);
 
         if retry {
-            wait_before_retry(&mut monitor, &clock).await;
+            wait_before_retry(monitor, clock).await;
         }
     }
 }
@@ -118,3 +145,6 @@ async fn wait_before_retry(monitor: &mut Monitor, clock: &Clock) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
