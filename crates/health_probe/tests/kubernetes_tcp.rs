@@ -4,6 +4,7 @@
 //! Contract tests for Kubernetes TCP readiness.
 
 #![cfg(feature = "tcp")]
+#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
