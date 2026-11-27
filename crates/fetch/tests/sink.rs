@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests that the `observed` sink of the deps reaches the request pipelines of a client.
+//! Tests that the `observed` sink of the deps reaches the request pipelines and the transports of a client.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::fake::{FakeDeps, FakeHandler};
-use fetch::{HttpClient, HttpClientBuilder, HttpRequest};
+use fetch::{HttpClient, HttpClientBuilder, HttpRequest, HttpResponseBuilder};
 use futures::executor::block_on;
 use http::StatusCode;
 use layered::{Intercept, Stack};
@@ -31,6 +31,38 @@ const THREADS: usize = 4;
 fn configured_sink_reaches_custom_pipeline() {
     let (sink, processor) = test_emitter(SinkId::new("configured"));
     let (client, _builds) = probe_client(HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(sink)));
+
+    block_on(client.get(URI).fetch()).unwrap();
+    block_on(client.get(URI).fetch()).unwrap();
+
+    assert_eq!(processor.events(), probes(2));
+}
+
+#[test]
+fn configured_sink_reaches_custom_transport() {
+    let (sink, processor) = test_emitter(SinkId::new("transport"));
+    let deps = CustomDeps {
+        clock: ClockControl::new().to_clock(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
+        sink,
+        extras: (),
+    };
+    let client = create_builder(
+        "test-runtime",
+        "test",
+        |context: CustomContext| {
+            let sink = context.sink;
+            FakeHandler::from_fn(move |_| {
+                emit!(sink, ProbeEvent::new(1));
+                HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
+            })
+        },
+        Isolation::Shared,
+        deps,
+    )
+    .insecure_allow_http()
+    .minimal_pipeline()
+    .build();
 
     block_on(client.get(URI).fetch()).unwrap();
     block_on(client.get(URI).fetch()).unwrap();

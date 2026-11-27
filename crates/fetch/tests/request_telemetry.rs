@@ -19,7 +19,6 @@ use http::StatusCode;
 use layered::Stack;
 use observed::{Severity, Sink, SinkId};
 use observed_testing::{CapturedEvent, MockProcessor, test_emitter};
-use opentelemetry::metrics::NoopMeterProvider;
 use tick::{Clock, ClockControl, SimpleClock};
 
 const URI: &str = "https://example.com/books";
@@ -237,38 +236,6 @@ fn custom_transport_names_reach_request_events() {
 }
 
 #[test]
-fn client_name_set_before_meter_provider_reaches_request_events() {
-    let (sink, processor) = capture();
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), sink))
-        .name("named_before_provider")
-        .meter_provider(NoopMeterProvider::new())
-        .build();
-
-    block_on(client.get(URI).fetch()).unwrap();
-
-    assert_eq!(
-        client_attributes(&processor),
-        vec![attributes("fake", "fake", "named_before_provider"); 2]
-    );
-}
-
-#[test]
-fn client_name_set_after_meter_provider_reaches_request_events() {
-    let (sink, processor) = capture();
-    let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), sink))
-        .meter_provider(NoopMeterProvider::new())
-        .name("named_after_provider")
-        .build();
-
-    block_on(client.get(URI).fetch()).unwrap();
-
-    assert_eq!(
-        client_attributes(&processor),
-        vec![attributes("fake", "fake", "named_after_provider"); 2]
-    );
-}
-
-#[test]
 fn custom_pipeline_with_client_telemetry_emits_client_attributes() {
     let (sink, processor) = capture();
     let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::with_clock(&Clock::new_frozen(), sink))
@@ -303,48 +270,6 @@ fn minimal_pipeline_emits_no_request_events() {
     block_on(client.get(URI).fetch()).unwrap();
 
     assert!(processor.is_empty());
-}
-
-#[test]
-#[cfg_attr(miri, ignore = "native tests cover SDK metrics initialization, which reads the OS clock")]
-fn request_duration_is_not_recorded_on_meter() {
-    use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
-
-    let exporter = InMemoryMetricExporter::default();
-    let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
-    let deps = CustomDeps {
-        clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(GlobalPool::new()),
-        sink: Sink::noop(),
-        extras: (),
-    };
-    // The transport records a counter on the `fetch` meter, so the meter has a data point to export.
-    let client = create_builder(
-        "test-runtime",
-        "test",
-        |cx: CustomContext| {
-            cx.meter.u64_counter("custom.transport.requests").build().add(1, &[]);
-            FakeHandler::from(StatusCode::OK)
-        },
-        Isolation::Shared,
-        deps,
-    )
-    .meter_provider(provider.clone())
-    .build();
-
-    block_on(client.get(URI).fetch()).unwrap();
-    provider.force_flush().unwrap();
-
-    let names = exporter
-        .get_finished_metrics()
-        .unwrap()
-        .iter()
-        .flat_map(ResourceMetrics::scope_metrics)
-        .flat_map(ScopeMetrics::metrics)
-        .map(|metric| metric.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(names, ["custom.transport.requests"]);
 }
 
 #[test]

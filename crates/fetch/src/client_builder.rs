@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use http_extensions::routing::{BaseUriConflict, Router};
 use http_extensions::{HttpBodyOptions, HttpRequest, HttpResponse};
-use opentelemetry::metrics::{Meter, MeterProvider};
 use seatbelt::ResilienceContext;
 use thread_aware::ThreadAware;
 
@@ -19,7 +18,6 @@ use crate::handlers::Dispatch;
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, DecompressionOptions, Http2Options, RequestFilter};
 use crate::pipeline::{CustomPipeline, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::{ClientAttributes, Metering};
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -40,7 +38,6 @@ use crate::{BaseUri, RequestHandler};
 pub struct HttpClientBuilder {
     pub(crate) options: ClientOptions,
     pipeline_builder: PipelineBuilder,
-    metering: Metering,
     transport: Transport,
     resilience_context: HttpResilienceContext,
 }
@@ -50,13 +47,11 @@ impl HttpClientBuilder {
         let clock = transport.clock().clone();
 
         Self {
-            options: ClientOptions::default(),
+            options: ClientOptions {
+                client_name: Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
+                ..ClientOptions::default()
+            },
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::new(ClientAttributes::new(
-                transport.runtime().clone(),
-                transport.name().clone(),
-                Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
-            )),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -68,8 +63,8 @@ impl HttpClientBuilder {
     /// is `http_client`.
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         let name = name.into();
-        self.metering = self.metering.with_client_name(name.clone());
-        self.resilience_context = self.resilience_context.name(name);
+        self.resilience_context = self.resilience_context.name(name.clone());
+        self.options.client_name = name;
         self
     }
 
@@ -281,29 +276,6 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets a custom OpenTelemetry meter provider for the client.
-    ///
-    /// The client uses the global meter provider by default. This method sets a provider for this
-    /// client. The provider records the resilience metrics and the instruments of
-    /// [`CustomContext::meter`](crate::custom::CustomContext::meter). Request telemetry and
-    /// connection telemetry go to the sink of the deps of the client.
-    ///
-    /// The client creates the scoped meter when [`build`][Self::build] runs. A
-    /// [`name`][Self::name] set before or after this call appears in the metrics.
-    ///
-    /// # Performance
-    ///
-    /// For a thread-isolated runtime, use a per-thread meter provider to avoid contention on the
-    /// global provider.
-    ///
-    /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
-    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
-        // Use the provider for the resilience metrics and the `fetch` meter.
-        self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        self.metering = self.metering.with_provider(meter_provider);
-        self
-    }
-
     /// Changes the standard pipeline.
     ///
     /// The closure receives the current pipeline and returns the changed pipeline. The standard
@@ -470,7 +442,6 @@ impl HttpClientBuilder {
             pipeline: self.pipeline_builder,
             options: self.options,
             resilience_context: self.resilience_context,
-            metering: self.metering,
         };
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
@@ -484,8 +455,6 @@ impl HttpClientBuilder {
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Aware {
-    #[thread_aware(skip)]
-    metering: Metering,
     pipeline: PipelineBuilder,
     #[thread_aware(skip)]
     options: ClientOptions,
@@ -495,17 +464,13 @@ struct Aware {
 
 impl Aware {
     fn into_pipeline(self) -> Pipeline {
-        let client_attributes = self.metering.client_attributes().clone();
-        let meter: Meter = self.metering.into();
         let body_builder = self.transport.create_body_builder(&self.options);
-        let dispatch = create_dispatch_handler(&meter, &client_attributes, self.options.clone(), &self.transport, &body_builder);
+        let dispatch = create_dispatch_handler(self.options.clone(), &self.transport, &body_builder);
         let context = PipelineContext::new(
             self.resilience_context,
-            &meter,
-            client_attributes,
+            &self.transport,
+            self.options.client_name,
             body_builder,
-            self.transport.clock().clone(),
-            self.transport.sink().clone(),
             self.options.router,
         );
 
@@ -519,22 +484,16 @@ mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
     use observed::Sink;
-    use opentelemetry::metrics::NoopMeterProvider;
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
     use crate::{HttpClient, HttpClientBuilder};
 
     #[test]
-    fn gamma_round2_name_and_meter_are_forwarded_to_resilience_context() {
+    fn gamma_round2_name_is_forwarded_to_resilience_context() {
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).name("gamma_round2_pipeline");
-        let before = format!("{:?}", builder.resilience_context);
-        assert!(before.contains("name: \"gamma_round2_pipeline\""), "{before}");
-        assert!(before.contains("meter: None"), "{before}");
-        let builder = builder.meter_provider(NoopMeterProvider::new());
-        let after = format!("{:?}", builder.resilience_context);
-        assert!(after.contains("meter: Some("), "{after}");
-        assert!(after.contains("name: \"gamma_round2_pipeline\""), "{after}");
+        let debug = format!("{:?}", builder.resilience_context);
+        assert!(debug.contains("name: \"gamma_round2_pipeline\""), "{debug}");
     }
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
@@ -748,17 +707,5 @@ mod tests {
             panic!("expected multiple pools to be configured");
         };
         assert_eq!(pool_count, 5);
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn meter_provider_updates_all_fields() {
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
-        assert!(!builder.metering.has_custom_provider());
-
-        let builder = builder.meter_provider(provider);
-        assert!(builder.metering.has_custom_provider());
     }
 }

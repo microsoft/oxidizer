@@ -1,15 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
+
 use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
 use observed::Sink;
-use opentelemetry::metrics::Meter;
 use tick::Clock;
 
+use crate::custom::Transport;
 use crate::error_labels::collect_error_labels;
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::{Client, ClientAttributes, Telemetry, TelemetryLayer};
+use crate::telemetry::{Client, FETCH_RUNTIME_ATTRIBUTE, FETCH_TRANSPORT_ATTRIBUTE, HTTP_CLIENT_NAME_ATTRIBUTE, Telemetry, TelemetryLayer};
 
 /// Shared dependencies for a custom or standard request pipeline.
 ///
@@ -20,9 +22,10 @@ use crate::telemetry::{Client, ClientAttributes, Telemetry, TelemetryLayer};
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PipelineContext {
-    meter: Meter,
     resilience_context: HttpResilienceContext,
-    client_attributes: ClientAttributes,
+    runtime_name: Cow<'static, str>,
+    transport_name: Cow<'static, str>,
+    client_name: Cow<'static, str>,
     clock: Clock,
     sink: Sink,
     body_builder: HttpBodyBuilder,
@@ -32,20 +35,19 @@ pub struct PipelineContext {
 impl PipelineContext {
     pub(crate) fn new(
         resilience_context: HttpResilienceContext,
-        meter: &Meter,
-        client_attributes: ClientAttributes,
+        transport: &Transport,
+        client_name: Cow<'static, str>,
         body_builder: HttpBodyBuilder,
-        clock: Clock,
-        sink: Sink,
         router: Router,
     ) -> Self {
         Self {
             resilience_context,
-            client_attributes,
-            meter: meter.clone(),
+            runtime_name: transport.runtime().clone(),
+            transport_name: transport.name().clone(),
+            client_name,
+            clock: transport.clock().clone(),
+            sink: transport.sink().clone(),
             body_builder,
-            clock,
-            sink,
             router,
         }
     }
@@ -60,12 +62,6 @@ impl PipelineContext {
     #[must_use]
     pub const fn sink(&self) -> &Sink {
         &self.sink
-    }
-
-    /// Returns the telemetry meter.
-    #[must_use]
-    pub const fn meter(&self) -> &Meter {
-        &self.meter
     }
 
     /// Returns the resilience context.
@@ -89,11 +85,12 @@ impl PipelineContext {
     /// ```
     #[must_use]
     pub fn client_telemetry(&self) -> TelemetryLayer<Client> {
-        self.client_attributes.apply(
-            Telemetry::client(self.sink.clone())
-                .clock(&self.clock)
-                .error_labels_with(collect_error_labels),
-        )
+        Telemetry::client(self.sink.clone())
+            .clock(&self.clock)
+            .error_labels_with(collect_error_labels)
+            .dimension(FETCH_RUNTIME_ATTRIBUTE, self.runtime_name.clone())
+            .dimension(FETCH_TRANSPORT_ATTRIBUTE, self.transport_name.clone())
+            .dimension(HTTP_CLIENT_NAME_ATTRIBUTE, self.client_name.clone())
     }
 
     /// Returns the HTTP body builder.
@@ -110,22 +107,17 @@ impl PipelineContext {
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        use opentelemetry::metrics::MeterProvider as _;
-
         let clock = Clock::new_frozen();
-        Self::new(
-            HttpResilienceContext::new(&clock),
-            &opentelemetry_sdk::metrics::SdkMeterProvider::default().meter("test"),
-            ClientAttributes::new(
-                crate::constants::FAKE_RUNTIME_NAME.into(),
-                crate::constants::FAKE_TRANSPORT_NAME.into(),
-                crate::constants::DEFAULT_HTTP_CLIENT_NAME.into(),
-            ),
-            HttpBodyBuilder::new_fake(),
+        Self {
+            resilience_context: HttpResilienceContext::new(&clock),
+            runtime_name: crate::constants::FAKE_RUNTIME_NAME.into(),
+            transport_name: crate::constants::FAKE_TRANSPORT_NAME.into(),
+            client_name: crate::constants::DEFAULT_HTTP_CLIENT_NAME.into(),
             clock,
-            Sink::noop(),
-            Router::default(),
-        )
+            sink: Sink::noop(),
+            body_builder: HttpBodyBuilder::new_fake(),
+            router: Router::default(),
+        }
     }
 }
 
@@ -136,7 +128,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn body_builder_returns_the_configured_builder() {
         let mut context = PipelineContext::for_test();
@@ -146,7 +137,6 @@ mod tests {
         assert!(format!("{:?}", context.body_builder()).contains("4321"));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn accessors_return_constructed_dependencies() {
         let context = PipelineContext::for_test();
@@ -154,7 +144,6 @@ mod tests {
         // Exercise every accessor. Each one must return without a panic.
         let _ = context.clock();
         let _ = context.sink();
-        let _ = context.meter();
         let _ = context.resilience_context();
         let _ = context.client_telemetry();
         let _ = context.router();

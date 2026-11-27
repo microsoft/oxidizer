@@ -307,7 +307,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_new_with_clock_creates_pipeline() {
         let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
@@ -327,7 +326,6 @@ mod tests {
         assert!(TOTAL_TIMEOUT_DURATION > ATTEMPT_TIMEOUT_DURATION);
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_debug_implementation() {
         let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
@@ -343,7 +341,6 @@ mod tests {
         assert!(debug_str.contains("attempt_telemetry"));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_multiple_pipelines_are_independent() {
         let pipeline1 = StandardRequestPipeline::new(&PipelineContext::for_test());
@@ -358,7 +355,6 @@ mod tests {
         assert!(debug2.contains("StandardRequestPipeline"));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_default_recovery_mode_is_retry() {
         let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test());
@@ -366,7 +362,6 @@ mod tests {
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Retry);
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_recovery_mode_can_be_set_to_hedging() {
         let pipeline = StandardRequestPipeline::new(&PipelineContext::for_test()).recovery_mode(RecoveryMode::Hedging);
@@ -374,7 +369,6 @@ mod tests {
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Hedging);
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn test_attempt_layer_configure_closures_are_invoked() {
         use std::sync::atomic::{AtomicUsize, Ordering};

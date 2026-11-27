@@ -82,7 +82,7 @@ impl HttpClient {
         Self::builder_custom_internal(
             crate::constants::FAKE_RUNTIME_NAME,
             crate::constants::FAKE_TRANSPORT_NAME,
-            move |cx: CustomContext<FakeHandler>, _client_attributes| TransportHandler::new(cx.extras),
+            move |cx: CustomContext<FakeHandler>, _client_name| TransportHandler::new(cx.extras),
             Isolation::Shared,
             CustomDeps {
                 clock: deps.clock,

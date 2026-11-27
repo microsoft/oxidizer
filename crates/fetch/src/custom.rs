@@ -15,14 +15,12 @@ use std::fmt::Debug;
 use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use observed::Sink;
-use opentelemetry::metrics::Meter;
 use performables::arc::{Arc, PerThread};
 use thread_aware::{ThreadAware, unaware};
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
 use crate::options::{ClientOptions, PoolIndex, TransportOptions};
-use crate::telemetry::ClientAttributes;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
@@ -77,6 +75,8 @@ pub struct CustomContext<Extras = ()> {
     pub body_builder: HttpBodyBuilder,
     /// Clock for timing operations and timeouts inside the handler.
     pub clock: Clock,
+    /// Sink for `observed` telemetry, cloned from [`CustomDeps::sink`].
+    pub sink: Sink,
     /// Index of the connection-pool slot that this handler serves.
     pub pool_index: PoolIndex,
     /// Caller-supplied extras, cloned from [`CustomDeps::extras`].
@@ -94,19 +94,13 @@ pub struct CustomContext<Extras = ()> {
     /// bundled Tokio transport uses them to build its TLS connector. An HTTP-only transport can
     /// ignore them.
     pub tls: TlsOptions,
-
-    /// Telemetry meter the client records its metrics against.
-    ///
-    /// A custom transport can use this [`Meter`] so its metrics share the client meter scope.
-    pub meter: Meter,
 }
 
 /// Creates a builder for an HTTP client backed by a custom transport handler.
 ///
 /// `runtime` and `transport` identify the client in telemetry. They are the `fetch.runtime` and
-/// `fetch.transport` instrumentation-scope attributes of the `fetch` meter, and fields of every
-/// request event. Use short, stable identifiers, such as `runtime = "tokio"` and
-/// `transport = "http3_experimental"`.
+/// `fetch.transport` fields of every request event. Use short, stable identifiers, such as
+/// `runtime = "tokio"` and `transport = "http3_experimental"`.
 ///
 /// The client calls `factory` when it needs a handler for a pool slot. The factory receives the
 /// slot [`CustomContext`] and returns the transport [`RequestHandler`]. The builder adds resilience,
@@ -180,7 +174,7 @@ where
     HttpClient::builder_custom_internal(
         runtime,
         transport,
-        move |cx, _client_attributes| TransportHandler::new(factory(cx)),
+        move |cx, _client_name| TransportHandler::new(factory(cx)),
         isolation,
         deps.into(),
     )
@@ -190,8 +184,8 @@ impl HttpClient {
     /// In-crate variant of [`create_builder`] for the bundled Tokio transport.
     ///
     /// The factory returns an erased [`TransportHandler`]. This avoids another boxing step when a
-    /// transport can return several handler types. [`CustomContext`] always contains `tls` and
-    /// `meter`. A factory can use or ignore them. The factory also gets the client attributes.
+    /// transport can return several handler types. [`CustomContext`] always contains `tls`. A
+    /// factory can use or ignore it. The factory also gets the client name.
     pub(crate) fn builder_custom_internal<F, Extras>(
         runtime: impl Into<Cow<'static, str>>,
         transport: impl Into<Cow<'static, str>>,
@@ -200,7 +194,7 @@ impl HttpClient {
         deps: CustomDeps<Extras>,
     ) -> HttpClientBuilder
     where
-        F: Fn(CustomContext<Extras>, ClientAttributes) -> TransportHandler + Send + Sync + 'static,
+        F: Fn(CustomContext<Extras>, Cow<'static, str>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
         // Share the factory across threads. Copy `extras` into each new `CustomContext`.
@@ -214,18 +208,18 @@ impl HttpClient {
             sink: deps.sink.clone(),
             isolation,
             inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
-                let transport: Box<dyn Fn(ClientOptions, Meter, ClientAttributes, PoolIndex) -> TransportHandler + Send + Sync> =
-                    Box::new(move |options, meter, client_attributes, pool_index| {
+                let transport: Box<dyn Fn(ClientOptions, PoolIndex) -> TransportHandler + Send + Sync> =
+                    Box::new(move |options, pool_index| {
                         let context = CustomContext {
                             body_builder: create_body_builder(&deps.memory, &deps.clock, &options),
                             clock: deps.clock.clone(),
+                            sink: deps.sink.clone(),
                             pool_index,
                             extras: deps.extras.clone(),
                             options: options.transport.clone(),
                             tls: options.tls.clone(),
-                            meter,
                         };
-                        factory(context, client_attributes)
+                        factory(context, options.client_name)
                     });
                 TransportFn::from(transport)
             }),
@@ -235,7 +229,7 @@ impl HttpClient {
     }
 }
 
-type TransportFn = Arc<dyn Fn(ClientOptions, Meter, ClientAttributes, PoolIndex) -> TransportHandler + Send + Sync>;
+type TransportFn = Arc<dyn Fn(ClientOptions, PoolIndex) -> TransportHandler + Send + Sync>;
 
 #[derive(Clone, ThreadAware)]
 pub(crate) struct Transport {
@@ -251,14 +245,8 @@ pub(crate) struct Transport {
 }
 
 impl Transport {
-    pub(crate) fn create_transport_handler(
-        &self,
-        options: ClientOptions,
-        meter: Meter,
-        client_attributes: ClientAttributes,
-        index: PoolIndex,
-    ) -> TransportHandler {
-        self.inner.as_ref()(options, meter, client_attributes, index)
+    pub(crate) fn create_transport_handler(&self, options: ClientOptions, index: PoolIndex) -> TransportHandler {
+        self.inner.as_ref()(options, index)
     }
 
     pub(crate) fn runtime(&self) -> &Cow<'static, str> {

@@ -158,7 +158,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_minimal_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
@@ -168,7 +167,6 @@ mod tests {
         assert!(!pipeline.is_standard());
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn service_trait_forwards_to_pipeline_execution() {
         let pipeline = PipelineBuilder::Minimal.build(Dispatch::new_fake(StatusCode::OK), PipelineContext::for_test());
@@ -181,7 +179,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     #[should_panic(expected = "expected custom pipeline, found minimal pipeline")]
     fn dbg_string_for_minimal_pipeline_panics() {
@@ -192,7 +189,6 @@ mod tests {
         let _ = pipeline.debug_string();
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_custom_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
@@ -202,7 +198,6 @@ mod tests {
         assert!(!pipeline.is_standard());
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn build_standard_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
@@ -211,7 +206,6 @@ mod tests {
         let _dbg = pipeline.debug_string();
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn pipeline_builder_default_ok() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
@@ -220,7 +214,6 @@ mod tests {
         assert!(pipeline.is_standard());
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn configure_standard() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);
@@ -231,7 +224,6 @@ mod tests {
         assert!(format!("{pipeline:?}").contains("max_attempts: 11"));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn configure_standard_twice() {
         let dispatch = Dispatch::new_fake(StatusCode::OK);

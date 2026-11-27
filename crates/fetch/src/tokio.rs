@@ -9,6 +9,8 @@
 //!
 //! These APIs require the `tokio` feature and at least one TLS backend: `rustls` or `native-tls`.
 
+use std::borrow::Cow;
+
 use anyspawn::Spawner;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_hyper::HyperTransportBuilder;
@@ -29,7 +31,6 @@ use tower_service::Service as _;
 use crate::custom::{CustomContext, CustomDeps, Isolation};
 use crate::error_labels::LABEL_SCHEME_NOT_ALLOWED;
 use crate::handlers::TransportHandler;
-use crate::telemetry::ClientAttributes;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
@@ -161,8 +162,8 @@ impl HttpClient {
     /// # }
     /// ```
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
-        create_tokio_builder_with_options(deps.into(), options, |cx, client_attributes, options| {
-            TransportHandler(build_tokio_handler(cx, client_attributes, options).into())
+        create_tokio_builder_with_options(deps.into(), options, |cx, client_name, options| {
+            TransportHandler(build_tokio_handler(cx, client_name, options).into())
         })
     }
 
@@ -186,15 +187,15 @@ impl HttpClient {
 fn create_tokio_builder_with_options(
     deps: TokioDeps,
     options: TokioTransportOptions,
-    factory: impl Fn(CustomContext<TokioDeps>, ClientAttributes, &TokioTransportOptions) -> TransportHandler + Send + Sync + 'static,
+    factory: impl Fn(CustomContext<TokioDeps>, Cow<'static, str>, &TokioTransportOptions) -> TransportHandler + Send + Sync + 'static,
 ) -> HttpClientBuilder {
-    create_tokio_builder(deps, move |cx, client_attributes| factory(cx, client_attributes, &options))
+    create_tokio_builder(deps, move |cx, client_name| factory(cx, client_name, &options))
 }
 
 /// Shares Tokio dependency forwarding with tests that supply a controlled transport.
 fn create_tokio_builder(
     deps: TokioDeps,
-    factory: impl Fn(CustomContext<TokioDeps>, ClientAttributes) -> TransportHandler + Send + Sync + 'static,
+    factory: impl Fn(CustomContext<TokioDeps>, Cow<'static, str>) -> TransportHandler + Send + Sync + 'static,
 ) -> HttpClientBuilder {
     let clock = deps.clock.clone();
     let memory = deps.memory.clone();
@@ -322,19 +323,19 @@ fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::Erro
 
 fn build_tokio_handler(
     cx: CustomContext<TokioDeps>,
-    client_attributes: ClientAttributes,
+    client_name: Cow<'static, str>,
     options: &TokioTransportOptions,
 ) -> fetch_hyper::HyperTransport {
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
     let connector = TokioConnector::new(options.socket);
 
-    HyperTransportBuilder::new(connector, Spawner::new_tokio(None), cx.clock, cx.options, cx.extras.sink)
+    HyperTransportBuilder::new(connector, Spawner::new_tokio(None), cx.clock, cx.options, cx.sink)
         .body_builder(cx.body_builder)
         .pool_index(cx.pool_index)
         .client_attributes(
-            client_attributes.runtime,
-            client_attributes.transport,
-            client_attributes.client_name,
+            crate::constants::TOKIO_RUNTIME_NAME,
+            crate::constants::HYPER_TRANSPORT_NAME,
+            client_name,
         )
         .build(tls_backend)
 }
@@ -488,7 +489,7 @@ mod tests {
                 memory: OpaqueMemory::new(memory),
                 sink: Sink::noop(),
             },
-            |cx, _client_attributes| {
+            |cx, _client_name| {
                 // Exercise both factory inputs without initializing TLS or opening sockets.
                 assert!(cx.body_builder.reserve(17).capacity() >= 17);
                 assert!(cx.extras.memory.reserve(19).capacity() >= 19);

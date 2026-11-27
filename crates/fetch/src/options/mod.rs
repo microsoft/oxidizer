@@ -4,12 +4,15 @@
 //! HTTP client configuration.
 //!
 //! [`fetch_options`] defines the transport options and this module re-exports them. `ClientOptions`
-//! combines transport options with response-body, routing, TLS, and decompression configuration.
+//! combines transport options with response-body, routing, TLS, decompression, and client name
+//! configuration.
 //!
 //! Transport-specific builders can use [`fetch_options::SocketOptions`]. It is separate from
 //! [`fetch_options::TransportOptions`] because only a transport that owns sockets can apply it.
 
 mod decompression;
+
+use std::borrow::Cow;
 
 pub use decompression::{DecompressionFormat, DecompressionOptions};
 pub use fetch_options::{
@@ -37,6 +40,8 @@ pub(crate) struct ClientOptions {
     pub tls: TlsOptions,
     /// Formats and resource limits for automatic response decompression.
     pub decompression: DecompressionOptions,
+    /// Name of the client, which its telemetry events carry.
+    pub client_name: Cow<'static, str>,
 }
 
 #[cfg(test)]

@@ -1446,8 +1446,8 @@ where
 ```
 
 `CustomContext` hands the factory a `HttpBodyBuilder` (carrying the clock and
-read-buffer pool), a `PoolIndex`, the generic `TransportOptions`/`TlsOptions`, a
-`Meter`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-thread
+read-buffer pool), a `PoolIndex`, the generic `TransportOptions`/`TlsOptions`, the
+`observed::Sink`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-thread
 placement comes from `Isolation::Isolated`, §3.2) and ignores `CustomContext::tls` (it
 takes its own `WinHttpTlsConfig` instead; see design.md §1.2). This generic TLS
 configuration is ignored without a runtime warning; the limitation is part of the
@@ -1468,11 +1468,10 @@ inside the factory when
 `fetch` materializes it (§3.2), so the session is scoped to the built client and never
 captured in the clone-shared builder closure. The session is deliberately not a
 `WinHttpDeps` field either - `WinHttpDeps` stays plain, relocatable configuration. The
-clock comes from `CustomContext`. Because `CustomContext` exposes only the derived
+clock and the `observed::Sink` come from `CustomContext`; the transport emits its telemetry
+through the sink (§13). Because `CustomContext` exposes only the derived
 `HttpBodyBuilder`, not the underlying `OpaqueMemory`, `WinHttpDeps` also retains a provider
-clone in `Extras` for WinHTTP read buffers and writer reservations. The `observed::Sink` rides in the same extras
-and relocates per thread with the rest of the config; the transport emits its telemetry
-through it (§13). There is no
+clone in `Extras` for WinHTTP read buffers and writer reservations. There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).
 
 Session creation opens a direct-connection session and applies every required session

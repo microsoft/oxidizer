@@ -5,17 +5,12 @@
 //!
 //! `fetch` emits its [request telemetry](#request-telemetry), and the
 //! [connection telemetry](#connection-telemetry) of its Tokio transport, as `observed` events
-//! through the sink of its deps. The `fetch` OpenTelemetry [`Meter`](opentelemetry::metrics::Meter)
-//! serves the instruments of [`CustomContext::meter`](crate::custom::CustomContext::meter). The
-//! client gets the meter from the global [`MeterProvider`](opentelemetry::metrics::MeterProvider)
-//! or a custom provider set through
-//! [`HttpClientBuilder::meter_provider`](crate::HttpClientBuilder::meter_provider).
+//! through the sink of its deps. A custom transport gets the same sink in
+//! [`CustomContext::sink`](crate::custom::CustomContext::sink).
 //!
 //! # Client attributes
 //!
-//! Every client has three attributes: its runtime, its transport and its name. The instrumentation
-//! scope of its `fetch` meter has them, so the instruments of
-//! [`CustomContext::meter`](crate::custom::CustomContext::meter) carry them. Every request event,
+//! Every client has three attributes: its runtime, its transport and its name. Every request event,
 //! and every connection event of the Tokio transport, has them as fields, and the metrics that
 //! these events record have them as attributes:
 //!

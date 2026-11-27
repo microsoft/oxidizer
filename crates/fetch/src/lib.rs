@@ -28,7 +28,7 @@
 //!
 //! `fetch` includes the features that services commonly need:
 //!
-//! - Secure TLS validation, retries, circuit breaking, hedging, and OpenTelemetry telemetry.
+//! - Secure TLS validation, retries, circuit breaking, hedging, and telemetry through `observed` events.
 //! - Fake responses through the `test-util` feature.
 //! - A request pipeline that supports custom logging, metrics, retries, and other handlers.
 //! - Memory pooling and zero-copy operations for large responses.

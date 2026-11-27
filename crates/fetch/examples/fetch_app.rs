@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Uses [`fundle`] to build an HTTP client with an OpenTelemetry meter provider and a custom rustls
-//! certificate verifier.
+//! Uses [`fundle`] to build an HTTP client with a custom rustls certificate verifier.
 
 use std::sync::Arc;
 
@@ -10,10 +9,7 @@ use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;
 use observed::Sink;
-use observed_destination_core::MeterProviderBuilderExt;
-use observed_destination_stdout::stdout_metrics;
 use ohno::ErrorExt;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::crypto::CryptoProvider;
 use tick::Clock;
@@ -39,23 +35,16 @@ fn custom_verifier(provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier>
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // Create the meter provider that the HTTP client uses.
-    let meter_provider = initialize_meter_provider();
-
     // Use fundle to construct App.
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
         .memory(|_| OpaqueMemory::new(GlobalPool::new()))
         // An application passes its own sink. `Sink::noop()` drops every event.
         .sink(|_| Sink::noop())
-        .client({
-            let meter_provider = meter_provider.clone();
-            move |x| {
-                HttpClient::builder_tokio(x)
-                    .meter_provider(meter_provider.clone())
-                    .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
-                    .build()
-            }
+        .client(|x| {
+            HttpClient::builder_tokio(x)
+                .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
+                .build()
         })
         .build();
 
@@ -70,11 +59,4 @@ async fn main() -> Result<(), ohno::AppError> {
     }
 
     Ok(())
-}
-
-fn initialize_meter_provider() -> SdkMeterProvider {
-    SdkMeterProvider::builder()
-        .register(stdout_metrics())
-        .expect("the stdout metric destination has no fallible configuration")
-        .build()
 }
