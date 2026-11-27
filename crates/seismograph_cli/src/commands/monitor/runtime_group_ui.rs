@@ -16,7 +16,7 @@ use super::super::data::{RuntimeMonitorSnapshot, RuntimeTaskSummary};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime::{AsynchronousTaskGroupSummary, BlockingTaskGroupSummary};
 use super::super::runtime_timeline::histogram;
-use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
+use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
 
 pub(super) fn draw_statistics(
     frame: &mut ratatui::Frame<'_>,
@@ -265,7 +265,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         .map(|bin| {
             Bar::default()
                 .value(bin.count)
-                .label(Line::from(format_runtime_duration(bin.lower)))
+                .label(Line::from(format_histogram_duration(bin.lower)))
                 .style(Style::default().fg(Color::Cyan))
         })
         .collect::<Vec<_>>();

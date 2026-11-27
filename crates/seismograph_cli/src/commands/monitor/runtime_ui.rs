@@ -14,7 +14,7 @@ use super::super::app::{RuntimeSectionFocus, RuntimeViewState, RuntimeWorkerSort
 use super::super::data::{RuntimeMonitorSnapshot, RuntimeWorkerSummary};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime_timeline::histogram;
-use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
+use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -83,12 +83,7 @@ fn optional(left: Option<u64>, right: Option<u64>, descending: bool) -> Ordering
     }
 }
 
-fn compare_workers(
-    left: &RuntimeWorkerSummary,
-    right: &RuntimeWorkerSummary,
-    sort: RuntimeWorkerSort,
-    descending: bool,
-) -> Ordering {
+fn compare_workers(left: &RuntimeWorkerSummary, right: &RuntimeWorkerSummary, sort: RuntimeWorkerSort, descending: bool) -> Ordering {
     let ordering = match sort {
         RuntimeWorkerSort::WorkerId => directed(left.worker_id.cmp(&right.worker_id), descending),
         RuntimeWorkerSort::State => directed(left.state.cmp(&right.state), descending),
@@ -114,9 +109,7 @@ fn compare_workers(
             right.blocking.queue_time.mean_nanos(),
             descending,
         ),
-        RuntimeWorkerSort::MaximumQueue => {
-            optional(left.blocking.queue_time.max_nanos, right.blocking.queue_time.max_nanos, descending)
-        }
+        RuntimeWorkerSort::MaximumQueue => optional(left.blocking.queue_time.max_nanos, right.blocking.queue_time.max_nanos, descending),
         RuntimeWorkerSort::AverageExecution => optional(
             left.blocking.execution_time.mean_nanos(),
             right.blocking.execution_time.mean_nanos(),
@@ -148,16 +141,6 @@ fn worker_name(worker: &RuntimeWorkerSummary) -> String {
 
 fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
-}
-
-fn histogram_duration(nanos: u64) -> String {
-    match nanos {
-        0..1_000 => format!("{nanos}ns"),
-        1_000..1_000_000 => format!("{}us", nanos / 1_000),
-        1_000_000..1_000_000_000 => format!("{}ms", nanos / 1_000_000),
-        1_000_000_000..10_000_000_000 => format!("{:.1}s", nanos as f64 / 1_000_000_000.0),
-        _ => format!("{}s", nanos / 1_000_000_000),
-    }
 }
 
 fn count_label(count: usize, singular: &str, plural: &str) -> String {
@@ -310,10 +293,7 @@ fn draw_workers(
     );
 }
 
-fn worker_columns(
-    focus: RuntimeWorkersFocus,
-    wide: bool,
-) -> (Vec<&'static str>, Vec<RuntimeWorkerSort>, Vec<Constraint>) {
+fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>, Vec<RuntimeWorkerSort>, Vec<Constraint>) {
     match (focus, wide) {
         (RuntimeWorkersFocus::Asynchronous, true) => (
             vec![
@@ -416,11 +396,7 @@ fn worker_columns(
     }
 }
 
-fn sort_headers(
-    headers: Vec<&str>,
-    sorts: &[RuntimeWorkerSort],
-    view: RuntimeViewState,
-) -> Vec<String> {
+fn sort_headers(headers: Vec<&str>, sorts: &[RuntimeWorkerSort], view: RuntimeViewState) -> Vec<String> {
     let (selected, descending) = match view.focus {
         RuntimeWorkersFocus::Asynchronous => (view.asynchronous_worker_sort, view.asynchronous_worker_descending),
         RuntimeWorkersFocus::Blocking => (view.blocking_worker_sort, view.blocking_worker_descending),
@@ -438,13 +414,7 @@ fn sort_headers(
         .collect()
 }
 
-fn register_sort_headers(
-    mouse: &MouseRows,
-    area: Rect,
-    widths: &[Constraint],
-    sorts: &[RuntimeWorkerSort],
-    focus: RuntimeWorkersFocus,
-) {
+fn register_sort_headers(mouse: &MouseRows, area: Rect, widths: &[Constraint], sorts: &[RuntimeWorkerSort], focus: RuntimeWorkersFocus) {
     let inner = Block::default().borders(Borders::ALL).inner(area);
     if inner.is_empty() {
         return;
@@ -607,7 +577,7 @@ fn draw_poll_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, samples: &[u6
         .map(|bin| {
             Bar::default()
                 .value(bin.count)
-                .label(Line::from(histogram_duration(bin.lower)))
+                .label(Line::from(format_histogram_duration(bin.lower)))
                 .style(Style::default().fg(Color::Cyan))
         })
         .collect::<Vec<_>>();
@@ -646,7 +616,7 @@ mod tests {
             (1_000_000_000, "1.0s"),
             (10_000_000_000, "10s"),
         ] {
-            assert_eq!(histogram_duration(nanos), expected);
+            assert_eq!(format_histogram_duration(nanos), expected);
             assert!(expected.len() <= 5);
         }
     }

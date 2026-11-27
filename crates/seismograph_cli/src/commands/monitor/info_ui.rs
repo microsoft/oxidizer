@@ -128,7 +128,7 @@ pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, ar
     let selected = selected.min(live.threads.len().saturating_sub(1));
     let first = selected.saturating_sub(rows.saturating_sub(1));
     let hidden = (live.hidden_internal_threads != 0)
-        .then(|| format!(" · {} telemetry threads hidden", live.hidden_internal_threads))
+        .then(|| format!(" · {} telemetry sources hidden", live.hidden_internal_threads))
         .unwrap_or_default();
     let footer = format!(
         " {}/{} threads{hidden} · Up/Down · PgUp/Dn ",

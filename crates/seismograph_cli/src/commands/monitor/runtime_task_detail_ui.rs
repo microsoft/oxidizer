@@ -12,7 +12,7 @@ use super::super::app::{RuntimeDetailMode, RuntimeViewState, TaskHistogram};
 use super::super::data::RuntimeTaskSummary;
 use super::super::runtime::RuntimeTaskKind;
 use super::super::runtime_timeline::{TimeWindow, bins, histogram};
-use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
+use super::{draw_empty_panel_with_message, format_count, format_histogram_duration, format_runtime_duration};
 
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
@@ -144,7 +144,7 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, area: Rect, label: &str, sampl
         .map(|bin| {
             Bar::default()
                 .value(bin.count)
-                .label(Line::from(format_runtime_duration(bin.lower)))
+                .label(Line::from(format_histogram_duration(bin.lower)))
                 .style(Style::default().fg(Color::Cyan))
         })
         .collect::<Vec<_>>();

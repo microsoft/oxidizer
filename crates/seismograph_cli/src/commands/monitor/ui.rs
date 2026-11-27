@@ -986,6 +986,16 @@ fn format_runtime_duration(nanos: u64) -> String {
     }
 }
 
+fn format_histogram_duration(nanos: u64) -> String {
+    match nanos {
+        0..1_000 => format!("{nanos}ns"),
+        1_000..1_000_000 => format!("{}us", nanos / 1_000),
+        1_000_000..1_000_000_000 => format!("{}ms", nanos / 1_000_000),
+        1_000_000_000..10_000_000_000 => format!("{:.1}s", nanos as f64 / 1_000_000_000.0),
+        _ => format!("{}s", nanos / 1_000_000_000),
+    }
+}
+
 fn format_decimal_duration(nanos: u64, unit_nanos: u64, suffix: &str) -> String {
     let whole = nanos / unit_nanos;
     let hundredths = nanos % unit_nanos * 100 / unit_nanos;
@@ -1405,9 +1415,7 @@ fn draw_primitives(
     };
     let groups = sorted_primitive_groups(primitives, view);
     draw_primitive_types(frame, mouse_rows, types_area, primitives, &groups, view);
-    let group = groups
-        .get(view.primitive_selected.min(groups.len().saturating_sub(1)))
-        .copied();
+    let group = groups.get(view.primitive_selected.min(groups.len().saturating_sub(1))).copied();
     let operations = group.map(|group| group.sorted_operations(view.sort, view.descending));
     draw_primitive_operations(frame, mouse_rows, operations_area, operations.as_deref(), view);
     let operation = operations
@@ -1423,10 +1431,7 @@ fn draw_primitives(
     draw_primitive_stack(frame, stack_area, hotspot, view);
 }
 
-fn sorted_primitive_groups(
-    primitives: &PrimitiveSnapshot,
-    view: PrimitiveViewState,
-) -> Vec<&super::data::PrimitiveGroup> {
+fn sorted_primitive_groups(primitives: &PrimitiveSnapshot, view: PrimitiveViewState) -> Vec<&super::data::PrimitiveGroup> {
     let mut groups = primitives.groups.iter().collect::<Vec<_>>();
     groups.sort_unstable_by(|left, right| {
         let ordering = match view.type_sort {
@@ -1472,31 +1477,24 @@ fn draw_primitive_types(
         ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
-    lines.extend(
-        groups
-            .iter()
-            .skip(first)
-            .take(visible)
-            .enumerate()
-            .map(|(index, group)| {
-                primitive_selection_line(
-                    Line::from(vec![
-                        Span::raw(format!(
-                            "{:<TYPE_WIDTH$} {:>14} {:>14} ",
-                            group.kind.label(),
-                            format_count(group.events),
-                            format_count(group.objects),
-                        )),
-                        Span::styled(
-                            format!("{:>14}", format_count(group.contentions)),
-                            Style::default().fg(CONTENTION_COLOR),
-                        ),
-                    ]),
-                    row_is_selected(first, index, selected),
-                    view.focus == PrimitiveFocus::Types,
-                )
-            }),
-    );
+    lines.extend(groups.iter().skip(first).take(visible).enumerate().map(|(index, group)| {
+        primitive_selection_line(
+            Line::from(vec![
+                Span::raw(format!(
+                    "{:<TYPE_WIDTH$} {:>14} {:>14} ",
+                    group.kind.label(),
+                    format_count(group.events),
+                    format_count(group.objects),
+                )),
+                Span::styled(
+                    format!("{:>14}", format_count(group.contentions)),
+                    Style::default().fg(CONTENTION_COLOR),
+                ),
+            ]),
+            row_is_selected(first, index, selected),
+            view.focus == PrimitiveFocus::Types,
+        )
+    }));
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
@@ -1623,10 +1621,7 @@ fn draw_primitive_operations(
     }
 }
 
-fn sorted_primitive_hotspots(
-    operation: &super::data::PrimitiveOperation,
-    view: PrimitiveViewState,
-) -> Vec<&super::data::PrimitiveHotspot> {
+fn sorted_primitive_hotspots(operation: &super::data::PrimitiveOperation, view: PrimitiveViewState) -> Vec<&super::data::PrimitiveHotspot> {
     let mut hotspots = operation.hotspots.iter().collect::<Vec<_>>();
     hotspots.sort_unstable_by(|left, right| {
         let ordering = match view.hotspot_sort {
@@ -1666,24 +1661,17 @@ fn draw_primitive_hotspots(
     ))];
     if let Some(hotspots) = hotspots {
         mouse_rows.register(area, 1, first, hotspots.len(), ListTarget::PrimitiveHotspots);
-        lines.extend(
-            hotspots
-                .iter()
-                .skip(first)
-                .take(visible)
-                .enumerate()
-                .map(|(index, hotspot)| {
-                    primitive_selection_line(
-                        Line::from(format!(
-                            "{:>12}  {}",
-                            format_count(hotspot.count),
-                            hotspot.location(view.stack_filter)
-                        )),
-                        row_is_selected(first, index, selected),
-                        view.focus == PrimitiveFocus::Hotspots,
-                    )
-                }),
-        );
+        lines.extend(hotspots.iter().skip(first).take(visible).enumerate().map(|(index, hotspot)| {
+            primitive_selection_line(
+                Line::from(format!(
+                    "{:>12}  {}",
+                    format_count(hotspot.count),
+                    hotspot.location(view.stack_filter)
+                )),
+                row_is_selected(first, index, selected),
+                view.focus == PrimitiveFocus::Hotspots,
+            )
+        }));
     }
     frame.render_widget(
         Paragraph::new(lines).block(
@@ -1814,10 +1802,7 @@ fn sorted_threads(threads: &ThreadSnapshot, view: ThreadViewState) -> Vec<&super
     sorted
 }
 
-fn sorted_thread_operations(
-    thread: &super::data::ThreadSummary,
-    view: ThreadViewState,
-) -> Vec<&super::data::ThreadOperation> {
+fn sorted_thread_operations(thread: &super::data::ThreadSummary, view: ThreadViewState) -> Vec<&super::data::ThreadOperation> {
     let mut sorted = thread.operations.iter().collect::<Vec<_>>();
     sorted.sort_unstable_by(|left, right| {
         let ordering = match view.operation_sort {
@@ -1832,10 +1817,7 @@ fn sorted_thread_operations(
     sorted
 }
 
-fn sorted_thread_participants(
-    operation: &super::data::ThreadOperation,
-    view: ThreadViewState,
-) -> Vec<&super::data::ThreadParticipant> {
+fn sorted_thread_participants(operation: &super::data::ThreadOperation, view: ThreadViewState) -> Vec<&super::data::ThreadParticipant> {
     let mut sorted = operation.participants.iter().collect::<Vec<_>>();
     sorted.sort_unstable_by(|left, right| {
         let ordering = match view.participant_sort {
@@ -1843,16 +1825,17 @@ fn sorted_thread_participants(
             ThreadParticipantSort::Objects => left.objects.len().cmp(&right.objects.len()),
             ThreadParticipantSort::Events => left.events.cmp(&right.events),
         };
-        let ordering = if view.participant_descending { ordering.reverse() } else { ordering };
+        let ordering = if view.participant_descending {
+            ordering.reverse()
+        } else {
+            ordering
+        };
         ordering.then_with(|| left.thread_id.cmp(&right.thread_id))
     });
     sorted
 }
 
-fn sorted_thread_objects(
-    participant: &super::data::ThreadParticipant,
-    view: ThreadViewState,
-) -> Vec<&super::data::ThreadObject> {
+fn sorted_thread_objects(participant: &super::data::ThreadParticipant, view: ThreadViewState) -> Vec<&super::data::ThreadObject> {
     let mut sorted = participant.objects.iter().collect::<Vec<_>>();
     sorted.sort_unstable_by(|left, right| {
         let ordering = match view.object_sort {
@@ -1908,7 +1891,7 @@ fn draw_thread_list(
         )
     }));
     let hidden = (snapshot.hidden_internal_threads != 0)
-        .then(|| format!(" · {} telemetry threads hidden", snapshot.hidden_internal_threads))
+        .then(|| format!(" · {} telemetry sources hidden", snapshot.hidden_internal_threads))
         .unwrap_or_default();
     frame.render_widget(
         Paragraph::new(lines).block(
@@ -1944,7 +1927,13 @@ fn draw_thread_operations(
     let selected = operations.map_or(0, |operations| view.operation_selected.min(operations.len().saturating_sub(1)));
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
-    mouse_rows.register(area, 1, first, operations.map_or(0, <[&super::data::ThreadOperation]>::len), ListTarget::ThreadOperations);
+    mouse_rows.register(
+        area,
+        1,
+        first,
+        operations.map_or(0, <[&super::data::ThreadOperation]>::len),
+        ListTarget::ThreadOperations,
+    );
     let heading = |label: &str, sort| {
         if view.operation_sort == sort {
             format!("{label}{}", if view.operation_descending { "▼" } else { "▲" })
@@ -2134,26 +2123,19 @@ fn draw_thread_objects(
         ),
         Style::default().add_modifier(Modifier::BOLD),
     ))];
-    lines.extend(
-        objects
-            .iter()
-            .skip(first)
-            .take(visible)
-            .enumerate()
-            .map(|(index, object)| {
-                primitive_selection_line(
-                    Line::from(format!(
-                        "{:016x} {:>5} {:>5} {:>5}",
-                        object.object_id,
-                        format_count(object.selected_events),
-                        format_count(object.related_events),
-                        format_count(object.hotness()),
-                    )),
-                    row_is_selected(first, index, selected),
-                    view.focus == ThreadFocus::Objects,
-                )
-            }),
-    );
+    lines.extend(objects.iter().skip(first).take(visible).enumerate().map(|(index, object)| {
+        primitive_selection_line(
+            Line::from(format!(
+                "{:016x} {:>5} {:>5} {:>5}",
+                object.object_id,
+                format_count(object.selected_events),
+                format_count(object.related_events),
+                format_count(object.hotness()),
+            )),
+            row_is_selected(first, index, selected),
+            view.focus == ThreadFocus::Objects,
+        )
+    }));
     if objects.is_empty() {
         lines.push(Line::from("No shared retained objects."));
     }
