@@ -293,6 +293,7 @@ const PRIMITIVE_TYPES: &Section = section!("PRIMITIVE TYPES";
     "Events" => "Retained primitive-event count.",
     "Objects" => "Distinct recorded object identities in this family.",
     "Contentions" => "Count of event kinds classified as contention, not nanoseconds blocked. Channel receive wait is normal waiting for a producer and is excluded.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "retained primitive / source accepted / overwritten" => "Retained primitive is class-specific; source counters span all event classes.",
     "Up/Down / Enter" => "Select a type / enter Operations.",
 );
@@ -311,6 +312,7 @@ const PRIMITIVE_OPERATIONS: &Section = section!("PRIMITIVE OPERATIONS";
 const PRIMITIVE_HOTSPOTS: &Section = section!("PRIMITIVE HOTSPOTS";
     "Events" => "Retained records sharing this stack for the selected type and operation.",
     "Location" => "First displayed frame of the selected hotspot.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "Stack Trace" => "Selected hotspot's stack, not every object of the primitive.",
     "Up/Down / Backspace" => "Select hotspot / return to Operations.",
     "f / PgUp/PgDn" => "Toggle application/all frames / scroll the stack.",
@@ -333,9 +335,10 @@ const PRIMITIVE_VALUES: &Section = section!("OPERATION VALUES";
 );
 
 const THREADS: &Section = section!("THREADS";
-    "Thread" => "Recorder thread ID and available name, not necessarily OS thread ID. Threads with the most retained activity appear first.",
+    "Thread" => "Recorder thread ID and available name, not necessarily OS thread ID. The default order shows the most retained activity first.",
     "Retained" => "Retained source records for this thread; filtering can reduce this count.",
     "Overwritten" => "All-class source lost-record count for this thread; remains unfiltered.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "Up/Down / Enter" => "Select a thread / enter its Operations.",
     "Empty operations" => "Other event classes can contribute retained events without relevant operation rows.",
 );
@@ -345,6 +348,7 @@ const THREAD_OPERATIONS: &Section = section!("THREAD OPERATIONS";
     "Events" => "Its retained records in that category.",
     "Objects" => "Distinct associated recorded identities.",
     "Threads" => "Related participant rows, not all process threads.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "Relationships" => "Association through retained object identities, not a scheduler wait-for graph or proof one thread blocked another. Allocation/free operations connect their counterparts.",
     "Channel receive wait" => "Often normal producer/consumer behavior, not a bug.",
     "Up/Down / Enter / Backspace" => "Select operation / enter Related Threads / return to Threads.",
@@ -354,6 +358,7 @@ const THREAD_PARTICIPANTS: &Section = section!("RELATED THREADS";
     "Thread" => "Related recorder thread; (self) is the originally selected thread.",
     "Objects" => "Shared recorded objects in this relationship.",
     "Events" => "Participant's retained events on those objects.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "Relationship title" => "Allocation/free counterparts or primitive users, including self. Shared identity does not establish causality, wall-clock overlap or lock ownership.",
     "Up/Down / Enter / Backspace" => "Select participant / enter Objects / return to Operations.",
 );
@@ -362,7 +367,8 @@ const THREAD_OBJECTS: &Section = section!("THREAD OBJECTS / STACKS";
     "Object" => "Hexadecimal recorded identity, not a size or portable pointer.",
     "Own" => "Selected thread's retained events for this operation/object.",
     "Related" => "Participant's corresponding retained events.",
-    "Hotness" => "Ranked using Own + Related, not elapsed time.",
+    "Total" => "Own + Related. The default order ranks objects by this value, not elapsed time.",
+    "Sortable headers" => "Click a heading to sort by that column. Click it again to reverse the order.",
     "Selected thread operation / Related thread operation" => "Representative captured stack on each side, not a complete chronological trace.",
     "event(s)" => "Retained count for that representative stack, not the entire object's event count.",
     "Missing stacks" => "Backtrace settings and partial retention can remove attribution on either side.",
@@ -382,6 +388,7 @@ const RUNTIME_WORKERS: &Section = section!("RUNTIME WORKERS";
     "Median poll" => "Median retained completed poll duration across this worker's tasks; '-' without samples and 0ns for measured zero.",
     "Max poll" => "Longest retained completed poll duration on this worker; an ongoing poll is not a completed sample.",
     "Poll timeline" => "Each async worker row bins retained poll intervals on the runtime window. A dim baseline means unobserved time, not measured idle time.",
+    "Sortable headers" => "Click a heading to sort by that column. Poll timeline sorts by total retained poll interval time. Click a heading again to reverse the order.",
     "Avg queue / Max queue" => "Mean and maximum retained time that blocking tasks waited before this worker started them.",
     "Avg exec / Max exec" => "Mean and maximum retained blocking execution duration on this worker.",
     "Worker Activity" => "The panel beside the worker list shows the selected worker's category-specific totals and durations.",
@@ -433,7 +440,7 @@ const IO_OPERATIONS: &Section = section!("I/O OPERATIONS";
     "Thread" => "Latest retained event's recorder thread, not necessarily initiating or OS thread.",
     "Requested" => "Requested bytes from that event.",
     "Completed" => "Completed bytes from that event.",
-    "Duration" => "Retained finish minus retained start, in ns/us/ms/s. '-' means the pair is incomplete, not zero latency.",
+    "Interval" => "Retained finish timestamp minus retained start timestamp, in ns/us/ms/s. This interval includes start-event recording overhead, including backtrace capture. It is not pure device latency. '-' means the pair is incomplete, not zero latency.",
     "buffer / span(s) / resource" => "Bottom details: buffer ID ('-' if absent), length in bytes, span count and resource kind. Multiple spans describe a logical buffer, not separate completed operations.",
     "Pending / missing duration" => "May reflect a truncated or filtered window, not only an operation still running.",
     "Up/Down / Backspace" => "Select operation / return to Resources.",
@@ -791,7 +798,7 @@ mod tests {
         ),
         (
             Context::IoOperations,
-            &["Operation", "Type", "Outcome", "Thread", "Requested", "Completed", "Duration"],
+            &["Operation", "Type", "Outcome", "Thread", "Requested", "Completed", "Interval"],
         ),
         (
             Context::CacheTiers,

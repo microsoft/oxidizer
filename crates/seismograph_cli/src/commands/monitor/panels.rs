@@ -149,10 +149,10 @@ impl Panels {
                 [areas[0], areas[1]] = split(Split::RuntimeTaskRows, Direction::Vertical, area, Constraint::Percentage(48));
             }
             MonitorTab::Io => {
-                [areas[0], areas[1]] = split(Split::Io, Direction::Horizontal, area, Constraint::Percentage(48));
+                [areas[0], areas[1]] = split(Split::Io, Direction::Vertical, area, Constraint::Percentage(35));
             }
             MonitorTab::Cache => {
-                [areas[0], areas[1]] = split(Split::Cache, Direction::Horizontal, area, Constraint::Percentage(55));
+                [areas[0], areas[1]] = split(Split::Cache, Direction::Vertical, area, Constraint::Percentage(35));
             }
         }
         Arrangement { areas, dividers }
@@ -294,7 +294,7 @@ mod tests {
         let mut panels = Panels::default();
         panels.sizes[Split::Io as usize] = Some(Constraint::Length(99));
         let layout = panels.arrange(MonitorTab::Io, Rect::new(0, 0, 100, 20));
-        assert_eq!((layout.areas[0].width, layout.areas[1].width), (97, 3));
+        assert_eq!((layout.areas[0].height, layout.areas[1].height), (17, 3));
         let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
         let mut app = App::with_io(io);
         app.panels.dragging = Some((MonitorTab::Io, Split::Io));

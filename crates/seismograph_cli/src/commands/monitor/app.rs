@@ -479,8 +479,12 @@ impl AllocationViewState {
 pub(super) struct PrimitiveViewState {
     pub(super) focus: PrimitiveFocus,
     pub(super) primitive_selected: usize,
+    pub(super) type_sort: PrimitiveTypeSort,
+    pub(super) type_descending: bool,
     pub(super) operation_selected: usize,
     pub(super) hotspot_selected: usize,
+    pub(super) hotspot_sort: PrimitiveHotspotSort,
+    pub(super) hotspot_descending: bool,
     pub(super) stack_scroll: usize,
     pub(super) sort: PrimitiveSort,
     pub(super) descending: bool,
@@ -492,8 +496,12 @@ impl PrimitiveViewState {
         Self {
             focus: PrimitiveFocus::Types,
             primitive_selected: 0,
+            type_sort: PrimitiveTypeSort::Contentions,
+            type_descending: true,
             operation_selected: 0,
             hotspot_selected: 0,
+            hotspot_sort: PrimitiveHotspotSort::Events,
+            hotspot_descending: true,
             stack_scroll: 0,
             sort: PrimitiveSort::Events,
             descending: true,
@@ -517,6 +525,20 @@ pub(super) enum PrimitiveFocus {
     Types,
     Operations,
     Hotspots,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PrimitiveTypeSort {
+    Type,
+    Events,
+    Objects,
+    Contentions,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PrimitiveHotspotSort {
+    Events,
+    Location,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -616,9 +638,17 @@ pub(super) enum HeapFocus {
 pub(super) struct ThreadViewState {
     pub(super) focus: ThreadFocus,
     pub(super) thread_selected: usize,
+    pub(super) thread_sort: ThreadListSort,
+    pub(super) thread_descending: bool,
     pub(super) operation_selected: usize,
+    pub(super) operation_sort: ThreadOperationSort,
+    pub(super) operation_descending: bool,
     pub(super) participant_selected: usize,
+    pub(super) participant_sort: ThreadParticipantSort,
+    pub(super) participant_descending: bool,
     pub(super) object_selected: usize,
+    pub(super) object_sort: ThreadObjectSort,
+    pub(super) object_descending: bool,
     pub(super) stack_scroll: usize,
     pub(super) stack_filter: AllocationStackFilter,
 }
@@ -628,9 +658,17 @@ impl ThreadViewState {
         Self {
             focus: ThreadFocus::Threads,
             thread_selected: 0,
+            thread_sort: ThreadListSort::Retained,
+            thread_descending: true,
             operation_selected: 0,
+            operation_sort: ThreadOperationSort::Operation,
+            operation_descending: false,
             participant_selected: 0,
+            participant_sort: ThreadParticipantSort::Thread,
+            participant_descending: false,
             object_selected: 0,
+            object_sort: ThreadObjectSort::Total,
+            object_descending: true,
             stack_scroll: 0,
             stack_filter: AllocationStackFilter::Application,
         }
@@ -642,17 +680,17 @@ impl ThreadViewState {
         self.reset_operation();
     }
 
-    fn reset_operation(&mut self) {
+    pub(super) fn reset_operation(&mut self) {
         self.operation_selected = 0;
         self.reset_participant();
     }
 
-    fn reset_participant(&mut self) {
+    pub(super) fn reset_participant(&mut self) {
         self.participant_selected = 0;
         self.reset_object();
     }
 
-    fn reset_object(&mut self) {
+    pub(super) fn reset_object(&mut self) {
         self.object_selected = 0;
         self.stack_scroll = 0;
     }
@@ -667,12 +705,46 @@ pub(super) enum ThreadFocus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ThreadListSort {
+    Thread,
+    Retained,
+    Overwritten,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ThreadOperationSort {
+    Operation,
+    Events,
+    Objects,
+    Threads,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ThreadParticipantSort {
+    Thread,
+    Objects,
+    Events,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ThreadObjectSort {
+    Object,
+    Own,
+    Related,
+    Total,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct RuntimeViewState {
     pub(super) runtime_selected: usize,
     pub(super) focus: RuntimeWorkersFocus,
     pub(super) section: RuntimeSectionFocus,
     pub(super) asynchronous_selected: usize,
+    pub(super) asynchronous_worker_sort: RuntimeWorkerSort,
+    pub(super) asynchronous_worker_descending: bool,
     pub(super) blocking_selected: usize,
+    pub(super) blocking_worker_sort: RuntimeWorkerSort,
+    pub(super) blocking_worker_descending: bool,
     pub(super) asynchronous_task_selected: usize,
     pub(super) blocking_task_selected: usize,
     pub(super) group_selected_explicitly: bool,
@@ -696,7 +768,11 @@ impl RuntimeViewState {
             focus: RuntimeWorkersFocus::Asynchronous,
             section: RuntimeSectionFocus::Workers,
             asynchronous_selected: 0,
+            asynchronous_worker_sort: RuntimeWorkerSort::WorkerId,
+            asynchronous_worker_descending: false,
             blocking_selected: 0,
+            blocking_worker_sort: RuntimeWorkerSort::WorkerId,
+            blocking_worker_descending: false,
             asynchronous_task_selected: 0,
             blocking_task_selected: 0,
             group_selected_explicitly: false,
@@ -735,6 +811,26 @@ impl RuntimeViewState {
 pub(super) enum RuntimeWorkersFocus {
     Asynchronous,
     Blocking,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeWorkerSort {
+    WorkerId,
+    State,
+    Types,
+    Tasks,
+    Polls,
+    Activity,
+    MedianPoll,
+    MaxPoll,
+    Runs,
+    Succeeded,
+    Canceled,
+    Panicked,
+    AverageQueue,
+    MaximumQueue,
+    AverageExecution,
+    MaximumExecution,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

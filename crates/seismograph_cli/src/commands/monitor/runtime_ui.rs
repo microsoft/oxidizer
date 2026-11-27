@@ -3,12 +3,14 @@
 
 //! Runtime workers and category-specific worker activity.
 
+use std::cmp::Ordering;
+
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use super::super::app::{RuntimeSectionFocus, RuntimeViewState, RuntimeWorkersFocus};
+use super::super::app::{RuntimeSectionFocus, RuntimeViewState, RuntimeWorkerSort, RuntimeWorkersFocus};
 use super::super::data::{RuntimeMonitorSnapshot, RuntimeWorkerSummary};
 use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime_timeline::histogram;
@@ -50,7 +52,7 @@ fn selection(selected: bool) -> Style {
 
 fn workers_for(runtime: &RuntimeMonitorSnapshot, view: RuntimeViewState) -> Vec<&RuntimeWorkerSummary> {
     let runtime_id = runtime.selected_runtime(view.runtime_selected).map(|runtime| runtime.runtime_id);
-    runtime
+    let mut workers = runtime
         .workers
         .iter()
         .filter(|worker| Some(worker.runtime_id) == runtime_id)
@@ -59,7 +61,74 @@ fn workers_for(runtime: &RuntimeMonitorSnapshot, view: RuntimeViewState) -> Vec<
             RuntimeWorkersFocus::Asynchronous => !is_blocking(worker),
             RuntimeWorkersFocus::Blocking => is_blocking(worker),
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let (sort, descending) = match view.focus {
+        RuntimeWorkersFocus::Asynchronous => (view.asynchronous_worker_sort, view.asynchronous_worker_descending),
+        RuntimeWorkersFocus::Blocking => (view.blocking_worker_sort, view.blocking_worker_descending),
+    };
+    workers.sort_unstable_by(|left, right| compare_workers(left, right, sort, descending));
+    workers
+}
+
+fn directed(ordering: Ordering, descending: bool) -> Ordering {
+    if descending { ordering.reverse() } else { ordering }
+}
+
+fn optional(left: Option<u64>, right: Option<u64>, descending: bool) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => directed(left.cmp(&right), descending),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_workers(
+    left: &RuntimeWorkerSummary,
+    right: &RuntimeWorkerSummary,
+    sort: RuntimeWorkerSort,
+    descending: bool,
+) -> Ordering {
+    let ordering = match sort {
+        RuntimeWorkerSort::WorkerId => directed(left.worker_id.cmp(&right.worker_id), descending),
+        RuntimeWorkerSort::State => directed(left.state.cmp(&right.state), descending),
+        RuntimeWorkerSort::Types => directed(left.task_types.cmp(&right.task_types), descending),
+        RuntimeWorkerSort::Tasks => directed(left.observed_tasks.cmp(&right.observed_tasks), descending),
+        RuntimeWorkerSort::Polls => directed(left.metrics.poll_count.cmp(&right.metrics.poll_count), descending),
+        RuntimeWorkerSort::Activity => {
+            let activity = |worker: &RuntimeWorkerSummary| {
+                worker.metrics.polls.iter().fold(0_u64, |total, interval| {
+                    total.saturating_add(interval.end.saturating_sub(interval.start))
+                })
+            };
+            directed(activity(left).cmp(&activity(right)), descending)
+        }
+        RuntimeWorkerSort::MedianPoll => optional(left.metrics.median_poll_nanos, right.metrics.median_poll_nanos, descending),
+        RuntimeWorkerSort::MaxPoll => optional(left.metrics.max_poll_nanos, right.metrics.max_poll_nanos, descending),
+        RuntimeWorkerSort::Runs => directed(left.blocking.executions.cmp(&right.blocking.executions), descending),
+        RuntimeWorkerSort::Succeeded => directed(left.blocking.succeeded.cmp(&right.blocking.succeeded), descending),
+        RuntimeWorkerSort::Canceled => directed(left.blocking.canceled.cmp(&right.blocking.canceled), descending),
+        RuntimeWorkerSort::Panicked => directed(left.blocking.panicked.cmp(&right.blocking.panicked), descending),
+        RuntimeWorkerSort::AverageQueue => optional(
+            left.blocking.queue_time.mean_nanos(),
+            right.blocking.queue_time.mean_nanos(),
+            descending,
+        ),
+        RuntimeWorkerSort::MaximumQueue => {
+            optional(left.blocking.queue_time.max_nanos, right.blocking.queue_time.max_nanos, descending)
+        }
+        RuntimeWorkerSort::AverageExecution => optional(
+            left.blocking.execution_time.mean_nanos(),
+            right.blocking.execution_time.mean_nanos(),
+            descending,
+        ),
+        RuntimeWorkerSort::MaximumExecution => optional(
+            left.blocking.execution_time.max_nanos,
+            right.blocking.execution_time.max_nanos,
+            descending,
+        ),
+    };
+    ordering.then_with(|| left.worker_id.cmp(&right.worker_id))
 }
 
 fn is_blocking(worker: &RuntimeWorkerSummary) -> bool {
@@ -210,9 +279,10 @@ fn draw_workers(
         .skip(first)
         .take(visible)
         .map(|worker| worker_row(worker, view.focus, wide, table.width));
-    let (headers, widths) = worker_columns(view.focus, wide);
+    let (headers, sorts, widths) = worker_columns(view.focus, wide);
+    register_sort_headers(mouse, table, &widths, &sorts, view.focus);
     let widget = Table::new(rows, widths)
-        .header(Row::new(headers).style(Style::default().add_modifier(Modifier::BOLD)))
+        .header(Row::new(sort_headers(headers, &sorts, view)).style(Style::default().add_modifier(Modifier::BOLD)))
         .column_spacing(1)
         .row_highlight_style(selection(focused))
         .block(block(title, focused));
@@ -230,7 +300,10 @@ fn draw_workers(
     );
 }
 
-fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>, Vec<Constraint>) {
+fn worker_columns(
+    focus: RuntimeWorkersFocus,
+    wide: bool,
+) -> (Vec<&'static str>, Vec<RuntimeWorkerSort>, Vec<Constraint>) {
     match (focus, wide) {
         (RuntimeWorkersFocus::Asynchronous, true) => (
             vec![
@@ -242,6 +315,16 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
                 "Median poll",
                 "Max poll",
                 "Poll timeline",
+            ],
+            vec![
+                RuntimeWorkerSort::WorkerId,
+                RuntimeWorkerSort::State,
+                RuntimeWorkerSort::Types,
+                RuntimeWorkerSort::Tasks,
+                RuntimeWorkerSort::Polls,
+                RuntimeWorkerSort::MedianPoll,
+                RuntimeWorkerSort::MaxPoll,
+                RuntimeWorkerSort::Activity,
             ],
             vec![
                 Constraint::Length(24),
@@ -256,6 +339,12 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
         ),
         (RuntimeWorkersFocus::Asynchronous, false) => (
             vec!["Worker ID", "Types", "Polls", "Max poll"],
+            vec![
+                RuntimeWorkerSort::WorkerId,
+                RuntimeWorkerSort::Types,
+                RuntimeWorkerSort::Polls,
+                RuntimeWorkerSort::MaxPoll,
+            ],
             vec![
                 Constraint::Min(18),
                 Constraint::Length(7),
@@ -277,6 +366,19 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
                 "Avg exec",
                 "Max exec",
             ],
+            vec![
+                RuntimeWorkerSort::WorkerId,
+                RuntimeWorkerSort::State,
+                RuntimeWorkerSort::Types,
+                RuntimeWorkerSort::Runs,
+                RuntimeWorkerSort::Succeeded,
+                RuntimeWorkerSort::Canceled,
+                RuntimeWorkerSort::Panicked,
+                RuntimeWorkerSort::AverageQueue,
+                RuntimeWorkerSort::MaximumQueue,
+                RuntimeWorkerSort::AverageExecution,
+                RuntimeWorkerSort::MaximumExecution,
+            ],
             vec![24, 9, 7, 8, 10, 9, 9, 12, 12, 12, 12]
                 .into_iter()
                 .map(Constraint::Length)
@@ -284,6 +386,14 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
         ),
         (RuntimeWorkersFocus::Blocking, false) => (
             vec!["Worker ID", "Types", "Runs", "Succeeded", "Max queue", "Max exec"],
+            vec![
+                RuntimeWorkerSort::WorkerId,
+                RuntimeWorkerSort::Types,
+                RuntimeWorkerSort::Runs,
+                RuntimeWorkerSort::Succeeded,
+                RuntimeWorkerSort::MaximumQueue,
+                RuntimeWorkerSort::MaximumExecution,
+            ],
             vec![
                 Constraint::Min(18),
                 Constraint::Length(7),
@@ -293,6 +403,60 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
                 Constraint::Length(12),
             ],
         ),
+    }
+}
+
+fn sort_headers(
+    headers: Vec<&str>,
+    sorts: &[RuntimeWorkerSort],
+    view: RuntimeViewState,
+) -> Vec<String> {
+    let (selected, descending) = match view.focus {
+        RuntimeWorkersFocus::Asynchronous => (view.asynchronous_worker_sort, view.asynchronous_worker_descending),
+        RuntimeWorkersFocus::Blocking => (view.blocking_worker_sort, view.blocking_worker_descending),
+    };
+    headers
+        .into_iter()
+        .zip(sorts)
+        .map(|(header, sort)| {
+            if *sort == selected {
+                format!("{header} {}", if descending { "▼" } else { "▲" })
+            } else {
+                header.into()
+            }
+        })
+        .collect()
+}
+
+fn register_sort_headers(
+    mouse: &MouseRows,
+    area: Rect,
+    widths: &[Constraint],
+    sorts: &[RuntimeWorkerSort],
+    focus: RuntimeWorkersFocus,
+) {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    if inner.is_empty() {
+        return;
+    }
+    let spacing = u16::try_from(widths.len().saturating_sub(1)).unwrap_or(u16::MAX);
+    let fixed = widths.iter().fold(0_u16, |total, width| {
+        total.saturating_add(match width {
+            Constraint::Length(width) => *width,
+            _ => 0,
+        })
+    });
+    let flexible = inner.width.saturating_sub(fixed).saturating_sub(spacing);
+    let mut x = inner.x;
+    for (width, sort) in widths.iter().zip(sorts) {
+        let width = match width {
+            Constraint::Length(width) => *width,
+            Constraint::Min(minimum) => flexible.max(*minimum),
+            _ => 0,
+        }
+        .min(inner.right().saturating_sub(x));
+        mouse.register_item(Rect::new(x, inner.y, width, 1), ListTarget::RuntimeWorkerHeader(focus, *sort), 0);
+        x = x.saturating_add(width).saturating_add(1);
     }
 }
 
