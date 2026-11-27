@@ -13,20 +13,40 @@
 
 </div>
 
-Kubernetes HTTP readiness adapters for [`health`][__link0].
+Kubernetes readiness adapters for [`health`][__link0].
 
-Both adapters read a [`health::Monitor`][__link1] for each request. A healthy process returns
-status `200 OK` with the JSON body `true`. A degraded or unhealthy process returns
-`503 Service Unavailable` with the JSON body `false`. Responses contain no component details
-and disable caching.
+The TCP adapter listens on a dedicated port only while the aggregate state is
+[`health::Health::Healthy`][__link1]. The HTTP adapters read a [`health::Monitor`][__link2] for each request.
+They return `200 OK` with JSON `true` for a healthy process. They return
+`503 Service Unavailable` with JSON `false` for any other state.
 
 ## Features
 
 * `http` enables the Tower readiness service.
 * `request-handler` enables the
-  [`http_extensions`][__link2] request handler.
+  [`http_extensions`][__link3] request handler.
+* `tcp` enables the TCP readiness server.
 
 No features are enabled by default.
+
+## Kubernetes configuration
+
+Point a TCP probe at a dedicated readiness port:
+
+```yaml
+readinessProbe:
+  tcpSocket:
+    port: 8081
+```
+
+Point an HTTP probe at the route that contains an HTTP adapter:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+```
 
 
 <hr/>
@@ -34,7 +54,8 @@ No features are enabled by default.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/health_probe">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbpXoqhIfze7YbZ5tYlnsi31obkA52rwh4jx4bi-pazXJ7D4FhZIGCZmhlYWx0aGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb1bYNm_q_KcMb3epICoaCydobBQGfy_fq0YUbcPzgIr6w4aFhZIGCZmhlYWx0aGUwLjEuMA
  [__link0]: https://crates.io/crates/health/0.1.0
- [__link1]: https://docs.rs/health/0.1.0/health/?search=Monitor
- [__link2]: https://docs.rs/http_extensions
+ [__link1]: https://docs.rs/health/0.1.0/health/?search=Health::Healthy
+ [__link2]: https://docs.rs/health/0.1.0/health/?search=Monitor
+ [__link3]: https://docs.rs/http_extensions
