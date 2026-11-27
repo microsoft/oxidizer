@@ -227,7 +227,8 @@ pbjson-build = { version = "0.9.0", default-features = false }
 performables = { path = "crates/performables", default-features = false, version = "0.5.0" }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
-plurality = { path = "crates/plurality", default-features = false, version = "0.2.5" }
+# Like ohno, use the published version shared with an external consumer (events_once).
+plurality = { default-features = false, version = "0.2.4" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 prettyplease = { version = "0.3.0", default-features = false }
 proc-macro-crate = { version = "3.5.0", default-features = false }

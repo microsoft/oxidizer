@@ -199,6 +199,19 @@ Describe 'Re-exported type edges in the live workspace' {
         @($resolved | ForEach-Object { $_.Folder }) | Should -Not -Contain 'anyspawn'
     }
 
+    It 'does not cascade a local plurality release into consumers of published plurality' {
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('plurality@breaking')) `
+            -WorkspaceBaseline $script:LiveBaseline `
+            -GetRequiredChangeType $script:NoSelfChangeClassifier
+
+        $folders = @($resolved | ForEach-Object { $_.Folder })
+        $folders | Should -Contain 'plurality'
+        foreach ($consumer in @('arty', 'arty_executor', 'bytesbuf', 'fetch_winhttp_impl', 'layered')) {
+            $folders | Should -Not -Contain $consumer
+        }
+    }
+
     It 'treats every indirect allowlist edge as exposure of the defining crate' {
         foreach ($pair in $script:IndirectPairs) {
             Test-PackageAllowlistNamesTarget -Dependent $pair.Dependent -TargetPackageName $pair.TargetName |

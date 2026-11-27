@@ -40,7 +40,7 @@ benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 pin-project-lite = { workspace = true }
-plurality = { path = "../plurality" }
+plurality = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }

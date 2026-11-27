@@ -104,7 +104,7 @@ observed = { path = "../observed" }
 ohno = { workspace = true, features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
-plurality = { path = "../plurality", features = ["std"] }
+plurality = { workspace = true, features = ["std"] }
 seismograph = { path = "../seismograph", features = ["monitor"] }
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 seismograph_runtime = { path = "../seismograph_runtime", features = ["test-util"] }
