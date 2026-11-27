@@ -1,0 +1,79 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "enactor"
+description = "Typed actors with prioritized lifecycle control for the Arty thread-per-core runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "actor", "async", "arty", "thread-per-core"]
+categories = ["asynchronous", "concurrency"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/enactor"
+autotests = false
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty::task::context::Context",
+    "futures_core::stream::Stream",
+    "ohno::*",
+    "oneshot::*",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+    "tick::clock::Clock",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+arty = { workspace = true, features = ["rt"] }
+flume = { workspace = true, features = ["async"] }
+futures = { workspace = true, features = ["std"] }
+ohno = { workspace = true }
+oneshot = { workspace = true, features = ["std", "async"] }
+thread_aware = { workspace = true, features = ["std", "derive"] }
+tick = { workspace = true }
+
+[dev-dependencies]
+arty = { path = "../arty", features = ["rt", "macros", "test-util"] }
+benchmarking = { path = "../benchmarking" }
+criterion = { workspace = true }
+flume = { workspace = true, features = ["async"] }
+futures = { workspace = true, features = ["std", "executor", "async-await"] }
+oneshot = { workspace = true, features = ["std", "async"] }
+tick = { path = "../tick", features = ["test-util"] }
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[bench]]
+name = "enactor_overhead"
+harness = false
+
+[[example]]
+name = "enactor_ping_pong"
+
+[[example]]
+name = "enactor_counter"
+
+[[example]]
+name = "enactor_worker_pool"
+
+[[example]]
+name = "enactor_supervisor"
+
+[[example]]
+name = "enactor_handshake"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
