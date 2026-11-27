@@ -1,7 +1,7 @@
 version: 4
 tool: cargo-gamma 0.4.0
 context:
-  repo_sha: 4394b75a04fdfd8eee5781d2cf7acbea5a9dba2a
+  repo_sha: 730658126777ca76ecebfef00a42e8fd1f57d74e
   generated_on: 2026-11-27
 files:
 - path: crates/allocation_hints/src/heaps.rs
@@ -111929,6 +111929,8 @@ files:
     killer: 0
   - id: 1103b6ee5772
     killer: 2
+  - id: 11687d43fb3d
+    killer: 3
   - id: 12074953a3a2
     killer: 4
   - id: 14abab79fd39
@@ -111959,6 +111961,8 @@ files:
     killer: 13
   - id: 22e51e1c60c5
     killer: 13
+  - id: 23a54d6a1430
+    killer: 3
   - id: 2453c955489f
     killer: 4
   - id: 25f374299ecf
@@ -112093,6 +112097,8 @@ files:
     killer: 2
   - id: 95cbd3acbfc4
     killer: 0
+  - id: 9651ff052e4e
+    killer: 3
   - id: 9899fe19d97a
     killer: 5
   - id: 9c514d669308
@@ -112133,6 +112139,8 @@ files:
     killer: 2
   - id: b79525b73bca
     killer: 2
+  - id: b8434677f758
+    killer: 13
   - id: b8539167f6e7
     killer: 2
   - id: bb1320548e68
@@ -112159,6 +112167,8 @@ files:
     killer: 13
   - id: d690eee26d9f
     killer: 3
+  - id: daf502ffb2b2
+    killer: 3
   - id: dc7bc4ffee70
     killer: 13
   - id: dec3318095b7
@@ -112175,6 +112185,8 @@ files:
     killer: 3
   - id: ece9ca80c17c
     killer: 3
+  - id: ed6ea0707f3d
+    killer: 13
   - id: efcfe599c259
     killer: 13
   - id: f2a96ceac587
@@ -112363,6 +112375,8 @@ files:
     killer: 1
   - id: 0fbfcdfc6156
     killer: 12
+  - id: 11be6c47a675
+    killer: 10
   - id: 11e88a3f25c2
     killer: 4
   - id: 12a6267c79d5
@@ -112393,6 +112407,8 @@ files:
     killer: 4
   - id: 1b9b807cfab2
     killer: 1
+  - id: 1fa74e1a5e3b
+    killer: 16
   - id: 2115d376f9b0
     killer: 12
   - id: 220b57cf8c83
@@ -112441,9 +112457,13 @@ files:
     killer: 4
   - id: 313a379b4882
     killer: 1
+  - id: 31ca31536eae
+    killer: 8
   - id: 31d001090965
     killer: 1
   - id: 31d265d3cc0a
+    killer: 1
+  - id: 31f1b89c6f7c
     killer: 1
   - id: 32088612d261
     killer: 4
@@ -112468,6 +112488,8 @@ files:
   - id: 3d9df1b32c96
     killer: 2
   - id: 3df98614a0ea
+    killer: 1
+  - id: 3e036138fcd7
     killer: 1
   - id: 401901f4d03b
     killer: 1
@@ -112501,6 +112523,8 @@ files:
     killer: 8
   - id: 50f13810efcb
     killer: 5
+  - id: 5145d09cbd8c
+    killer: 1
   - id: 514b4d41244c
     killer: 4
   - id: 514dd6ee8935
@@ -112509,6 +112533,8 @@ files:
     killer: 5
   - id: 53d40ea7dd69
     killer: 15
+  - id: 540ccb661782
+    killer: 16
   - id: 541ee082a927
     killer: 4
   - id: 5431ea68499f
@@ -112567,6 +112593,8 @@ files:
     killer: 4
   - id: 691b5ce17b32
     killer: 9
+  - id: 693ecb514e99
+    killer: 1
   - id: 698a31efccf4
     killer: 4
   - id: 69b1be56b0f9
@@ -112691,8 +112719,12 @@ files:
     killer: 4
   - id: a7ed9ae5d9d8
     killer: 10
+  - id: a8ee01e5acfa
+    killer: 4
   - id: a8fdb6b60c5a
     killer: 16
+  - id: a9341ccdee30
+    killer: 1
   - id: aadf3df42d10
     killer: 8
   - id: ab63f230a5c1
@@ -112703,10 +112735,14 @@ files:
     killer: 16
   - id: ad1b3c53b1f8
     killer: 4
+  - id: ad8bf3853b50
+    killer: 1
   - id: ad9343bbcc98
     killer: 4
   - id: ae276b538dbd
     killer: 4
+  - id: af3c870a3229
+    killer: 1
   - id: af4d61dd0a9c
     killer: 4
   - id: b08209414d21
@@ -112726,6 +112762,8 @@ files:
   - id: bce783abfa03
     killer: 12
   - id: bdedfab51d1c
+    killer: 16
+  - id: bf1abc25a0d5
     killer: 16
   - id: bf472a535b19
     killer: 4
@@ -112769,10 +112807,14 @@ files:
     killer: 16
   - id: d2dbfdcc4849
     killer: 1
+  - id: d347cc160ea7
+    killer: 1
   - id: d392cd678da2
     killer: 4
   - id: d3ff3a5fe47b
     killer: 10
+  - id: d47292557f25
+    killer: 1
   - id: d472e4362500
     killer: 1
   - id: d57ca47da18b
@@ -112797,6 +112839,8 @@ files:
     killer: 10
   - id: dba0663c394c
     killer: 16
+  - id: dbfbb1184d43
+    killer: 10
   - id: dc5f6bb71566
     killer: 6
   - id: dc7485316f79
@@ -112812,6 +112856,8 @@ files:
   - id: e1e41029ce95
     killer: 1
   - id: e223f61077ac
+    killer: 1
+  - id: e348ebe32e3d
     killer: 1
   - id: e61604c18787
     killer: 5
@@ -112883,6 +112929,8 @@ files:
     killer: 4
   - id: feca82ab0cb8
     killer: 7
+  - id: ff4a964e6b4a
+    killer: 16
   - id: ffc6aadbd68f
     killer: 4
 - path: crates/process_health/src/health.rs
@@ -112950,16 +112998,111 @@ files:
     killer: 4
   - id: fbe6c9deab6a
     killer: 5
+- path: crates/process_health/src/monitor.rs
+  killers:
+  - package: process_health
+    target: lib:health
+    test: aggregator::tests::overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns
+  - package: process_health
+    target: test:worker
+    test: process_and_component_snapshots_follow_registration_publication_and_removal
+  mutants:
+  - id: 0087d42af49a
+    killer: 1
+  - id: 17e4140a3aff
+    killer: 0
 - path: crates/process_health/src/publisher.rs
   killers:
   - package: process_health
+    target: lib:health
+    test: aggregator::tests::overlapping_component_failures_do_not_publish_a_ready_snapshot_between_turns
+  - package: process_health
+    target: lib:health
+    test: component::tests::component_publishers_retain_the_component_owner
+  - package: process_health
+    target: lib:health
+    test: component::tests::empty_live_set_does_not_publish_a_ready_snapshot_between_turns
+  - package: process_health
+    target: lib:health
+    test: component::tests::retired_publishers_operate_locally_even_while_a_pass_owns_the_component
+  - package: process_health
+    target: test:aggregation
+    test: a_burst_of_publishers_yields_to_another_component_and_converges
+  - package: process_health
+    target: test:aggregation
+    test: cloned_publisher_is_independent_and_healthy
+  - package: process_health
     target: test:aggregation
     test: diagnostics_identify_the_degraded_component_and_publisher_reason
+  - package: process_health
+    target: test:aggregation
+    test: equal_signal_does_not_notify
+  - package: process_health
+    target: test:worker
+    test: process_and_component_snapshots_follow_registration_publication_and_removal
   mutants:
+  - id: 00f4a6f5631a
+    killer: 3
+  - id: 0e5b4e73b217
+    killer: 8
+  - id: 15aa62f4ce38
+    killer: 1
+  - id: 1e88d6c981b6
+    killer: 0
+  - id: 1fd361029dc7
+    killer: 3
+  - id: 2451e45cbfdf
+    killer: 0
   - id: 298bd49037b1
+    killer: 6
+  - id: 3cac1b0acdd2
+    killer: 7
+  - id: 465173197ad1
     killer: 0
+  - id: 4bfb1bcc585e
+    killer: 8
+  - id: 55dc1200960e
+    killer: 8
+  - id: 59a012cfdd8e
+    killer: 8
+  - id: 6ec46833be87
+    killer: 2
+  - id: 77e895301c54
+    killer: 1
+  - id: 7875654e992e
+    killer: 8
+  - id: 7a5058b148a6
+    killer: 0
+  - id: 7ad55991688b
+    killer: 8
+  - id: 8302a0025345
+    killer: 3
+  - id: 85573d998b1f
+    killer: 0
+  - id: 8c2abbf01fae
+    killer: 0
+  - id: 9000ae395bb9
+    killer: 8
   - id: a255e37e6eb5
-    killer: 0
+    killer: 6
+  - id: a7a87f5f6bd6
+    killer: 3
+  - id: a88573943859
+    killer: 4
+  - id: aed1182600c5
+    killer: 8
+  - id: c820a6b1c85a
+    killer: 4
+  - id: c864f198d0d0
+    killer: 8
+  - id: cec75519c280
+    killer: 4
+  - id: db15490c37f1
+    killer: 7
+  - id: e3be5f75d0c4
+    killer: 2
+  - id: ee490a164ac3
+    killer: 5
 - path: crates/process_health/src/report.rs
   killers:
   - package: process_health
@@ -113141,6 +113284,8 @@ files:
     killer: 2
   - id: 4fadb7a6956f
     killer: 3
+  - id: 5379cec1de7b
+    killer: 4
   - id: 5c44acec8c9d
     killer: 4
   - id: 642e6ecc71ae
@@ -113207,6 +113352,11 @@ files:
     killer: 3
   - id: fb4e77ca03e5
     killer: 5
+- path: crates/process_health/src/telemetry.rs
+  killers: []
+  mutants:
+  - id: e0100d10aa7a
+    unviable: true
 - path: crates/process_health/src/worker.rs
   killers:
   - package: process_health
@@ -113266,6 +113416,8 @@ files:
     killer: 3
   - id: 2a890aaa2312
     killer: 7
+  - id: 2ab18b4c321b
+    killer: 4
   - id: 2baebb195ef0
     killer: 5
   - id: 2f27c98736a5
@@ -113278,6 +113430,8 @@ files:
     killer: 10
   - id: 39c9dab3fe77
     killer: 5
+  - id: 3d293f2fa1f7
+    killer: 11
   - id: 3debdee36e4a
     killer: 5
   - id: 3e9df6c86109
@@ -113302,8 +113456,14 @@ files:
     killer: 5
   - id: 6381dc65a180
     killer: 10
+  - id: 64f409939f2c
+    killer: 11
   - id: 68127903745b
     killer: 10
+  - id: 6b29da681a63
+    killer: 3
+  - id: 6f3c60c8e3c7
+    killer: 11
   - id: 6fcfac56f8f1
     killer: 0
   - id: 73431ca5ce66
@@ -113326,6 +113486,10 @@ files:
     killer: 11
   - id: 9a431a66341c
     killer: 8
+  - id: 9abf4eb80b79
+    killer: 11
+  - id: 9adb10486b1e
+    killer: 8
   - id: 9e013d678c58
     killer: 0
   - id: a406e7336676
@@ -113334,6 +113498,8 @@ files:
     killer: 10
   - id: a7223bfcb727
     killer: 5
+  - id: a8da6fad2467
+    killer: 10
   - id: a9cd30577611
     killer: 11
   - id: ade16be269a0
@@ -113350,8 +113516,12 @@ files:
     killer: 5
   - id: bb80637069d6
     killer: 9
+  - id: beb245291b21
+    killer: 11
   - id: c3d222c1743c
     killer: 0
+  - id: ca30a23482f7
+    killer: 10
   - id: ca40acb139e1
     killer: 8
   - id: cb1ca71e017d
@@ -113362,9 +113532,13 @@ files:
     killer: 10
   - id: d3d1b1f9cd0a
     killer: 10
+  - id: d3e1ed8cf864
+    killer: 11
   - id: d4d4c98feed6
     killer: 0
   - id: d529bebfcc30
+    killer: 11
+  - id: da4a771bb99d
     killer: 11
   - id: dad129291e0e
     killer: 0
