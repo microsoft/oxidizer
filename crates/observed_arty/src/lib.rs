@@ -2,15 +2,20 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-//! Integrates an Observed sink with the Arty runtime.
+//! Transfers Observed enrichment into Arty async tasks.
+//!
+//! Enrichment contains context fields that Observed attaches to emitted events.
+//! The integration captures these fields from the thread that submits an async
+//! task. For example, a request ID attached before submission remains visible
+//! on events that the task emits on another worker.
 //!
 //! Call [`ObservedExt::enable_observed`] with an [`observed::Sink`] before you
-//! submit a task. The first integration feature transfers enrichment into Arty
-//! async tasks. It captures the enrichment at submission time, restores it for
-//! each task poll, and removes it after the poll. Blocking functions submitted
+//! submit a task. The integration restores the captured enrichment for each
+//! task poll and removes it after the poll. Blocking functions submitted
 //! through `spawn_blocking` are not covered.
 //!
 //! Enable the integration on a runtime builder:
@@ -42,18 +47,16 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! Live registration runs immediately on the calling worker and is queued on
-//! other workers. An async task submitted on another worker before it processes
-//! that queue is not covered. Configure the runtime builder when every async
-//! task must receive the integration.
+//! Arty enables a live registration on the calling worker immediately. Each
+//! other worker enables it when that worker processes the queued registration.
+//! Until then, tasks submitted by that worker do not inherit enrichment through
+//! this integration. Configure the runtime builder when every async task must
+//! receive the integration.
 //!
-//! Arty runs the task-spawn callback on the submitting worker when one exists.
-//! Submissions from outside the runtime use Arty's worker-neutral callback.
-//! Arty moves the captured transfer to the target worker, creates the poll
-//! observer there, and keeps that observer on the target worker.
-//!
-//! Enrichment added inside the task stays above the transferred enrichment.
-//! The integration restores the previous worker enrichment after every poll.
+//! The integration also captures enrichment when a thread outside the Arty
+//! runtime submits a task. Captured enrichment appears before enrichment added
+//! inside the task. The integration restores the previous worker enrichment
+//! after every poll.
 
 mod extensions;
 

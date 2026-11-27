@@ -5,10 +5,9 @@
 
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
-mod support;
-
 use std::future::poll_fn;
-use std::sync::{Arc, Mutex};
+use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
 use std::thread::ThreadId;
 
@@ -16,34 +15,19 @@ use arty::core::{Thread, ThreadAware};
 use arty::runtime::Runtime;
 use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::policy::WorkersPolicy;
+use observed::Sink;
 use observed::context::{Transfer, TransferGuard};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt, Enrichment, EnrichmentEntry};
-use observed::metadata::EventDescription;
-use observed::processing::{EventProcessor, EventView};
-use observed::{FlushError, Sink};
 use observed_arty::{ObservedExt as _, ObservedOptions};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
-use support::stop_bounded;
+use testing_aids::execute_or_abandon;
 
 assert_impl_all!(ObservedOptions: Clone, Send, Sync);
+// Sink processors and samplers can contain state that is not unwind-safe.
+assert_not_impl_any!(ObservedOptions: UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(ObservedOptions: Copy);
 
-struct IgnoreEvents;
-
-impl EventProcessor for IgnoreEvents {
-    fn is_interested(&self, _description: &EventDescription) -> bool {
-        false
-    }
-
-    fn process(&self, _event: &EventView<'_>) {
-        unreachable!("the processor rejects every event")
-    }
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
+/// Adds an observable marker to a sink's current enrichment chain.
 struct Layer(&'static str, i64);
 
 impl Enrichment for Layer {
@@ -52,14 +36,17 @@ impl Enrichment for Layer {
     }
 }
 
+/// Creates a regular sink whose enrichment state drives the public API tests.
 fn sink() -> Sink {
-    Sink::builder("observed_arty_test").processors(vec![Arc::new(IgnoreEvents)]).build()
+    Sink::builder("observed_arty_test").build()
 }
 
+/// Returns a stable snapshot of the sink's active enrichment keys.
 fn active_keys(sink: &Sink) -> Vec<String> {
     sink.current_enrichments().iter().map(|entry| entry.key().to_string()).collect()
 }
 
+/// Records one restoration boundary and the context visible at that boundary.
 #[derive(Debug, Eq, PartialEq)]
 struct RestorationObservation {
     thread: ThreadId,
@@ -67,15 +54,18 @@ struct RestorationObservation {
     keys: Vec<String>,
 }
 
+/// Shares restoration observations between Arty workers and the test thread.
 #[derive(Clone, Default)]
 struct RestorationLog(Arc<Mutex<Vec<RestorationObservation>>>);
 
 impl RestorationLog {
+    /// Takes the recorded observations after every expected poll completes.
     fn take(&self) -> Vec<RestorationObservation> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
 }
 
+/// Builds a probe with a relocatable baseline worker context.
 #[derive(Clone)]
 struct RestorationProbeFactory {
     sink: Sink,
@@ -90,14 +80,20 @@ impl ThreadAware for RestorationProbeFactory {
     }
 }
 
+/// Applies a known worker baseline and records the adapter's restoration result.
 struct RestorationProbe {
+    /// Supplies the sink whose active keys the probe records.
     sink: Sink,
+    /// Holds the transferable worker baseline that the probe applies.
     worker_context: Transfer,
+    /// Keeps the worker baseline active until the observation is complete.
     guard: Option<TransferGuard>,
+    /// Stores observations across worker threads.
     observations: RestorationLog,
 }
 
 impl RestorationProbe {
+    /// Moves the factory state into one worker-local probe.
     fn new(factory: RestorationProbeFactory) -> Self {
         Self {
             sink: factory.sink,
@@ -114,19 +110,17 @@ impl TaskObserver for RestorationProbe {
     }
 
     fn poll_end(&mut self, outcome: Poll<()>) {
-        self.observations
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(RestorationObservation {
-                thread: std::thread::current().id(),
-                outcome,
-                keys: active_keys(&self.sink),
-            });
+        let observation = RestorationObservation {
+            thread: std::thread::current().id(),
+            outcome,
+            keys: active_keys(&self.sink),
+        };
+        self.observations.0.lock().unwrap_or_else(PoisonError::into_inner).push(observation);
         self.guard = None;
     }
 }
 
+/// Installs the probe only after a parent context starts a tracked task.
 fn restoration_probe(factory: RestorationProbeFactory) -> HookFn<TaskSpawn, RestorationProbeFactory> {
     HookFn::new(factory, |event, factory| {
         if active_keys(&factory.sink) == ["parent"] {
@@ -141,8 +135,11 @@ fn options_convert_from_sink() {
     let owned = ObservedOptions::from(sink.clone());
     let borrowed = ObservedOptions::from(&sink);
 
-    assert_eq!(owned.sink().id(), sink.id());
-    assert_eq!(borrowed.sink().id(), sink.id());
+    (|| {
+        assert_eq!(active_keys(owned.sink()), ["retained"]);
+        assert_eq!(active_keys(borrowed.sink()), ["retained"]);
+    })
+    .enrich(&sink, Layer("retained", 1))();
 }
 
 #[test]
@@ -152,6 +149,8 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
     let worker_context = (|| sink.transfer_context()).enrich(&sink, Layer("worker", 0))();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
+        // Start hooks run in registration order and end hooks run in reverse.
+        // The probe must observe after Observed releases its task guard.
         .on(restoration_probe(RestorationProbeFactory {
             sink: sink.clone(),
             worker_context,
@@ -176,18 +175,20 @@ fn builder_transfers_nested_enrichment_to_another_worker_and_restores_context() 
             async {
                 scheduler
                     .spawn_at(&target, sink.clone(), |sink| {
-                        let task_sink = sink.clone();
                         let mut polls = 0;
-                        poll_fn(move |cx| {
-                            assert_eq!(active_keys(&task_sink), ["parent", "child"]);
-                            polls += 1;
-                            if polls == 1 {
-                                cx.waker().wake_by_ref();
-                                Poll::Pending
-                            } else {
-                                Poll::Ready(())
-                            }
-                        })
+                        {
+                            let sink = sink.clone();
+                            poll_fn(move |cx| {
+                                assert_eq!(active_keys(&sink), ["parent", "child"]);
+                                polls += 1;
+                                if polls == 1 {
+                                    cx.waker().wake_by_ref();
+                                    Poll::Pending
+                                } else {
+                                    Poll::Ready(())
+                                }
+                            })
+                        }
                         .enrich(&sink, Layer("child", 2))
                     })
                     .await
@@ -248,10 +249,12 @@ fn runtime_control_enables_transfer_for_later_local_tasks() {
         .block_on(async |cx| {
             cx.control().enable_observed(sink.clone());
             async {
-                let task_sink = sink.clone();
                 cx.scheduler()
-                    .spawn(move |_| async move {
-                        assert_eq!(active_keys(&task_sink), ["control"]);
+                    .spawn({
+                        let sink = sink.clone();
+                        move |_| async move {
+                            assert_eq!(active_keys(&sink), ["control"]);
+                        }
                     })
                     .await
                     .unwrap();
@@ -262,4 +265,9 @@ fn runtime_control_enables_transfer_for_later_local_tasks() {
         .unwrap();
 
     stop_bounded(runtime);
+}
+
+/// Applies the shared watchdog policy to runtime shutdown.
+fn stop_bounded(runtime: Runtime) {
+    execute_or_abandon(move || runtime.stop()).unwrap().unwrap();
 }

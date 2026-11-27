@@ -22,6 +22,8 @@ use observed_arty::ObservedExt as _;
 #[derive(Enrichment)]
 struct RequestContext {
     #[dimension(log = "request.id")]
+    // This fixed value contains no user data. Classified application data must
+    // use data classification instead of the unredacted annotation.
     #[unredacted]
     request_id: &'static str,
 }
@@ -39,7 +41,7 @@ impl EventProcessor for PrintingProcessor {
 
     fn process(&self, event: &EventView<'_>) {
         let mut enrichment_names = Vec::new();
-        let _ = event.visit_enrichments(&mut |description, _get_value| {
+        _ = event.visit_enrichments(&mut |description, _get_value| {
             enrichment_names.push(description.field_name());
             ControlFlow::Continue(())
         });
@@ -51,7 +53,8 @@ impl EventProcessor for PrintingProcessor {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// Runs one event on another Arty worker and reports any operation failure.
+fn main() -> Result<(), ohno::AppError> {
     let sink = Sink::builder("example").processors(vec![Arc::new(PrintingProcessor)]).build();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
@@ -66,19 +69,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .find(|worker| worker.id() != cx.thread().id())
             .expect("the runtime has two distinct workers")
             .clone();
-        let child_sink = sink.clone();
 
         async {
             cx.scheduler()
-                .spawn_at(&target, child_sink, |sink| async move {
+                .spawn_at(&target, sink.clone(), |sink| async move {
                     emit!(sink, TaskObserved);
                 })
                 .await
-                .expect("the child task must complete");
         }
         .enrich(&sink, RequestContext { request_id: "request-42" })
-        .await;
-    })?;
+        .await
+    })??;
 
     runtime.stop()?;
     Ok(())

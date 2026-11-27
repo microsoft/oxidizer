@@ -7,9 +7,11 @@ use arty::runtime::hook::{HookFn, TaskObserver, TaskSpawn};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
 use observed::Sink;
 use observed::context::{Transfer, TransferGuard};
-use thread_aware::ThreadAware;
 
 /// Configures Observed sink integration for an Arty runtime.
+///
+/// Pass an `ObservedOptions`, an owned [`Sink`], or a shared `&Sink` to
+/// [`ObservedExt::enable_observed`]. The shared form clones the sink handle.
 ///
 /// Its private fields let later releases add configuration without changing
 /// [`ObservedExt::enable_observed`].
@@ -17,19 +19,22 @@ use thread_aware::ThreadAware;
 /// Clone this value when another owner needs it. It intentionally does not
 /// implement `Copy`, so later configuration fields do not inherit implicit
 /// copying without an explicit API decision.
-#[derive(Clone, Debug, ThreadAware)]
+#[derive(Clone, Debug)]
 pub struct ObservedOptions {
+    /// Supplies enrichment for covered tasks.
     sink: Sink,
 }
 
 impl ObservedOptions {
-    /// Creates configuration for `sink`.
+    /// Selects the sink that supplies enrichment for covered async tasks.
+    #[inline]
     #[must_use]
     pub const fn new(sink: Sink) -> Self {
         Self { sink }
     }
 
     /// Returns the sink that supplies the enrichment context.
+    #[inline]
     #[must_use]
     pub const fn sink(&self) -> &Sink {
         &self.sink
@@ -37,6 +42,7 @@ impl ObservedOptions {
 }
 
 impl From<Sink> for ObservedOptions {
+    #[inline]
     fn from(sink: Sink) -> Self {
         Self::new(sink)
     }
@@ -77,7 +83,7 @@ impl ObservedExt for RuntimeBuilder {
     type Output = Self;
 
     fn enable_observed(self, options: impl Into<ObservedOptions>) -> Self::Output {
-        self.on(task_spawn(options.into()))
+        self.on(task_spawn(options.into().sink))
     }
 }
 
@@ -85,20 +91,28 @@ impl ObservedExt for &RuntimeControl {
     type Output = ();
 
     fn enable_observed(self, options: impl Into<ObservedOptions>) {
-        self.on(task_spawn(options.into()));
+        self.on(task_spawn(options.into().sink));
     }
 }
 
-fn task_spawn(options: ObservedOptions) -> HookFn<TaskSpawn, ObservedOptions> {
-    HookFn::new(options, capture_enrichment)
+/// Captures each submission from the sink without exposing hook payloads.
+fn task_spawn(sink: Sink) -> HookFn<TaskSpawn, Sink> {
+    HookFn::new(sink, capture_enrichment)
 }
 
-fn capture_enrichment(event: &mut TaskSpawn, options: &ObservedOptions) {
-    event.observe_with(options.sink.transfer_context(), ObservedTask::new);
+/// Captures the submitting thread's context before Arty moves the transfer.
+fn capture_enrichment(event: &mut TaskSpawn, sink: &Sink) {
+    event.observe_with(sink.transfer_context(), ObservedTask::new);
 }
 
+/// Applies one task's captured enrichment while Arty polls that task.
+///
+/// Arty constructs this observer on the destination worker. The observer
+/// remains with the task across polls, so only its captured transfer moves.
 struct ObservedTask {
+    /// Captured enrichment that remains available for every task poll.
     transfer: Transfer,
+    /// Preserves the worker's prior context during the current poll only.
     guard: Option<TransferGuard>,
 }
 
@@ -136,11 +150,14 @@ mod tests {
 
     use super::*;
 
+    /// Routes allocations from the poll-scope test to the measurement session.
     #[global_allocator]
     static ALLOCATOR: Allocator<System> = Allocator::system();
 
+    /// Arbitrarily repeats a short poll scope to make allocation accounting stable.
     const MEASURED_POLLS: usize = 1_000;
 
+    /// Verifies the public contract that a repeated single-sink poll does not allocate.
     #[test]
     fn repeated_single_sink_poll_scopes_do_not_allocate() {
         let sink = Sink::builder("allocation_test").build();

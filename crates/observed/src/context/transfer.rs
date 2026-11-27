@@ -18,8 +18,8 @@ use crate::enrichment::{ApplyState, Enrichment, EnrichmentTransfer, Guard};
 /// for async code), or synchronously via [`Transfer::apply_current_thread`].
 ///
 /// This is the integration surface for spawners, `tower` layers and similar
-/// middleware; code that spawns through `observed_rt` or `oxidizer_rt` gets
-/// enrichment propagation without touching it.
+/// middleware; code that spawns through `observed_rt`, `oxidizer_rt`, or
+/// `observed_arty` gets enrichment propagation without touching it.
 ///
 /// An integration that wants to contribute entries of its own should add them
 /// here, with [`with_enrichment`](Self::with_enrichment) or
@@ -120,7 +120,7 @@ impl Transfer {
     }
 }
 
-/// Restores the prior enrichment when it is dropped.
+/// Dropping this guard restores the thread's previous enrichment.
 ///
 /// The guard belongs to the thread that created it. It cannot move to another
 /// thread.
@@ -131,6 +131,8 @@ pub struct TransferGuard {
 
 impl std::fmt::Debug for TransferGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The guard holds restoration state that can contain user enrichment.
+        // Keep that state out of debug output.
         f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }

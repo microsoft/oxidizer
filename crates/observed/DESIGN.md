@@ -146,9 +146,11 @@ Rust services and libraries need structured telemetry that is:
 1. **Async propagation is manual in the core.** The `observed` crate itself is runtime agnostic, so async
    code must explicitly propagate enrichment context and library pipelines across `.await` points, via
    `Sink::transfer_context` plus `EnrichFutureExt::attach`. Runtime integrations layer automation on top:
-   tasks spawned through `observed_rt` (over `anyspawn`) or `oxidizer_rt` inherit the spawn-site context
-   without the caller attaching anything. Hand-attaching is therefore integration plumbing - spawners,
-   `tower` layers and similar middleware - not everyday application code.
+   tasks spawned through `observed_rt` (over `anyspawn`), `oxidizer_rt`, or `observed_arty` inherit the
+   spawn-site context without the caller attaching anything. The
+   [Observed Arty implementation guide](../observed_arty/docs/implementation.md) explains the
+   private hook boundary for the native Arty adapter. Hand-attaching is therefore integration
+   plumbing - spawners, `tower` layers and similar middleware - not everyday application code.
    See [Cross-thread enrichment transfer](#cross-thread-enrichment-transfer) for the composition contract.
 
 1. **ETW as a primary export target.** While `observed` supports any OTel-compatible

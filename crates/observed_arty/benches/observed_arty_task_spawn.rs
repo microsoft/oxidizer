@@ -11,8 +11,9 @@
 //! isolated task-spawn costs.
 
 use std::borrow::BorrowMut;
+use std::fmt;
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use arty::runtime::Runtime;
 use arty::runtime::policy::{MonitorPolicy, WorkersPolicy};
@@ -21,11 +22,15 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use metabench::benchmark;
 use observed::Sink;
 use observed_arty::ObservedExt as _;
+use tick::SimpleClock;
 
+/// Keeps a remote batch large enough to amortize scheduler coordination.
 const BATCH_SIZE: usize = 64;
+/// Repeats each remote batch enough times for a stable throughput sample.
 const BATCHES: usize = 64;
 const TASK_COUNT: usize = BATCH_SIZE * BATCHES;
 
+/// Selects the single-worker or cross-worker task submission workload.
 #[derive(Clone, Copy, Debug)]
 enum Workload {
     Local,
@@ -33,6 +38,7 @@ enum Workload {
 }
 
 impl Workload {
+    /// Names the workload in Criterion and metabench output.
     const fn name(self) -> &'static str {
         match self {
             Self::Local => "local",
@@ -40,6 +46,7 @@ impl Workload {
         }
     }
 
+    /// Supplies the worker count that defines the selected workload.
     const fn workers(self) -> usize {
         match self {
             Self::Local => 1,
@@ -48,14 +55,27 @@ impl Workload {
     }
 }
 
-#[derive(Debug)]
+/// Retains the runtime and reusable storage for one measured workload.
 struct Case {
     runtime: Runtime,
+    /// Reuses one remote batch allocation instead of measuring vector growth.
     handles: Vec<JoinHandle<()>>,
     workload: Workload,
+    /// Reads monotonic benchmark time through the shared clock abstraction.
+    clock: SimpleClock,
+}
+
+impl fmt::Debug for Case {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Case")
+            .field("workload", &self.workload)
+            .field("handle_count", &self.handles.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Case {
+    /// Builds and warms one runtime before Criterion measures repeated work.
     fn new(workload: Workload, observed_enabled: bool) -> Self {
         let builder = Runtime::builder()
             .workers(WorkersPolicy::exactly(workload.workers()))
@@ -70,16 +90,18 @@ impl Case {
             runtime,
             handles: Vec::with_capacity(BATCH_SIZE),
             workload,
+            clock: SimpleClock::new_system(),
         };
         black_box(case.run());
         case
     }
 
+    /// Runs one local or remote workload and returns its elapsed time.
     fn run(&mut self) -> Duration {
         match self.workload {
             Workload::Local => {
-                let parent = self.runtime.scheduler().spawn_anywhere((), |cx, ()| async move {
-                    let start = Instant::now();
+                let parent = self.runtime.scheduler().spawn_anywhere(self.clock.clone(), |cx, clock| async move {
+                    let start = clock.instant();
                     for _ in 0..TASK_COUNT {
                         cx.scheduler()
                             .spawn(async |_| black_box(()))
@@ -91,7 +113,7 @@ impl Case {
                 futures::executor::block_on(parent).expect("benchmark parent succeeds")
             }
             Workload::Remote => {
-                let start = Instant::now();
+                let start = self.clock.instant();
                 for _ in 0..BATCHES {
                     self.handles.clear();
                     self.handles
@@ -106,6 +128,7 @@ impl Case {
     }
 }
 
+/// Matches the Arty benchmark suite's sampling window for comparable runs.
 fn configured_criterion() -> Criterion {
     Criterion::default()
         .sample_size(50)
@@ -113,6 +136,7 @@ fn configured_criterion() -> Criterion {
         .measurement_time(Duration::from_secs(2))
 }
 
+/// Registers local and remote cases with and without the integration.
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(TASK_SPAWN.group_name());
     group.throughput(Throughput::Elements(TASK_COUNT as u64));
@@ -142,6 +166,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::local_observed(Box::new(Case::new(Workload::Local, true)))]
 #[bench::remote_disabled(Box::new(Case::new(Workload::Remote, false)))]
 #[bench::remote_observed(Box::new(Case::new(Workload::Remote, true)))]
+/// Measures one complete task-spawn workload.
 fn task_spawn<S: BorrowMut<Case>>(mut input: S) -> (Duration, S) {
     let elapsed = input.borrow_mut().run();
     (elapsed, input)

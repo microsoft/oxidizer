@@ -3731,9 +3731,10 @@ dependencies = [
  "futures",
  "metabench",
  "observed",
+ "ohno 0.5.5",
  "static_assertions",
  "testing_aids",
- "thread_aware",
+ "tick",
 ]
 
 [[package]]

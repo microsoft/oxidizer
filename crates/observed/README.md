@@ -90,17 +90,18 @@ Enrichment lives in a thread-local slot, so it is **not** automatically
 propagated to other threads or async tasks.
 
 **Most code should not do this by hand.** The runtime integrations
-(`observed_rt`, which layers over `anyspawn`, and `oxidizer_rt`) propagate
-enrichment to every spawned task for you: enrich at the spawn site, spawn
-through the runtime, and the context follows. The rest of this section is
-the plumbing underneath, and is aimed at people writing such an integration -
-a spawner, a `tower` layer, or similar middleware.
+(`observed_rt`, which layers over `anyspawn`, `oxidizer_rt`, and
+[`observed_arty`][__link6]) propagate enrichment to
+every spawned task for you: enrich at the spawn site, spawn through the
+runtime, and the context follows. The rest of this section is the plumbing
+underneath, and is aimed at people writing such an integration - a spawner,
+a `tower` layer, or similar middleware.
 
 Integrators transfer it explicitly:
 
-* [`Sink::transfer_context`][__link6] snapshots the current thread’s enrichment into a
-  plain, sendable [`Transfer`][__link7] value.
-* [`EnrichFutureExt::attach`][__link8] wraps a
+* [`Sink::transfer_context`][__link7] snapshots the current thread’s enrichment into a
+  plain, sendable [`Transfer`][__link8] value.
+* [`EnrichFutureExt::attach`][__link9] wraps a
   future so the captured enrichment is restored **on every poll** and removed
   again before the future yields.
 
@@ -109,15 +110,15 @@ lifetime of the returned guard, so any emission made through the original sink
 on that thread also sees the transferred entries.
 
 To add entries of your own, put them **in the transfer** with
-[`Transfer::with_enrichment`][__link9] or
-[`Transfer::with_enrichment_for`][__link10].
+[`Transfer::with_enrichment`][__link10] or
+[`Transfer::with_enrichment_for`][__link11].
 That is what an integration wants: it is independent of wrapper order, so it
 keeps working once the future is boxed or wrapped again further out - both of
 which happen in real integrations.
 
-Wrapping [`enrich`][__link11] around
+Wrapping [`enrich`][__link12] around
 `attach` also works for a single `attach` on a plain, non-boxed future, since
-[`Transferred::enrich`][__link12] re-orders the two.
+[`Transferred::enrich`][__link13] re-orders the two.
 That is a convenience for hand-written code, not a general guarantee - see its
 docs for the shapes it does not cover.
 
@@ -138,11 +139,11 @@ let _ = task;
 ```
 
 For synchronous work you can instead apply the low-level guard directly via
-[`Transfer::apply_current_thread`][__link13].
+[`Transfer::apply_current_thread`][__link14].
 **Never hold that guard across an `.await`**: because it mutates a thread-local,
 the enrichment would stay active while the task is suspended and leak into
 unrelated tasks that the runtime schedules on the same thread. Use
-[`attach`][__link14] for async code so the
+[`attach`][__link15] for async code so the
 guard is scoped to a single poll.
 
 ### Resolution at emission time
@@ -156,19 +157,20 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbKjbIWh5Saasb3Q6nH8YFiegbx_otY0Te-H0b2d0E4ceQ9gVhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjOCaG9ic2VydmVkZjAuMzEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0eug28h_t-wb7cOs2pka9F4buvuqqRomXt0b-GRQZsZvUZFhZIKCbGRhdGFfcHJpdmFjeWYwLjEzLjOCaG9ic2VydmVkZjAuMzEuMA
  [__link0]: `emit!`
  [__link1]: https://docs.rs/data_privacy/0.13.3/data_privacy/?search=RedactionEngine
- [__link10]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::with_enrichment_for
- [__link11]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::enrich
- [__link12]: https://docs.rs/observed/0.31.0/observed/?search=context::Transferred::enrich
- [__link13]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::apply_current_thread
- [__link14]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::attach
+ [__link10]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::with_enrichment
+ [__link11]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::with_enrichment_for
+ [__link12]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::enrich
+ [__link13]: https://docs.rs/observed/0.31.0/observed/?search=context::Transferred::enrich
+ [__link14]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::apply_current_thread
+ [__link15]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::attach
  [__link2]: https://docs.rs/observed/0.31.0/observed/?search=EventSampler
  [__link3]: https://docs.rs/observed/0.31.0/observed/?search=processing::EventProcessor
  [__link4]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::enrich
  [__link5]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFnExt::enrich
- [__link6]: https://docs.rs/observed/0.31.0/observed/?search=Sink::transfer_context
- [__link7]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer
- [__link8]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::attach
- [__link9]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer::with_enrichment
+ [__link6]: https://docs.rs/observed_arty
+ [__link7]: https://docs.rs/observed/0.31.0/observed/?search=Sink::transfer_context
+ [__link8]: https://docs.rs/observed/0.31.0/observed/?search=context::Transfer
+ [__link9]: https://docs.rs/observed/0.31.0/observed/?search=enrichment::EnrichFutureExt::attach

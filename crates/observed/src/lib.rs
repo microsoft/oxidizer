@@ -96,11 +96,12 @@
 //! propagated to other threads or async tasks.
 //!
 //! **Most code should not do this by hand.** The runtime integrations
-//! (`observed_rt`, which layers over `anyspawn`, and `oxidizer_rt`) propagate
-//! enrichment to every spawned task for you: enrich at the spawn site, spawn
-//! through the runtime, and the context follows. The rest of this section is
-//! the plumbing underneath, and is aimed at people writing such an integration -
-//! a spawner, a `tower` layer, or similar middleware.
+//! (`observed_rt`, which layers over `anyspawn`, `oxidizer_rt`, and
+//! [`observed_arty`](https://docs.rs/observed_arty)) propagate enrichment to
+//! every spawned task for you: enrich at the spawn site, spawn through the
+//! runtime, and the context follows. The rest of this section is the plumbing
+//! underneath, and is aimed at people writing such an integration - a spawner,
+//! a `tower` layer, or similar middleware.
 //!
 //! Integrators transfer it explicitly:
 //!
