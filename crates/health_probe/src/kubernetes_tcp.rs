@@ -7,9 +7,10 @@
 //! It closes each accepted connection without reading or writing data. Use a
 //! dedicated readiness address so health changes do not affect application traffic.
 //!
-//! The caller must run the returned future and the supplied clock continuously.
-//! Health changes are asynchronous, so the socket can briefly show the previous state
-//! during a transition. Cancel the future during shutdown to release the address.
+//! The caller must use a continuously driven Tokio runtime with networking enabled.
+//! The caller must also drive the supplied clock continuously. Health changes are
+//! asynchronous, so the socket can briefly show the previous state during a transition.
+//! Cancel the future during shutdown to release the address.
 
 use std::io;
 use std::net::SocketAddr;
@@ -48,14 +49,31 @@ const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 ///
 /// # Errors
 ///
-/// Returns an error when the server cannot bind `address`.
+/// Returns an error when the server cannot bind `address` before it has listened
+/// successfully. Later bind failures are retried while the process remains healthy.
 pub async fn serve(mut monitor: Monitor, address: SocketAddr, clock: Clock) -> io::Result<()> {
-    loop {
+    let mut bound_once = false;
+
+    'server: loop {
         while monitor.state() != Health::Healthy {
             monitor.changed().await;
         }
 
-        let listener = TcpListener::bind(address).await?;
+        let listener = loop {
+            match TcpListener::bind(address).await {
+                Ok(listener) => {
+                    bound_once = true;
+                    break listener;
+                }
+                Err(error) if !bound_once => return Err(error),
+                Err(_) => {
+                    wait_before_retry(&mut monitor, &clock).await;
+                    if monitor.state() != Health::Healthy {
+                        continue 'server;
+                    }
+                }
+            }
+        };
         if monitor.state() != Health::Healthy {
             continue;
         }
