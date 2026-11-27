@@ -105,6 +105,32 @@ until someone remembered to exclude it.
    `Cargo.toml` opts in with `include = { workspace = true }`. The crate
    template (`scripts/crate-template`) should keep this line.
 
+## Dependency resolution before publication
+
+The root `[patch.crates-io]` table selects workspace sources for compatible
+registry dependencies on `ohno` and `plurality`. Direct workspace consumers
+also use local paths. This makes local builds use the prepared release versions.
+
+Without these patches, the lockfile can retain older registry copies.
+The current dependency graph contains two conflicting paths:
+
+- `many_cpus` uses `cpulist`, which locks `ohno` to `0.5.4`.
+  The prepared `metabench` requires `ohno ^0.5.5`.
+- `events_once` locks `plurality` to `0.2.4`.
+  The prepared `arty` requires `plurality ^0.2.5`.
+
+Cargo replaces versioned path dependencies with registry dependencies during
+packaging. Those locked selections then conflict with the prepared versions.
+The `ohno` patch also removes the old registry macro family through its local
+path dependencies. The current resolved graph needs no separate macro patches
+or patches for other workspace packages.
+
+After a release version change, update the affected lockfile entries.
+Package the release set together with its required workspace dependencies.
+Cargo removes root patches from published manifests. Make sure that generated
+package lockfiles select the intended registry versions without local paths.
+Patches cannot unify versions that have incompatible requirements.
+
 ## How to verify
 
 List exactly what a crate would package and confirm no binary slips in:

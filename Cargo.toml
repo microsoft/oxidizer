@@ -212,8 +212,7 @@ observed_macros = { path = "crates/observed_macros", default-features = false, v
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.31.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.7.0" }
-# Use published ohno intentionally so unreleased local changes stay isolated from workspace consumers.
-ohno = { default-features = false, version = "0.5.4" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.5.5" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
@@ -420,6 +419,10 @@ wildcard_imports = "allow"
 
 # Repository-specific Clippy lint policy beyond the Anvil catalog.
 panic = "warn"
+
+[patch.crates-io]
+ohno = { path = "crates/ohno" }
+plurality = { path = "crates/plurality" }
 
 # A bit of debugging support for release builds.
 [profile.release]
