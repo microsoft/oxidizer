@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-#Requires -Version 7.7
+#Requires -Version 7.0
 
 <#
 .SYNOPSIS
