@@ -492,7 +492,7 @@ mod tests {
             WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
             0x1234,
         ] {
-            let buffer = OperationBuffer::write(BytesView::copied_from_slice(b"payload", &crate::test_memory().clone()), 7);
+            let buffer = OperationBuffer::write(BytesView::copied_from_slice(b"payload", &*crate::MEMORY), 7);
             // SAFETY: the payload is null and the declared length is readable vacuously; decode rejects null without reading.
             let result = unsafe { decode_success(status, null_mut(), 9, buffer) };
             let CompletionResult::InvalidStatusInfo {
@@ -645,7 +645,7 @@ mod tests {
         // bytes than were lent, a read naming a buffer no read was submitted
         // with, or a status this decoder never issues - describes no
         // transferable result and is reported as a protocol violation.
-        let pool = crate::test_memory().clone();
+        let pool = crate::MEMORY.clone();
         let write = || OperationBuffer::write(BytesView::copied_from_slice(b"ab", &pool), 2);
         let read = || OperationBuffer::read(pool.reserve(8), NonNull::<u8>::dangling().as_ptr().addr(), 8);
         let mut written = 8_u32;
@@ -681,7 +681,7 @@ mod tests {
         // address, or a null address against a non-zero length, names no buffer
         // this read lent and is rejected rather than trusted to describe
         // initialized bytes.
-        let pool = crate::test_memory().clone();
+        let pool = crate::MEMORY.clone();
         let address = NonNull::<u8>::dangling().as_ptr().addr();
         let capacity = 8_u32;
         let foreign = std::ptr::without_provenance_mut::<c_void>(address.wrapping_add(0x100));

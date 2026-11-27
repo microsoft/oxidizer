@@ -545,7 +545,7 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         harness.reader.memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
             requests.lock().unwrap().push(min_bytes);
-            crate::test_memory().clone().reserve(min_bytes)
+            crate::MEMORY.clone().reserve(min_bytes)
         }));
         let into = harness.memory.reserve(8);
         let spare = into.remaining_capacity();
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn a_filled_buffer_becomes_a_data_frame_and_leaves_spare_capacity() {
-        let pool = crate::test_memory().clone();
+        let pool = crate::MEMORY.clone();
         let mut buffer = BytesBuf::new();
         buffer.reserve(64, &pool);
         buffer.put_slice(*b"abc");
@@ -824,7 +824,7 @@ mod tests {
         );
         harness.reader.memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
             requests.lock().unwrap().push(min_bytes);
-            let pool = crate::test_memory().clone();
+            let pool = crate::MEMORY.clone();
             let mut buffer = pool.reserve(min_bytes);
             // Leave a prefix-sized first region while preserving the requested total capacity.
             let prefix = buffer.first_unfilled_slice().len() - b"abc".len();
@@ -959,7 +959,7 @@ mod tests {
     fn reads_only_the_first_contiguous_region_and_bounds_it_by_u32() {
         // The completion has to fill the region exactly, because a flagged read
         // that comes back short reports a response that has already ended.
-        let mut probe = crate::test_memory().clone().reserve(8);
+        let mut probe = crate::MEMORY.clone().reserve(8);
         let first_region = probe.first_unfilled_slice().len();
         assert!(first_region < DESIRED_READ_SIZE, "the test requires a small first allocation");
 
@@ -1461,7 +1461,7 @@ mod tests {
         .unwrap();
         let context = installed_context(&guard);
         drop((session, contexts));
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
 
         ReaderHarness {
             reader: WinHttpBodyReader::new(guard, facade, memory.clone(), declared_length),

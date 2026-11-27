@@ -142,8 +142,5 @@ pub use error::CompressibleTypeError;
 
 /// Supplies the one general-purpose resource set used by unit tests.
 #[cfg(test)]
-pub(crate) fn test_resources() -> &'static compressors::Resources {
-    static RESOURCES: std::sync::OnceLock<compressors::Resources> = std::sync::OnceLock::new();
-
-    RESOURCES.get_or_init(|| compressors::Resources::new(bytesbuf::mem::GlobalPool::new()))
-}
+pub(crate) static RESOURCES: std::sync::LazyLock<compressors::Resources> =
+    std::sync::LazyLock::new(|| compressors::Resources::new(bytesbuf::mem::GlobalPool::new()));

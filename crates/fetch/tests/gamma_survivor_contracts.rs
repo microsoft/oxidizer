@@ -15,11 +15,7 @@ use tick::Clock;
 
 testing_aids::init_tracing!();
 
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 #[test]
 fn gamma_survivor_buffering_preserves_stream_error() {
@@ -200,7 +196,7 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     let expected_tls = format!("{tls:?}");
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: bytesbuf::mem::OpaqueMemory::new(memory().clone()),
+        memory: bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()),
         extras: (),
     };
     let builder = create_builder(

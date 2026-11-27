@@ -6,7 +6,6 @@
 #![allow(missing_docs, clippy::unwrap_used, reason = "benchmark code")]
 
 use std::hint::black_box;
-use std::sync::OnceLock;
 
 use alloc_tracker::{Allocator, Session};
 use benchmarking::{time_sample, time_sample_with_inputs};
@@ -20,11 +19,7 @@ use tick::Clock;
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
 
 /// Forces serialization at the fallback boundary without accumulating primary entries.
 struct MissTier;
@@ -57,7 +52,7 @@ fn serialization(c: &mut Criterion) {
         let clock = Clock::new_frozen();
         let cache = Cache::builder(clock.clone())
             .storage(MissTier)
-            .serialize(OpaqueMemory::new(memory().clone()))
+            .serialize(OpaqueMemory::new(MEMORY.clone()))
             .fallback(Cache::builder::<BytesView, BytesView>(clock).memory())
             .build();
         let key = String::from("key");

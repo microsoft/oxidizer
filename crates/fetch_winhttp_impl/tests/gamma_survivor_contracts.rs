@@ -9,11 +9,7 @@ use bytes::Bytes;
 use fetch_winhttp_impl::testing::{ResponseFrame, ResponsePlan, ResponseScript, collect_frames};
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 #[test]
 fn gamma_survivor_winhttp_builder_reports_exact_runtime_and_transport() {
@@ -21,7 +17,7 @@ fn gamma_survivor_winhttp_builder_reports_exact_runtime_and_transport() {
 
     let deps = WinHttpDeps::builder(
         tick::Clock::new_frozen(),
-        bytesbuf::mem::OpaqueMemory::new(memory().clone()),
+        bytesbuf::mem::OpaqueMemory::new(MEMORY.clone()),
         observed::Sink::noop(),
     )
     .build();
@@ -59,7 +55,7 @@ fn gamma_survivor_response_plan_data_headers_trailers_and_stall() {
 
 #[test]
 fn gamma_survivor_collect_frames_keeps_data_order_and_trailers() {
-    let memory = bytesbuf::mem::OpaqueMemory::new(memory().clone());
+    let memory = bytesbuf::mem::OpaqueMemory::new(MEMORY.clone());
     let builder = fetch::HttpBodyBuilder::new(memory.clone(), &tick::Clock::new_frozen());
     let mut trailers = HeaderMap::new();
     trailers.insert("x-end", HeaderValue::from_static("done"));

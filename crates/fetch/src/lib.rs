@@ -892,11 +892,7 @@ pub mod documentation;
 // thread-local subscribers compose safely. See `docs/tracing-tests.md`.
 /// Supplies the one general-purpose provider used by the unit-test binary.
 #[cfg(test)]
-fn test_memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 #[cfg(test)]
 testing_aids::init_tracing!();

@@ -10,7 +10,6 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -25,11 +24,7 @@ use http::{Method, StatusCode, Version};
 use http_body::Body;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
 use layered::{Layer, Service};
 use observed::{Severity, Value};
 use ohno::Labeled;
@@ -297,7 +292,7 @@ fn body_error_reports_error_event_with_status() {
 fn body_timeout_reports_error_instead_of_abandonment() {
     let timeout = Duration::from_millis(100);
     let clock = ClockControl::new();
-    let body = HttpBodyBuilder::new(memory().clone(), &clock.to_clock())
+    let body = HttpBodyBuilder::new(MEMORY.clone(), &clock.to_clock())
         .with_options(http_extensions::HttpBodyOptions::new().timeout(timeout))
         .stream(stream::pending());
     let (mut body, capture) = respond(StatusCode::OK, get(body));

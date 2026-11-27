@@ -6,11 +6,7 @@
 #![cfg(test)]
 
 #[cfg(feature = "futures-stream")]
-fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 #[cfg(feature = "futures-stream")]
 mod read_fixture;
@@ -73,7 +69,7 @@ mod read_futures {
     #[test]
     fn smoke_test() {
         async_test(async || {
-            let memory = crate::memory().clone();
+            let memory = crate::MEMORY.clone();
             let contents = BytesView::copied_from_slice(b"Hello, w", &memory);
             let inner = FakeRead::builder().contents(contents).max_read_size(nz!(2)).build();
 
@@ -197,7 +193,7 @@ mod read_futures {
     #[test]
     fn pending_on_first_poll_then_returns_result() {
         async_test(async || {
-            let memory = crate::memory().clone();
+            let memory = crate::MEMORY.clone();
             let contents = BytesView::copied_from_slice(b"Hello", &memory);
             let inner = YieldThenRead {
                 inner: FakeRead::builder().contents(contents).build(),

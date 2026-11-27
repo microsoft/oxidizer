@@ -8,11 +8,7 @@ use core::sync::atomic as sync_fence;
 use bytesbuf::mem;
 
 #[cfg(feature = "std")]
-pub(crate) fn memory() -> &'static bytesbuf::mem::GlobalPool {
-    static MEMORY: std::sync::OnceLock<bytesbuf::mem::GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(bytesbuf::mem::GlobalPool::new)
-}
+pub(crate) static MEMORY: std::sync::LazyLock<bytesbuf::mem::GlobalPool> = std::sync::LazyLock::new(bytesbuf::mem::GlobalPool::new);
 
 // Shared fixture for integration tests and private unit tests.
 #[path = "../src/mem/testing/test_block.rs"]

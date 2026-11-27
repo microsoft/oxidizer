@@ -11,15 +11,11 @@ use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
 use tick::Clock;
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: std::sync::OnceLock<GlobalPool> = std::sync::OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
 
 #[test]
 fn facade_accepts_a_global_pool_without_building_a_client() {
-    let deps = WinHttpDeps::builder(Clock::new_frozen(), memory().clone(), Sink::noop()).build();
+    let deps = WinHttpDeps::builder(Clock::new_frozen(), MEMORY.clone(), Sink::noop()).build();
     let _builder = HttpClient::builder_winhttp(deps).minimal_pipeline();
 }
 
@@ -28,7 +24,7 @@ fn facade_accepts_a_global_pool_without_building_a_client() {
 /// The implementation's mock-backed builder tests cover allocations and client cloning.
 #[test]
 fn facade_accepts_memory_dependencies_without_building_a_client() {
-    let memory = OpaqueMemory::new(CallbackMemory::new((), |(), min_bytes| memory().reserve(min_bytes)));
+    let memory = OpaqueMemory::new(CallbackMemory::new((), |(), min_bytes| MEMORY.reserve(min_bytes)));
     let deps = WinHttpDeps::builder(Clock::new_frozen(), memory, Sink::noop()).build();
     let _builder = HttpClient::builder_winhttp(deps).minimal_pipeline();
 }

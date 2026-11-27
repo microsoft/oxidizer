@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn decode_empty_payload_returns_soft_failure() {
-        let codec = PostcardCodec::new(OpaqueMemory::new(crate::test_memory().clone()));
+        let codec = PostcardCodec::new(OpaqueMemory::new(crate::MEMORY.clone()));
         let empty = BytesView::from(Vec::<u8>::new());
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(empty);
         assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("empty payload")));
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn decode_wrong_format_version_returns_soft_failure() {
-        let codec = PostcardCodec::new(OpaqueMemory::new(crate::test_memory().clone()));
+        let codec = PostcardCodec::new(OpaqueMemory::new(crate::MEMORY.clone()));
         let mut data = vec![0xFF];
         data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
         let view = BytesView::from(data);
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn decode_corrupt_payload_returns_soft_failure() {
-        let codec = PostcardCodec::new(OpaqueMemory::new(crate::test_memory().clone()));
+        let codec = PostcardCodec::new(OpaqueMemory::new(crate::MEMORY.clone()));
         let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
         let view = BytesView::from(data);
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);

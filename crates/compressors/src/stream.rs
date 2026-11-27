@@ -354,7 +354,7 @@ mod tests {
             assert_eq!(polls.get(), 1);
             Poll::Ready(None::<std::result::Result<BytesView, std::io::Error>>)
         });
-        let compressor = gzip::Compressor::new(crate::testing::resources());
+        let compressor = gzip::Compressor::new(&crate::testing::RESOURCES);
         let mut adapter = pin!(CompressionStream::compress(source, compressor));
         let waker = noop_waker();
         let mut context = Context::from_waker(&waker);
@@ -431,7 +431,7 @@ mod tests {
             assert!(matches!(Pin::new(&mut adapter).poll_next(&mut context), Poll::Ready(None)));
         }
 
-        let adapter = CompressionStream::decompress(ok_stream(vec![]), gzip::Decompressor::new(crate::testing::resources()));
+        let adapter = CompressionStream::decompress(ok_stream(vec![]), gzip::Decompressor::new(&crate::testing::RESOURCES));
         assert!(!adapter.flush_on_pending);
         assert!(!adapter.needs_flush);
     }
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn the_source_is_reachable_through_the_adapter() {
         let source = ok_stream(vec![view(b"payload")]);
-        let mut stream = CompressionStream::compress(source, gzip::Compressor::new(crate::testing::resources()));
+        let mut stream = CompressionStream::compress(source, gzip::Compressor::new(&crate::testing::RESOURCES));
 
         let _shared: &_ = stream.get_ref();
         let _exclusive: &mut _ = stream.get_mut();
@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn the_source_can_be_taken_back_out() {
         let source = ok_stream(vec![view(b"payload")]);
-        let stream = CompressionStream::compress(source, gzip::Compressor::new(crate::testing::resources()));
+        let stream = CompressionStream::compress(source, gzip::Compressor::new(&crate::testing::RESOURCES));
 
         let recovered = stream.into_inner();
         let chunks: Vec<_> = block_on(recovered.collect());
@@ -509,7 +509,7 @@ mod tests {
         let source = ok_stream(vec![view(b"payload")]);
         let mut stream = Box::pin(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ));
 
         let _pinned: Pin<&mut _> = stream.as_mut().get_pin_mut();
@@ -522,13 +522,13 @@ mod tests {
         let source = ok_stream(payload.chunks(97).map(view).collect());
         let gzip = drain(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
         let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -545,12 +545,12 @@ mod tests {
         // cannot fall out of step when a format is added.
         for &format in Format::ALL {
             let compressor = crate::CompressorBuilder::new()
-                .build_format(format, crate::testing::resources())
+                .build_format(format, &crate::testing::RESOURCES)
                 .unwrap();
             let compressed = drain(CompressionStream::compress(chunks(), compressor)).unwrap();
 
             let decompressor = crate::DecompressorBuilder::new()
-                .build_format(format, crate::testing::resources())
+                .build_format(format, &crate::testing::RESOURCES)
                 .unwrap();
             let plain = drain(CompressionStream::decompress(ok_stream(vec![compressed]), decompressor)).unwrap();
 
@@ -563,7 +563,7 @@ mod tests {
         let source = ok_stream(Vec::new());
         let gzip = drain(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -572,12 +572,12 @@ mod tests {
 
     #[test]
     fn decompresses_a_byte_at_a_time() {
-        let compressed = crate::gzip::compress(view(b"one byte at a time"), crate::testing::resources()).unwrap();
+        let compressed = crate::gzip::compress(view(b"one byte at a time"), &crate::testing::RESOURCES).unwrap();
         let single_bytes = (0..compressed.len()).map(|i| compressed.range(i..=i)).collect();
 
         let plain = drain(CompressionStream::decompress(
             ok_stream(single_bytes),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -586,12 +586,12 @@ mod tests {
 
     #[test]
     fn decompresses_members_delivered_as_separate_source_items() {
-        let first = crate::gzip::compress(view(b"first"), crate::testing::resources()).unwrap();
-        let second = crate::gzip::compress(view(b"second"), crate::testing::resources()).unwrap();
+        let first = crate::gzip::compress(view(b"first"), &crate::testing::RESOURCES).unwrap();
+        let second = crate::gzip::compress(view(b"second"), &crate::testing::RESOURCES).unwrap();
 
         let plain = drain(CompressionStream::decompress(
             ok_stream(vec![first, second]),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -604,7 +604,7 @@ mod tests {
 
         let error = drain(CompressionStream::compress(
             failing,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap_err();
 
@@ -622,7 +622,7 @@ mod tests {
 
         let error = drain(CompressionStream::compress(
             failing,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap_err();
 
@@ -671,7 +671,7 @@ mod tests {
         let source = ok_stream(vec![view(b"this is not gzip")]);
         let mut stream = Box::pin(CompressionStream::decompress(
             source,
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ));
 
         block_on(async {
@@ -685,10 +685,10 @@ mod tests {
 
     #[test]
     fn stays_ended_after_completion() {
-        let gzip = crate::gzip::compress(view(b"done"), crate::testing::resources()).unwrap();
+        let gzip = crate::gzip::compress(view(b"done"), &crate::testing::RESOURCES).unwrap();
         let mut stream = pin!(CompressionStream::decompress(
             ok_stream(vec![gzip]),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ));
 
         let waker = noop_waker();
@@ -715,7 +715,7 @@ mod tests {
 
         let error = drain(CompressionStream::decompress(
             source,
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap_err();
 
@@ -724,11 +724,11 @@ mod tests {
 
     #[test]
     fn honours_a_pre_configured_decompressor() {
-        let gzip = crate::gzip::compress(view(&vec![0_u8; 4 * 1024 * 1024]), crate::testing::resources()).unwrap();
+        let gzip = crate::gzip::compress(view(&vec![0_u8; 4 * 1024 * 1024]), &crate::testing::RESOURCES).unwrap();
 
         let decompressor = gzip::Decompressor::builder()
             .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(1024).unwrap()))
-            .build(crate::testing::resources());
+            .build(&crate::testing::RESOURCES);
 
         let error = drain(CompressionStream::decompress(ok_stream(vec![gzip]), decompressor)).unwrap_err();
 
@@ -739,12 +739,12 @@ mod tests {
     fn honours_a_pre_configured_compressor() {
         let payload = b"the quick brown fox ".repeat(400);
 
-        let compressor = gzip::Compressor::builder().level(Level::HIGH).build(crate::testing::resources());
+        let compressor = gzip::Compressor::builder().level(Level::HIGH).build(&crate::testing::RESOURCES);
         let gzip = drain(CompressionStream::compress(ok_stream(vec![view(&payload)]), compressor)).unwrap();
 
         let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -757,12 +757,12 @@ mod tests {
 
         let gzip = drain(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
         let plain = drain(CompressionStream::decompress(
             ok_stream(vec![gzip]),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -785,7 +785,7 @@ mod tests {
 
         let gzip = drain(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ))
         .unwrap();
 
@@ -847,11 +847,9 @@ mod tests {
                 let (sender, source) = mpsc::unbounded::<std::result::Result<BytesView, std::io::Error>>();
                 let compressor = CompressorBuilder::new()
                     .output_chunk_size(NonZeroUsize::new(size).unwrap())
-                    .build_format(format, crate::testing::resources())
+                    .build_format(format, &crate::testing::RESOURCES)
                     .unwrap();
-                let decompressor = DecompressorBuilder::new()
-                    .build_format(format, crate::testing::resources())
-                    .unwrap();
+                let decompressor = DecompressorBuilder::new().build_format(format, &crate::testing::RESOURCES).unwrap();
                 let compressed = CompressionStream::compress(source, compressor).flush_on_pending(true);
                 let mut decoded = CompressionStream::decompress(compressed, decompressor);
                 let scheduled = Arc::new(CountingWaker::default());
@@ -888,13 +886,13 @@ mod tests {
     fn flushing_on_pending_is_opt_in_and_can_be_disabled() {
         for explicitly_disabled in [false, true] {
             let (sender, source) = mpsc::unbounded::<std::result::Result<BytesView, std::io::Error>>();
-            let compressed = CompressionStream::compress(source, gzip::Compressor::new(crate::testing::resources()));
+            let compressed = CompressionStream::compress(source, gzip::Compressor::new(&crate::testing::RESOURCES));
             let compressed = if explicitly_disabled {
                 compressed.flush_on_pending(true).flush_on_pending(false)
             } else {
                 compressed
             };
-            let mut decoded = CompressionStream::decompress(compressed, gzip::Decompressor::new(crate::testing::resources()));
+            let mut decoded = CompressionStream::decompress(compressed, gzip::Decompressor::new(&crate::testing::RESOURCES));
             let waker = noop_waker();
             let mut cx = Context::from_waker(&waker);
 
@@ -912,7 +910,7 @@ mod tests {
     fn idle_polls_and_empty_chunks_do_not_repeat_a_flush() {
         for &format in Format::ALL {
             let (sender, source) = mpsc::unbounded::<std::result::Result<BytesView, std::io::Error>>();
-            let compressor = CompressorBuilder::new().build_format(format, crate::testing::resources()).unwrap();
+            let compressor = CompressorBuilder::new().build_format(format, &crate::testing::RESOURCES).unwrap();
             let mut compressed = CompressionStream::compress(source, compressor).flush_on_pending(true);
             let waker = noop_waker();
             let mut cx = Context::from_waker(&waker);
@@ -947,7 +945,7 @@ mod tests {
     fn enabling_flush_does_not_change_an_immediately_ready_stream() {
         for &format in Format::ALL {
             let compress = |flush| {
-                let compressor = CompressorBuilder::new().build_format(format, crate::testing::resources()).unwrap();
+                let compressor = CompressorBuilder::new().build_format(format, &crate::testing::RESOURCES).unwrap();
                 drain(CompressionStream::compress(ok_stream(vec![view(b"first "), view(b"second")]), compressor).flush_on_pending(flush))
                     .unwrap()
                     .to_vec()
@@ -976,7 +974,7 @@ mod tests {
         let source = ReadyEmpty { polls: Arc::clone(&polls) };
         let mut stream = Box::pin(CompressionStream::compress(
             source,
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ));
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -1021,18 +1019,18 @@ mod tests {
         fn assert_send<T: Send>(_: &T) {}
         assert_send(&CompressionStream::compress(
             ok_stream(Vec::new()),
-            gzip::Compressor::new(crate::testing::resources()),
+            gzip::Compressor::new(&crate::testing::RESOURCES),
         ));
         assert_send(&CompressionStream::decompress(
             ok_stream(Vec::new()),
-            gzip::Decompressor::new(crate::testing::resources()),
+            gzip::Decompressor::new(&crate::testing::RESOURCES),
         ));
     }
 
     #[test]
     fn debug_is_available_for_diagnostics() {
         let empty = stream::iter(Vec::<std::result::Result<BytesView, std::io::Error>>::new());
-        let stream = CompressionStream::compress(empty, gzip::Compressor::new(crate::testing::resources()));
+        let stream = CompressionStream::compress(empty, gzip::Compressor::new(&crate::testing::RESOURCES));
 
         assert!(format!("{stream:?}").contains("CompressionStream"));
     }

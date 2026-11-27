@@ -4,8 +4,6 @@
 //! Integration tests for the `fetch.runtime` and `fetch.transport` instrumentation-scope
 //! attributes on client metrics.
 
-use std::sync::OnceLock;
-
 use bytes::Bytes;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
@@ -21,11 +19,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 const TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
-fn memory() -> &'static GlobalPool {
-    static MEMORY: OnceLock<GlobalPool> = OnceLock::new();
-
-    MEMORY.get_or_init(GlobalPool::new)
-}
+static MEMORY: std::sync::LazyLock<GlobalPool> = std::sync::LazyLock::new(GlobalPool::new);
 
 /// Returns `attribute_key` from the scope that recorded `metric_name`.
 fn scope_attribute_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str, attribute_key: &str) -> Option<String> {
@@ -100,7 +94,7 @@ async fn custom_transport_scope_attribute() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(memory().clone()),
+        memory: OpaqueMemory::new(MEMORY.clone()),
         extras: (),
     };
 
@@ -134,7 +128,7 @@ async fn custom_transport_instrument_inherits_scope() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        memory: OpaqueMemory::new(memory().clone()),
+        memory: OpaqueMemory::new(MEMORY.clone()),
         extras: (),
     };
 
@@ -171,7 +165,7 @@ async fn custom_transport_instrument_inherits_scope() {
 async fn tokio_transport_connection_metric_scope_attribute() {
     let (exporter, provider) = exporter_and_provider();
 
-    let client = HttpClient::builder_tokio(TokioDeps::new(&Clock::new_frozen(), memory().clone()))
+    let client = HttpClient::builder_tokio(TokioDeps::new(&Clock::new_frozen(), MEMORY.clone()))
         .insecure_allow_http()
         .meter_provider(provider.clone())
         .build();

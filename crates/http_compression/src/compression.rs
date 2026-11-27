@@ -1043,7 +1043,7 @@ mod tests {
     #[test]
     fn gamma_round2_negotiation_skips_head_and_disabled_formats() {
         for (formats, method) in [(&[Format::Gzip][..], Method::HEAD), (&[][..], Method::GET)] {
-            let layer = Compression::server(crate::test_resources().clone()).compress_responses(formats);
+            let layer = Compression::server(crate::RESOURCES.clone()).compress_responses(formats);
             let request = http::Request::builder()
                 .method(method)
                 .header(ACCEPT_ENCODING, "gzip, identity;q=0")
@@ -1078,7 +1078,7 @@ mod tests {
 
     #[test]
     fn raw_deflate_has_no_http_content_encoding() {
-        let layer = Compression::server(crate::test_resources().clone());
+        let layer = Compression::server(crate::RESOURCES.clone());
         let mut headers = HeaderMap::new();
         let body = http_extensions::HttpResponseBuilder::new_fake()
             .text("unchanged")

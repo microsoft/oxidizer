@@ -7,7 +7,7 @@
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
 
 use std::num::NonZeroU64;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -23,11 +23,7 @@ use ohno::{ErrorExt as _, Labeled as _};
 
 const URL: &str = "https://example.com/resource";
 
-fn resources() -> &'static Resources {
-    static RESOURCES: OnceLock<Resources> = OnceLock::new();
-
-    RESOURCES.get_or_init(|| Resources::new(GlobalPool::new()))
-}
+static RESOURCES: std::sync::LazyLock<Resources> = std::sync::LazyLock::new(|| Resources::new(GlobalPool::new()));
 
 /// Compresses well so each transformation has a visible effect.
 fn payload() -> String {
@@ -39,15 +35,15 @@ fn builder() -> HttpBodyBuilder {
 }
 
 fn compress(format: Format, data: &[u8]) -> BytesView {
-    compressors::format::compress(format, data, resources()).unwrap()
+    compressors::format::compress(format, data, &RESOURCES).unwrap()
 }
 
 fn client() -> CompressionLayer<Client> {
-    Compression::client(resources().clone())
+    Compression::client(RESOURCES.clone())
 }
 
 fn server() -> CompressionLayer<Server> {
-    Compression::server(resources().clone())
+    Compression::server(RESOURCES.clone())
 }
 
 fn request(body: BytesView, format_token: Option<&'static str>) -> HttpRequest {
@@ -115,7 +111,7 @@ async fn buffered_compression_returns_a_buffered_body() {
     let wire = BytesView::try_from(response.into_body()).unwrap();
     assert_eq!(length, HeaderValue::from(wire.len()));
     assert_eq!(
-        compressors::gzip::decompress(wire, resources()).unwrap().to_vec(),
+        compressors::gzip::decompress(wire, &RESOURCES).unwrap().to_vec(),
         expected.as_bytes()
     );
 }
@@ -134,7 +130,7 @@ async fn large_buffered_compression_uses_a_streaming_body() {
     assert!(response.headers().get(CONTENT_LENGTH).is_none());
     assert!(response.body().try_clone().is_none());
     let wire = response.into_body().into_bytes().await.unwrap();
-    assert_eq!(compressors::gzip::decompress(wire, resources()).unwrap().to_vec(), expected);
+    assert_eq!(compressors::gzip::decompress(wire, &RESOURCES).unwrap().to_vec(), expected);
 }
 
 #[tokio::test]
@@ -540,7 +536,7 @@ async fn a_server_never_advertises_or_decompresses_its_responses() {
 async fn a_server_compresses_the_response_the_caller_accepts() {
     let expected = payload();
     let handler = server()
-        .resources(resources().clone())
+        .resources(RESOURCES.clone())
         .compress_responses(&[Format::Zstd, Format::Gzip])
         .layer(echo());
 
@@ -554,7 +550,7 @@ async fn a_server_compresses_the_response_the_caller_accepts() {
 
     let wire = response.into_body().into_bytes().await.unwrap();
     assert_eq!(
-        compressors::gzip::decompress(wire, resources()).unwrap().to_vec(),
+        compressors::gzip::decompress(wire, &RESOURCES).unwrap().to_vec(),
         expected.as_bytes()
     );
 }
@@ -594,7 +590,7 @@ async fn response_compression_defaults_to_fast_and_honours_the_configured_level(
 
                 let compressor = CompressorBuilder::new()
                     .level(expected_level)
-                    .build_format(format, resources())
+                    .build_format(format, &RESOURCES)
                     .unwrap();
                 let reference = if buffered {
                     compressors::compress(bytes(&expected), compressor).unwrap()
@@ -610,7 +606,7 @@ async fn response_compression_defaults_to_fast_and_honours_the_configured_level(
                     "{format:?}, {configured:?}, buffered={buffered}"
                 );
                 assert_eq!(
-                    compressors::format::decompress(format, actual, resources()).unwrap().to_vec(),
+                    compressors::format::decompress(format, actual, &RESOURCES).unwrap().to_vec(),
                     expected.as_bytes()
                 );
             }
@@ -649,7 +645,7 @@ async fn building_a_server_captures_its_role_settings() {
         );
         let wire = response.into_body().into_bytes().await.unwrap();
         assert_eq!(
-            compressors::format::decompress(format, wire, resources()).unwrap().to_vec(),
+            compressors::format::decompress(format, wire, &RESOURCES).unwrap().to_vec(),
             expected.as_bytes()
         );
     }

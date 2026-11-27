@@ -676,7 +676,7 @@ mod tests {
     fn november4_header_capacity_failures_escape_request_construction_before_native_io() {
         for length in [(usize::try_from(u32::MAX).unwrap(), 1), (usize::MAX, 1)] {
             let clock = Clock::new_frozen();
-            let memory = OpaqueMemory::new(crate::test_memory().clone());
+            let memory = OpaqueMemory::new(crate::MEMORY.clone());
             let bodies = HttpBodyBuilder::new(memory.clone(), &clock);
             let polls = Arc::new(AtomicUsize::new(0));
             let observed = Arc::clone(&polls);
@@ -1309,7 +1309,7 @@ mod tests {
 
     #[test]
     fn malformed_or_unsupported_requests_fail_before_native_io() {
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &Clock::new_frozen());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &Clock::new_frozen());
         let asterisk_form = http::Request::builder()
             .method(Method::OPTIONS)
             .uri(
@@ -1406,7 +1406,7 @@ mod tests {
 
     #[test]
     fn request_upload_writes_every_frame_and_contiguous_span_sequentially() {
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let first = BytesView::copied_from_slice(b"ab", &memory);
         let second = BytesView::copied_from_slice(b"cd", &memory);
@@ -1465,7 +1465,7 @@ mod tests {
 
     #[test]
     fn partial_write_completions_advance_within_the_active_span() {
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let data = BytesView::copied_from_slice(b"abcd", &memory);
         let address = data.first_slice().as_ptr().addr();
@@ -1516,7 +1516,7 @@ mod tests {
             if cfg!(miri) && !miri_case {
                 continue;
             }
-            let memory = OpaqueMemory::new(crate::test_memory().clone());
+            let memory = OpaqueMemory::new(crate::MEMORY.clone());
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
             let body = body_builder.body(ScriptedBody::new(
@@ -1559,7 +1559,7 @@ mod tests {
 
     #[test]
     fn unknown_length_upload_waits_for_terminal_write_completion_before_receiving_response() {
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let clock = Clock::new_frozen();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let completed_writes = Arc::new(AtomicUsize::new(0));
@@ -1652,7 +1652,7 @@ mod tests {
 
     #[test]
     fn large_known_length_uses_explicit_content_length_without_allocating_the_body() {
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &Clock::new_frozen());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let length = u64::from(u32::MAX) + 1;
         let body = body_builder.body(ScriptedBody::new([], Arc::clone(&completed_writes), 0, Some(length)));
@@ -1682,7 +1682,7 @@ mod tests {
 
     #[test]
     fn request_body_errors_and_trailers_stop_before_response_reception() {
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &Clock::new_frozen());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let body = body_builder.body(ScriptedBody::new(
             [(0, Err(HttpError::validation("request body stream failed")))],
@@ -1737,7 +1737,7 @@ mod tests {
     #[test]
     fn final_unknown_length_write_failures_stop_before_response_reception() {
         for failure in [LifecycleFailure::EndWriteSync, LifecycleFailure::EndWriteCallback] {
-            let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &Clock::new_frozen());
+            let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
             let body = body_builder.body(ScriptedBody::new([], Arc::clone(&completed_writes), 0, None));
             let request = http::Request::builder()
@@ -1764,7 +1764,7 @@ mod tests {
     #[test]
     fn synchronous_callback_and_zero_length_write_failures_are_reported() {
         for failure in [LifecycleFailure::WriteSync, LifecycleFailure::WriteCallback] {
-            let memory = OpaqueMemory::new(crate::test_memory().clone());
+            let memory = OpaqueMemory::new(crate::MEMORY.clone());
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
             let body = body_builder.body(ScriptedBody::new(
@@ -1792,7 +1792,7 @@ mod tests {
             assert_lifecycle_closed(&record);
         }
 
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let body = body_builder.body(ScriptedBody::new(
@@ -1822,7 +1822,7 @@ mod tests {
 
     #[test]
     fn cancelling_an_active_upload_retains_the_buffer_and_parents_until_handle_closing() {
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let body = body_builder.body(ScriptedBody::new(
@@ -1908,7 +1908,7 @@ mod tests {
         let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
         let session = session(facade);
         let contexts = ContextPool::new(Pool::new());
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let mut options = TransportOptions::default();
         options.connect_timeout = Duration::from_secs(1);
@@ -1971,7 +1971,7 @@ mod tests {
     fn completed_send_cancels_connect_timeout_before_upload() {
         let control = ClockControl::new();
         let clock = control.to_clock();
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let body = body_builder.body(ScriptedBody::new(
@@ -2053,7 +2053,7 @@ mod tests {
         let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
         let session = session(facade);
         let contexts = ContextPool::new(Pool::new());
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let options = TransportOptions::default();
@@ -2381,7 +2381,7 @@ mod tests {
         let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
         let session = session(facade);
         let contexts = ContextPool::new(Pool::new());
-        let memory = OpaqueMemory::new(crate::test_memory().clone());
+        let memory = OpaqueMemory::new(crate::MEMORY.clone());
         let clock = Clock::new_frozen();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let mut body_polled = false;
@@ -2843,7 +2843,7 @@ mod tests {
     }
 
     fn request(method: Method, uri: &str) -> HttpRequest {
-        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::test_memory().clone()), &Clock::new_frozen());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(crate::MEMORY.clone()), &Clock::new_frozen());
         http::Request::builder().method(method).uri(uri).body(body_builder.empty()).unwrap()
     }
 
