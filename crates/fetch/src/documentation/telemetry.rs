@@ -16,7 +16,8 @@
 //! Every client has three attributes: its runtime, its transport and its name. The instrumentation
 //! scope of its `fetch` meter has them, so the instruments of
 //! [`CustomContext::meter`](crate::custom::CustomContext::meter) carry them. Every request event,
-//! and every connection event of the Tokio transport, has them as fields:
+//! and every connection event of the Tokio transport, has them as fields, and the metrics that
+//! these events record have them as attributes:
 //!
 //! | Key | Description | Sample value |
 //! |-----|-------------|--------------|
@@ -46,12 +47,12 @@
 //! The Tokio transport emits these events for each connection. They are only available when the
 //! Hyper-based transport is in use (the default for the Tokio runtime).
 //!
-//! | Event | Severity | Emitted when | Metric |
-//! |-------|----------|--------------|--------|
-//! | `http.client.connection.start` | Debug | The transport starts to connect to a server | none |
-//! | `http.client.connection.success` | Info | The connection is set up before the connect timeout | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
-//! | `http.client.connection.error` | Warn | The connection fails, or the connect timeout passes | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
-//! | `http.client.connection.closed` | Debug | A connection is closed (the underlying stream is dropped) | [`http.client.connection.duration`](#httpclientconnectionduration) |
+//! | Event | Severity | Message | Emitted when | Metric |
+//! |-------|----------|---------|--------------|--------|
+//! | `http.client.connection.start` | Debug | `connecting to a remote endpoint` | The transport starts to connect to a server | none |
+//! | `http.client.connection.success` | Info | `connected to server` | The connection is set up before the connect timeout | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
+//! | `http.client.connection.error` | Warn | `server connection failed` | The connection fails, or the connect timeout passes | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) |
+//! | `http.client.connection.closed` | Debug | `connection closed` | A connection is closed (the underlying stream is dropped) | [`http.client.connection.duration`](#httpclientconnectionduration) |
 //!
 //! The events have these fields:
 //!
