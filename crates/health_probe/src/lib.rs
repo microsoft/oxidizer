@@ -4,7 +4,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-//! Kubernetes HTTP readiness adapters for [`health`].
+//! Readiness adapters for [`health`].
 //!
 //! Both adapters read a [`health::Monitor`] for each request. A healthy process returns
 //! status `200 OK` with the JSON body `true`. A degraded or unhealthy process returns

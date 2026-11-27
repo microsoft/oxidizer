@@ -495,7 +495,7 @@ fn monitor_keeps_reading_reports_after_the_aggregator_handle_drops() {
     let component = aggregator.component("database");
     let mut publisher = component.publisher();
     wait_for_monitor(&mut monitor, Health::Healthy);
-    let mut waiting_monitor = monitor.clone();
+    let mut waiting_monitor = aggregator.monitor();
     let mut changed = pin!(waiting_monitor.changed());
     changed.as_mut().unwrap_pending();
     drop(aggregator);

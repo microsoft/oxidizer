@@ -1,11 +1,11 @@
 <div align="center">
- <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Health Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Process Health Logo" width="96">
 
-# Health
+# Process Health
 
-[![crate.io](https://img.shields.io/crates/v/health.svg)](https://crates.io/crates/health)
-[![docs.rs](https://docs.rs/health/badge.svg)](https://docs.rs/health)
-[![MSRV](https://img.shields.io/crates/msrv/health)](https://crates.io/crates/health)
+[![crate.io](https://img.shields.io/crates/v/process_health.svg)](https://crates.io/crates/process_health)
+[![docs.rs](https://docs.rs/process_health/badge.svg)](https://docs.rs/process_health)
+[![MSRV](https://img.shields.io/crates/msrv/process_health)](https://crates.io/crates/process_health)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml/badge.svg)](https://github.com/microsoft/oxidizer/actions/workflows/anvil-pr.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
@@ -97,30 +97,30 @@ read the reports, await [`Monitor::changed`][__link15], and repeat.
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/health">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/process_health">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbX_4VzDhABZgbJ8ZXfu_ETgEbKOKR4xiqBGIbY88hYsWFXpZhZIGCZmhlYWx0aGUwLjEuMA
- [__link0]: https://docs.rs/health/0.1.0/health/?search=Publisher
- [__link1]: https://docs.rs/health/0.1.0/health/?search=Component
- [__link10]: https://docs.rs/health/0.1.0/health/?search=Monitor::changed
- [__link11]: https://docs.rs/health/0.1.0/health/?search=Component
- [__link12]: https://docs.rs/health/0.1.0/health/?search=Aggregator
- [__link13]: https://docs.rs/health/0.1.0/health/?search=Monitor
- [__link14]: https://docs.rs/health/0.1.0/health/?search=Report::signals
- [__link15]: https://docs.rs/health/0.1.0/health/?search=Monitor::changed
- [__link16]: https://docs.rs/health/0.1.0/health/?search=Component
- [__link17]: https://docs.rs/health/0.1.0/health/?search=Aggregator::component
- [__link18]: https://docs.rs/health/0.1.0/health/?search=Publisher::publish
- [__link19]: https://docs.rs/health/0.1.0/health/?search=Monitor
- [__link2]: https://docs.rs/health/0.1.0/health/?search=Aggregator
- [__link20]: https://docs.rs/health/0.1.0/health/?search=Aggregator::monitor
- [__link21]: https://docs.rs/health/0.1.0/health/?search=Health
- [__link22]: https://docs.rs/health/0.1.0/health/?search=Report::signals
- [__link3]: https://docs.rs/health/0.1.0/health/?search=Health::Healthy
- [__link4]: https://docs.rs/health/0.1.0/health/?search=Health::Degraded
- [__link5]: https://docs.rs/health/0.1.0/health/?search=Health::Unhealthy
- [__link6]: https://docs.rs/health/0.1.0/health/?search=Report
- [__link7]: https://docs.rs/health/0.1.0/health/?search=Aggregator
- [__link8]: https://docs.rs/health/0.1.0/health/?search=Aggregator::component
- [__link9]: https://docs.rs/health/0.1.0/health/?search=Signal
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbX_4VzDhABZgbJ8ZXfu_ETgEbKOKR4xiqBGIbY88hYsWFXpZhZIGCbnByb2Nlc3NfaGVhbHRoZTAuMS4w
+ [__link0]: https://docs.rs/process_health/0.1.0/process_health/?search=Publisher
+ [__link1]: https://docs.rs/process_health/0.1.0/process_health/?search=Component
+ [__link10]: https://docs.rs/process_health/0.1.0/process_health/?search=Monitor::changed
+ [__link11]: https://docs.rs/process_health/0.1.0/process_health/?search=Component
+ [__link12]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator
+ [__link13]: https://docs.rs/process_health/0.1.0/process_health/?search=Monitor
+ [__link14]: https://docs.rs/process_health/0.1.0/process_health/?search=Report::signals
+ [__link15]: https://docs.rs/process_health/0.1.0/process_health/?search=Monitor::changed
+ [__link16]: https://docs.rs/process_health/0.1.0/process_health/?search=Component
+ [__link17]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator::component
+ [__link18]: https://docs.rs/process_health/0.1.0/process_health/?search=Publisher::publish
+ [__link19]: https://docs.rs/process_health/0.1.0/process_health/?search=Monitor
+ [__link2]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator
+ [__link20]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator::monitor
+ [__link21]: https://docs.rs/process_health/0.1.0/process_health/?search=Health
+ [__link22]: https://docs.rs/process_health/0.1.0/process_health/?search=Report::signals
+ [__link3]: https://docs.rs/process_health/0.1.0/process_health/?search=Health::Healthy
+ [__link4]: https://docs.rs/process_health/0.1.0/process_health/?search=Health::Degraded
+ [__link5]: https://docs.rs/process_health/0.1.0/process_health/?search=Health::Unhealthy
+ [__link6]: https://docs.rs/process_health/0.1.0/process_health/?search=Report
+ [__link7]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator
+ [__link8]: https://docs.rs/process_health/0.1.0/process_health/?search=Aggregator::component
+ [__link9]: https://docs.rs/process_health/0.1.0/process_health/?search=Signal
