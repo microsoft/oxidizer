@@ -5103,6 +5103,7 @@ mod tests {
                 runtime_id: 1,
                 type_descriptor_id: Some(42),
                 spawned_at: None,
+                body_size_bytes: Some(8),
                 outcomes: TaskOutcomeSummary {
                     tasks: 2,
                     completed: 1,
@@ -5127,6 +5128,7 @@ mod tests {
                 runtime_id: 1,
                 type_descriptor_id: Some(77),
                 spawned_at: None,
+                body_size_bytes: Some(16),
                 outcomes: TaskOutcomeSummary {
                     tasks: 2,
                     completed: 1,

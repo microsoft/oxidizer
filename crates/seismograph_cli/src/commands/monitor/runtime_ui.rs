@@ -74,7 +74,7 @@ const fn selected_index(view: RuntimeViewState) -> usize {
 }
 
 fn worker_name(worker: &RuntimeWorkerSummary) -> String {
-    worker.thread_id.map_or_else(|| "Unknown".into(), |id| format!("#{id}"))
+    worker.worker_id.map_or_else(|| "Unknown".into(), |id| format!("w{id}"))
 }
 
 fn duration(value: Option<u64>) -> String {
@@ -234,7 +234,7 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
     match (focus, wide) {
         (RuntimeWorkersFocus::Asynchronous, true) => (
             vec![
-                "Thread",
+                "Worker ID",
                 "State",
                 "Types",
                 "Tasks",
@@ -255,7 +255,7 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
             ],
         ),
         (RuntimeWorkersFocus::Asynchronous, false) => (
-            vec!["Thread", "Types", "Polls", "Max poll"],
+            vec!["Worker ID", "Types", "Polls", "Max poll"],
             vec![
                 Constraint::Min(18),
                 Constraint::Length(7),
@@ -265,7 +265,7 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
         ),
         (RuntimeWorkersFocus::Blocking, true) => (
             vec![
-                "Thread",
+                "Worker ID",
                 "State",
                 "Types",
                 "Runs",
@@ -283,7 +283,7 @@ fn worker_columns(focus: RuntimeWorkersFocus, wide: bool) -> (Vec<&'static str>,
                 .collect(),
         ),
         (RuntimeWorkersFocus::Blocking, false) => (
-            vec!["Thread", "Types", "Runs", "Succeeded", "Max queue", "Max exec"],
+            vec!["Worker ID", "Types", "Runs", "Succeeded", "Max queue", "Max exec"],
             vec![
                 Constraint::Min(18),
                 Constraint::Length(7),

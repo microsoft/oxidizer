@@ -48,8 +48,7 @@ pub(super) fn draw(
     let (label, samples) = match task.kind {
         RuntimeTaskKind::Asynchronous => {
             lines.push(Line::from(format!(
-                "Future {} B · {} polls · median {} · max {}",
-                task.future_size_bytes.map_or_else(|| "-".into(), |size| size.to_string()),
+                "{} polls · median {} · max {}",
                 format_count(task.metrics.poll_count),
                 duration(task.metrics.median_poll_nanos),
                 duration(task.metrics.max_poll_nanos),

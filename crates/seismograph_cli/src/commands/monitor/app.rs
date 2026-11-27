@@ -775,6 +775,7 @@ pub(super) enum TaskHistogram {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeTaskTypeSort {
     SpawnedAt,
+    BodySize,
     Spawned,
     Live,
     Succeeded,
@@ -792,9 +793,7 @@ pub(super) enum RuntimeTaskTypeSort {
 pub(super) enum RuntimeTaskRowSort {
     Task,
     State,
-    Worker,
     Spawn,
-    FutureSize,
     Operations,
     Polls,
     MaximumPoll,
@@ -2269,9 +2268,7 @@ pub(super) fn sort_runtime_tasks(tasks: &mut Vec<&super::data::RuntimeTaskSummar
         let ordering = match view.task_sort {
             RuntimeTaskRowSort::Task => directed(left.task_id.cmp(&right.task_id)),
             RuntimeTaskRowSort::State => directed(left.state.cmp(&right.state)),
-            RuntimeTaskRowSort::Worker => optional(left.worker_ids.first().copied(), right.worker_ids.first().copied()),
             RuntimeTaskRowSort::Spawn => directed(spawn(left).cmp(&spawn(right))),
-            RuntimeTaskRowSort::FutureSize => optional(left.future_size_bytes, right.future_size_bytes),
             RuntimeTaskRowSort::Operations => directed(left.operations.cmp(&right.operations)),
             RuntimeTaskRowSort::Polls => directed(left.metrics.poll_count.cmp(&right.metrics.poll_count)),
             RuntimeTaskRowSort::MaximumPoll => optional(left.metrics.max_poll_nanos, right.metrics.max_poll_nanos),

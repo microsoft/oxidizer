@@ -371,7 +371,7 @@ const THREAD_OBJECTS: &Section = section!("THREAD OBJECTS / STACKS";
 
 const RUNTIME_WORKERS: &Section = section!("RUNTIME WORKERS";
     "Runtime" => "Selected runtime name and ID. Use [ and ] when the snapshot contains more than one runtime.",
-    "Thread" => "Recorder thread ID for the worker. Unknown means that no recorder thread was attached.",
+    "Worker ID" => "Runtime worker ID. The selected runtime supplies the scope for this value.",
     "State" => "Running means available to execute, not necessarily polling now. Parked means parked; Stopped means stopped. Event-only workers can have blank metadata.",
     "Types" => "Distinct retained task descriptors that executed on this worker.",
     "Tasks" => "Distinct asynchronous tasks with a retained poll on this worker. A migrated task can count on more than one worker.",
@@ -390,6 +390,8 @@ const RUNTIME_WORKERS: &Section = section!("RUNTIME WORKERS";
 
 const RUNTIME_TASK_GROUPS: &Section = section!("RUNTIME TASK TYPES";
     "Spawned at" => "Source file, line and column for the task descriptor. A numeric descriptor appears when the source location is unavailable.",
+    "Future B" => "Inline future size shared by this asynchronous task type.",
+    "Closure B" => "Inline closure size shared by this blocking task type.",
     "Async tasks" => "Groups are inferred from retained poll events. Poll totals include retained finished and unfinished polls.",
     "Blocking tasks" => "Groups are inferred when a blocking worker starts execution. Queue-only tasks remain unclassified.",
     "Spawned" => "Retained task count for this descriptor.",
@@ -740,7 +742,7 @@ mod tests {
         (
             Context::RuntimeWorkers,
             &[
-                "Thread",
+                "Worker ID",
                 "State",
                 "Types",
                 "Tasks",

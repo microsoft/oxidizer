@@ -132,6 +132,7 @@ fn compare_optional<T: Ord>(left: Option<T>, right: Option<T>, view: RuntimeView
 fn compare_async_groups(left: &AsynchronousTaskGroupSummary, right: &AsynchronousTaskGroupSummary, view: RuntimeViewState) -> Ordering {
     let ordering = match view.task_type_sort {
         RuntimeTaskTypeSort::SpawnedAt => compare_optional(left.spawned_at.as_deref(), right.spawned_at.as_deref(), view),
+        RuntimeTaskTypeSort::BodySize => compare_optional(left.body_size_bytes, right.body_size_bytes, view),
         RuntimeTaskTypeSort::Spawned => directed(left.outcomes.tasks.cmp(&right.outcomes.tasks), view),
         RuntimeTaskTypeSort::Live => directed(left.outcomes.active.cmp(&right.outcomes.active), view),
         RuntimeTaskTypeSort::Succeeded => directed(left.outcomes.completed.cmp(&right.outcomes.completed), view),
@@ -150,6 +151,7 @@ fn compare_async_groups(left: &AsynchronousTaskGroupSummary, right: &Asynchronou
 fn compare_blocking_groups(left: &BlockingTaskGroupSummary, right: &BlockingTaskGroupSummary, view: RuntimeViewState) -> Ordering {
     let ordering = match view.task_type_sort {
         RuntimeTaskTypeSort::SpawnedAt => compare_optional(left.spawned_at.as_deref(), right.spawned_at.as_deref(), view),
+        RuntimeTaskTypeSort::BodySize => compare_optional(left.body_size_bytes, right.body_size_bytes, view),
         RuntimeTaskTypeSort::Spawned => directed(left.outcomes.tasks.cmp(&right.outcomes.tasks), view),
         RuntimeTaskTypeSort::Live => directed(left.outcomes.active.cmp(&right.outcomes.active), view),
         RuntimeTaskTypeSort::Succeeded => directed(left.outcomes.completed.cmp(&right.outcomes.completed), view),
@@ -243,6 +245,7 @@ fn draw_asynchronous(
         (
             vec![
                 "Spawned at",
+                "Future B",
                 "Spawned",
                 "Live",
                 "Succeeded",
@@ -255,12 +258,13 @@ fn draw_asynchronous(
                 "Avg poll",
                 "Max poll",
             ],
-            vec![42, 8, 8, 10, 9, 9, 8, 10, 12, 12, 12, 12]
+            vec![42, 10, 8, 8, 10, 9, 9, 8, 10, 12, 12, 12, 12]
                 .into_iter()
                 .map(Constraint::Length)
                 .collect(),
             vec![
                 RuntimeTaskTypeSort::SpawnedAt,
+                RuntimeTaskTypeSort::BodySize,
                 RuntimeTaskTypeSort::Spawned,
                 RuntimeTaskTypeSort::Live,
                 RuntimeTaskTypeSort::Succeeded,
@@ -276,9 +280,19 @@ fn draw_asynchronous(
         )
     } else {
         (
-            vec!["Spawned at", "Spawned", "Live", "Succeeded", "Canceled", "Polls", "Max poll"],
+            vec![
+                "Spawned at",
+                "Future B",
+                "Spawned",
+                "Live",
+                "Succeeded",
+                "Canceled",
+                "Polls",
+                "Max poll",
+            ],
             vec![
                 Constraint::Min(24),
+                Constraint::Length(10),
                 Constraint::Length(8),
                 Constraint::Length(8),
                 Constraint::Length(10),
@@ -288,6 +302,7 @@ fn draw_asynchronous(
             ],
             vec![
                 RuntimeTaskTypeSort::SpawnedAt,
+                RuntimeTaskTypeSort::BodySize,
                 RuntimeTaskTypeSort::Spawned,
                 RuntimeTaskTypeSort::Live,
                 RuntimeTaskTypeSort::Succeeded,
@@ -317,6 +332,7 @@ fn draw_asynchronous(
 fn asynchronous_row(group: &AsynchronousTaskGroupSummary, wide: bool) -> Row<'static> {
     let mut cells = vec![
         task_type(group.spawned_at.as_deref(), group.type_descriptor_id),
+        group.body_size_bytes.map_or_else(|| "-".into(), |size| size.to_string()),
         format_count(group.outcomes.tasks),
     ];
     if wide {
@@ -399,6 +415,7 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
         (
             vec![
                 "Spawned at",
+                "Closure B",
                 "Spawned",
                 "Runs",
                 "Live",
@@ -411,12 +428,13 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
                 "Avg exec",
                 "Max exec",
             ],
-            vec![42, 8, 8, 8, 10, 9, 9, 8, 12, 12, 12, 12]
+            vec![42, 10, 8, 8, 8, 10, 9, 9, 8, 12, 12, 12, 12]
                 .into_iter()
                 .map(Constraint::Length)
                 .collect(),
             vec![
                 RuntimeTaskTypeSort::SpawnedAt,
+                RuntimeTaskTypeSort::BodySize,
                 RuntimeTaskTypeSort::Spawned,
                 RuntimeTaskTypeSort::PollsOrRuns,
                 RuntimeTaskTypeSort::Live,
@@ -432,9 +450,19 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
         )
     } else {
         (
-            vec!["Spawned at", "Spawned", "Runs", "Succeeded", "Canceled", "Max queue", "Max exec"],
+            vec![
+                "Spawned at",
+                "Closure B",
+                "Spawned",
+                "Runs",
+                "Succeeded",
+                "Canceled",
+                "Max queue",
+                "Max exec",
+            ],
             vec![
                 Constraint::Min(24),
+                Constraint::Length(10),
                 Constraint::Length(8),
                 Constraint::Length(8),
                 Constraint::Length(10),
@@ -444,6 +472,7 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
             ],
             vec![
                 RuntimeTaskTypeSort::SpawnedAt,
+                RuntimeTaskTypeSort::BodySize,
                 RuntimeTaskTypeSort::Spawned,
                 RuntimeTaskTypeSort::PollsOrRuns,
                 RuntimeTaskTypeSort::Succeeded,
@@ -473,6 +502,7 @@ fn draw_blocking(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, 
 fn blocking_row(group: &BlockingTaskGroupSummary, wide: bool) -> Row<'static> {
     let mut cells = vec![
         task_type(group.spawned_at.as_deref(), group.type_descriptor_id),
+        group.body_size_bytes.map_or_else(|| "-".into(), |size| size.to_string()),
         format_count(group.outcomes.tasks),
         format_count(group.executions),
     ];
@@ -518,6 +548,7 @@ mod tests {
                 runtime_id: 1,
                 type_descriptor_id: Some(42),
                 spawned_at: Some("src/async.rs:1:1".into()),
+                body_size_bytes: Some(128),
                 outcomes: TaskOutcomeSummary {
                     tasks: 3,
                     active: 1,
@@ -540,6 +571,7 @@ mod tests {
                 runtime_id: 1,
                 type_descriptor_id: Some(77),
                 spawned_at: Some("src/blocking.rs:2:1".into()),
+                body_size_bytes: Some(64),
                 outcomes: TaskOutcomeSummary {
                     tasks: 2,
                     completed: 1,

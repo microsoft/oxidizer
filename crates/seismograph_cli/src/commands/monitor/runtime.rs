@@ -72,6 +72,7 @@ pub(super) struct AsynchronousTaskGroupSummary {
     pub(super) runtime_id: u64,
     pub(super) type_descriptor_id: Option<u64>,
     pub(super) spawned_at: Option<String>,
+    pub(super) body_size_bytes: Option<u64>,
     pub(super) outcomes: TaskOutcomeSummary,
     pub(super) polls: u64,
     pub(super) ready_time: DurationSummary,
@@ -85,6 +86,7 @@ pub(super) struct BlockingTaskGroupSummary {
     pub(super) runtime_id: u64,
     pub(super) type_descriptor_id: Option<u64>,
     pub(super) spawned_at: Option<String>,
+    pub(super) body_size_bytes: Option<u64>,
     pub(super) outcomes: TaskOutcomeSummary,
     pub(super) executions: u64,
     pub(super) queue_time: DurationSummary,
@@ -218,6 +220,7 @@ impl TaskOutcomeBuilder {
 #[derive(Default)]
 struct AsynchronousTaskGroupBuilder {
     outcomes: TaskOutcomeBuilder,
+    body_sizes: BTreeSet<u64>,
     polls: u64,
     ready_time: DurationSummary,
     poll_time: DurationSummary,
@@ -228,6 +231,7 @@ struct AsynchronousTaskGroupBuilder {
 #[derive(Default)]
 struct BlockingTaskGroupBuilder {
     outcomes: TaskOutcomeBuilder,
+    body_sizes: BTreeSet<u64>,
     executions: u64,
     queue_time: DurationSummary,
     execution_time: DurationSummary,
@@ -247,6 +251,7 @@ fn observe_task_group(
         TaskKind::Asynchronous(asynchronous) => {
             let group = asynchronous_groups.entry(key).or_default();
             group.outcomes.observe(task);
+            group.body_sizes.extend(task.body_size);
             group.polls = group
                 .polls
                 .saturating_add(u64::try_from(asynchronous.polls.len()).unwrap_or(u64::MAX));
@@ -260,6 +265,7 @@ fn observe_task_group(
         TaskKind::Blocking(blocking) => {
             let group = blocking_groups.entry(key).or_default();
             group.outcomes.observe(task);
+            group.body_sizes.extend(task.body_size);
             group.executions = group.executions.saturating_add(u64::from(blocking.started_at.is_some()));
             group.queue_time.observe(blocking.queue_duration_nanos);
             group.execution_time.observe(blocking.duration_nanos);
@@ -287,6 +293,7 @@ fn finish_task_groups(
             runtime_id,
             type_descriptor_id,
             spawned_at: type_descriptor_id.and_then(|descriptor| task_locations.get(&(runtime_id, descriptor)).cloned()),
+            body_size_bytes: only_value(&group.body_sizes),
             outcomes: group.outcomes.finish(),
             polls: group.polls,
             ready_time: group.ready_time,
@@ -309,6 +316,7 @@ fn finish_task_groups(
             runtime_id,
             type_descriptor_id,
             spawned_at: type_descriptor_id.and_then(|descriptor| task_locations.get(&(runtime_id, descriptor)).cloned()),
+            body_size_bytes: only_value(&group.body_sizes),
             outcomes: group.outcomes.finish(),
             executions: group.executions,
             queue_time: group.queue_time,
@@ -326,6 +334,10 @@ fn finish_task_groups(
         )
     });
     (asynchronous, blocking)
+}
+
+fn only_value(values: &BTreeSet<u64>) -> Option<u64> {
+    if values.len() == 1 { values.first().copied() } else { None }
 }
 
 impl TaskBuilder {

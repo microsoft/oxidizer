@@ -291,31 +291,25 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
     let visible = usize::from(area.height.saturating_sub(3));
     let first = selected.saturating_sub(visible.saturating_sub(1));
     let wide = area.width >= 82;
-    let rows = tasks.iter().skip(first).take(visible).map(|task| task_row(task, view.focus, wide));
+    let rows = tasks.iter().skip(first).take(visible).map(|task| task_row(task, view.focus));
     let (headers, widths, sorts) = match (view.focus, wide) {
         (RuntimeWorkersFocus::Asynchronous, true) => (
-            vec!["Task", "State", "Worker", "Spawn", "Future B", "Ops", "Polls", "Max poll"],
-            vec![8, 11, 8, 16, 10, 7, 8, 12]
-                .into_iter()
-                .map(Constraint::Length)
-                .collect::<Vec<_>>(),
+            vec!["Task", "State", "Spawn", "Ops", "Polls", "Max poll"],
+            vec![8, 11, 16, 7, 8, 12].into_iter().map(Constraint::Length).collect::<Vec<_>>(),
             vec![
                 RuntimeTaskRowSort::Task,
                 RuntimeTaskRowSort::State,
-                RuntimeTaskRowSort::Worker,
                 RuntimeTaskRowSort::Spawn,
-                RuntimeTaskRowSort::FutureSize,
                 RuntimeTaskRowSort::Operations,
                 RuntimeTaskRowSort::Polls,
                 RuntimeTaskRowSort::MaximumPoll,
             ],
         ),
         (RuntimeWorkersFocus::Asynchronous, false) => (
-            vec!["Task", "State", "Worker", "Spawn", "Ops", "Polls", "Max poll"],
+            vec!["Task", "State", "Spawn", "Ops", "Polls", "Max poll"],
             vec![
                 Constraint::Length(8),
                 Constraint::Length(9),
-                Constraint::Length(7),
                 Constraint::Min(10),
                 Constraint::Length(6),
                 Constraint::Length(7),
@@ -324,7 +318,6 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
             vec![
                 RuntimeTaskRowSort::Task,
                 RuntimeTaskRowSort::State,
-                RuntimeTaskRowSort::Worker,
                 RuntimeTaskRowSort::Spawn,
                 RuntimeTaskRowSort::Operations,
                 RuntimeTaskRowSort::Polls,
@@ -332,15 +325,14 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
             ],
         ),
         (RuntimeWorkersFocus::Blocking, true) => (
-            vec!["Task", "State", "Worker", "Spawn", "Ops", "Queue", "Execution"],
-            vec![8, 11, 8, 16, 7, 12, 12]
+            vec!["Task", "State", "Spawn", "Ops", "Queue", "Execution"],
+            vec![8, 11, 16, 7, 12, 12]
                 .into_iter()
                 .map(Constraint::Length)
                 .collect::<Vec<_>>(),
             vec![
                 RuntimeTaskRowSort::Task,
                 RuntimeTaskRowSort::State,
-                RuntimeTaskRowSort::Worker,
                 RuntimeTaskRowSort::Spawn,
                 RuntimeTaskRowSort::Operations,
                 RuntimeTaskRowSort::Queue,
@@ -348,11 +340,10 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
             ],
         ),
         (RuntimeWorkersFocus::Blocking, false) => (
-            vec!["Task", "State", "Worker", "Spawn", "Ops", "Queue", "Execution"],
+            vec!["Task", "State", "Spawn", "Ops", "Queue", "Execution"],
             vec![
                 Constraint::Length(8),
                 Constraint::Length(9),
-                Constraint::Length(7),
                 Constraint::Min(10),
                 Constraint::Length(6),
                 Constraint::Length(11),
@@ -361,7 +352,6 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
             vec![
                 RuntimeTaskRowSort::Task,
                 RuntimeTaskRowSort::State,
-                RuntimeTaskRowSort::Worker,
                 RuntimeTaskRowSort::Spawn,
                 RuntimeTaskRowSort::Operations,
                 RuntimeTaskRowSort::Queue,
@@ -393,21 +383,15 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
     );
 }
 
-fn task_row(task: &RuntimeTaskSummary, focus: RuntimeWorkersFocus, wide: bool) -> Row<'static> {
-    let worker = task.worker_ids.first().map_or_else(|| "-".into(), |worker| format!("w{worker}"));
+fn task_row(task: &RuntimeTaskSummary, focus: RuntimeWorkersFocus) -> Row<'static> {
     let spawn = task_spawn(task);
-    let mut cells = vec![format!("#{}", task.task_id), task.state.clone(), worker, spawn];
+    let mut cells = vec![format!("#{}", task.task_id), task.state.clone(), spawn];
     match focus {
-        RuntimeWorkersFocus::Asynchronous => {
-            if wide {
-                cells.push(task.future_size_bytes.map_or_else(|| "-".into(), |size| size.to_string()));
-            }
-            cells.extend([
-                format_count(task.operations),
-                format_count(task.metrics.poll_count),
-                duration(task.metrics.max_poll_nanos),
-            ]);
-        }
+        RuntimeWorkersFocus::Asynchronous => cells.extend([
+            format_count(task.operations),
+            format_count(task.metrics.poll_count),
+            duration(task.metrics.max_poll_nanos),
+        ]),
         RuntimeWorkersFocus::Blocking => cells.extend([
             format_count(task.operations),
             duration(task.blocking.queue_duration_nanos),
@@ -416,6 +400,6 @@ fn task_row(task: &RuntimeTaskSummary, focus: RuntimeWorkersFocus, wide: bool) -
     }
     Row::new(cells.into_iter().enumerate().map(|(index, value)| {
         let line = Line::from(value);
-        Cell::from(if index >= 4 { line.right_aligned() } else { line })
+        Cell::from(if index >= 3 { line.right_aligned() } else { line })
     }))
 }
