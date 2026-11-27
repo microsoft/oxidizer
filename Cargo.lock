@@ -4397,6 +4397,7 @@ dependencies = [
  "static_assertions",
  "testing_aids",
  "thread_aware",
+ "tick",
 ]
 
 [[package]]
