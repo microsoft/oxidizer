@@ -2448,32 +2448,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "health"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "data_privacy",
- "foldhash 0.2.0",
- "futures",
- "observed",
- "observed_testing",
- "performables",
- "static_assertions",
- "testing_aids",
- "thread_aware",
-]
-
-[[package]]
 name = "health_probe"
 version = "0.1.0"
 dependencies = [
  "bytesbuf",
  "futures",
- "health",
  "http",
  "http_extensions",
  "layered",
  "observed",
+ "process_health",
  "tick",
  "tokio",
  "tower",
@@ -4413,6 +4397,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process_health"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "data_privacy",
+ "foldhash 0.2.0",
+ "future_assert",
+ "futures",
+ "observed",
+ "observed_testing",
+ "performables",
+ "static_assertions",
+ "testing_aids",
+ "thread_aware",
 ]
 
 [[package]]

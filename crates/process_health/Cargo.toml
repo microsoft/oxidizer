@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [package]
-name = "health"
+name = "process_health"
 description = "Application health aggregation with component reports."
 version = "0.1.0"
 readme = "README.md"
@@ -14,11 +14,13 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 include.workspace = true
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/health"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/process_health"
 
 [package.metadata.cargo_check_external_types]
-# Thread-aware handles.
-allowed_external_types = ["thread_aware_core::thread_aware::ThreadAware"]
+allowed_external_types = ["observed::sink::core::Sink", "thread_aware_core::thread_aware::ThreadAware"]
+
+[lib]
+name = "health"
 
 [features]
 default = []
@@ -32,6 +34,7 @@ performables.workspace = true
 thread_aware = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
 observed_testing = { path = "../observed_testing" }
 static_assertions.workspace = true

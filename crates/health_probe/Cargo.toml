@@ -3,7 +3,7 @@
 
 [package]
 name = "health_probe"
-description = "Kubernetes readiness adapters for health."
+description = "Readiness adapters for health."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["health", "readiness", "kubernetes", "http", "tcp"]
@@ -38,10 +38,10 @@ tcp = ["dep:tick", "dep:tokio"]
 
 [dependencies]
 bytesbuf = { workspace = true, optional = true, features = ["std"] }
-health.workspace = true
 http = { workspace = true, optional = true }
 http_extensions = { workspace = true, optional = true }
 layered = { workspace = true, optional = true }
+process_health.workspace = true
 tick = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["macros", "net"] }
 tower-service = { workspace = true, optional = true }

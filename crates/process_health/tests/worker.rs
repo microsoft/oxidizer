@@ -63,7 +63,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let mut clients = root.component("clients");
     flush();
     assert_eq!(reader.state(), Health::Unhealthy, "a newly registered empty component is unhealthy");
-    assert_eq!(block_on(reader.reports()).len(), 2);
+    assert_eq!(block_on(reader.reports()).count(), 2);
 
     let writer = clients.clone();
     let (mut publisher, observed) = turn(&mut clients, || writer.publisher());
