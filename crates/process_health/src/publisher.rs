@@ -15,8 +15,10 @@ use crate::{Attribute, Health, Signal};
 /// One independently owned writer of a [`Component`](crate::Component)'s health.
 ///
 /// A publisher stores its current [`Signal`] locally and forwards it to the component only when
-/// it changes. Dropping a publisher unregisters its contribution without blocking. A publisher
-/// keeps its component registered until the publisher and all component handles are dropped.
+/// it changes. Dropping a publisher queues removal of its contribution without waiting for
+/// aggregation. If that drop releases the final process owner, it waits for the worker thread to
+/// stop. A publisher keeps its component registered until the publisher and all component handles
+/// are dropped.
 ///
 /// A clone represents a new publisher, not another handle to the original signal. It starts
 /// `Healthy` with no attributes, even if the original is `Degraded`. If only the healthy clone
