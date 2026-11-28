@@ -1,0 +1,61 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "health_probe"
+description = "Readiness adapters for health."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["health", "readiness", "probe", "http"]
+categories = ["asynchronous", "web-programming::http-server"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/health_probe"
+
+[package.metadata.cargo_check_external_types]
+# The crate is an interoperability adapter over these public contracts.
+allowed_external_types = [
+    "health::monitor::Monitor",
+    "http::request::Request",
+    "http::response::Response",
+    "tower_service::Service",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+http-readiness-tower = ["dep:http", "dep:tower-service"]
+
+[dependencies]
+http = { workspace = true, optional = true }
+process_health.workspace = true
+tower-service = { workspace = true, optional = true }
+
+[dev-dependencies]
+axum = { workspace = true, features = ["http1", "tokio"] }
+futures = { workspace = true, features = ["executor"] }
+http.workspace = true
+observed = { path = "../observed" }
+testing_aids = { path = "../testing_aids" }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tower = { workspace = true, features = ["util"] }
+tower-service.workspace = true
+
+[[example]]
+name = "health_probe_axum"
+required-features = ["http-readiness-tower"]
+
+[[test]]
+name = "http_readiness_tower"
+required-features = ["http-readiness-tower"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
