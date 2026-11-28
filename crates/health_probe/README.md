@@ -23,8 +23,8 @@ contain no component details and disable caching.
 
 ## Features
 
-* `http` enables the Tower readiness service.
-* `request-handler` enables the
+* `http-readiness-tower` enables the Tower readiness service.
+* `http-readiness-request` enables the
   [`http_extensions`][__link2] request handler.
 
 No features are enabled by default.

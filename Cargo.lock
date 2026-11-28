@@ -2451,6 +2451,7 @@ dependencies = [
 name = "health_probe"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "bytesbuf",
  "futures",
  "http",
@@ -2459,6 +2460,7 @@ dependencies = [
  "observed",
  "process_health",
  "tick",
+ "tokio",
  "tower",
  "tower-service",
 ]

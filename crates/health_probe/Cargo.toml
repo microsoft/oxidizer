@@ -6,7 +6,7 @@ name = "health_probe"
 description = "Readiness adapters for health."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["health", "readiness", "kubernetes", "http"]
+keywords = ["health", "readiness", "probe", "http"]
 categories = ["asynchronous", "web-programming::http-server"]
 edition.workspace = true
 rust-version.workspace = true
@@ -31,8 +31,8 @@ all-features = true
 
 [features]
 default = []
-http = ["dep:http", "dep:tower-service"]
-request-handler = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
+http-readiness-request = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
+http-readiness-tower = ["dep:http", "dep:tower-service"]
 
 [dependencies]
 bytesbuf = { workspace = true, optional = true, features = ["std"] }
@@ -44,6 +44,7 @@ tick = { workspace = true, optional = true }
 tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
+axum = { workspace = true, features = ["http1", "tokio"] }
 bytesbuf = { path = "../bytesbuf", default-features = false, features = ["std"] }
 futures = { workspace = true, features = ["executor"] }
 http.workspace = true
@@ -51,8 +52,13 @@ http_extensions = { path = "../http_extensions", default-features = false, featu
 layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
 tick = { path = "../tick", default-features = false }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
+
+[[example]]
+name = "axum"
+required-features = ["http-readiness-tower"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

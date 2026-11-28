@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Contract tests for the Kubernetes HTTP readiness adapters.
+//! Contract tests for the HTTP readiness adapters.
 
 use futures::executor::block_on;
 use health::{Aggregator, Component, Health, Monitor, Publisher};
@@ -12,7 +12,8 @@ use layered::Service;
 use observed::Sink;
 use tower::ServiceExt;
 
-use crate::kubernetes_http::{request_handler, service};
+use crate::http::readiness_request::request_handler;
+use crate::http::readiness_tower::service;
 
 const STATES: [Health; 3] = [Health::Healthy, Health::Degraded, Health::Unhealthy];
 
@@ -53,7 +54,7 @@ fn tower_service_reports_readiness() {
         let response = block_on(service(monitor).oneshot(Request::new("ignored"))).unwrap();
         let (status, body) = expected(state);
         assert_eq!(response.status(), status);
-        assert_eq!(*response.body(), body);
+        assert_eq!(response.body(), body);
         assert_headers(response.headers());
     }
 }

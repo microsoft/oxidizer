@@ -14,11 +14,11 @@
 //!
 //! # Features
 //!
-//! - `http` enables the Tower readiness service.
-//! - `request-handler` enables the
+//! - `http-readiness-tower` enables the Tower readiness service.
+//! - `http-readiness-request` enables the
 //!   [`http_extensions`](https://docs.rs/http_extensions) request handler.
 //!
 //! No features are enabled by default.
 
-#[cfg(any(test, feature = "http", feature = "request-handler"))]
-pub mod kubernetes_http;
+#[cfg(any(test, feature = "http-readiness-request", feature = "http-readiness-tower"))]
+pub mod http;
