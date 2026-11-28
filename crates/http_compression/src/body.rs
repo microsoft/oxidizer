@@ -24,7 +24,7 @@ use compressors::CompressionStream;
 use compressors::core::{Compress, Compression, Decompress};
 use futures::Stream;
 use http::HeaderMap;
-use http_body::{Body, Frame, SizeHint};
+use http_body::{Body, Frame};
 use http_extensions::body::StreamingBody;
 use http_extensions::{HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
@@ -159,11 +159,6 @@ impl<C: Compression> Body for CompressionBody<C> {
 
     fn is_end_stream(&self) -> bool {
         self.chain.is_none()
-    }
-
-    /// The transformed length is unknown until the complete body is read.
-    fn size_hint(&self) -> SizeHint {
-        SizeHint::default()
     }
 }
 

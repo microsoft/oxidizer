@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.22.0] - 2026-11-24
+
+- Breaking: Update body construction, compression, resilience, and timing integrations to the new contracts.
+- Expand connector and transport regression coverage.
+- Remove the forwarding `seismograph` feature. Enable recording directly on instrumented dependencies.
+- Update the local requirement for `anyspawn` from `^0.11.0` to `^0.12.0`.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `compressors` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `data_privacy` from `^0.13.2` to `^0.13.3`.
+- Update the local requirement for `fetch_hyper` from `^0.12.0` to `^0.13.0`.
+- Update the local requirement for `fetch_options` from `^0.2.5` to `^0.2.6`.
+- Update the local requirement for `fetch_tls` from `^0.5.1` to `^0.5.2`.
+- Update the local requirement for `fundle` from `^0.4.1` to `^0.4.2`.
+- Update the local requirement for `http_compression` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `http_extensions` from `^0.15.0` to `^0.16.0`.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `seatbelt` from `^0.12.1` to `^0.13.0`.
+- Update the local requirement for `seatbelt_http` from `^0.13.0` to `^0.14.0`.
+- Update the local requirement for `templated_uri` from `^0.7.1` to `^0.7.2`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+- Update the local development requirement for `observed_destination_core` from `^0.29.2` to `^0.29.3`.
+- Update the local development requirement for `observed_destination_stdout` from `^0.1.1` to `^0.2.0`.
+
 ## [0.21.0] - 2026-11-06
 
 - Use the Tokio runtime active at each spawn call for the default task spawner.

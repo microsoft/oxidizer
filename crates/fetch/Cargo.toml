@@ -4,7 +4,7 @@
 [package]
 name = "fetch"
 description = "HTTP client with resilience, observability, and Tokio runtime support."
-version = "0.21.0"
+version = "0.22.0"
 readme = "README.md"
 keywords = ["http", "client", "async", "resilience", "observability"]
 categories = ["network-programming"]
@@ -65,7 +65,6 @@ rustls = [
 ]
 native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
-seismograph = ["anyspawn?/seismograph", "bytesbuf/seismograph", "performables/seismograph"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 compression-gzip = ["dep:compressors", "dep:http_compression", "http_compression/gzip"]
 # HTTP `deflate` is zlib-wrapped DEFLATE, which is `compressors/zlib`.
@@ -173,7 +172,7 @@ insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
 observed_destination_core = { workspace = true }
 observed_destination_stdout = { workspace = true }
-ohno = { path = "../ohno", features = ["test-util", "app-err"] }
+ohno = { workspace = true, features = ["test-util", "app-err"] }
 opentelemetry_sdk = { workspace = true, features = [
     "metrics",
     "testing",

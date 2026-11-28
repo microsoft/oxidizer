@@ -5,27 +5,31 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::{Attribute, Health};
 
-/// One publisher's current [`Health`] state and diagnostic attributes.
+/// The health and diagnostics that one publisher contributes to a component.
 ///
-/// Signals are created by [`Component::publisher_with`](crate::Component::publisher_with) and
-/// [`Publisher::publish`](crate::Publisher::publish), then inspected through publishers and
-/// reports. Attribute order is not significant for equality. `Signal` does not implement `Eq` or
-/// `Hash` because [`AttributeValue::Double`](crate::AttributeValue::Double) can contain `NaN`.
+/// A signal is a value, not an event or subscription. Create a publisher through
+/// [`Component::publisher`](crate::Component::publisher) or
+/// [`Component::publisher_with`](crate::Component::publisher_with). Each call to
+/// [`Publisher::publish`](crate::Publisher::publish) replaces that publisher's previous signal.
+/// Background aggregation can skip intermediate signals.
+///
+/// Observe signals through [`Report::signals`](crate::Report::signals). Reports group equal signals
+/// and count their publishers. Retained reports and cloned signals do not update themselves.
+///
+/// # Equality
+///
+/// Attribute order is not significant.
 ///
 /// # Examples
 ///
 /// ```
-/// use health::{Aggregator, Health};
-/// use observed::Sink;
+/// use health::{Health, Report};
 ///
-/// let aggregator = Aggregator::new(Sink::noop());
-/// let database = aggregator.component("database");
-/// let mut publisher = database.publisher();
-/// publisher.degraded("high latency");
-///
-/// let signal = publisher.signal();
-/// assert_eq!(signal.state(), Health::Degraded);
-/// assert_eq!(signal.to_string(), "Degraded (reason=high latency)");
+/// fn print_degraded(report: &Report) {
+///     for (signal, publishers) in report.signals(Health::Degraded) {
+///         println!("{publishers} publisher(s): {signal}");
+///     }
+/// }
 /// ```
 #[derive(Clone, Debug)]
 pub struct Signal {
@@ -48,10 +52,9 @@ impl Signal {
         self.state
     }
 
-    /// Attribute order does not affect signal equality.
-    #[must_use]
-    pub fn attributes(&self) -> &[Attribute] {
-        &self.attributes
+    /// Returns the diagnostic attributes. Iteration order is unspecified.
+    pub fn attributes(&self) -> impl Iterator<Item = &Attribute> {
+        self.attributes.iter()
     }
 }
 
@@ -59,14 +62,14 @@ impl PartialEq for Signal {
     // Attributes compare as a multiset; signals carry few attributes, so the quadratic scan is
     // cheaper than allocating a sorted copy.
     fn eq(&self, other: &Self) -> bool {
+        // #[gamma::skip(relational.eq_to_ne, tag = "equivalent", reason = "For equal-length multisets, matching counts are equal exactly when nonmatching counts are equal.")]
         let count = |attributes: &[Attribute], attribute: &Attribute| attributes.iter().filter(|candidate| *candidate == attribute).count();
 
         self.state == other.state
             && self.attributes.len() == other.attributes.len()
             && self.attributes.iter().all(|attribute| {
-                // An attribute that is not equal to itself (a NaN value) makes the signals unequal.
                 let own = count(&self.attributes, attribute);
-                own != 0 && own == count(&other.attributes, attribute)
+                own == count(&other.attributes, attribute)
             })
     }
 }
@@ -90,20 +93,23 @@ impl Display for Signal {
 mod tests {
     use super::*;
 
-    fn signal(attributes: impl IntoIterator<Item = (&'static str, i64)>) -> Signal {
+    fn signal(attributes: impl IntoIterator<Item = (&'static str, &'static str)>) -> Signal {
         Signal::new(Health::Degraded, attributes.into_iter().map(Attribute::from).collect())
     }
 
     #[test]
     fn equality_ignores_attribute_order() {
-        assert_eq!(signal([("a", 1), ("b", 2)]), signal([("b", 2), ("a", 1)]));
+        assert_eq!(signal([("a", "1"), ("b", "2")]), signal([("b", "2"), ("a", "1")]));
     }
 
     #[test]
     fn equality_respects_duplicate_counts() {
-        assert_ne!(signal([("a", 1), ("a", 1), ("b", 2)]), signal([("a", 1), ("b", 2), ("b", 2)]));
-        assert_ne!(signal([("a", 1)]), signal([("a", 1), ("b", 2)]));
-        assert_ne!(signal([("a", 1), ("b", 2)]), signal([("a", 1), ("b", 3)]));
+        assert_ne!(
+            signal([("a", "1"), ("a", "1"), ("b", "2")]),
+            signal([("a", "1"), ("b", "2"), ("b", "2")])
+        );
+        assert_ne!(signal([("a", "1")]), signal([("a", "1"), ("b", "2")]));
+        assert_ne!(signal([("a", "1"), ("b", "2")]), signal([("a", "1"), ("b", "3")]));
     }
 
     #[test]
@@ -112,15 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn nan_attributes_are_never_equal() {
-        let nan = Signal::new(Health::Healthy, Box::new([Attribute::from(("ratio", f64::NAN))]));
-        assert_ne!(nan, nan.clone());
-    }
-
-    #[test]
     fn display_lists_attributes() {
         assert_eq!(Signal::healthy().to_string(), "Healthy");
-        assert_eq!(signal([("a", 1), ("b", 2)]).to_string(), "Degraded (a=1, b=2)");
+        assert_eq!(signal([("a", "1"), ("b", "2")]).to_string(), "Degraded (a=1, b=2)");
     }
 
     #[test]
@@ -134,7 +134,7 @@ mod tests {
                 Ok(())
             }
         }
-        let signal = signal([("a", 1), ("b", 2)]);
+        let signal = signal([("a", "1"), ("b", "2")]);
         let len = signal.to_string().len();
         for capacity in 0..len {
             assert!(write!(Limited(capacity), "{signal}").is_err());

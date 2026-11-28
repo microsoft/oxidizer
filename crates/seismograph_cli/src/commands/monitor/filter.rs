@@ -177,6 +177,7 @@ fn identifier(segment: &str) -> bool {
 /// Removes generic arguments, retaining the implementing owner of qualified impls.
 pub(super) fn symbol_path(symbol: &str) -> Option<String> {
     let symbol = symbol.trim();
+    // #[gamma::skip(cond.always_false, reason = "The identifier check also rejects the empty path")]
     if symbol.is_empty() {
         return None;
     }
@@ -219,16 +220,15 @@ fn qualified_owner_end(qualified: &str) -> usize {
 }
 
 fn angle_end(text: &str, start: usize) -> Option<usize> {
-    let mut depth = 0_usize;
-    for (offset, byte) in text.as_bytes()[start..].iter().enumerate() {
-        let position = start + offset;
+    let mut depth = 1_usize;
+    for (offset, [previous, byte]) in text.as_bytes()[start..].array_windows::<2>().enumerate() {
         match byte {
             b'<' => depth += 1,
-            b'>' if position == 0 || text.as_bytes()[position - 1] != b'-' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(position);
+            b'>' if *previous != b'-' => {
+                if depth == 1 {
+                    return Some(start + offset + 1);
                 }
+                depth -= 1;
             }
             _ => {}
         }
@@ -254,7 +254,16 @@ fn strip_generics(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, symbol_path};
+    use super::{FilterSpec, Match, Rule, RuntimeStackMode, StackProvenance, angle_end, symbol_path};
+
+    #[test]
+    fn angle_scan_starts_at_the_requested_generic_list() {
+        let symbol = "app::First<T>::Second<Outer<fn() -> U>>::run";
+        let start = symbol.find("<Outer").unwrap();
+        let end = angle_end(symbol, start).unwrap();
+        assert_eq!(&symbol[start..=end], "<Outer<fn() -> U>>");
+        assert_eq!(angle_end("app::Second<Outer<U>", "app::Second".len()), None);
+    }
 
     #[test]
     fn gamma_survivor_symbol_owners_reject_partial_paths_and_keep_async_blocks() {
@@ -273,6 +282,10 @@ mod tests {
         assert_eq!(
             symbol_path("app::run::h0123456789abcdeg"),
             Some("app::run::h0123456789abcdeg".into())
+        );
+        assert_eq!(
+            symbol_path("app::run::hg123456789abcdef"),
+            Some("app::run::hg123456789abcdef".into())
         );
         assert_eq!(symbol_path("app::Type<one::Arg>::run::<two::Arg>"), Some("app::Type::run".into()));
     }
@@ -389,18 +402,23 @@ mod tests {
 
     #[test]
     fn malformed_rules_have_actionable_errors() {
-        for text in [
-            "crate:",
-            "crate:foo::bar",
-            "module:foo",
-            "function:foo",
-            "crate:foo-bar",
-            "crate:foo:",
-            "foo",
-            "other:foo",
+        let invalid_identifier = "target must contain nonempty Rust identifiers separated by ::";
+        let missing_crate = "target must include its crate, for example my_crate::name";
+        let invalid_kind = "use crate:, module:, or function:";
+        for (text, reason) in [
+            ("crate:", invalid_identifier),
+            ("crate:foo::bar", "crate target must be a single crate name"),
+            ("module:foo", missing_crate),
+            ("function:foo", missing_crate),
+            ("crate:foo-bar", invalid_identifier),
+            ("crate:foo:", invalid_identifier),
+            ("foo", invalid_kind),
+            ("other:foo", invalid_kind),
         ] {
             let error = FilterSpec::parse(text, "", false, RuntimeStackMode::Event).unwrap_err();
-            assert!(error.to_string().contains(text), "{error}");
+            assert_eq!(error.rule, text);
+            assert_eq!(error.reason, reason);
+            assert_eq!(error.to_string(), format!("Invalid filter rule {text:?}: {reason}"));
         }
     }
 

@@ -211,20 +211,20 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbyYEyPFVDKXMbDRKkHqMoD3sbPQp2e4YVT2sbkF6qdCQL1qJhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
- [__link0]: https://crates.io/crates/observed/0.30.1
- [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
- [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit
- [__link11]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::response_body_media_types
- [__link12]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::route_resolver
- [__link13]: https://docs.rs/http_extensions/0.15.0/http_extensions/?search=HttpError
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbyYEyPFVDKXMbDRKkHqMoD3sbPQp2e4YVT2sbkF6qdCQL1qJhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE2LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMi4wgmdsYXllcmVkZjAuMy4xMIJob2JzZXJ2ZWRmMC4zMS4w
+ [__link0]: https://crates.io/crates/observed/0.31.0
+ [__link1]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry::server
+ [__link10]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit
+ [__link11]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::response_body_media_types
+ [__link12]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::route_resolver
+ [__link13]: https://docs.rs/http_extensions/0.16.0/http_extensions/?search=HttpError
  [__link14]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream
- [__link15]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::excluded_paths
- [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry
- [__link3]: https://docs.rs/layered/0.3.9/layered/?search=Layer
- [__link4]: https://docs.rs/observed/0.30.1/observed/?search=Sink
- [__link5]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::route_parameter_data_classes
- [__link6]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::request_header_data_classes
- [__link7]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::response_header_data_classes
- [__link8]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit
- [__link9]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::request_body_media_types
+ [__link15]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::excluded_paths
+ [__link2]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=Telemetry
+ [__link3]: https://docs.rs/layered/0.3.10/layered/?search=Layer
+ [__link4]: https://docs.rs/observed/0.31.0/observed/?search=Sink
+ [__link5]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::route_parameter_data_classes
+ [__link6]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::request_header_data_classes
+ [__link7]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::response_header_data_classes
+ [__link8]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::body_size_limit
+ [__link9]: https://docs.rs/http_telemetry/0.2.0/http_telemetry/?search=TelemetryLayer::request_body_media_types

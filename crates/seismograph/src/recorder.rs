@@ -384,6 +384,7 @@ pub(crate) fn try_configure(configuration: Configuration) -> Result<(), crate::E
         wait_deadline(),
         "seismograph recording configuration timed out waiting for another operation",
     )?;
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after still applies the full recorder configuration and returns the same unit value.")]
     configure_locked(configuration);
     Ok(())
 }

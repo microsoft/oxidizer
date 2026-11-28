@@ -829,6 +829,10 @@ impl Server {
     }
 
     /// Compresses small buffered data directly and streams larger data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if compressor initialization or buffered compression fails.
     fn compress(&self, config: &Config, headers: &mut HeaderMap, body: HttpBody, format: Format) -> Result<HttpBody> {
         let Some(token) = format.content_encoding() else {
             return Ok(body);
@@ -848,23 +852,16 @@ impl Server {
         weaken_etag(headers);
 
         body.map(|content| {
-            Ok(match content {
-                Content::Streaming(inner) => Content::Streaming(StreamingBody::new(body::CompressionBody::new(
-                    body::CompressionChain::new(inner).compress(compressor),
-                ))),
+            let inner = match content {
+                Content::Streaming(inner) => inner,
                 Content::Bytes(bytes) if bytes.len() <= MAX_DIRECT_COMPRESSION_INPUT_LEN => {
-                    let bytes = compressors::compress(bytes, compressor).map_err(body::to_http_error)?;
-                    headers.remove(TRANSFER_ENCODING);
-                    headers.insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
-                    Content::Bytes(bytes)
+                    return compress_buffered(headers, bytes, |bytes| compressors::compress(bytes, compressor));
                 }
-                Content::Bytes(bytes) => {
-                    let inner = StreamingBody::new(http_body_util::Full::new(bytes));
-                    Content::Streaming(StreamingBody::new(body::CompressionBody::new(
-                        body::CompressionChain::new(inner).compress(compressor),
-                    )))
-                }
-            })
+                Content::Bytes(bytes) => StreamingBody::new(http_body_util::Full::new(bytes)),
+            };
+            Ok(Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                body::CompressionChain::new(inner).compress(compressor),
+            ))))
         })
     }
 
@@ -886,6 +883,17 @@ impl Server {
     }
 }
 
+fn compress_buffered(
+    headers: &mut HeaderMap,
+    bytes: BytesView,
+    compress: impl FnOnce(BytesView) -> compressors::Result<BytesView>,
+) -> Result<Content> {
+    let bytes = compress(bytes).map_err(body::to_http_error)?;
+    headers.remove(TRANSFER_ENCODING);
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
+    Ok(Content::Bytes(bytes))
+}
+
 fn not_acceptable(response: HttpResponse) -> Result<HttpResponse> {
     let (mut parts, body) = response.into_parts();
     parts.status = StatusCode::NOT_ACCEPTABLE;
@@ -897,6 +905,7 @@ fn not_acceptable(response: HttpResponse) -> Result<HttpResponse> {
     parts.headers.remove(CONTENT_DIGEST_HEADER);
     parts.headers.remove(REPR_DIGEST_HEADER);
 
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The caller skips zero-length bodies, which include consumed buffered bodies. The mapper always succeeds.")]
     let body = body.map(|_| Ok(Content::Bytes(BytesView::default())))?;
     Ok(HttpResponse::from_parts(parts, body))
 }
@@ -961,6 +970,7 @@ impl Config {
             })
             .collect::<SmallVec<[_; 2]>>();
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Both callers skip zero-length bodies, which include consumed buffered bodies. The mapper always succeeds.")]
         let decompressed = body.map(|content| {
             let inner = match content {
                 Content::Streaming(inner) => inner,
@@ -1035,8 +1045,25 @@ impl Config {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http_extensions::HttpBodyBuilder;
+    use ohno::Labeled as _;
 
     use super::*;
+
+    #[test]
+    fn buffered_compression_returns_codec_errors_without_publishing_a_length() {
+        let mut headers = HeaderMap::new();
+        headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        let result = compress_buffered(&mut headers, BytesView::default(), |_| {
+            Err(compressors::Error::other("codec failed", std::io::Error::other("injected failure")))
+        });
+
+        let Err(error) = result else {
+            panic!("a failed codec cannot produce a buffered response");
+        };
+        assert_eq!(error.label(), "compression_invalid");
+        assert!(!headers.contains_key(CONTENT_LENGTH));
+        assert_eq!(headers.get(TRANSFER_ENCODING).unwrap(), "chunked");
+    }
 
     #[test]
     fn gamma_round2_negotiation_skips_head_and_disabled_formats() {

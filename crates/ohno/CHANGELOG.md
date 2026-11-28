@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.5] - 2026-11-24
+
+- Probe compiler coverage-attribute support for nested builds.
+- Expand backtrace, formatting, and error-macro regression coverage.
+- Update the local requirement for `ohno_macros` from `=0.5.4` to `=0.5.5`.
+
 ## [0.5.4] - 2026-11-02
 
 - Update the published Tokio test requirement. Use version 0.5.4 for all Ohno packages. Error

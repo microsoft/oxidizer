@@ -56,6 +56,32 @@ A crate that declares an explicit `[[example]]` or `[[bench]]` target therefore
 publishes a manifest entry whose source is absent. Cargo does not build those
 targets for a dependent, so this is inert.
 
+## Dependencies shared with external crates
+
+Workspace consumers use published `ohno` and `plurality`, not their local
+workspace copies. Both remain workspace members for development and release.
+Normal and dev-dependencies in each consumer must use the same source.
+
+External crates also depend on these packages: `cpulist` uses `ohno`, and
+`events_once` uses `plurality`. Cargo changes local path dependencies to
+registry dependencies during packaging. With `--locked`, an external dependency
+can keep an older registry version while a local path requires a newer,
+compatible version. Cargo then rejects the conflicting selections. For example,
+Arty requires local `plurality 0.2.5`, but `events_once 0.5.42` stays locked to
+registry `plurality 0.2.4`.
+
+The version-only requirements let consumers share the published versions already
+selected for the external crates. Releasing local `ohno` or `plurality` does not
+change those requirements or trigger consumer releases. Adopting a newer published
+version is a separate dependency update.
+
+The full workspace graph, with all features and target dependencies, contains
+no other external dependencies on workspace packages except the published
+`ohno` macro family. That family stays connected through exact local paths
+inside `ohno` and `ohno_macros`. Other workspace dependencies retain their paths.
+Before adding another version-only exception, reproduce the conflict with
+`cargo package --locked --no-verify` and the affected packages selected together.
+
 ## Why an allowlist instead of `exclude`
 
 The allowlist exists primarily to keep **Git LFS-tracked binaries out of the

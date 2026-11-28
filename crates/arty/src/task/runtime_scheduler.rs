@@ -1,16 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::panic::Location;
 use std::pin::Pin;
 use std::task::{Context as PollContext, Poll};
 
 use futures::future::{FutureExt, LocalBoxFuture};
 use performables::sync::channel;
 use pin_project::pin_project;
+use seismograph_runtime::TaskIdentity;
 
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::worker::asynchronous::LocalWorker;
 use crate::task::{Context, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
@@ -113,6 +116,7 @@ impl RuntimeScheduler {
     /// assert_eq!(message, "Hello, Arty");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, Error>
     where
         FF: FnOnce(Context) -> F + Send + 'a,
@@ -135,7 +139,7 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        let options = crate::task::preparation::TaskSpawnOptions::with_future_size::<LocalBoxFuture<'static, R>>(size_of::<F>());
+        let options = crate::task::preparation::SpawnOptions::new(TaskIdentity::from_location(Location::caller()), size_of::<F>(), None);
         let task = self.dispatcher.spawn(factory, options);
         futures::executor::block_on(task).map_err(Error::new)
     }
@@ -186,19 +190,25 @@ impl RuntimeScheduler {
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Context, D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        let options = crate::task::preparation::SpawnOptions::new(
+            TaskIdentity::from_location(Location::caller()),
+            size_of::<F>(),
+            LocalWorker::current_task(),
+        );
         self.dispatcher.spawn(
             move |cx| {
                 let mut data = data;
                 data.relocate(None, cx.thread());
                 future_factory(cx, data)
             },
-            crate::task::preparation::TaskSpawnOptions::new::<F>(),
+            options,
         )
     }
 
@@ -228,12 +238,15 @@ impl RuntimeScheduler {
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[track_caller]
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.next_blocking_worker().spawn_blocking(body)
+        self.dispatcher
+            .next_blocking_worker()
+            .spawn_blocking(body, TaskIdentity::from_location(Location::caller()))
     }
 }
 

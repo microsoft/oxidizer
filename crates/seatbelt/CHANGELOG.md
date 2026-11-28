@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0] - 2026-11-24
+
+- Breaking: Update resilience timing integration to the new Tick contracts.
+- Expand timeout, retry, breaker, fallback, and chaos-policy regression coverage.
+- Update the local requirement for `layered` from `^0.3.9` to `^0.3.10`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+- Update the local development requirement for `observed_destination_core` from `^0.29.2` to `^0.29.3`.
+- Update the local development requirement for `observed_destination_stdout` from `^0.1.1` to `^0.2.0`.
+
 ## [0.12.1] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

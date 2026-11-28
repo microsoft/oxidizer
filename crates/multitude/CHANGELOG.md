@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0] - 2026-11-24
+
+- Breaking: Update BytesBuf integration to its new defining contracts.
+- Expand arena ownership, synchronization, allocation, and Serde regression coverage.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `multitude_macros` from `=0.14.0` to `=0.15.0`.
+
 ## [0.14.0] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

@@ -20,6 +20,10 @@
 //! tasks. Only one executor can be alive on a thread. You can create a replacement after
 //! you drop the previous executor. A runtime integration supplies a [`TaskCompletion`]
 //! target when it registers a task.
+//! Each registration also requires a [`TaskIdentity`]. During each poll,
+//! [`TaskSet::current`] returns that identity through a handle to the executor.
+//! Outside a poll, it returns `None`. Runtime integrations can use the current
+//! identity to record the parent of a newly submitted task.
 //!
 //! A task ends when its future returns `Poll::Ready`, when it panics, or when
 //! executor shutdown cancels it. The executor does not provide methods to
@@ -55,6 +59,7 @@ pub use executor::*;
 pub(crate) use executor_shared::*;
 pub use panic::*;
 pub use panic_policy::*;
+use seismograph_runtime::TaskIdentity;
 pub use shutdown::*;
 pub use task::TaskCompletion;
 pub(crate) use task::*;

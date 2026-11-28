@@ -52,9 +52,13 @@ impl SpawnedWorker {
     }
 
     pub(crate) fn activate(self, dispatcher: DispatcherClient) -> JoinHandle<()> {
-        self.activation_tx
-            .send(Activation { dispatcher })
-            .expect("a starting worker retains its activation receiver");
+        {
+            // Close the activation channel before waiting for startup.
+            let activation_tx = self.activation_tx;
+            activation_tx
+                .send(Activation { dispatcher })
+                .expect("a starting worker retains its activation receiver");
+        }
         self.ready_rx.recv().expect("failed to receive worker startup signal");
         self.join_handle
     }
@@ -122,8 +126,8 @@ impl ThreadEntry {
             options,
             command_rx,
             activation_rx,
-            ready_tx,
-            endpoint_tx,
+            ready_tx: ready_sender,
+            endpoint_tx: endpoint_sender,
         } = self;
         let StartOptions {
             inactive_clock,
@@ -149,19 +153,22 @@ impl ThreadEntry {
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
         let blocking_pool = blocking_pools.pool_for_worker(worker_index);
-        #[cfg(any(test, feature = "monitor"))]
         if let Some(runtime) = monitor_options.runtime() {
             blocking_pool.enable_monitoring(runtime);
         }
         let blocking_worker = blocking::Worker::new(blocking_pool, shutdown);
 
-        endpoint_tx
-            .send(Endpoint {
-                waker: worker_waker,
-                thread: current.clone(),
-                blocking_worker: Arc::clone(&blocking_worker),
-            })
-            .expect("failed to send the worker endpoint to the runtime builder");
+        {
+            // Close the channel before waiting for activation so the builder can detect a missing endpoint.
+            let endpoint_tx = endpoint_sender;
+            endpoint_tx
+                .send(Endpoint {
+                    waker: worker_waker,
+                    thread: current.clone(),
+                    blocking_worker: Arc::clone(&blocking_worker),
+                })
+                .expect("failed to send the worker endpoint to the runtime builder");
+        }
 
         let dispatcher = futures::executor::block_on(activation_rx)
             .expect("RuntimeBuilder failed between initializing and activating a worker")
@@ -182,7 +189,11 @@ impl ThreadEntry {
             hook_registrations,
         );
 
-        _ = ready_tx.send(());
+        {
+            // Close the channel before entering the run loop so activation can detect a missing readiness message.
+            let ready_tx = ready_sender;
+            _ = ready_tx.send(());
+        }
 
         let outcome = run_and_drop_worker(worker, &dispatcher, asynchronous::Worker::run);
 
@@ -327,7 +338,12 @@ mod tests {
 
     #[test]
     fn gamma_round2_activation_consumes_the_actual_buffered_ready_acknowledgment() {
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(idle_endpoint()), Shutdown::default(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            NonEmpty::new(idle_endpoint()),
+            Shutdown::default(),
+            Vec::new(),
+            None,
+        ));
         let (activation_tx, activation_rx) = channel::oneshot();
         let (ready_tx, ready_rx) = channel::unbounded();
         let observer = ready_rx.clone();
@@ -356,7 +372,12 @@ mod tests {
         }
 
         let shutdown = Shutdown::default();
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(idle_endpoint()), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
+            NonEmpty::new(idle_endpoint()),
+            shutdown.clone(),
+            Vec::new(),
+            None,
+        ));
         let mut runs = 0;
         let result = run_and_drop_worker(FailedDrop, &dispatcher, |_| runs += 1);
         assert_eq!(runs, 1);
@@ -476,7 +497,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
         report_failure(&Err(Box::new("worker panic")), &dispatcher);
 
@@ -490,7 +511,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new(), None));
 
         report_failure(&Ok(()), &dispatcher);
 

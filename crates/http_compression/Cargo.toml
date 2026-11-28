@@ -4,7 +4,7 @@
 [package]
 name = "http_compression"
 description = "Compression and decompression for HTTP message bodies."
-version = "0.5.0"
+version = "0.6.0"
 readme = "README.md"
 keywords = ["http", "compression", "decompression", "gzip", "middleware"]
 categories = ["compression", "network-programming"]
@@ -64,7 +64,7 @@ compressors = { path = "../compressors", features = [
 # The compression unit test drives a body future without a Tokio runtime.
 futures = { workspace = true, features = ["executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
-ohno = { path = "../ohno", features = ["test-util"] }
+ohno = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt"] }
 
 # >>> anvil-managed: anvil-lints
