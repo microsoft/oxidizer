@@ -11,7 +11,7 @@ use health_probe::http::readiness_request::request_handler;
 use http::Request;
 use http_extensions::HttpBodyBuilder;
 use layered::Service;
-use support::{STATES, assert_headers, expected, monitor_in, wait_for_component};
+use support::{STATES, assert_headers, expected, monitor_in, wait_for_monitor};
 
 #[test]
 fn reports_readiness() {
@@ -29,7 +29,8 @@ fn reports_readiness() {
 
 #[test]
 fn reads_current_state_for_each_request() {
-    let (monitor, component, mut publisher) = monitor_in(Health::Unhealthy);
+    let (monitor, _component, mut publisher) = monitor_in(Health::Unhealthy);
+    let observer = monitor.clone();
     let handler = request_handler(monitor);
     let request = || Request::new(HttpBodyBuilder::new_fake().empty());
 
@@ -37,7 +38,7 @@ fn reads_current_state_for_each_request() {
     assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);
 
     publisher.publish(Health::Healthy, [("case", "updated")]);
-    wait_for_component(&component, Health::Healthy);
+    wait_for_monitor(&observer, Health::Healthy);
 
     let response = block_on(handler.execute(request())).unwrap();
     assert_eq!(response.status(), http::StatusCode::OK);

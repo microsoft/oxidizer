@@ -9,7 +9,7 @@ use futures::executor::block_on;
 use health::Health;
 use health_probe::http::readiness_tower::service;
 use http::Request;
-use support::{STATES, assert_headers, expected, monitor_in, wait_for_component};
+use support::{STATES, assert_headers, expected, monitor_in, wait_for_monitor};
 use tower::ServiceExt;
 use tower_service::Service;
 
@@ -27,14 +27,15 @@ fn reports_readiness() {
 
 #[test]
 fn reads_current_state_for_each_request() {
-    let (monitor, component, mut publisher) = monitor_in(Health::Unhealthy);
+    let (monitor, _component, mut publisher) = monitor_in(Health::Unhealthy);
+    let observer = monitor.clone();
     let mut service = service(monitor);
 
     let response = block_on(service.call(Request::new("ignored"))).unwrap();
     assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);
 
     publisher.publish(Health::Healthy, [("case", "updated")]);
-    wait_for_component(&component, Health::Healthy);
+    wait_for_monitor(&observer, Health::Healthy);
 
     let response = block_on(service.call(Request::new("ignored"))).unwrap();
     assert_eq!(response.status(), http::StatusCode::OK);

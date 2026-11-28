@@ -18,8 +18,8 @@ pub(crate) fn monitor_in(state: Health) -> (Monitor, Component, Publisher) {
     (monitor, component, publisher)
 }
 
-pub(crate) fn wait_for_component(component: &Component, state: Health) {
-    wait_until(|| component.state() == state);
+pub(crate) fn wait_for_monitor(monitor: &Monitor, state: Health) {
+    wait_until(|| monitor.state() == state);
 }
 
 pub(crate) fn expected(state: Health) -> (StatusCode, &'static str) {
