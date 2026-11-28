@@ -60,6 +60,14 @@ tower-service.workspace = true
 name = "axum"
 required-features = ["http-readiness-tower"]
 
+[[test]]
+name = "http_readiness_request"
+required-features = ["http-readiness-request"]
+
+[[test]]
+name = "http_readiness_tower"
+required-features = ["http-readiness-tower"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
