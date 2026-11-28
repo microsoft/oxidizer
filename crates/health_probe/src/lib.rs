@@ -15,8 +15,8 @@
 //!
 //! # Features
 //!
-//! - `http` enables the Tower readiness service.
-//! - `request-handler` enables the
+//! - `http-readiness-tower` enables the Tower readiness service.
+//! - `http-readiness-request` enables the
 //!   [`http_extensions`](https://docs.rs/http_extensions) request handler.
 //! - `tcp` enables the TCP readiness server.
 //!
@@ -41,8 +41,8 @@
 //!     port: 8080
 //! ```
 
-#[cfg(any(test, feature = "http", feature = "request-handler"))]
-pub mod kubernetes_http;
+#[cfg(any(test, feature = "http-readiness-request", feature = "http-readiness-tower"))]
+pub mod http;
 
 #[cfg(feature = "tcp")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tcp")))]

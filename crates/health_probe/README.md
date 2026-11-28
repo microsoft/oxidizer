@@ -24,8 +24,8 @@ request. They return `200 OK` with JSON `true` for a healthy process. They retur
 
 ## Features
 
-* `http` enables the Tower readiness service.
-* `request-handler` enables the
+* `http-readiness-tower` enables the Tower readiness service.
+* `http-readiness-request` enables the
   [`http_extensions`][__link3] request handler.
 * `tcp` enables the TCP readiness server.
 
