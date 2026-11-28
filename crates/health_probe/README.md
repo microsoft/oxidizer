@@ -15,8 +15,10 @@
 
 Readiness adapters for [`health`][__link0].
 
-The adapter reads a
-[`health::Monitor`][__link1] for each
+The TCP adapter listens on a dedicated port after it observes
+[`health::Health::Healthy`][__link1].
+It closes the port after it observes another state. The HTTP adapter reads a
+[`health::Monitor`][__link2] for each
 request. A healthy process returns status `200 OK` with the JSON body `true`. A degraded or
 unhealthy process returns `503 Service Unavailable` with the JSON body `false`. Responses
 contain no component details and disable caching.
@@ -24,8 +26,28 @@ contain no component details and disable caching.
 ## Features
 
 * `http-readiness-tower` enables the Tower readiness service.
+* `tcp` enables the TCP readiness server.
 
 No features are enabled by default.
+
+## Kubernetes configuration
+
+Point a TCP probe at a dedicated readiness port:
+
+```yaml
+readinessProbe:
+  tcpSocket:
+    port: 8081
+```
+
+Point an HTTP probe at the route that contains an HTTP adapter:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
+```
 
 
 <hr/>
@@ -34,4 +56,5 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 </sub>
 
  [__link0]: https://docs.rs/process_health/latest/health/
- [__link1]: https://docs.rs/process_health/latest/health/?search=Monitor
+ [__link1]: https://docs.rs/process_health/latest/health/?search=Health::Healthy
+ [__link2]: https://docs.rs/process_health/latest/health/?search=Monitor

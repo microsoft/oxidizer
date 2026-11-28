@@ -6,7 +6,7 @@ name = "health_probe"
 description = "Readiness adapters for health."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["health", "readiness", "probe", "http"]
+keywords = ["health", "readiness", "probe", "http", "tcp"]
 categories = ["asynchronous", "web-programming::http-server"]
 edition.workspace = true
 rust-version.workspace = true
@@ -22,6 +22,7 @@ allowed_external_types = [
     "health::monitor::Monitor",
     "http::request::Request",
     "http::response::Response",
+    "tick::clock::Clock",
     "tower_service::Service",
 ]
 
@@ -31,18 +32,22 @@ all-features = true
 [features]
 default = []
 http-readiness-tower = ["dep:http", "dep:tower-service"]
+tcp = ["dep:tick", "dep:tokio"]
 
 [dependencies]
 http = { workspace = true, optional = true }
 process_health.workspace = true
+tick = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["macros", "net"] }
 tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["http1", "tokio"] }
-futures = { workspace = true, features = ["executor"] }
+futures = { workspace = true, features = ["async-await", "executor"] }
 http.workspace = true
 observed = { path = "../observed" }
 testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", default-features = false, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
