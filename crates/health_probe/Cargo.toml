@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/health_prob
 [package.metadata.cargo_check_external_types]
 # The crate is an interoperability adapter over these public contracts.
 allowed_external_types = [
-    "health::aggregator::Monitor",
+    "health::monitor::Monitor",
     "http::request::Request",
     "http::response::Response",
     "http_extensions::request_handler::RequestHandler",
@@ -51,13 +51,14 @@ http.workspace = true
 http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
 layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
+testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", default-features = false }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
 
 [[example]]
-name = "axum"
+name = "health_probe_axum"
 required-features = ["http-readiness-tower"]
 
 [[test]]

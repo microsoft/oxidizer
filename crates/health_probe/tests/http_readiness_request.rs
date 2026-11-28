@@ -6,11 +6,12 @@
 mod support;
 
 use futures::executor::block_on;
+use health::Health;
 use health_probe::http::readiness_request::request_handler;
 use http::Request;
 use http_extensions::HttpBodyBuilder;
 use layered::Service;
-use support::{STATES, assert_headers, expected, monitor_in};
+use support::{STATES, assert_headers, expected, monitor_in, wait_for_component};
 
 #[test]
 fn reports_readiness() {
@@ -24,4 +25,20 @@ fn reports_readiness() {
         let text = block_on(response.into_body().into_text()).unwrap();
         assert_eq!(text, body);
     }
+}
+
+#[test]
+fn reads_current_state_for_each_request() {
+    let (monitor, component, mut publisher) = monitor_in(Health::Unhealthy);
+    let handler = request_handler(monitor);
+    let request = || Request::new(HttpBodyBuilder::new_fake().empty());
+
+    let response = block_on(handler.execute(request())).unwrap();
+    assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);
+
+    publisher.publish(Health::Healthy, [("case", "updated")]);
+    wait_for_component(&component, Health::Healthy);
+
+    let response = block_on(handler.execute(request())).unwrap();
+    assert_eq!(response.status(), http::StatusCode::OK);
 }
