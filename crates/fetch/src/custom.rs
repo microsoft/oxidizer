@@ -276,7 +276,10 @@ impl Transport {
 
 impl Debug for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish()
+        f.debug_struct(std::any::type_name::<Self>())
+            .field("runtime", &self.runtime_name)
+            .field("transport", &self.name)
+            .finish_non_exhaustive()
     }
 }
 

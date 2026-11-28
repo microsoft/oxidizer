@@ -74,7 +74,10 @@ fn gamma_survivor_two_pool_custom_factory_receives_tls_options() {
     )
     .tls_options(tls)
     .connection_pool_options(ConnectionPoolOptions::default().multiple_pools(2, PoolSelection::round_robin()));
-    assert!(format!("{builder:?}").contains("transport: fetch::custom::Transport"));
+    assert!(
+        format!("{builder:?}")
+            .contains("transport: fetch::custom::Transport { runtime: \"runtime-marker\", transport: \"transport-marker\", .. }")
+    );
     let client = builder.build();
     block_on(client.get("https://example.test").fetch()).unwrap();
     assert_eq!(*calls.lock().unwrap(), [(0, expected_tls.clone()), (1, expected_tls)]);

@@ -8,7 +8,8 @@
 mod common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::task::Poll;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytesbuf::BytesView;
@@ -16,6 +17,7 @@ use common::{ABANDONED, CLIENT_COMPLETE, CLIENT_DURATION, Capture, ERROR, Echoin
 use future_assert::FutureTestExt;
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Version};
+use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
 use http_telemetry::Telemetry;
 use layered::{Execute, Layer, Service};
@@ -195,6 +197,51 @@ fn logged_text_is_cut_at_limit_and_lossy() {
             logged(32, || vec![bytes(b"caf\xe9")]),
         ],
         ["hello", "caf", "ab", "caf\u{fffd}", "caf\u{fffd}"].map(|text| [Some(Value::from(text)), Some(Value::from(text))])
+    );
+}
+
+#[test]
+fn body_of_one_empty_frame_logs_empty_text() {
+    let logged = logged_bodies(&["text/plain"], None, || request(Method::GET, "text/plain", scripted([data("")])));
+
+    assert_eq!(logged, [Some(Value::from("")), Some(Value::from(""))]);
+}
+
+#[test]
+fn server_body_that_reports_end_early_logs_text_up_to_that_end() {
+    struct EarlyEnd {
+        inner: HttpBody,
+        polled: bool,
+    }
+
+    impl Body for EarlyEnd {
+        type Data = BytesView;
+        type Error = HttpError;
+
+        fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
+            self.polled = true;
+            Pin::new(&mut self.inner).poll_frame(cx)
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.polled
+        }
+    }
+
+    let [(service, capture), _] = sides(&["text/plain"], None);
+    let source = HttpBodyBuilder::new_fake().body(EarlyEnd {
+        inner: scripted([data("hello"), data(" world")]),
+        polled: false,
+    });
+    let body = service
+        .execute(request(Method::GET, "text/plain", source))
+        .unwrap_ready()
+        .unwrap()
+        .into_body();
+
+    assert_eq!(
+        (read_to_end(body), capture.single().log(BODY).cloned()),
+        (vec!["hello".to_owned(), " world".to_owned()], Some(Value::from("hello")))
     );
 }
 

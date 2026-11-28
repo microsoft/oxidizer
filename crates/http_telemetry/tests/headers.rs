@@ -16,7 +16,7 @@ use common::{
     ABANDONED, CLIENT_ABANDONED, CLIENT_COMPLETE, CLIENT_ERROR, COMPLETE, Capture, Captured, ERROR, Echoing, PUBLIC, REQUEST_ID, Step,
     StopAt, TOTAL_ABANDONED, TOTAL_ERROR, client, poll_frame, scripted, server,
 };
-use data_privacy::RedactionEngine;
+use data_privacy::{DataClass, RedactionEngine};
 use future_assert::FutureTestExt;
 use http::header::RETRY_AFTER;
 use http::{HeaderName, HeaderValue, StatusCode};
@@ -179,6 +179,31 @@ fn request_or_response_headers_alone_are_logged() {
             (CLIENT_COMPLETE, [None, response]),
         ]
     );
+}
+
+#[test]
+fn empty_header_lists_log_no_header() {
+    let (sink, capture) = common::capture_sink();
+    let services = [
+        server(sink.clone())
+            .request_header_data_classes(Vec::<(HeaderName, DataClass)>::new())
+            .response_header_data_classes(Vec::<(HeaderName, DataClass)>::new())
+            .layer(Echoing(StatusCode::OK)),
+        client(sink)
+            .request_header_data_classes(Vec::<(HeaderName, DataClass)>::new())
+            .response_header_data_classes(Vec::<(HeaderName, DataClass)>::new())
+            .layer(Echoing(StatusCode::OK)),
+    ];
+
+    for service in services {
+        service
+            .execute(get(&[(REQUEST_ID, b"7"), (RETRY_AFTER, b"120")]))
+            .unwrap_ready()
+            .unwrap();
+    }
+
+    let events: Vec<_> = capture.events().iter().map(|event| (event.name, header_logs(event))).collect();
+    assert_eq!(events, [(COMPLETE, [None, None]), (CLIENT_COMPLETE, [None, None])]);
 }
 
 #[test]
