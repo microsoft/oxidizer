@@ -192,7 +192,7 @@ just anvil-spellcheck
 just anvil-pr-fast
 ```
 
-Tool versions are generated in `justfiles/anvil/versions.just` and updated with
+Tool versions are generated in `.anvil/setup.just` and updated with
 Cargo Anvil. Do not maintain a second tool-version list.
 
 ## Trademarks

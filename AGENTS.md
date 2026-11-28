@@ -125,8 +125,8 @@ to maintain a separate pinning policy.
 ## Upgrading Anvil
 
 Follow the upgrade procedure in [docs/design/README.md](docs/design/README.md#upgrading-anvil).
-Run generation after installing the selected release. A newer `tool_version` in
-`.anvil.lock` does not prove that every generated file matches that release.
+Run generation after you install the selected release. A newer `tool_version` in
+`.anvil/manifest.toml` does not prove that every generated file matches that release.
 
 Review every preserved customization and proposed file against the new template.
 Do not silently retain old action pins or carry an entire workflow override

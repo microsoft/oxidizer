@@ -5,7 +5,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
 
     $script:RepoRoot = Get-OxiRepoRoot
-    $script:AnvilVersionsFile = Join-Path $script:RepoRoot 'justfiles\anvil\versions.just'
+    $script:AnvilVersionsFile = Join-Path $script:RepoRoot '.anvil\setup.just'
     $script:SettingsTemplate = Join-Path $script:RepoRoot '.vscode\settings.template.jsonc'
 }
 

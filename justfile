@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# Cargo Anvil 0.28 uses Just list values in its generated setup recipes.
+set unstable
 set windows-shell := ["pwsh.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 set shell := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 set script-interpreter := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive"]
@@ -9,7 +11,7 @@ _default:
     @just --list
 
 # >>> anvil-managed: anvil-imports
-import 'justfiles/anvil/mod.just'
+import '.anvil/anvil.just'
 # <<< anvil-managed: anvil-imports
 
 # Repository-specific utilities outside Cargo Anvil.
@@ -35,7 +37,7 @@ test-feature-regressions package: anvil-tool-rustc-validate-prereqs
             )
         }
     }
-    $tests = & cargo {{ _anvil_stable_toolchain_args }} test @testArgs -- --list
+    $tests = & cargo {{ anvil_stable_toolchain_arg }} test @testArgs -- --list
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $tests | Write-Output
     foreach ($required in $requiredTests) {
@@ -43,7 +45,7 @@ test-feature-regressions package: anvil-tool-rustc-validate-prereqs
             throw "required feature regression test is missing: $required"
         }
     }
-    & cargo {{ _anvil_stable_toolchain_args }} test @testArgs
+    & cargo {{ anvil_stable_toolchain_arg }} test @testArgs
     exit $LASTEXITCODE
 
 # Apply license boilerplate headers.
@@ -63,12 +65,8 @@ test-http-headers-simd-no-std-arm: (_test-http-headers-simd-no-std "aarch64-unkn
 # Install the selected Rust target for baseline x86-family no_std tests.
 [arg("target", long, pattern='(?:i586|i686|x86_64)-unknown-linux-gnu')]
 [script("pwsh", "-NoProfile")]
-setup-http-headers-simd-no-std-x86 target: anvil-toolchain-stable-install
+setup-http-headers-simd-no-std-x86 target:
     $ErrorActionPreference = 'Stop'
-    $toolchainArgs = {{_anvil_stable_toolchain_args}}
-    if ($toolchainArgs.Count -gt 0) {
-        $env:RUSTUP_TOOLCHAIN = $toolchainArgs[0].Substring(1)
-    }
     & rustup target add "{{ target }}"
     exit $LASTEXITCODE
 
@@ -110,7 +108,7 @@ _test-http-headers-simd-no-std target: anvil-tool-rustc-validate-prereqs
     }
     # Selecting the facade alongside this package would re-enable std.
     $testArgs = @('--locked', '--package', 'http_headers_simd', '--no-default-features', '--target', $target, '--tests')
-    $tests = & cargo {{_anvil_stable_toolchain_args}} test @testArgs -- --list
+    $tests = & cargo {{ anvil_stable_toolchain_arg }} test @testArgs -- --list
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $tests | Write-Output
     # Fail if feature unification or target selection hides either path.
@@ -119,7 +117,7 @@ _test-http-headers-simd-no-std target: anvil-tool-rustc-validate-prereqs
             throw "required no_std test for $target is missing: $required"
         }
     }
-    & cargo {{_anvil_stable_toolchain_args}} test @testArgs
+    & cargo {{ anvil_stable_toolchain_arg }} test @testArgs
     exit $LASTEXITCODE
 
 # Run compile-fail tests while iterating on macro diagnostics.
@@ -128,7 +126,7 @@ _test-http-headers-simd-no-std target: anvil-tool-rustc-validate-prereqs
 [script("pwsh", "-NoProfile")]
 trybuild package filter="": anvil-tool-rustc-validate-prereqs
     $ErrorActionPreference = "Stop"
-    cargo {{_anvil_stable_toolchain_args}} test --package "{{ package }}" --all-features --locked --tests -- "{{ filter }}"
+    cargo {{ anvil_stable_toolchain_arg }} test --package "{{ package }}" --all-features --locked --tests -- "{{ filter }}"
 
 # Rewrite compile-fail diagnostic snapshots after an intentional change.
 [arg("package", long)]
@@ -137,7 +135,7 @@ trybuild package filter="": anvil-tool-rustc-validate-prereqs
 trybuild-overwrite package filter="": anvil-tool-rustc-validate-prereqs
     $ErrorActionPreference = "Stop"
     $env:TRYBUILD = "overwrite"
-    cargo {{_anvil_stable_toolchain_args}} test --package "{{ package }}" --all-features --locked --tests -- "{{ filter }}"
+    cargo {{ anvil_stable_toolchain_arg }} test --package "{{ package }}" --all-features --locked --tests -- "{{ filter }}"
 
 # Install the Linux-only Callgrind benchmark runner.
 [script("pwsh", "-NoProfile")]

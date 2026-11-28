@@ -12,7 +12,7 @@ files are updated with `cargo anvil`, not edited directly.
 
 Anvil preserves files that differ from their last generated content.
 An upgrade can therefore leave an older customized file in place.
-The version in `.anvil.lock` does not prove that all files match the new templates.
+The version in `.anvil/manifest.toml` does not prove that all files match the new templates.
 An `.anvil-proposed` file contains proposed replacement content.
 
 1. Install the selected release with `cargo install --locked --version VERSION cargo-anvil`.
@@ -21,7 +21,7 @@ An `.anvil-proposed` file contains proposed replacement content.
 4. Compare each customized file with the selected release's template. Prefer the template unless a current repository requirement needs an override.
 5. If a file must return to generated content, remove only that file after reviewing its differences. Run `cargo anvil` to recreate it.
 6. Run `cargo anvil` to apply the remaining updates.
-7. Review the generated changes and `.anvil.lock`. Run `cargo anvil --dry-run` again and explain every remaining override.
+7. Review the generated changes and `.anvil/manifest.toml`. Run `cargo anvil --dry-run` again and explain every remaining override.
 
 Move repository requirements to supported Anvil configuration where possible.
 Do not preserve an entire generated file to retain obsolete pins or comments.
@@ -33,21 +33,29 @@ Local action and workflow references remain local paths.
 If an Anvil template still uses an external action tag, resolve that upstream.
 Do not claim complete SHA pinning while generated templates still contain tags.
 
-The current example-runner override builds each example before its execution
-timeout starts. This keeps compilation outside the runtime limit.
-Review this override against the selected template during each upgrade.
-The PR workflow uses the unmodified Anvil template.
+The `anvil-examples` recipe builds the selected examples before it runs them.
+Package-specific dependency compilation can still happen during `cargo run`.
+That compilation counts toward the execution timeout.
 
 ## Verification behavior
 
 Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
 It runs both `--all-features` and `--no-default-features` configurations.
-The local gate and CI uploads use the same filtered LCOV files, which contain
-line-coverage counts, under `target/coverage`.
+On Windows x64, the workflow collects those configurations in sequence.
+This releases the large scratch target before the next collection and reduces
+the peak disk use. The gate still evaluates both LCOV reports together.
+The local gate evaluates the separate filtered feature reports under
+`target/coverage`. CI uploads a merged report with union line coverage so
+Codecov applies the same coverage semantics as the gate.
 Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.
 If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
 filter cannot classify.
+
+PR runtime analysis runs Careful and Loom as separate jobs for each
+operating-system target. Miri also runs in two deterministic package shards
+per target. This keeps the full-workspace Miri workload below the six-hour
+GitHub-hosted job limit without removing any runtime check.
 
 Package-isolated all-target checks run in scheduled validation, not in the
 generated PR tiers. This division follows the standard Anvil catalog.

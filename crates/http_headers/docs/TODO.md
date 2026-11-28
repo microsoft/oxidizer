@@ -79,7 +79,7 @@ executable later runs directly in the credential-bearing step.
 - `.github/workflows/publish-gh-release.yml:39` — token-bearing invocation
 - `justfile:54` — recipe compiles and executes the Rust script
 - `scripts/publish-gh-release.rs:12` — script dependency selection
-- `.github/actions/anvil-setup/action.yml:115` — minimum-version rather than exact `just` selection
+- `.anvil/github/actions/setup/action.yml` — minimum-version rather than exact `just` selection
 
 An upstream compromise could consequently modify repository contents or
 GitHub Releases using the job token. This is conditional supply-chain
@@ -218,7 +218,7 @@ unsoundness finding or as missing Miri tooling.
 - `crates/http_headers_simd/src/api.rs:39` — `str::from_utf8_unchecked(bytes)` follows the ASCII proof
 - `crates/http_headers_simd/src/x86.rs:33` — `_mm_loadu_si128(pointer)` has a local slice-bound proof
 - `crates/http_headers_simd/src/tracking.rs:127` — `unsafe impl GlobalAlloc for TrackingAllocator` delegates allocator obligations to `System`
-- `justfiles/anvil/checks/miri.just:35` — existing package-scoped `anvil-miri` recipe; its implementation selects `--all-features` test targets
+- `.anvil/checks.just` — existing package-scoped `anvil-miri` recipe; its implementation selects `--all-features` test targets
 
 **Done when:** current-commit artifacts from
 `just anvil-miri --package http_headers_simd` and
@@ -1225,8 +1225,8 @@ Preserve generated Anvil ownership: express supported configuration upstream
 or add justified repository-specific performance automation, not a hand edit
 to the generated recipe.
 
-- `justfiles/anvil/checks/bench.just:17` — `cargo ... bench ... --all-features --no-run`
-- `justfiles/anvil/groups/scheduled-exhaustive.just:22` — scheduled tier invokes that compile-only recipe
+- `.anvil/checks.just` — `cargo ... bench ... --all-features --no-run`
+- `.anvil/groups.just` — scheduled tier invokes that compile-only recipe
 - `crates/http_headers/docs/PERF.md:3` — timing table is explicitly an imported snapshot
 
 Protect short borrowed/owned singleton decode, retained shared HTTP storage,
