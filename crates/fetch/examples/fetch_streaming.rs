@@ -7,10 +7,12 @@ use std::io::{BufWriter, Write};
 
 use fetch::HttpClient;
 use futures::TryStreamExt;
+use observed::Sink;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let client = HttpClient::new_tokio();
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::new_tokio(Sink::noop());
 
     // Send a GET request and read the body as a stream.
     let body = client.get("https://example.com").fetch().await?.into_body();

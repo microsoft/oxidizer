@@ -25,6 +25,7 @@ use std::process;
 use argh::FromArgs;
 use fetch::HttpClient;
 use fetch::tls::{ClientIdentity, TlsOptions};
+use observed::Sink;
 use serde_json::Value;
 use tracing::info;
 
@@ -74,7 +75,8 @@ async fn main() -> Result<(), ohno::AppError> {
     info!("Loaded the client identity");
 
     // Build a rustls client with the client identity.
-    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::new(Sink::noop()))
         .tls_options(TlsOptions::builder_rustls().client_identity(identity).build())
         .build();
 

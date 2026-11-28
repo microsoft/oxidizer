@@ -9,6 +9,7 @@ use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::resilience::retry::HttpRetryLayerExt;
 use fetch::{HttpClient, HttpResponse, StatusExt};
 use http::StatusCode;
+use observed::Sink;
 use seatbelt::retry::Backoff;
 
 #[path = "util/utils.rs"]
@@ -21,7 +22,8 @@ async fn main() -> Result<(), ohno::AppError> {
     let fake_handler =
         FakeHandler::from_status_codes([StatusCode::INTERNAL_SERVER_ERROR, StatusCode::INTERNAL_SERVER_ERROR, StatusCode::OK]);
 
-    let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(fake_handler, FakeDeps::new(Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             // Change the retry layer.
             pipeline.retry(|retry| {

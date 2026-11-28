@@ -10,6 +10,7 @@ use fetch::resilience::HttpClone;
 use fetch::resilience::retry::HttpRetryLayerExt;
 use fetch::{HttpClient, HttpResponse, HttpResponseBuilder, StatusExt};
 use http::StatusCode;
+use observed::Sink;
 
 #[path = "util/utils.rs"]
 mod utils;
@@ -31,7 +32,8 @@ async fn main() -> Result<(), ohno::AppError> {
             .build()
     });
 
-    let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::builder_fake(fake_handler, FakeDeps::new(Sink::noop()))
         .standard_pipeline(|pipeline, _context| {
             pipeline
                 // Increase the total timeout.

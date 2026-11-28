@@ -14,6 +14,7 @@ use fetch::{HttpBodyBuilder, HttpClient, HttpRequest, HttpResponse};
 use futures::executor::block_on;
 use http_extensions::HttpBodyOptions;
 use layered::Service;
+use observed::Sink;
 use ohno::Labeled as _;
 use thread_aware::{Relocator, Thread, ThreadAware};
 use tick::Clock;
@@ -100,6 +101,7 @@ fn client(isolation: Isolation, reservations: &Arc<Mutex<Vec<Reservation>>>, opt
                 generation: 0,
                 relocated: false,
             }),
+            sink: Sink::noop(),
             extras: (),
         },
     )

@@ -12,72 +12,28 @@ mod common;
 
 use std::borrow::Borrow;
 use std::hint::black_box;
-use std::ops::ControlFlow;
-use std::pin::pin;
+use std::io::{self, ErrorKind};
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
 
-use common::{ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, Responding, SECRET, Step, Tenant};
+use common::{
+    ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, REQUEST_ID, ReadAll, Responding, SECRET, Step, Tenant, abandon, filled, frames_32,
+    in_memory, interested_sink, invalid_utf8, json, post, read_to_end, reading_sink, send, stalled, streamed_bytes, typed, with_headers,
+};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
-use http::header::{CONTENT_TYPE, RETRY_AFTER};
-use http::{HeaderName, HeaderValue, Method, Request, StatusCode, Uri, Version};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use http::header::RETRY_AFTER;
+use http::{HeaderValue, Method, Request, StatusCode, Version};
+use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
-use observed::metadata::{EventDescription, FieldDescriptor};
-use observed::processing::{EventProcessor, EventView, FieldValueFn};
-use observed::{FlushError, Sink, SinkId};
+use observed::{Sink, SinkId};
+use routerama::HttpMethod;
 use templated_uri::BasePath;
 use tick::SimpleClock;
 
 const GROUP: &str = "http_telemetry_server/request";
 const CASE: &str = "get";
-
-/// Reads every field and every enrichment of each event whose name `interested` accepts, and keeps
-/// nothing. Thus the measurements do not include the work of keeping the events.
-struct ReadAll {
-    engine: RedactionEngine,
-    interested: fn(&str) -> bool,
-}
-
-impl EventProcessor for ReadAll {
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        (self.interested)(description.name())
-    }
-
-    fn process(&self, event: &EventView<'_>) {
-        let mut read = |_: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            black_box(value(&self.engine));
-            ControlFlow::Continue(())
-        };
-        let _ = event.visit_fields(&mut read);
-        let _ = event.visit_enrichments(&mut read);
-    }
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
-/// A sink with `count` processors that each read every field of every event. Their engine prints
-/// the values of [`PUBLIC`] unchanged, and erases the values of every other data class.
-fn reading_sink(count: usize) -> Sink {
-    Sink::builder(SinkId::new("reading"))
-        .clock(SimpleClock::new_frozen())
-        .processors(
-            (0..count)
-                .map(|_| {
-                    Arc::new(ReadAll {
-                        engine: common::public_engine(),
-                        interested: |_| true,
-                    }) as Arc<dyn EventProcessor>
-                })
-                .collect(),
-        )
-        .build()
-}
 
 /// A sink with one processor that reads every field of each event whose name `interested`
 /// accepts.
@@ -87,66 +43,9 @@ fn filtered_sink(interested: fn(&str) -> bool) -> Sink {
         .processors(vec![Arc::new(ReadAll {
             engine: RedactionEngine::default(),
             interested,
+            reads: |_| true,
         })])
         .build()
-}
-
-/// Receives every event and reads none of its fields.
-struct Interested;
-
-impl EventProcessor for Interested {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
-    }
-
-    fn process(&self, _: &EventView<'_>) {}
-
-    fn flush(&self) -> Result<(), FlushError> {
-        Ok(())
-    }
-}
-
-/// A sink whose one processor receives every event and reads none of its fields.
-fn interested_sink() -> Sink {
-    Sink::builder(SinkId::new("interested"))
-        .clock(SimpleClock::new_frozen())
-        .processors(vec![Arc::new(Interested)])
-        .build()
-}
-
-/// A `PURGE` request, which `http.request.method` records as `_OTHER`.
-fn purge() -> HttpRequest {
-    common::request(
-        Method::from_bytes(b"PURGE").expect("PURGE is a valid method name"),
-        Version::HTTP_11,
-    )
-}
-
-/// A request with a method that `http` has no constant for, and that is longer than 15 bytes.
-/// `http` keeps such a method on the heap.
-fn long_extension_method() -> HttpRequest {
-    let method = Method::from_bytes(b"LONG-EXTENSION-METHOD").expect("LONG-EXTENSION-METHOD is a valid method name");
-    common::request(method, Version::HTTP_11)
-}
-
-/// Sends `request` to `handler`, which responds or returns an error at the first poll.
-fn send(handler: &impl RequestHandler, request: HttpRequest) -> Result<HttpResponse, HttpError> {
-    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
-    let future = pin!(handler.execute(request));
-    let Poll::Ready(result) = future.poll(&mut Context::from_waker(Waker::noop())) else {
-        unreachable!("the handler finishes at the first poll, and the layer does not wait");
-    };
-    result
-}
-
-/// Sends `request` to `handler`, which never responds. Then polls the future once and drops it.
-fn abandon(handler: &impl RequestHandler, request: HttpRequest) {
-    // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
-    let future = pin!(handler.execute(request));
-    assert!(
-        future.poll(&mut Context::from_waker(Waker::noop())).is_pending(),
-        "the handler never responds"
-    );
 }
 
 /// The server middleware over `sink`, in front of [`Responding`]. The stack already got one
@@ -197,19 +96,17 @@ fn streamed(steps: impl IntoIterator<Item = Step>) -> HttpRequest {
     common::get().map(|_| common::scripted(steps))
 }
 
+/// A `HEAD` request over HTTP/1.1 whose body has bytes. [`Echoing`] responds with this body, and a response to `HEAD`
+/// has no content.
+fn head_with_body() -> HttpRequest {
+    common::request(Method::HEAD, Version::HTTP_11).map(|_| common::scripted([common::data("chunk"), Step::End]))
+}
+
 /// Sends `request` to `handler`, polls the response body `polls` times, and drops it.
 fn read_body(handler: &impl RequestHandler, request: HttpRequest, polls: usize) {
     let mut body = send(handler, request).expect("the handler responds").into_body();
     for _ in 0..polls {
         drop(black_box(common::poll_frame(&mut body)));
-    }
-}
-
-/// Sends `request` to `handler`, and polls the response body until it ends.
-fn read_to_end(handler: &impl RequestHandler, request: HttpRequest) {
-    let mut body = send(handler, request).expect("the handler responds").into_body();
-    while let Poll::Ready(Some(frame)) = common::poll_frame(&mut body) {
-        drop(black_box(frame));
     }
 }
 
@@ -234,8 +131,6 @@ enum Route<'p> {
     GetBook { book: &'p str },
 }
 
-const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-
 /// The server middleware with a resolver for [`Route`], over a sink with two processors that read
 /// every field, in front of [`Responding`]. If `class` is set, it is the data class of the route
 /// parameter `book`. The stack already got `warm_up`, so that the redaction buffer of `observed`
@@ -247,6 +142,26 @@ fn routed_stack(class: Option<DataClass>, warm_up: HttpRequest) -> Telemetry<Res
     }
     let stack = layer.layer(common::responding(StatusCode::OK));
     drop(send(&stack, warm_up));
+    stack
+}
+
+/// The route of the resolver of [`runtime_routed_stack`], which adds it at run time.
+#[routerama::resolver]
+enum RuntimeRoute {
+    ListBooks,
+}
+
+/// The server middleware with a resolver that adds the route `GET /books` at run time, over a sink with two
+/// processors that read every field, in front of [`Responding`]. The stack already got one request to that route.
+fn runtime_routed_stack() -> Telemetry<Responding> {
+    let resolver = RuntimeRoute::builder()
+        .add_list_books(HttpMethod::GET, "/books")
+        .build()
+        .expect("the route is valid");
+    let stack = Telemetry::server(reading_sink(2))
+        .route_resolver(resolver)
+        .layer(common::responding(StatusCode::OK));
+    drop(send(&stack, common::get_to("http://example.com/books")));
     stack
 }
 
@@ -270,53 +185,26 @@ fn long_book() -> HttpRequest {
         .expect("the URI is valid")
 }
 
+/// The request of [`with_headers`] with three lines of `x-request-id`, so the request side of the event has three
+/// header values.
+fn three_request_ids() -> HttpRequest {
+    let mut request = with_headers(HeaderValue::from_static("120"));
+    request.headers_mut().append(REQUEST_ID, HeaderValue::from_static("8"));
+    request.headers_mut().append(REQUEST_ID, HeaderValue::from_static("9"));
+    request
+}
+
 /// The server middleware that logs the bodies of `application/json` responses, over a sink with two
-/// processors that read every field, in front of [`Echoing`]. The stack already got one such
-/// response.
-fn body_logging_stack() -> Telemetry<Echoing> {
+/// processors that read every field, in front of [`Echoing`]. The stack already got two such
+/// responses, one in memory and one streamed in several frames.
+fn response_logging_stack() -> Telemetry<Echoing> {
     let stack = Telemetry::server(reading_sink(2))
         .response_body_media_types(["application/json"])
         .expect("application/json is a media type")
         .layer(Echoing(StatusCode::OK));
     read_to_end(&stack, json(in_memory(b"{}")));
+    read_to_end(&stack, json(streamed_bytes(65536)));
     stack
-}
-
-/// A `GET` request over HTTP/1.1 with `body` and with the `Content-Type` `application/json`.
-/// [`Echoing`] responds with both.
-fn json(body: HttpBody) -> HttpRequest {
-    typed("application/json", body)
-}
-
-/// A `GET` request over HTTP/1.1 with `body` and with `content_type` as its `Content-Type`.
-fn typed(content_type: &'static str, body: HttpBody) -> HttpRequest {
-    let mut request = common::get().map(|_| body);
-    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    request
-}
-
-/// A body in memory with `bytes`.
-fn in_memory(bytes: &[u8]) -> HttpBody {
-    HttpBodyBuilder::new_fake().slice(bytes)
-}
-
-/// A body in memory with `length` bytes.
-fn filled(length: usize) -> HttpBody {
-    in_memory(&vec![b'a'; length])
-}
-
-/// 1024 bytes that are valid UTF-8 up to their last 3 bytes, which start a 4-byte character.
-/// `String::from_utf8_lossy` replaces them with one character of 3 bytes, so the text keeps the
-/// length of the bytes.
-fn invalid_utf8() -> Vec<u8> {
-    let mut bytes = vec![b'a'; 1021];
-    bytes.extend_from_slice(&"\u{1F600}".as_bytes()[..3]);
-    bytes
-}
-
-/// A streamed body of 1024 bytes in 32 frames, whose length is unknown.
-fn frames_32() -> HttpBody {
-    common::scripted((0..32).map(|_| common::data(&"a".repeat(32))))
 }
 
 /// The server middleware that logs the bodies of `application/json` requests, over a sink with two processors that
@@ -328,44 +216,6 @@ fn request_logging_stack() -> Telemetry<Echoing> {
         .layer(Echoing(StatusCode::OK));
     read_to_end(&stack, post("application/json", streamed_bytes(1024)));
     stack
-}
-
-/// A `POST` request over HTTP/1.1 to `http://example.com/books/1/reviews`, with `body` and with `content_type` as
-/// its `Content-Type`. [`Echoing`] responds with both.
-fn post(content_type: &'static str, body: HttpBody) -> HttpRequest {
-    let mut request = Request::post(Uri::from_static("http://example.com/books/1/reviews"))
-        .body(body)
-        .expect("the URI is valid");
-    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
-    request
-}
-
-/// A streamed body of `length` bytes in frames of 8 KiB at most, with an exact size hint, as a request body with a
-/// `Content-Length` has.
-fn streamed_bytes(length: usize) -> HttpBody {
-    let frames = (0..length)
-        .step_by(8192)
-        .map(|start| common::data(&"a".repeat((length - start).min(8192))));
-    common::sized_scripted(frames)
-}
-
-/// A body whose exact size hint declares `declared` bytes, as a `Content-Length` does, but that sends only the first
-/// `sent` bytes and then stalls.
-fn stalled(sent: usize, declared: usize) -> HttpBody {
-    common::sized_scripted([
-        common::data(&"a".repeat(sent)),
-        Step::Pending,
-        common::data(&"a".repeat(declared - sent)),
-    ])
-}
-
-/// A request for `/books/1` with the header `x-request-id`, and with `retry_after` as the header
-/// `retry-after`. [`Echoing`] copies both headers to the response.
-fn with_headers(retry_after: HeaderValue) -> HttpRequest {
-    let mut request = common::get_to("http://example.com/books/1");
-    request.headers_mut().insert(REQUEST_ID, HeaderValue::from_static("7"));
-    request.headers_mut().insert(RETRY_AFTER, retry_after);
-    request
 }
 
 #[metabench::benchmark(INNER_ONLY, GROUP, "inner_only")]
@@ -394,13 +244,13 @@ fn abandoned<S: Borrow<Telemetry<NeverResponding>>>(stack: S, request: HttpReque
 }
 
 #[metabench::benchmark(METHOD_ORIGINAL_READ, GROUP, "method_original_read")]
-#[bench::purge(Box::new(responding_stack(reading_sink(2))), purge())]
+#[bench::purge(Box::new(responding_stack(reading_sink(2))), common::purge())]
 fn method_original_read<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(LONG_METHOD, GROUP, "long_method")]
-#[bench::long_extension_method(Box::new(responding_stack(interested_sink())), long_extension_method())]
+#[bench::long_extension_method(Box::new(responding_stack(interested_sink())), common::long_extension_method())]
 fn long_method<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -428,7 +278,7 @@ fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(
     Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))),
     common::get_to("ftp://example.com/books/1")
 )]
-#[bench::purge(Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))), purge())]
+#[bench::purge(Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))), common::purge())]
 fn active_requests_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -470,8 +320,19 @@ fn abandoned_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest)
     Box::new(echoing_stack(reading_sink(1))),
     streamed([Step::Error(HttpError::validation("the page is missing"))])
 )]
+#[bench::connection_refused(
+    Box::new(echoing_stack(reading_sink(1))),
+    streamed([Step::Error(HttpError::from(io::Error::from(ErrorKind::ConnectionRefused)))])
+)]
 fn body_error<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
     read_body(stack.borrow(), request, 1);
+    stack
+}
+
+#[metabench::benchmark(COMPLETE_WITHOUT_CONTENT, GROUP, "complete_without_content")]
+#[bench::head(Box::new(echoing_stack(reading_sink(1))), head_with_body())]
+fn complete_without_content<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 0);
     stack
 }
 
@@ -508,6 +369,12 @@ fn complete_with_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: Http
     (send(stack.borrow(), request), stack)
 }
 
+#[metabench::benchmark(COMPLETE_WITH_RUNTIME_ROUTE, GROUP, "complete_with_runtime_route")]
+#[bench::get(Box::new(runtime_routed_stack()), common::get_to("http://example.com/books"))]
+fn complete_with_runtime_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
 #[metabench::benchmark(COMPLETE_WITH_ROUTE_PARAMETERS, GROUP, "complete_with_route_parameters")]
 #[bench::classified(
     Box::new(routed_stack(Some(PUBLIC), common::get_to("http://example.com/books/1"))),
@@ -516,6 +383,10 @@ fn complete_with_route<S: Borrow<Telemetry<Responding>>>(stack: S, request: Http
 #[bench::classified_long(Box::new(routed_stack(Some(PUBLIC), long_book())), long_book())]
 #[bench::erased(
     Box::new(routed_stack(Some(SECRET), common::get_to("http://example.com/books/1"))),
+    common::get_to("http://example.com/books/1")
+)]
+#[bench::unclassified(
+    Box::new(routed_stack(None, common::get_to("http://example.com/books/1"))),
     common::get_to("http://example.com/books/1")
 )]
 fn complete_with_route_parameters<S: Borrow<Telemetry<Responding>>>(
@@ -538,17 +409,20 @@ fn complete_with_route_parameters<S: Borrow<Telemetry<Responding>>>(
     Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))),
     with_headers(HeaderValue::from_str("120").expect("120 is a valid header value"))
 )]
+#[bench::three_values(Box::new(header_stack(SECRET, with_headers(HeaderValue::from_static("120")))), three_request_ids())]
 fn complete_with_headers<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(COMPLETE_WITH_RESPONSE_BODY, GROUP, "complete_with_response_body")]
 #[bench::logging_off(Box::new(echoing_stack(reading_sink(2))), json(filled(1024)))]
-#[bench::not_matching(Box::new(body_logging_stack()), typed("image/png", filled(1024)))]
-#[bench::bytes_1024(Box::new(body_logging_stack()), json(filled(1024)))]
-#[bench::frames_32(Box::new(body_logging_stack()), json(frames_32()))]
-#[bench::invalid_utf8(Box::new(body_logging_stack()), json(in_memory(&invalid_utf8())))]
-#[bench::bytes_65536(Box::new(body_logging_stack()), json(filled(65536)))]
+#[bench::not_matching(Box::new(response_logging_stack()), typed("image/png", filled(1024)))]
+#[bench::bytes_1024(Box::new(response_logging_stack()), json(filled(1024)))]
+#[bench::frames_32(Box::new(response_logging_stack()), json(frames_32()))]
+#[bench::invalid_utf8(Box::new(response_logging_stack()), json(in_memory(&invalid_utf8())))]
+#[bench::bytes_65536(Box::new(response_logging_stack()), json(filled(65536)))]
+#[bench::streamed_1024(Box::new(response_logging_stack()), json(streamed_bytes(1024)))]
+#[bench::streamed_65536(Box::new(response_logging_stack()), json(streamed_bytes(65536)))]
 fn complete_with_response_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
     read_to_end(stack.borrow(), request);
     stack
@@ -588,12 +462,16 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     });
     let stack = responding_stack(reading_sink(2));
     group.bench_function(BenchmarkId::new(METHOD_ORIGINAL_READ.benchmark_name(), "purge"), |bencher| {
-        bencher.iter_batched(purge, |request| method_original_read(&stack, request).0, BatchSize::SmallInput);
+        bencher.iter_batched(
+            common::purge,
+            |request| method_original_read(&stack, request).0,
+            BatchSize::SmallInput,
+        );
     });
     let stack = responding_stack(interested_sink());
     group.bench_function(BenchmarkId::new(LONG_METHOD.benchmark_name(), "long_extension_method"), |bencher| {
         bencher.iter_batched(
-            long_extension_method,
+            common::long_extension_method,
             |request| long_method(&stack, request).0,
             BatchSize::SmallInput,
         );
@@ -617,7 +495,11 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     group.bench_function(BenchmarkId::new(ACTIVE_REQUESTS_ONLY.benchmark_name(), "purge"), |bencher| {
-        bencher.iter_batched(purge, |request| active_requests_only(&stack, request).0, BatchSize::SmallInput);
+        bencher.iter_batched(
+            common::purge,
+            |request| active_requests_only(&stack, request).0,
+            BatchSize::SmallInput,
+        );
     });
     let stack = responding_stack(filtered_sink(|name| name != ACTIVE));
     group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {
@@ -657,6 +539,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    group.bench_function(BenchmarkId::new(BODY_ERROR.benchmark_name(), "connection_refused"), |bencher| {
+        bencher.iter_batched(
+            || streamed([Step::Error(HttpError::from(io::Error::from(ErrorKind::ConnectionRefused)))]),
+            |request| body_error(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
+    group.bench_function(BenchmarkId::new(COMPLETE_WITHOUT_CONTENT.benchmark_name(), "head"), |bencher| {
+        bencher.iter_batched(
+            head_with_body,
+            |request| complete_without_content(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
     let stack = echoing_stack(reading_sink(2));
     group.bench_function(
         BenchmarkId::new(COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS.benchmark_name(), CASE),
@@ -685,11 +581,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    let stack = runtime_routed_stack();
+    group.bench_function(BenchmarkId::new(COMPLETE_WITH_RUNTIME_ROUTE.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || common::get_to("http://example.com/books"),
+            |request| complete_with_runtime_route(&stack, request).0,
+            BatchSize::SmallInput,
+        );
+    });
     let book: fn() -> HttpRequest = || common::get_to("http://example.com/books/1");
     for (case, class, request) in [
         ("classified", Some(PUBLIC), book),
         ("classified_long", Some(PUBLIC), long_book),
         ("erased", Some(SECRET), book),
+        ("unclassified", None, book),
     ] {
         let stack = routed_stack(class, request());
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_ROUTE_PARAMETERS.benchmark_name(), case), |bencher| {
@@ -706,6 +611,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         ("classified", PUBLIC, static_value),
         ("erased", SECRET, static_value),
         ("owned_value", SECRET, owned_value),
+        ("three_values", SECRET, three_request_ids),
     ] {
         let stack = header_stack(class, static_value());
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_HEADERS.benchmark_name(), case), |bencher| {
@@ -713,7 +619,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         });
     }
     let logging_off = echoing_stack(reading_sink(2));
-    let logging_on = body_logging_stack();
+    let logging_on = response_logging_stack();
     let json_1024: fn() -> HttpRequest = || json(filled(1024));
     for (case, stack, request) in [
         ("logging_off", &logging_off, json_1024),
@@ -722,6 +628,8 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         ("frames_32", &logging_on, || json(frames_32())),
         ("invalid_utf8", &logging_on, || json(in_memory(&invalid_utf8()))),
         ("bytes_65536", &logging_on, || json(filled(65536))),
+        ("streamed_1024", &logging_on, || json(streamed_bytes(1024))),
+        ("streamed_65536", &logging_on, || json(streamed_bytes(65536))),
     ] {
         group.bench_function(BenchmarkId::new(COMPLETE_WITH_RESPONSE_BODY.benchmark_name(), case), |bencher| {
             bencher.iter_batched(
@@ -768,10 +676,12 @@ metabench::main!(
         COMPLETE_STREAMED_BODY,
         ABANDONED_BODY,
         BODY_ERROR,
+        COMPLETE_WITHOUT_CONTENT,
         COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS,
         INNER_ERROR,
         HANDLER_ERROR,
         COMPLETE_WITH_ROUTE,
+        COMPLETE_WITH_RUNTIME_ROUTE,
         COMPLETE_WITH_ROUTE_PARAMETERS,
         COMPLETE_WITH_HEADERS,
         COMPLETE_WITH_RESPONSE_BODY,

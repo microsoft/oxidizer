@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The request body that the server middleware copies while the handler reads it, and logs as `http.request.body.content`.
+//! The request body that the middleware copies while the handler reads it, and logs as `http.request.body.content`.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -16,30 +16,33 @@ use std::time::Duration;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use common::{ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server};
+use common::{
+    ABANDONED, CLIENT_ABANDONED, CLIENT_COMPLETE, CLIENT_ERROR, COMPLETE, Capture, ERROR, Echoing, Step, client, data, poll_frame,
+    scripted, server,
+};
 use future_assert::{FutureTestExt, poll_once};
 use futures::{StreamExt, stream};
 use http::header::CONTENT_TYPE;
 use http::{HeaderValue, Method, StatusCode, Version};
 use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
-use http_telemetry::{Telemetry, TelemetryLayer};
+use http_telemetry::{Server, Telemetry, TelemetryLayer};
 use layered::{Execute, Layer, Service};
-use observed::{Severity, Sink, Value};
+use observed::{Sink, Value};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
 const BODY: &str = "http.request.body.content";
 
 /// A server layer that logs the request bodies of `types`.
-fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer) -> TelemetryLayer {
+fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server> {
     move |layer| layer.request_body_media_types(types.iter().copied()).unwrap()
 }
 
 /// Sends `request` through a server layer that `configure` sets up, to `handler`, which responds at the first poll.
 /// Returns the response body and a capture of every event except the deltas of `http.server.active_requests`.
 fn respond(
-    configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer,
+    configure: impl FnOnce(TelemetryLayer<Server>) -> TelemetryLayer<Server>,
     handler: impl RequestHandler,
     request: HttpRequest,
 ) -> (HttpBody, Capture) {
@@ -47,6 +50,39 @@ fn respond(
     let service = configure(server(sink)).layer(handler);
     let body = service.execute(request).unwrap_ready().unwrap().into_body();
     (body, capture)
+}
+
+/// A server layer and a client layer that log the request bodies of `types`, each over its own `handler()`, and a
+/// capture of the events of each side.
+fn sides<H: RequestHandler>(types: &[&'static str], handler: impl Fn() -> H) -> [(Telemetry<H>, Capture); 2] {
+    let (server_sink, server_capture) = common::capture_sink();
+    let (client_sink, client_capture) = common::capture_sink();
+    [
+        (
+            server(server_sink)
+                .request_body_media_types(types.iter().copied())
+                .unwrap()
+                .layer(handler()),
+            server_capture,
+        ),
+        (
+            client(client_sink)
+                .request_body_media_types(types.iter().copied())
+                .unwrap()
+                .layer(handler()),
+            client_capture,
+        ),
+    ]
+}
+
+/// Sends `request()` through each of [`sides`], whose handlers respond at the first poll. Returns the response body and
+/// the capture of each side, the server first.
+fn respond_both<H: RequestHandler>(
+    types: &[&'static str],
+    handler: impl Fn() -> H,
+    request: impl Fn() -> HttpRequest,
+) -> [(HttpBody, Capture); 2] {
+    sides(types, handler).map(|(service, capture)| (service.execute(request()).unwrap_ready().unwrap().into_body(), capture))
 }
 
 /// A `POST` request over HTTP/1.1 with `body`, and with `content_type` as its `Content-Type`.
@@ -122,44 +158,27 @@ fn uninterested_sink_does_not_inspect_the_request_body() {
 
 #[test]
 fn matching_body_is_log_only_field() {
-    let (body, capture) = respond(
-        logging(&["application/json"]),
-        Echoing(StatusCode::OK),
-        request("application/json", scripted([data(r#"{"stars":5}"#)])),
-    );
+    let body_fields = respond_both(&["application/json"], reading, || {
+        request("application/json", scripted([data(r#"{"stars":5}"#)]))
+    })
+    .map(|(_body, capture)| {
+        let event = capture.single();
+        [&event.logs, &event.dimensions].map(|fields| fields.iter().filter(|(key, _)| key.contains(".body.")).cloned().collect::<Vec<_>>())
+    });
 
-    let frames = read_to_end(body);
-
-    let dimensions = vec![
-        ("http.request.method", Value::from("POST")),
-        ("network.protocol.version", Value::from("1.1")),
-        ("http.response.status_code", Value::I64(200)),
-    ];
-    let mut logs = dimensions.clone();
-    logs.extend([(DURATION, Value::F64(0.0)), (BODY, Value::from(r#"{"stars":5}"#))]);
-    assert_eq!(
-        (frames, capture.single()),
-        (
-            vec![r#"{"stars":5}"#.to_owned()],
-            Captured {
-                name: COMPLETE,
-                severity: Some(Severity::Info),
-                message: Some("HTTP server request completed".into()),
-                logs,
-                dimensions,
-                measurements: vec![duration(0.0)],
-                enrichments: vec![],
-            }
-        )
-    );
+    let fields = [vec![(BODY, Value::from(r#"{"stars":5}"#))], vec![]];
+    assert_eq!(body_fields, [fields.clone(), fields]);
 }
 
 #[test]
 fn body_is_logged_only_for_covered_type() {
-    let logged = |types: &[&'static str], content_type: &'static str, text: &str| {
-        let request = request(content_type, HttpBodyBuilder::new_fake().text(text));
-        let (_body, capture) = respond(logging(types), common::responding(StatusCode::OK), request);
-        capture.single().log(BODY).cloned()
+    let logged = |types: &[&'static str], content_type: &'static str, text: &'static str| {
+        respond_both(
+            types,
+            || common::responding(StatusCode::OK),
+            || request(content_type, HttpBodyBuilder::new_fake().text(text)),
+        )
+        .map(|(_body, capture)| capture.single().log(BODY).cloned())
     };
 
     assert_eq!(
@@ -169,40 +188,47 @@ fn body_is_logged_only_for_covered_type() {
             logged(&[], "application/json", "chunk"),
             logged(&["application/json"], "application/json", ""),
         ],
-        [Some(Value::from("chunk")), None, None, Some(Value::from(""))]
+        [Some(Value::from("chunk")), None, None, Some(Value::from(""))].map(|body| [body.clone(), body])
     );
 }
 
 #[test]
 fn unread_body_logs_empty_text() {
-    let (_body, capture) = respond(
-        logging(&["text/plain"]),
-        common::responding(StatusCode::OK),
-        request("text/plain", scripted([data("hello")])),
-    );
+    let logged = respond_both(
+        &["text/plain"],
+        || common::responding(StatusCode::OK),
+        || request("text/plain", scripted([data("hello")])),
+    )
+    .map(|(_body, capture)| capture.single().log(BODY).cloned());
 
-    assert_eq!(capture.single().log(BODY).cloned(), Some(Value::from("")));
+    assert_eq!(logged, [Some(Value::from("")), Some(Value::from(""))]);
 }
 
 #[test]
 fn body_read_before_middleware_logs_empty_text() {
-    let mut body = HttpBodyBuilder::new_fake().text("hello");
-    let _ = poll_frame(&mut body);
+    let read_request = || {
+        let mut body = HttpBodyBuilder::new_fake().text("hello");
+        let _ = poll_frame(&mut body);
+        request("text/plain", body)
+    };
 
-    let (_body, capture) = respond(
-        logging(&["text/plain"]),
-        common::responding(StatusCode::OK),
-        request("text/plain", body),
-    );
+    let logged = respond_both(&["text/plain"], || common::responding(StatusCode::OK), read_request)
+        .map(|(_body, capture)| capture.single().log(BODY).cloned());
 
-    assert_eq!(capture.single().log(BODY).cloned(), Some(Value::from("")));
+    assert_eq!(logged, [Some(Value::from("")), Some(Value::from(""))]);
 }
 
 #[test]
 fn invalid_media_type_returns_error() {
-    let error = Telemetry::server(Sink::noop()).request_body_media_types(["json"]).unwrap_err();
+    let errors = [
+        Telemetry::server(Sink::noop()).request_body_media_types(["json"]).unwrap_err(),
+        Telemetry::client(Sink::noop()).request_body_media_types(["json"]).unwrap_err(),
+    ];
 
-    assert_eq!(error.message(), "'json' is not a media type");
+    assert_eq!(
+        errors.map(|error| error.message()),
+        ["'json' is not a media type", "'json' is not a media type"]
+    );
 }
 
 #[test]
@@ -301,29 +327,40 @@ fn read_frame(body: &mut HttpBody) -> String {
 
 #[test]
 fn events_log_bytes_that_handler_read() {
-    let logged = |last: Step| {
-        let (sink, capture) = common::capture_sink();
-        let service = logging(&["text/plain"])(server(sink)).layer(reading());
-        let mut response = Box::pin(service.execute(request("text/plain", scripted([data("hel"), last]))));
-        let panic = catch_unwind(AssertUnwindSafe(|| poll_once(&mut response)))
-            .err()
-            .map(|payload| *payload.downcast::<&str>().unwrap());
-        drop(response);
-        let event = capture.single();
-        (panic, event.name, event.log("error.type").cloned(), event.log(BODY).cloned())
+    let logged = |last: fn() -> Step| {
+        sides(&["text/plain"], reading).map(|(service, capture)| {
+            let mut response = Box::pin(service.execute(request("text/plain", scripted([data("hel"), last()]))));
+            let panic = catch_unwind(AssertUnwindSafe(|| poll_once(&mut response)))
+                .err()
+                .map(|payload| *payload.downcast::<&str>().unwrap());
+            drop(response);
+            let event = capture.single();
+            (panic, event.name, event.log("error.type").cloned(), event.log(BODY).cloned())
+        })
     };
+    let hel = || Some(Value::from("hel"));
 
     assert_eq!(
-        [logged(Step::End), logged(Step::Panic), logged(Step::Pending)],
         [
-            (None, COMPLETE, None, Some(Value::from("hel"))),
-            (
-                Some("the body panicked"),
-                ERROR,
-                Some(Value::from("panic")),
-                Some(Value::from("hel"))
-            ),
-            (None, ABANDONED, Some(Value::from("abandoned")), Some(Value::from("hel")))
+            logged(|| Step::End),
+            logged(|| Step::Error(HttpError::validation("the review is cut"))),
+            logged(|| Step::Panic),
+            logged(|| Step::Pending),
+        ],
+        [
+            [(None, COMPLETE, None, hel()), (None, CLIENT_COMPLETE, None, hel())],
+            [
+                (None, ERROR, Some(Value::from("validation")), hel()),
+                (None, CLIENT_ERROR, Some(Value::from("validation")), hel())
+            ],
+            [
+                (Some("the body panicked"), ERROR, Some(Value::from("panic")), hel()),
+                (Some("the body panicked"), CLIENT_ERROR, Some(Value::from("panic")), hel())
+            ],
+            [
+                (None, ABANDONED, Some(Value::from("abandoned")), hel()),
+                (None, CLIENT_ABANDONED, Some(Value::from("abandoned")), hel())
+            ],
         ]
     );
 }

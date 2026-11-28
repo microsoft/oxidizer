@@ -10,7 +10,7 @@
 //! - Custom uses a caller-defined stack above the dispatch handler.
 //! - Minimal contains only the dispatch handler.
 //!
-//! [`PipelineContext`][crate::pipeline::PipelineContext] gives pipeline factories the clock, meter,
+//! [`PipelineContext`][crate::pipeline::PipelineContext] gives pipeline factories the clock, sink,
 //! router, and other shared dependencies. [`HttpClientBuilder`](crate::HttpClientBuilder) selects
 //! the pipeline type.
 

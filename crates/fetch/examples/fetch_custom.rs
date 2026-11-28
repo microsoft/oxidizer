@@ -10,6 +10,7 @@ use fetch::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::StatusCode;
 use http_extensions::HttpBodyBuilder;
 use layered::Service;
+use observed::Sink;
 use tick::Clock;
 
 #[tokio::main]
@@ -17,6 +18,8 @@ async fn main() -> Result<(), ohno::AppError> {
     let deps = CustomDeps {
         clock: Clock::new_tokio(),
         memory: OpaqueMemory::new(GlobalPool::new()),
+        // An application passes its own sink. `Sink::noop()` drops every event.
+        sink: Sink::noop(),
         extras: (),
     };
 

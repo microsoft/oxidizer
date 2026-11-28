@@ -1,0 +1,58 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"operation\"\"#,\nr#\"\n        #[info]\n        #[histogram(duration_secs, unit = \"s\", boundaries = BOUNDARIES)]\n        struct Operation {\n            #[unredacted]\n            duration_secs: f64,\n        }\n        \"#,)"
+---
+struct Operation {
+    duration_secs: f64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Operation {
+        const CONTAINS_METRICS: bool = true;
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "duration_secs",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("duration_secs"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "duration_secs",
+                            ::observed::metadata::MetricDescription::new(
+                                    "operation",
+                                    ::observed::metadata::InstrumentKind::Histogram,
+                                    "",
+                                    "s",
+                                )
+                                .with_boundaries(BOUNDARIES),
+                        ),
+                    ),
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.duration_secs.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+    impl ::observed::Event for Operation {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "operation",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "operation",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+    }
+};

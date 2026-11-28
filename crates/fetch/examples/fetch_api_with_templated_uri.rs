@@ -3,10 +3,11 @@
 
 //! Uses templated URIs for a REST client with several endpoints.
 
-use fetch::fake::FakeDeps;
 use fetch::{BaseUri, HttpClient};
+use observed::Sink;
 use ohno::AppError;
 use templated_uri::EscapedString;
+use tick::ClockControl;
 
 use crate::crates_io_mock::crates_io_fake_handler;
 
@@ -107,10 +108,11 @@ mod api {
 async fn main() -> Result<(), AppError> {
     let crate_name = EscapedString::from_static("serde");
 
-    let client =
-        HttpClient::new_fake(crates_io_fake_handler(crate_name.to_string())).with_base_uri(BaseUri::from_static("https://crates.io/"));
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::new_fake(crates_io_fake_handler(crate_name.to_string()), Sink::noop())
+        .with_base_uri(BaseUri::from_static("https://crates.io/"));
 
-    let watch = FakeDeps::default().clock.stopwatch();
+    let watch = ClockControl::new().to_clock().stopwatch();
     let api_client = api::CratesClient::new(client);
     let crate_response = api_client.get_crate(crate_name.clone()).await?;
 

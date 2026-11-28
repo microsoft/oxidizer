@@ -86,6 +86,12 @@ impl PathAndQuery {
         }
     }
 
+    /// Returns `true` when this path and query was built from a template.
+    #[must_use]
+    pub fn is_templated(&self) -> bool {
+        matches!(self.0, PathAndQueryInner::Templated(_))
+    }
+
     /// Returns the path and query as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
     ///
     /// This shadows [`ToString::to_string`] to ensure callers receive a classified value
@@ -403,6 +409,16 @@ mod tests {
         // from the `Static` arm's length computation so an arm swap is observable.
         let pq = PathAndQuery::from_template(FixedTemplate);
         assert_eq!(pq.render_capacity_hint(), 42);
+    }
+
+    #[test]
+    fn is_templated_is_true_for_template() {
+        assert!(PathAndQuery::from_template(FixedTemplate).is_templated());
+    }
+
+    #[test]
+    fn is_templated_is_false_for_plain_path() {
+        assert!(!PathAndQuery::from_static("/api/v1/users").is_templated());
     }
 
     #[test]

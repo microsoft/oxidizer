@@ -5,29 +5,23 @@
 //!
 //! [`Dispatch`] owns the transports and their wrappers. It wraps each transport once when it builds
 //! the dispatch pool. The wrapper runs inside retries, so it processes the response from every
-//! attempt. It also runs inside attempt logging and metrics. Those layers receive the response
-//! after its encoding metadata is updated. Their timing excludes decompression,
-//! which runs when the consumer reads the body.
+//! attempt. It also runs inside the attempt telemetry. That layer receives the response after its
+//! encoding metadata is updated. Its timing excludes decompression, which runs when the consumer
+//! reads the body.
 
 use http_extensions::HttpBodyBuilder;
-use opentelemetry::metrics::Meter;
 
 use crate::custom::Transport;
 use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, PoolIndex};
 
 /// Builds the dispatch handler, wrapping every transport it creates.
-pub(crate) fn create_dispatch_handler(
-    meter: &Meter,
-    options: ClientOptions,
-    transport: &Transport,
-    body_builder: &HttpBodyBuilder,
-) -> Dispatch {
+pub(crate) fn create_dispatch_handler(options: ClientOptions, transport: &Transport, body_builder: &HttpBodyBuilder) -> Dispatch {
     let decompression = decompression::layer(&options, body_builder);
 
     // Apply the same wrapper to every transport in the pool.
     let mut create = |index: usize| {
-        let handler = transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(index));
+        let handler = transport.create_transport_handler(options.clone(), PoolIndex::new(index));
 
         decompression::wrap(handler, decompression.as_ref())
     };

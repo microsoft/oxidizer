@@ -21,7 +21,7 @@ use smallvec::SmallVec;
 use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
+use syn::{Attribute, Error, Expr, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
 
 use crate::field_attrs::{
     Dimension, FieldRedaction, IfNone, LogRouting, MetricRouting, SharedFieldAttrs, is_borrowed_str, is_mutable_reference_type,
@@ -134,22 +134,25 @@ impl Parse for LogAttrBody {
 /// required for every other instrument kind.
 ///
 /// `name` overrides the instrument's metric name (defaults to the event name).
-/// `desc` and `unit` supply the corresponding OpenTelemetry metadata.
+/// `desc` and `unit` supply the corresponding OpenTelemetry metadata. `boundaries`
+/// supplies the bucket boundaries of a `histogram`.
 struct InstrumentArgs {
     kind: InstrumentKindValue,
     field: Option<Ident>,
     name: Option<String>,
     description: Option<String>,
     unit: Option<String>,
+    boundaries: Option<Expr>,
 }
 
-/// Parsed body of a `#[<kind>([field] [, name = ...] [, desc = ...] [, unit = ...])]`
+/// Parsed body of a `#[<kind>([field] [, name = ...] [, desc = ...] [, unit = ...] [, boundaries = ...])]`
 /// metric attribute (the instrument `kind` comes from the attribute name).
 struct MetricAttrBody {
     field: Option<Ident>,
     name: Option<String>,
     description: Option<String>,
     unit: Option<String>,
+    boundaries: Option<Expr>,
 }
 
 impl Parse for MetricAttrBody {
@@ -166,17 +169,26 @@ impl Parse for MetricAttrBody {
         let mut name = None;
         let mut description = None;
         let mut unit = None;
-        let named = Punctuated::<NamedStr, Token![,]>::parse_terminated(input)?;
-        for NamedStr { key, value } in named {
-            match key.to_string().as_str() {
-                "name" => set_str_once(&mut name, value, &key, "name")?,
-                "desc" => set_str_once(&mut description, value, &key, "desc")?,
-                "unit" => set_str_once(&mut unit, value, &key, "unit")?,
-                other => {
-                    return Err(Error::new_spanned(
-                        &key,
-                        format!("unknown metric option `{other}`; expected `name`, `desc`, or `unit`"),
-                    ));
+        let mut boundaries = None;
+        let options = Punctuated::<MetricOption, Token![,]>::parse_terminated(input)?;
+        for option in options {
+            match option {
+                MetricOption::Text(NamedStr { key, value }) => match key.to_string().as_str() {
+                    "name" => set_str_once(&mut name, value, &key, "name")?,
+                    "desc" => set_str_once(&mut description, value, &key, "desc")?,
+                    "unit" => set_str_once(&mut unit, value, &key, "unit")?,
+                    other => {
+                        return Err(Error::new_spanned(
+                            &key,
+                            format!("unknown metric option `{other}`; expected `name`, `desc`, `unit`, or `boundaries`"),
+                        ));
+                    }
+                },
+                MetricOption::Boundaries { key, value } => {
+                    if boundaries.is_some() {
+                        return Err(Error::new_spanned(key, "duplicate `boundaries` setting"));
+                    }
+                    boundaries = Some(value);
                 }
             }
         }
@@ -185,7 +197,29 @@ impl Parse for MetricAttrBody {
             name,
             description,
             unit,
+            boundaries,
         })
+    }
+}
+
+/// One `key = value` option of a metric attribute. `boundaries` takes an expression of type
+/// `&'static [f64]`, every other option a string.
+enum MetricOption {
+    Text(NamedStr),
+    Boundaries { key: Ident, value: Expr },
+}
+
+impl Parse for MetricOption {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        if input.peek(Ident) && input.peek2(Token![=]) && input.fork().parse::<Ident>()? == "boundaries" {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            return Ok(Self::Boundaries {
+                key,
+                value: input.parse()?,
+            });
+        }
+        Ok(Self::Text(input.parse()?))
     }
 }
 
@@ -235,6 +269,7 @@ struct FieldMetric {
     kind: InstrumentKindValue,
     description: Option<String>,
     unit: Option<String>,
+    boundaries: Option<Expr>,
 }
 
 /// Parsed definition of a single field.
@@ -480,6 +515,12 @@ fn parse_event_def<'a>(
             });
         } else if let Some(kind) = InstrumentKindValue::from_ident(ident) {
             let body = parse_metric_attr(attr)?;
+            if body.boundaries.is_some() && !matches!(kind, InstrumentKindValue::Histogram) {
+                return Err(Error::new_spanned(
+                    attr,
+                    format!("`boundaries` applies only to `#[histogram]`, not to `#[{}]`", kind.attr_name()),
+                ));
+            }
             metric_specs.push(MetricSpec {
                 args: InstrumentArgs {
                     kind,
@@ -487,6 +528,7 @@ fn parse_event_def<'a>(
                     name: body.name,
                     description: body.description,
                     unit: body.unit,
+                    boundaries: body.boundaries,
                 },
                 attr,
             });
@@ -535,11 +577,12 @@ fn parse_metric_attr(attr: &Attribute) -> Result<MetricAttrBody> {
             description: None,
             // #[gamma::skip(option.none_to_some, tag = "equivalent", reason = "Generated metric metadata resolves both an absent unit and an empty unit to the same empty string.")]
             unit: None,
+            boundaries: None,
         }),
         Meta::List(_) => attr.parse_args::<MetricAttrBody>(),
         Meta::NameValue(_) => Err(Error::new_spanned(
             attr,
-            "a metric attribute takes an optional field and `name`/`desc`/`unit` options, \
+            "a metric attribute takes an optional field and `name`/`desc`/`unit`/`boundaries` options, \
              not `= value`",
         )),
     }
@@ -648,6 +691,7 @@ fn resolve_metrics(specs: SmallVec<[MetricSpec<'_>; 2]>, fields: &mut [FieldDef<
             kind,
             description: args.description,
             unit: args.unit,
+            boundaries: args.boundaries,
         });
     }
 
@@ -1168,6 +1212,7 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
         let kind = decl.kind;
         let description = decl.description.as_deref().unwrap_or("");
         let unit = decl.unit.as_deref().unwrap_or("");
+        let boundaries = decl.boundaries.as_ref().map(|boundaries| quote! { .with_boundaries(#boundaries) });
         quote! {
             ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
                 #default_key,
@@ -1176,7 +1221,7 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
                     ::observed::metadata::InstrumentKind::#kind,
                     #description,
                     #unit,
-                ),
+                )#boundaries,
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {

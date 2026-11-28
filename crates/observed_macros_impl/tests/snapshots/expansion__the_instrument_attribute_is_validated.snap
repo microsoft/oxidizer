@@ -42,14 +42,14 @@ only one event-level metric (a fieldless `#[counter]`) is allowed
 #[counter = "x"] struct Subject { #[unredacted] v: u64 }
 
 ---- yields ----
-a metric attribute takes an optional field and `name`/`desc`/`unit` options, not `= value`
+a metric attribute takes an optional field and `name`/`desc`/`unit`/`boundaries` options, not `= value`
 
 ---- input ----
 #[event("e")]
 #[counter(v, bogus = "x")] struct Subject { #[unredacted] v: u64 }
 
 ---- yields ----
-unknown metric option `bogus`; expected `name`, `desc`, or `unit`
+unknown metric option `bogus`; expected `name`, `desc`, `unit`, or `boundaries`
 
 ---- input ----
 #[event("e")]
@@ -71,6 +71,20 @@ duplicate `desc` setting
 
 ---- yields ----
 duplicate `unit` setting
+
+---- input ----
+#[event("e")]
+#[counter(v, boundaries = &[1.0])] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`boundaries` applies only to `#[histogram]`, not to `#[counter]`
+
+---- input ----
+#[event("e")]
+#[histogram(v, boundaries = &[1.0], boundaries = &[2.0])] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+duplicate `boundaries` setting
 
 ---- input ----
 #[event("e")]

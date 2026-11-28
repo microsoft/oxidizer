@@ -53,7 +53,6 @@
 //!
 //! ```rust
 //! # use std::time::Duration;
-//! # use fetch::handlers::Logging;
 //! # use fetch::HttpClientBuilder;
 //! # use fetch::resilience::HttpRecovery;
 //! # use fetch::resilience::retry::{HttpRetry, HttpRetryLayerExt};

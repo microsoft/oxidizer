@@ -6,6 +6,7 @@
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::StatusCode;
+use observed::Sink;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
@@ -18,7 +19,8 @@ async fn main() -> Result<(), ohno::AppError> {
             .build()
     });
 
-    let client = HttpClient::new_fake(fake_handler);
+    // An application passes its own sink. `Sink::noop()` drops every event.
+    let client = HttpClient::new_fake(fake_handler, Sink::noop());
 
     let response = client.get("https://example.com").fetch_text().await?;
 

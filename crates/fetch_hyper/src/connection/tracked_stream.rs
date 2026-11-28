@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! [`TrackedStream`]: wraps a stream to record an
-//! `http.client.connection.duration` histogram on drop and to attach the
-//! [`ConnectionInfo`] response extension.
+//! [`TrackedStream`]: wraps a stream to emit `http.client.connection.closed`
+//! on drop and to attach the [`ConnectionInfo`] response extension.
 
 use std::io::IoSlice;
 use std::pin::Pin;
@@ -12,11 +11,10 @@ use std::task::{Context, Poll};
 use fetch_options::ConnectionInfo;
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
-use opentelemetry::metrics::Histogram;
+use observed::{Sink, emit};
 use templated_uri::BaseUri;
-use tracing::{Level, event};
 
-use crate::telemetry::create_connection_attributes;
+use crate::telemetry::{ClientAttributes, ConnectionClosed, protocol_version};
 
 /// A wrapper around a stream that tracks connection lifecycle.
 #[derive(Debug)]
@@ -24,7 +22,8 @@ pub(crate) struct TrackedStream<T> {
     inner: T,
     base_uri: BaseUri,
     info: ConnectionInfo,
-    connection_duration: Option<Histogram<f64>>,
+    sink: Sink,
+    client_attributes: Option<ClientAttributes>,
     connected: Connected,
 }
 
@@ -33,14 +32,16 @@ impl<T> TrackedStream<T> {
         inner: T,
         base_uri: BaseUri,
         info: ConnectionInfo,
-        connection_duration: Histogram<f64>,
+        sink: Sink,
+        client_attributes: Option<ClientAttributes>,
         connected: Connected,
     ) -> Self {
         Self {
             inner,
             base_uri,
             info,
-            connection_duration: Some(connection_duration),
+            sink,
+            client_attributes,
             connected,
         }
     }
@@ -48,22 +49,18 @@ impl<T> TrackedStream<T> {
 
 impl<T> Drop for TrackedStream<T> {
     fn drop(&mut self) {
-        let Some(connection_duration) = self.connection_duration.take() else {
-            return;
-        };
-
-        let duration_secs = self.info.age().as_secs_f64();
-
-        connection_duration.record(duration_secs, &create_connection_attributes(&self.base_uri, &self.connected));
-
-        event!(
-            name: "http.client.connection.closed",
-            Level::DEBUG,
-            server.address = self.base_uri.host(),
-            server.port = self.base_uri.effective_port(),
-            url.scheme = %self.base_uri.scheme(),
-            http.connection.duration = duration_secs,
-            "connection closed",
+        emit!(
+            self.sink,
+            ConnectionClosed {
+                server_address: self.base_uri.host(),
+                server_port: self.base_uri.effective_port(),
+                scheme: self.base_uri.scheme().as_str(),
+                protocol_version: protocol_version(&self.connected),
+                duration_secs: self.info.age().as_secs_f64(),
+                runtime: self.client_attributes.as_ref().map(|attributes| attributes.runtime.clone()),
+                transport: self.client_attributes.as_ref().map(|attributes| attributes.transport.clone()),
+                client_name: self.client_attributes.as_ref().map(|attributes| attributes.client_name.clone()),
+            }
         );
     }
 }
@@ -111,15 +108,14 @@ impl<T: Unpin> Unpin for TrackedStream<T> {}
 mod tests {
     use std::pin::pin;
     use std::task::Waker;
+    use std::time::Duration;
 
     use fetch_options::PoolIndex;
-    use opentelemetry::KeyValue;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use testing_aids::MetricTester;
+    use observed::Severity;
+    use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
 
     use super::*;
-    use crate::testing::PanickingStream;
+    use crate::testing::{PanickingStream, client_attributes};
 
     #[test]
     fn gamma_survivor_tracked_stream_preserves_write_vectored_capability() {
@@ -131,7 +127,8 @@ mod tests {
             inner,
             base_uri: BaseUri::from_static("https://example.test"),
             info: ConnectionInfo::new(move || now, PoolIndex::new(0), None),
-            connection_duration: None,
+            sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         };
         assert_eq!(hyper::rt::Write::is_write_vectored(&stream), capability);
@@ -141,51 +138,48 @@ mod tests {
         ConnectionInfo::new(std::time::Instant::now, PoolIndex::new(pool_index), None)
     }
 
-    fn make_histogram() -> Histogram<f64> {
-        SdkMeterProvider::builder()
-            .build()
-            .meter("test")
-            .f64_histogram("http.client.connection.duration")
-            .build()
-    }
-
     fn create() -> TrackedStream<PanickingStream> {
         TrackedStream {
             inner: PanickingStream,
             base_uri: BaseUri::from_static("https://example.com"),
             info: frozen_info(0),
-            connection_duration: None,
+            sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         }
     }
 
     #[test]
-    fn drop_without_histogram_is_noop() {
-        drop(create());
-    }
+    fn drop_emits_closed_event_with_inferred_port() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let stream = TrackedStream::new(
+            PanickingStream,
+            BaseUri::from_static("https://example.com"),
+            ConnectionInfo::new(move || clock.instant(), PoolIndex::new(0), None),
+            sink,
+            Some(client_attributes()),
+            Connected::new().negotiated_h2(),
+        );
+        control.advance(Duration::from_millis(500));
 
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn drop_records_metric_with_inferred_port() {
-        let tester = MetricTester::new();
-        let histogram = tester
-            .meter_provider()
-            .meter("test")
-            .f64_histogram("http.client.connection.duration")
-            .build();
+        drop(stream);
 
-        drop(TrackedStream {
-            inner: PanickingStream,
-            base_uri: BaseUri::from_static("https://example.com"),
-            info: frozen_info(0),
-            connection_duration: Some(histogram),
-            connected: Connected::new(),
-        });
-
-        tester.assert_attributes_contain(&[
-            KeyValue::new("server.address", "example.com"),
-            KeyValue::new("server.port", 443_i64),
-        ]);
+        assert_eq!(
+            processor.single_event(),
+            ExpectedEvent::new("http.client.connection.closed", Severity::Debug)
+                .body("connection closed")
+                .dimension("fetch.runtime", "tokio")
+                .dimension("fetch.transport", "hyper")
+                .dimension("http.client.connection.duration", 0.5)
+                .dimension("http.client.name", "books")
+                .dimension("network.protocol.version", "2")
+                .dimension("server.address", "example.com")
+                .dimension("server.port", 443_u16)
+                .dimension("url.scheme", "https")
+                .metric(),
+        );
     }
 
     #[test]
@@ -194,7 +188,8 @@ mod tests {
             inner: ConnectedOnlyStream,
             base_uri: BaseUri::from_static("https://example.com"),
             info: frozen_info(7),
-            connection_duration: None,
+            sink: Sink::noop(),
+            client_attributes: None,
             connected: Connected::new(),
         };
 
@@ -270,18 +265,5 @@ mod tests {
     fn is_write_vectored_delegates_to_inner() {
         let stream = create();
         let _ = stream.is_write_vectored();
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn new_starts_with_active_histogram() {
-        let stream = TrackedStream::new(
-            PanickingStream,
-            BaseUri::from_static("https://example.com"),
-            frozen_info(0),
-            make_histogram(),
-            Connected::new(),
-        );
-        assert!(stream.connection_duration.is_some());
     }
 }

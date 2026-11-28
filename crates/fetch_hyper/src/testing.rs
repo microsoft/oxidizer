@@ -14,11 +14,13 @@ use bytes::Bytes;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
+use observed::Text;
 use seatbelt::RecoveryInfo;
 use templated_uri::BaseUri;
 use tick::Clock;
 
 use crate::error_labels::LABEL_CONNECT;
+use crate::telemetry::ClientAttributes;
 
 /// A stream that panics on every operation.
 ///
@@ -313,13 +315,14 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
     HttpBodyBuilder::new_fake()
 }
 
-/// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted
-/// by key, suitable for deterministic snapshot assertions.
+/// Returns the client attributes of a client named `books` with the Tokio runtime and the Hyper transport.
 #[must_use]
-pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = attrs.iter().map(|kv| (kv.key.to_string(), kv.value.to_string())).collect();
-    pairs.sort();
-    pairs
+pub(crate) fn client_attributes() -> ClientAttributes {
+    ClientAttributes {
+        runtime: Text::from("tokio"),
+        transport: Text::from("hyper"),
+        client_name: Text::from("books"),
+    }
 }
 
 /// Returns a real [`hyper::Error`] driven by an in-memory stream.
@@ -377,6 +380,7 @@ mod tests {
     use http_body_util::BodyExt;
     use layered::Service as _;
     use native_tls::TlsConnector;
+    use observed::Sink;
     use seatbelt::RecoveryInfo;
 
     use crate::HyperTransportBuilder;
@@ -401,6 +405,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             options,
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());
@@ -427,6 +432,7 @@ mod tests {
             Spawner::new_tokio(None),
             clock,
             options,
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());
@@ -453,6 +459,7 @@ mod tests {
             clock,
             // default RequestFilter is Https only
             fetch_options::TransportOptions::default(),
+            Sink::noop(),
         )
         .body_builder(fake_body_builder())
         .build(build_tls());

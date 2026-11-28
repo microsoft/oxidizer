@@ -9,6 +9,7 @@ use azure_core::Bytes;
 use azure_core::http::request::Request;
 use azure_core::http::{HttpClient as _, Method, Url};
 use fetch::fake::FakeHandler;
+use observed::Sink;
 
 #[test]
 fn gamma_survivor_empty_azure_bytes_use_empty_fetch_body_variant() {
@@ -18,7 +19,7 @@ fn gamma_survivor_empty_azure_bytes_use_empty_fetch_body_variant() {
         recorded.lock().unwrap().push(format!("{:?}", request.body()));
         fetch::HttpResponseBuilder::new_fake().build()
     });
-    let fetch = fetch::HttpClient::builder_fake(handler, &tick::Clock::new_frozen())
+    let fetch = fetch::HttpClient::builder_fake(handler, fetch::fake::FakeDeps::with_clock(&tick::Clock::new_frozen(), Sink::noop()))
         .minimal_pipeline()
         .build();
     let client = fetch_azure::HttpClient::new(fetch);

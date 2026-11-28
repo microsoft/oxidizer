@@ -11,8 +11,9 @@
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 #[doc(no_inline)]
 pub use http_extensions::FakeHandler;
+use observed::Sink;
 use thread_aware::ThreadAware;
-use tick::Clock;
+use tick::{Clock, ClockControl};
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};
 use crate::handlers::TransportHandler;
@@ -20,24 +21,29 @@ use crate::{HttpClient, HttpClientBuilder};
 
 /// Dependencies for fake HTTP operations.
 ///
-/// Fake clients require only a clock.
+/// Fake clients require a clock and an `observed` sink.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct FakeDeps {
     /// Clock for testing time-based operations.
     pub clock: Clock,
+    /// Sink for `observed` telemetry.
+    pub sink: Sink,
 }
 
-impl Default for FakeDeps {
-    fn default() -> Self {
-        Self {
-            clock: tick::ClockControl::new().into(),
-        }
+impl FakeDeps {
+    /// Creates `FakeDeps` with the clock of a new [`ClockControl`] and the given sink.
+    #[must_use]
+    pub fn new(sink: Sink) -> Self {
+        Self::with_clock(&ClockControl::new().to_clock(), sink)
     }
-}
 
-impl From<&Clock> for FakeDeps {
-    fn from(clock: &Clock) -> Self {
-        Self { clock: clock.clone() }
+    /// Creates `FakeDeps` with the given clock and sink.
+    #[must_use]
+    pub fn with_clock(clock: &Clock, sink: Sink) -> Self {
+        Self {
+            clock: clock.clone(),
+            sink,
+        }
     }
 }
 
@@ -53,8 +59,10 @@ impl HttpClient {
     /// # use fetch::HttpClient;
     /// # use http::StatusCode;
     /// # use fetch::fake::FakeDeps;
+    /// # use observed::Sink;
     /// async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = HttpClient::builder_fake(StatusCode::NOT_FOUND, FakeDeps::default())
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
+    /// let client = HttpClient::builder_fake(StatusCode::NOT_FOUND, FakeDeps::new(Sink::noop()))
     ///     .connect_timeout(Duration::from_millis(100))
     ///     .insecure_allow_http()
     ///     .build();
@@ -74,11 +82,12 @@ impl HttpClient {
         Self::builder_custom_internal(
             crate::constants::FAKE_RUNTIME_NAME,
             crate::constants::FAKE_TRANSPORT_NAME,
-            move |cx: CustomContext<FakeHandler>| TransportHandler::new(cx.extras),
+            move |cx: CustomContext<FakeHandler>, _client_name| TransportHandler::new(cx.extras),
             Isolation::Shared,
             CustomDeps {
                 clock: deps.clock,
                 memory: OpaqueMemory::new(GlobalPool::new()),
+                sink: deps.sink,
                 extras: handler,
             },
         )
@@ -93,9 +102,11 @@ impl HttpClient {
     /// ```
     /// # use fetch::HttpClient;
     /// # use http::StatusCode;
+    /// # use observed::Sink;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
     /// // Always return one status code.
-    /// let client = HttpClient::new_fake(StatusCode::OK);
+    /// let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
     ///
     /// // Send a request without network I/O.
     /// let response = client.get("https://example.com").fetch().await?;
@@ -105,8 +116,8 @@ impl HttpClient {
     /// ```
     ///
     /// This method requires `test-util` outside test builds.
-    pub fn new_fake(handler: impl Into<FakeHandler>) -> Self {
-        Self::builder_fake(handler, FakeDeps::default())
+    pub fn new_fake(handler: impl Into<FakeHandler>, sink: Sink) -> Self {
+        Self::builder_fake(handler, FakeDeps::new(sink))
             .insecure_allow_http()
             .minimal_pipeline()
             .build()
@@ -120,15 +131,19 @@ mod tests {
 
     use http::StatusCode;
     use http_extensions::FakeHandler;
+    use observed::Sink;
+    use tick::Clock;
 
     use super::FakeDeps;
     use crate::HttpClient;
     use crate::pipeline::Pipeline;
 
+    static_assertions::assert_not_impl_any!(FakeDeps: Default, From<&'static Clock>);
+
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ctor_fake_ok() {
-        let client = HttpClient::new_fake(StatusCode::INTERNAL_SERVER_ERROR);
+        let client = HttpClient::new_fake(StatusCode::INTERNAL_SERVER_ERROR, Sink::noop());
 
         let response = client.get("http://example.com").fetch().await.unwrap();
 
@@ -139,7 +154,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_builder_fake_with_custom_options() {
-        let client = HttpClient::builder_fake(StatusCode::IM_A_TEAPOT, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::IM_A_TEAPOT, FakeDeps::new(Sink::noop()))
             .connect_timeout(Duration::from_millis(100))
             .insecure_allow_http()
             .minimal_pipeline()
@@ -152,7 +167,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn fake_builder_no_clock() {
-        let _client = HttpClient::builder_fake(FakeHandler::never_completes(), FakeDeps::default())
+        let _client = HttpClient::builder_fake(FakeHandler::never_completes(), FakeDeps::new(Sink::noop()))
             .custom_pipeline(|root, ctx| {
                 let dbg = format!("{:?}", ctx.clock());
                 assert!(dbg.contains("kind: \"controlled\""));
@@ -166,7 +181,7 @@ mod tests {
     fn fake_builder_custom_clock() {
         let clock = tick::ClockControl::new().auto_advance(Duration::from_secs(2)).to_clock();
 
-        let _client = HttpClient::builder_fake(FakeHandler::never_completes(), &clock)
+        let _client = HttpClient::builder_fake(FakeHandler::never_completes(), FakeDeps::with_clock(&clock, Sink::noop()))
             .custom_pipeline(|root, ctx| {
                 let dbg = format!("{:?}", ctx.clock());
                 assert!(dbg.contains("kind: \"controlled\""));

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! The store of the field names that the client and the server layers build when they are set up.
+
 use std::collections::BTreeSet;
 
 use parking_lot::Mutex;
@@ -9,7 +11,7 @@ use parking_lot::Mutex;
 /// data from a request.
 static INTERNED: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
 
-pub(super) fn intern(name: &str) -> &'static str {
+pub(crate) fn intern(name: &str) -> &'static str {
     let mut interned = INTERNED.lock();
     if let Some(name) = interned.get(name) {
         return name;

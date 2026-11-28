@@ -22,7 +22,8 @@ const URL: &str = "https://example.com";
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    let deps = TokioDeps::default();
+    // The sink prints the request events and the connection events.
+    let deps = TokioDeps::new(utils::print_sink());
     let clock = deps.clock.clone();
 
     let client = HttpClient::builder_tokio(deps)

@@ -3,17 +3,16 @@
 
 //! The events of the server side.
 
-use std::fmt::{self, Write as _};
 use std::ops::ControlFlow;
 
 use data_privacy::{Redactor, Sensitive};
-use http::HeaderValue;
 use observed::processing::FieldVisitorFn;
 use observed::{Text, Value, VisitFields, event};
 use routerama::RouteHit;
 
-use super::HeaderValues;
 use super::route_fields::RouteParameter;
+use crate::header_fields::Headers;
+use crate::shared::DURATION_BOUNDARIES;
 
 /// Produces the event `http.server.request.complete` when the handler returned a response and its body
 /// ended.
@@ -23,7 +22,8 @@ use super::route_fields::RouteParameter;
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestComplete<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -86,7 +86,8 @@ pub(crate) struct RequestComplete<'a> {
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestError<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -149,7 +150,8 @@ pub(crate) struct RequestError<'a> {
     duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "s"
+    unit = "s",
+    boundaries = DURATION_BOUNDARIES
 )]
 pub(crate) struct RequestAbandoned<'a> {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -239,67 +241,5 @@ impl VisitFields for RouteParameters<'_> {
             }
         }
         ControlFlow::Continue(())
-    }
-}
-
-pub(crate) struct Headers<'a>(pub(crate) Option<&'a HeaderValues>);
-
-impl VisitFields for Headers<'_> {
-    const CONTAINS_METRICS: bool = false;
-
-    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        if let Some(headers) = self.0 {
-            // The values of one header are next to each other, so each chunk holds the values of one header.
-            for values in headers.values.chunk_by(|left, right| left.0 == right.0) {
-                let header_field = &headers.fields[values[0].0];
-                let value = |redactor: &dyn Redactor| {
-                    Value::from_redacted(&Sensitive::new(JoinedValues(values), header_field.data_class.clone()), redactor)
-                };
-                visitor(&header_field.descriptor, &value)?;
-            }
-        }
-        ControlFlow::Continue(())
-    }
-}
-
-struct JoinedValues<'a>(&'a [(usize, HeaderValue)]);
-
-impl fmt::Display for JoinedValues<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut separator = "";
-        for (_, value) in self.0 {
-            f.write_str(separator)?;
-            for chunk in value.as_bytes().utf8_chunks() {
-                f.write_str(chunk.valid())?;
-                if !chunk.invalid().is_empty() {
-                    f.write_char(char::REPLACEMENT_CHARACTER)?;
-                }
-            }
-            separator = ", ";
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct RejectNonEmptyWrites;
-
-    impl fmt::Write for RejectNonEmptyWrites {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            if s.is_empty() { Ok(()) } else { Err(fmt::Error) }
-        }
-    }
-
-    #[test]
-    fn joined_values_return_writer_errors() {
-        let written = |values: &[&'static [u8]]| {
-            let values: Vec<_> = values.iter().map(|value| (0, HeaderValue::from_bytes(value).unwrap())).collect();
-            write!(RejectNonEmptyWrites, "{}", JoinedValues(&values))
-        };
-
-        assert_eq!([written(&[b"a"]), written(&[b"", b"a"]), written(&[b"\xff"])], [Err(fmt::Error); 3]);
     }
 }

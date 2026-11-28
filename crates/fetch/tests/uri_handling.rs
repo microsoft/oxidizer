@@ -9,6 +9,7 @@ use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::{HttpBodyBuilder, HttpClient, HttpResponseBuilder};
 use http::{Request, StatusCode};
 use layered::Service;
+use observed::Sink;
 use templated_uri::{BaseUri, PathAndQuery, Uri};
 
 fn prepare_client_with_base_uri(base_uri: BaseUri) -> HttpClient {
@@ -17,7 +18,7 @@ fn prepare_client_with_base_uri(base_uri: BaseUri) -> HttpClient {
             let response = format!("requested URI: {}", request.uri());
             HttpResponseBuilder::new_fake().status(StatusCode::OK).text(response).build()
         }),
-        FakeDeps::default(),
+        FakeDeps::new(Sink::noop()),
     )
     .base_uri(base_uri)
     .build()

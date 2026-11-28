@@ -15,6 +15,7 @@ use fetch::pipeline::RecoveryMode;
 use fetch::{HttpClient, HttpError, HttpResponseBuilder};
 use http::StatusCode;
 use http_extensions::routing::Router;
+use observed::Sink;
 use ohno::ErrorExt;
 use seatbelt::retry::Attempt;
 use seatbelt::{Recovery, RecoveryKind};
@@ -23,21 +24,6 @@ use tick::ClockControl;
 
 const FAILING_HOST: &str = "https://failing.example.com";
 const HEALTHY_HOST: &str = "https://healthy.example.com";
-
-#[test]
-fn metrics_without_an_explicit_meter_preserve_the_response() {
-    use fetch::handlers::Metrics;
-    use layered::{Layer as _, Service as _};
-
-    let handler = Metrics::layer()
-        .clock(tick::SimpleClock::new_frozen())
-        .layer(FakeHandler::from(StatusCode::ACCEPTED));
-    let request = http_extensions::HttpRequestBuilder::new_fake().uri(HEALTHY_HOST).build().unwrap();
-
-    let response = futures::executor::block_on(handler.execute(request)).unwrap();
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-}
 
 // Helpers.
 
@@ -87,7 +73,7 @@ fn create_per_host_client(calls: Calls) -> HttpClient {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 // Large timeouts keep auto-advance from firing before the test completes.
@@ -112,7 +98,7 @@ fn create_uniform_client(status: StatusCode, calls: Calls) -> HttpClient {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 .total_timeout(|t| t.timeout(Duration::MAX))
@@ -301,7 +287,7 @@ fn create_hedging_client(calls: Calls, responses: Vec<StatusCode>) -> HttpClient
         HttpResponseBuilder::new_fake().status(status).build()
     });
 
-    HttpClient::builder_fake(handler, FakeDeps { clock })
+    HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .standard_pipeline(|pipeline, _| {
             pipeline
                 .total_timeout(|t| t.timeout(Duration::MAX))
@@ -375,7 +361,7 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     });
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    let client = HttpClient::builder_fake(handler, FakeDeps { clock })
+    let client = HttpClient::builder_fake(handler, FakeDeps::with_clock(&clock, Sink::noop()))
         .router(Router::fallback(
             BaseUri::from_static("https://primary.example.com/"),
             BaseUri::from_static("https://secondary.example.com/"),

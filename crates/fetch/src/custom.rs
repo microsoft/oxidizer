@@ -14,7 +14,7 @@ use std::fmt::Debug;
 
 use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
-use opentelemetry::metrics::Meter;
+use observed::Sink;
 use performables::arc::{Arc, PerThread};
 use thread_aware::{ThreadAware, unaware};
 use tick::Clock;
@@ -54,6 +54,8 @@ where
     pub clock: Clock,
     /// Memory provider for HTTP body allocations.
     pub memory: OpaqueMemory,
+    /// Sink for `observed` telemetry.
+    pub sink: Sink,
     /// Extra dependencies copied to [`CustomContext::extras`].
     pub extras: Extras,
 }
@@ -73,6 +75,8 @@ pub struct CustomContext<Extras = ()> {
     pub body_builder: HttpBodyBuilder,
     /// Clock for timing operations and timeouts inside the handler.
     pub clock: Clock,
+    /// Sink for `observed` telemetry, cloned from [`CustomDeps::sink`].
+    pub sink: Sink,
     /// Index of the connection-pool slot that this handler serves.
     pub pool_index: PoolIndex,
     /// Caller-supplied extras, cloned from [`CustomDeps::extras`].
@@ -90,18 +94,13 @@ pub struct CustomContext<Extras = ()> {
     /// bundled Tokio transport uses them to build its TLS connector. An HTTP-only transport can
     /// ignore them.
     pub tls: TlsOptions,
-
-    /// Telemetry meter the client records its metrics against.
-    ///
-    /// A custom transport can use this [`Meter`] so its metrics share the client meter scope.
-    pub meter: Meter,
 }
 
 /// Creates a builder for an HTTP client backed by a custom transport handler.
 ///
-/// `runtime` and `transport` identify the client in telemetry. Every metric uses them as the
-/// `fetch.runtime` and `fetch.transport` instrumentation-scope attributes. Use short, stable
-/// identifiers, such as `runtime = "tokio"` and `transport = "http3_experimental"`.
+/// `runtime` and `transport` identify the client in telemetry. They are the `fetch.runtime` and
+/// `fetch.transport` fields of every request event. Use short, stable identifiers, such as
+/// `runtime = "tokio"` and `transport = "http3_experimental"`.
 ///
 /// The client calls `factory` when it needs a handler for a pool slot. The factory receives the
 /// slot [`CustomContext`] and returns the transport [`RequestHandler`]. The builder adds resilience,
@@ -175,7 +174,7 @@ where
     HttpClient::builder_custom_internal(
         runtime,
         transport,
-        move |cx| TransportHandler::new(factory(cx)),
+        move |cx, _client_name| TransportHandler::new(factory(cx)),
         isolation,
         deps.into(),
     )
@@ -185,8 +184,8 @@ impl HttpClient {
     /// In-crate variant of [`create_builder`] for the bundled Tokio transport.
     ///
     /// The factory returns an erased [`TransportHandler`]. This avoids another boxing step when a
-    /// transport can return several handler types. [`CustomContext`] always contains `tls` and
-    /// `meter`. A factory can use or ignore them.
+    /// transport can return several handler types. [`CustomContext`] always contains `tls`. A
+    /// factory can use or ignore it. The factory also gets the client name.
     pub(crate) fn builder_custom_internal<F, Extras>(
         runtime: impl Into<Cow<'static, str>>,
         transport: impl Into<Cow<'static, str>>,
@@ -195,7 +194,7 @@ impl HttpClient {
         deps: CustomDeps<Extras>,
     ) -> HttpClientBuilder
     where
-        F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
+        F: Fn(CustomContext<Extras>, Cow<'static, str>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
     {
         // Share the factory across threads. Copy `extras` into each new `CustomContext`.
@@ -206,20 +205,21 @@ impl HttpClient {
             name: transport.into(),
             clock: deps.clock.clone(),
             memory: deps.memory.clone(),
+            sink: deps.sink.clone(),
             isolation,
             inner: Arc::new_with_data((deps, factory), |(deps, factory)| {
-                let transport: Box<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync> =
-                    Box::new(move |options, meter, pool_index| {
+                let transport: Box<dyn Fn(ClientOptions, PoolIndex) -> TransportHandler + Send + Sync> =
+                    Box::new(move |options, pool_index| {
                         let context = CustomContext {
                             body_builder: create_body_builder(&deps.memory, &deps.clock, &options),
                             clock: deps.clock.clone(),
+                            sink: deps.sink.clone(),
                             pool_index,
                             extras: deps.extras.clone(),
                             options: options.transport.clone(),
                             tls: options.tls.clone(),
-                            meter,
                         };
-                        factory(context)
+                        factory(context, options.client_name)
                     });
                 TransportFn::from(transport)
             }),
@@ -229,7 +229,7 @@ impl HttpClient {
     }
 }
 
-type TransportFn = Arc<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync>;
+type TransportFn = Arc<dyn Fn(ClientOptions, PoolIndex) -> TransportHandler + Send + Sync>;
 
 #[derive(Clone, ThreadAware)]
 pub(crate) struct Transport {
@@ -240,12 +240,13 @@ pub(crate) struct Transport {
     inner: Arc<TransportFn, PerThread>,
     clock: Clock,
     memory: OpaqueMemory,
+    sink: Sink,
     isolation: Isolation,
 }
 
 impl Transport {
-    pub(crate) fn create_transport_handler(&self, options: ClientOptions, meter: Meter, index: PoolIndex) -> TransportHandler {
-        self.inner.as_ref()(options, meter, index)
+    pub(crate) fn create_transport_handler(&self, options: ClientOptions, index: PoolIndex) -> TransportHandler {
+        self.inner.as_ref()(options, index)
     }
 
     pub(crate) fn runtime(&self) -> &Cow<'static, str> {
@@ -260,6 +261,10 @@ impl Transport {
         &self.clock
     }
 
+    pub(crate) fn sink(&self) -> &Sink {
+        &self.sink
+    }
+
     pub(crate) fn isolation(&self) -> Isolation {
         self.isolation
     }
@@ -271,7 +276,10 @@ impl Transport {
 
 impl Debug for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(std::any::type_name::<Self>()).finish()
+        f.debug_struct(std::any::type_name::<Self>())
+            .field("runtime", &self.runtime_name)
+            .field("transport", &self.name)
+            .finish_non_exhaustive()
     }
 }
 
@@ -288,17 +296,19 @@ mod tests {
     use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
+    use observed::Sink;
     use thread_aware::unaware;
+    use tick::ClockControl;
 
     use super::{CustomContext, CustomDeps, Isolation, create_builder};
     use crate::HttpResponseBuilder;
-    use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
 
     fn custom_deps() -> CustomDeps {
         CustomDeps {
-            clock: FakeDeps::default().clock,
+            clock: ClockControl::new().to_clock(),
             memory: OpaqueMemory::new(GlobalPool::new()),
+            sink: Sink::noop(),
             extras: (),
         }
     }
@@ -340,8 +350,9 @@ mod tests {
         // Wrap Arc<AtomicUsize> in unaware because derive cannot implement ThreadAware for it.
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
-            clock: FakeDeps::default().clock,
+            clock: ClockControl::new().to_clock(),
             memory: OpaqueMemory::new(GlobalPool::new()),
+            sink: Sink::noop(),
             extras: unaware(Arc::clone(&counter)),
         };
 

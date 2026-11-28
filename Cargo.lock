@@ -1795,16 +1795,14 @@ dependencies = [
  "http",
  "http_compression",
  "http_extensions",
+ "http_telemetry",
  "hyper-util",
  "insta",
  "layered",
  "native-tls",
- "observed_destination_core",
- "observed_destination_stdout",
+ "observed",
+ "observed_testing",
  "ohno 0.5.4",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
  "performables",
  "rustls",
  "rustls-platform-verifier",
@@ -1812,7 +1810,6 @@ dependencies = [
  "seatbelt_http",
  "serde",
  "serde_json",
- "smallvec",
  "static_assertions",
  "tempfile",
  "templated_uri",
@@ -1842,6 +1839,7 @@ dependencies = [
  "futures",
  "http",
  "layered",
+ "observed",
  "tick",
  "tokio",
 ]
@@ -1853,7 +1851,6 @@ dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
- "ctor",
  "fetch_options",
  "fetch_tls",
  "futures",
@@ -1866,22 +1863,19 @@ dependencies = [
  "insta",
  "layered",
  "native-tls",
+ "observed",
+ "observed_testing",
  "ohno 0.5.4",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
  "pin-project",
  "rcgen",
  "rustls",
  "seatbelt",
  "templated_uri",
- "testing_aids",
  "tick",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
  "tower",
- "tracing",
  "wiremock",
 ]
 
@@ -3951,12 +3945,6 @@ dependencies = [
  "pin-project-lite",
  "thiserror",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a3cf639fefd3e852869114f9925b578da6dd8e99281a2089bb0e773ead46962"
 
 [[package]]
 name = "opentelemetry_sdk"

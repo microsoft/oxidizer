@@ -28,7 +28,7 @@
 //!
 //! `fetch` includes the features that services commonly need:
 //!
-//! - Secure TLS validation, retries, circuit breaking, hedging, and OpenTelemetry telemetry.
+//! - Secure TLS validation, retries, circuit breaking, hedging, and telemetry through `observed` events.
 //! - Fake responses through the `test-util` feature.
 //! - A request pipeline that supports custom logging, metrics, retries, and other handlers.
 //! - Memory pooling and zero-copy operations for large responses.
@@ -60,8 +60,8 @@
 //! | Resilience | Retries and circuit breaking are enabled by default; hedging is built in and optional | Built-in retries; circuit breaking and hedging require external middleware |
 //! | JSON support | Built in | Built in |
 //! | Testing tools | Built in | Requires custom or external tools |
-//! | OpenTelemetry metrics | Built in | Requires custom integration |
-//! | Structured request logging | Built-in tracing events | Requires custom middleware |
+//! | Request logs and metrics | Built-in `observed` events | Requires custom middleware |
+//! | Connection logs and metrics | Built-in `observed` events | Requires custom integration |
 //! | Advanced HTTP client features [^1] | Not supported yet [^2] | Available through optional features |
 //! | Request pipeline | Built in | Requires custom or external tools |
 //! | Zero-copy buffers | Built in | Partial support through `Bytes` |
@@ -82,11 +82,13 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
 //! use fetch::{HttpClient, HttpError};
+//! use observed::Sink;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
 //!     // Create a client with the bundled Tokio transport.
-//!     let client: HttpClient = HttpClient::new_tokio();
+//!     // An application passes its own sink. `Sink::noop()` drops every event.
+//!     let client: HttpClient = HttpClient::new_tokio(Sink::noop());
 //!
 //!     // Return an error for a `4xx` or `5xx` status, then read the body as text.
 //!     let body: String = client.get("https://example.com").fetch_text_body().await?;
@@ -301,10 +303,10 @@
 //! query parameters through templates.
 //!
 //! Templates follow [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) level 3. [`Uri`] and
-//! string types also support URLs without typed templates. In that case, the full `PathAndQuery`
-//! string becomes the template.
+//! string types also support URLs without typed templates. Such a request has no URL template.
 //!
-//! [`handlers::Logging`] records the URL template as `url.path.template`.
+//! The request telemetry records the URL template as `url.template`. A request without a URL
+//! template records `unknown`.
 //!
 //! This example creates a [`Uri`] with a templated path:
 //!
@@ -541,12 +543,17 @@
 //! # use fetch::{HttpClient, HttpResponseBuilder};
 //! # use fetch::fake::FakeHandler;
 //! # use http::StatusCode;
+//! # use observed::Sink;
 //!
+//! // An application passes its own sink. `Sink::noop()` drops every event.
 //! // Always return a 200 response.
-//! let client = HttpClient::new_fake(StatusCode::OK);
+//! let client = HttpClient::new_fake(StatusCode::OK, Sink::noop());
 //!
 //! // Return a sequence of responses without bodies.
-//! let client = HttpClient::new_fake(vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR]);
+//! let client = HttpClient::new_fake(
+//!     vec![StatusCode::OK, StatusCode::INTERNAL_SERVER_ERROR],
+//!     Sink::noop(),
+//! );
 //!
 //! // Create a fake response.
 //! let response = HttpResponseBuilder::new_fake()
@@ -556,7 +563,7 @@
 //!     .expect("always succeeds");
 //!
 //! // Always return the same response.
-//! let client = HttpClient::new_fake(response);
+//! let client = HttpClient::new_fake(response, Sink::noop());
 //!
 //! // Use a synchronous or asynchronous custom handler.
 //! let fake_handler = FakeHandler::from_fn(|req| {
@@ -569,7 +576,7 @@
 //! });
 //!
 //! // Create a client that uses the custom handler.
-//! let client = HttpClient::new_fake(fake_handler);
+//! let client = HttpClient::new_fake(fake_handler, Sink::noop());
 //! # }
 //! ```
 //!
@@ -621,10 +628,12 @@
 //!
 //! ```rust,no_run
 //! # use fetch::{HttpClient, Uri};
+//! # use observed::Sink;
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create one client and reuse it.
-//! let client = HttpClient::new_tokio();
+//! // An application passes its own sink. `Sink::noop()` drops every event.
+//! let client = HttpClient::new_tokio(Sink::noop());
 //!
 //! // Parse repeated URIs once.
 //! let users_uri: Uri = "https://api.example.com/users".parse()?;
@@ -685,10 +694,12 @@
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
 //! use fetch::HttpClient;
+//! use observed::Sink;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = HttpClient::new_tokio();
+//!     // An application passes its own sink. `Sink::noop()` drops every event.
+//!     let client = HttpClient::new_tokio(Sink::noop());
 //!
 //!     // Send an HTTPS request.
 //!     let response = client.get("https://www.example.com").fetch_text().await?;
@@ -727,7 +738,8 @@
 //! # use fetch::fake::FakeDeps;
 //! # use fetch::options::DecompressionFormat;
 //! # use http::StatusCode;
-//! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+//! # use observed::Sink;
+//! # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
 //! let client = builder.decompression(&[DecompressionFormat::Gzip]).build();
 //! # }
 //! ```

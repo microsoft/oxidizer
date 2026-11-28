@@ -5,10 +5,8 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use data_privacy::RedactionEngine;
 use http_extensions::routing::{BaseUriConflict, Router};
 use http_extensions::{HttpBodyOptions, HttpRequest, HttpResponse};
-use opentelemetry::metrics::{Meter, MeterProvider};
 use seatbelt::ResilienceContext;
 use thread_aware::ThreadAware;
 
@@ -20,7 +18,6 @@ use crate::handlers::Dispatch;
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, DecompressionOptions, Http2Options, RequestFilter};
 use crate::pipeline::{CustomPipeline, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::Metering;
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -41,7 +38,6 @@ use crate::{BaseUri, RequestHandler};
 pub struct HttpClientBuilder {
     pub(crate) options: ClientOptions,
     pipeline_builder: PipelineBuilder,
-    metering: Metering,
     transport: Transport,
     resilience_context: HttpResilienceContext,
 }
@@ -51,13 +47,11 @@ impl HttpClientBuilder {
         let clock = transport.clock().clone();
 
         Self {
-            options: ClientOptions::default(),
+            options: ClientOptions {
+                client_name: Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
+                ..ClientOptions::default()
+            },
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::new(
-                transport.runtime().clone(),
-                transport.name().clone(),
-                Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
-            ),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -69,8 +63,8 @@ impl HttpClientBuilder {
     /// is `http_client`.
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         let name = name.into();
-        self.metering = self.metering.with_client_name(name.clone());
-        self.resilience_context = self.resilience_context.name(name);
+        self.resilience_context = self.resilience_context.name(name.clone());
+        self.options.client_name = name;
         self
     }
 
@@ -131,7 +125,8 @@ impl HttpClientBuilder {
     /// # use fetch::HttpClient;
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
-    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+    /// # use observed::Sink;
+    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     /// let options = HttpBodyOptions::default()
     ///     .buffer_limit(4 * 1024 * 1024)
     ///     .timeout(Duration::from_secs(30));
@@ -184,7 +179,8 @@ impl HttpClientBuilder {
     /// # use fetch::options::{DecompressionFormat, DecompressionOptions};
     /// # use fetch::fake::FakeDeps;
     /// # use http::StatusCode;
-    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+    /// # use observed::Sink;
+    /// # let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     /// let client = builder
     ///     .decompression(
     ///         DecompressionOptions::with_formats(&[DecompressionFormat::Gzip])
@@ -221,18 +217,16 @@ impl HttpClientBuilder {
     ///
     /// ```rust
     /// # use fetch::*;
-    /// # use fetch::handlers::*;
     /// # use fetch::resilience::retry::{HttpRetry, HttpRetryLayerExt};
     /// # use layered::Stack;
     /// fn configure_builder(mut builder: HttpClientBuilder) -> HttpClientBuilder {
     ///     builder.custom_pipeline(move |dispatch, ctx| {
     ///         let stack = (
-    ///             Logging::layer()
-    ///                 .redaction_engine(ctx.redaction_engine())
-    ///                 .clock(ctx.clock()),
     ///             HttpRetry::layer("my_retry", ctx.resilience_context())
     ///                 .http_configure_defaults()
     ///                 .max_retry_attempts(1),
+    ///             // Below the retry, the layer emits one event for each attempt.
+    ///             ctx.client_telemetry(),
     ///             dispatch,
     ///         );
     ///         stack.into_service()
@@ -279,27 +273,6 @@ impl HttpClientBuilder {
     /// The default versions are HTTP/1.1 and HTTP/2.
     pub fn supported_http_versions(mut self, versions: &[http::Version]) -> Self {
         self.options.transport.supported_http_versions = versions.to_vec();
-        self
-    }
-
-    /// Sets a custom OpenTelemetry meter provider for the client.
-    ///
-    /// The client uses the global meter provider by default. This method sets a provider for this
-    /// client.
-    ///
-    /// The client creates the scoped meter when [`build`][Self::build] runs. A
-    /// [`name`][Self::name] set before or after this call appears in the metrics.
-    ///
-    /// # Performance
-    ///
-    /// For a thread-isolated runtime, use a per-thread meter provider to avoid contention on the
-    /// global provider.
-    ///
-    /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
-    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
-        // Use the provider for both resilience and HTTP metrics.
-        self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        self.metering = self.metering.with_provider(meter_provider);
         self
     }
 
@@ -357,9 +330,11 @@ impl HttpClientBuilder {
     /// # use fetch::HttpClient;
     /// # use fetch::HttpResponseBuilder;
     /// # use fetch::fake::FakeDeps;
+    /// # use observed::Sink;
     /// # use templated_uri::BaseUri;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::default())
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
+    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::new(Sink::noop()))
     ///     .base_uri(BaseUri::from_static("https://example.com"))
     ///     .build();
     ///
@@ -393,8 +368,10 @@ impl HttpClientBuilder {
     /// # use fetch::fake::FakeHandler;
     /// # use fetch::fake::FakeDeps;
     /// # use http_extensions::routing::Router;
+    /// # use observed::Sink;
     /// # use templated_uri::BaseUri;
-    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::default())
+    /// // An application passes its own sink. `Sink::noop()` drops every event.
+    /// let client = HttpClient::builder_fake(FakeHandler::default(), FakeDeps::new(Sink::noop()))
     ///     .router(Router::fallback(
     ///         BaseUri::from_static("https://primary.example.com/"),
     ///         BaseUri::from_static("https://secondary.example.com/"),
@@ -453,15 +430,6 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the redaction engine for the client.
-    ///
-    /// Logging and telemetry use the [`RedactionEngine`] to remove sensitive request and response
-    /// data.
-    pub fn redaction_engine(mut self, redaction_engine: &RedactionEngine) -> Self {
-        self.options.redaction_engine = redaction_engine.clone();
-        self
-    }
-
     /// Builds the configured [`HttpClient`](crate::HttpClient).
     ///
     /// The returned client uses every setting on this builder.
@@ -474,7 +442,6 @@ impl HttpClientBuilder {
             pipeline: self.pipeline_builder,
             options: self.options,
             resilience_context: self.resilience_context,
-            metering: self.metering,
         };
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
@@ -488,8 +455,6 @@ impl HttpClientBuilder {
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Aware {
-    #[thread_aware(skip)]
-    metering: Metering,
     pipeline: PipelineBuilder,
     #[thread_aware(skip)]
     options: ClientOptions,
@@ -499,15 +464,13 @@ struct Aware {
 
 impl Aware {
     fn into_pipeline(self) -> Pipeline {
-        let meter: Meter = self.metering.into();
         let body_builder = self.transport.create_body_builder(&self.options);
-        let dispatch = create_dispatch_handler(&meter, self.options.clone(), &self.transport, &body_builder);
+        let dispatch = create_dispatch_handler(self.options.clone(), &self.transport, &body_builder);
         let context = PipelineContext::new(
             self.resilience_context,
-            &meter,
-            self.options.redaction_engine,
+            &self.transport,
+            self.options.client_name,
             body_builder,
-            self.transport.clock().clone(),
             self.options.router,
         );
 
@@ -520,29 +483,24 @@ impl Aware {
 mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
-    use opentelemetry::metrics::NoopMeterProvider;
+    use observed::Sink;
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
     use crate::{HttpClient, HttpClientBuilder};
 
     #[test]
-    fn gamma_round2_name_and_meter_are_forwarded_to_resilience_context() {
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("gamma_round2_pipeline");
-        let before = format!("{:?}", builder.resilience_context);
-        assert!(before.contains("name: \"gamma_round2_pipeline\""), "{before}");
-        assert!(before.contains("meter: None"), "{before}");
-        let builder = builder.meter_provider(NoopMeterProvider::new());
-        let after = format!("{:?}", builder.resilience_context);
-        assert!(after.contains("meter: Some("), "{after}");
-        assert!(after.contains("name: \"gamma_round2_pipeline\""), "{after}");
+    fn gamma_round2_name_is_forwarded_to_resilience_context() {
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).name("gamma_round2_pipeline");
+        let debug = format!("{:?}", builder.resilience_context);
+        assert!(debug.contains("name: \"gamma_round2_pipeline\""), "{debug}");
     }
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
 
     #[test]
     fn standard_pipeline_customization_applied() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(5)))
             .build();
 
@@ -556,7 +514,7 @@ mod tests {
 
         use crate::options::ConnectionKeepAlive;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_keep_alive(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_keep_alive(
             ConnectionKeepAlive::active_connections(Duration::from_secs(15), Duration::from_secs(5)),
         );
 
@@ -573,7 +531,7 @@ mod tests {
         use crate::tls::TlsOptions;
 
         // The fake transport ignores TLS. Storing custom options must not affect requests.
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .tls_options(TlsOptions::default())
             .build();
 
@@ -582,25 +540,8 @@ mod tests {
     }
 
     #[test]
-    fn redaction_engine_sets_option() {
-        use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-        use data_privacy::{RedactedToString, RedactionEngine};
-        use templated_uri::{PathAndQuery, Uri};
-
-        let engine = RedactionEngine::builder()
-            .add_class_redactor(Uri::DATA_CLASS, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
-            .build();
-
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).redaction_engine(&engine);
-
-        // A passthrough redactor leaves the path unchanged.
-        let redacted = PathAndQuery::from_static("/path").to_redacted_string(&builder.options.redaction_engine);
-        assert_eq!(redacted, "/path");
-    }
-
-    #[test]
     fn standard_pipeline_after_minimal_creates_new_pipeline() {
-        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(3)))
             .minimal_pipeline()
             .standard_pipeline(|pipeline, _context| pipeline)
@@ -614,7 +555,7 @@ mod tests {
     fn response_body_options() {
         let custom = HttpBodyOptions::default().buffer_limit(1234);
 
-        let mut builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+        let mut builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
         assert_eq!(builder.options.response_body_options, HttpBodyOptions::default());
 
         builder = builder.response_body_options(custom);
@@ -628,14 +569,14 @@ mod tests {
 
     #[test]
     fn test_http2_options_configuration() {
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_max_send_streams(100).adaptive_window(true));
         assert_eq!(builder.options.transport.http_2.initial_max_send_streams, Some(100));
 
         assert!(builder.options.transport.http_2.adaptive_window);
         assert_eq!(builder.options.transport.http_2.initial_stream_window_size, None);
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_stream_window_size(1024 * 1024));
         assert_eq!(builder.options.transport.http_2.initial_stream_window_size, Some(1_048_576));
     }
@@ -644,7 +585,7 @@ mod tests {
     fn test_connection_pool_options_configuration() {
         use std::time::Duration;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_pool_options(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_pool_options(
             ConnectionPoolOptions::default()
                 .max_connections(50)
                 .connection_idle_timeout(Duration::from_mins(5)),
@@ -663,7 +604,7 @@ mod tests {
     fn test_http2_and_connection_pool_options_chaining() {
         use std::time::Duration;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .http2_options(Http2Options::default().initial_max_send_streams(200))
             .connection_pool_options(
                 ConnectionPoolOptions::default()
@@ -687,13 +628,13 @@ mod tests {
     #[test]
     fn defaults_ok() {
         // Create a builder with default settings.
-        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
+        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()));
     }
 
     #[test]
     fn name_ok() {
         // Set the client name.
-        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("custom_client");
+        let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).name("custom_client");
     }
 
     #[test]
@@ -701,7 +642,7 @@ mod tests {
         use std::time::Duration;
 
         // Create a configured builder.
-        let builder_1 = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+        let builder_1 = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop()))
             .name("base_client")
             .connect_timeout(Duration::from_secs(10))
             .response_body_options(HttpBodyOptions::default().buffer_limit(1000));
@@ -757,7 +698,7 @@ mod tests {
     fn multiple_pools_sets_options() {
         use crate::options::{ConnectionPoolOptions, PoolSelection};
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_pool_options(
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::new(Sink::noop())).connection_pool_options(
             ConnectionPoolOptions::default().multiple_pools(5, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)),
         );
 
@@ -766,17 +707,5 @@ mod tests {
             panic!("expected multiple pools to be configured");
         };
         assert_eq!(pool_count, 5);
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn meter_provider_updates_all_fields() {
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-        assert!(!builder.metering.has_custom_provider());
-
-        let builder = builder.meter_provider(provider);
-        assert!(builder.metering.has_custom_provider());
     }
 }

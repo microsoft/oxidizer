@@ -1,13 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy::RedactionEngine;
+use std::borrow::Cow;
+
 use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
-use opentelemetry::metrics::Meter;
+use observed::Sink;
 use tick::Clock;
 
+use crate::custom::Transport;
+use crate::error_labels::collect_error_labels;
 use crate::resilience::HttpResilienceContext;
+use crate::telemetry::{Client, FETCH_RUNTIME_ATTRIBUTE, FETCH_TRANSPORT_ATTRIBUTE, HTTP_CLIENT_NAME_ATTRIBUTE, Telemetry, TelemetryLayer};
 
 /// Shared dependencies for a custom or standard request pipeline.
 ///
@@ -18,10 +22,12 @@ use crate::resilience::HttpResilienceContext;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PipelineContext {
-    meter: Meter,
     resilience_context: HttpResilienceContext,
-    redaction_engine: RedactionEngine,
+    runtime_name: Cow<'static, str>,
+    transport_name: Cow<'static, str>,
+    client_name: Cow<'static, str>,
     clock: Clock,
+    sink: Sink,
     body_builder: HttpBodyBuilder,
     router: Router,
 }
@@ -29,18 +35,19 @@ pub struct PipelineContext {
 impl PipelineContext {
     pub(crate) fn new(
         resilience_context: HttpResilienceContext,
-        meter: &Meter,
-        redaction_engine: RedactionEngine,
+        transport: &Transport,
+        client_name: Cow<'static, str>,
         body_builder: HttpBodyBuilder,
-        clock: Clock,
         router: Router,
     ) -> Self {
         Self {
             resilience_context,
-            redaction_engine,
-            meter: meter.clone(),
+            runtime_name: transport.runtime().clone(),
+            transport_name: transport.name().clone(),
+            client_name,
+            clock: transport.clock().clone(),
+            sink: transport.sink().clone(),
             body_builder,
-            clock,
             router,
         }
     }
@@ -51,10 +58,10 @@ impl PipelineContext {
         &self.clock
     }
 
-    /// Returns the telemetry meter.
+    /// Returns the `observed` sink that the deps of the client supplied.
     #[must_use]
-    pub const fn meter(&self) -> &Meter {
-        &self.meter
+    pub const fn sink(&self) -> &Sink {
+        &self.sink
     }
 
     /// Returns the resilience context.
@@ -63,10 +70,27 @@ impl PipelineContext {
         &self.resilience_context
     }
 
-    /// Returns the redaction engine.
+    /// Returns a telemetry layer that emits the request events of this client.
+    ///
+    /// Each event has the fields `http.client.name`, `fetch.runtime` and `fetch.transport`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fetch::HttpClientBuilder;
+    /// # use layered::Stack;
+    /// # fn configure(builder: HttpClientBuilder) -> HttpClientBuilder {
+    /// builder.custom_pipeline(|dispatch, ctx| (ctx.client_telemetry(), dispatch).into_service())
+    /// # }
+    /// ```
     #[must_use]
-    pub const fn redaction_engine(&self) -> &RedactionEngine {
-        &self.redaction_engine
+    pub fn client_telemetry(&self) -> TelemetryLayer<Client> {
+        Telemetry::client(self.sink.clone())
+            .clock(&self.clock)
+            .error_labels_with(collect_error_labels)
+            .dimension(FETCH_RUNTIME_ATTRIBUTE, self.runtime_name.clone())
+            .dimension(FETCH_TRANSPORT_ATTRIBUTE, self.transport_name.clone())
+            .dimension(HTTP_CLIENT_NAME_ATTRIBUTE, self.client_name.clone())
     }
 
     /// Returns the HTTP body builder.
@@ -80,51 +104,48 @@ impl PipelineContext {
     pub const fn router(&self) -> &Router {
         &self.router
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let clock = Clock::new_frozen();
+        Self {
+            resilience_context: HttpResilienceContext::new(&clock),
+            runtime_name: crate::constants::FAKE_RUNTIME_NAME.into(),
+            transport_name: crate::constants::FAKE_TRANSPORT_NAME.into(),
+            client_name: crate::constants::DEFAULT_HTTP_CLIENT_NAME.into(),
+            clock,
+            sink: Sink::noop(),
+            body_builder: HttpBodyBuilder::new_fake(),
+            router: Router::default(),
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http_extensions::HttpBodyOptions;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     use super::*;
 
-    fn test_context(body_builder: HttpBodyBuilder) -> PipelineContext {
-        let clock = Clock::new_frozen();
-        let meter = SdkMeterProvider::default().meter("test");
-
-        PipelineContext::new(
-            HttpResilienceContext::new(&clock),
-            &meter,
-            RedactionEngine::default(),
-            body_builder,
-            clock,
-            Router::default(),
-        )
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn body_builder_returns_the_configured_builder() {
-        let body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
-        let context = test_context(body_builder);
+        let mut context = PipelineContext::for_test();
+        context.body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
 
         // Return the builder supplied at construction, including its buffer limit.
         assert!(format!("{:?}", context.body_builder()).contains("4321"));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn accessors_return_constructed_dependencies() {
-        let context = test_context(HttpBodyBuilder::new_fake());
+        let context = PipelineContext::for_test();
 
         // Exercise every accessor. Each one must return without a panic.
         let _ = context.clock();
-        let _ = context.meter();
+        let _ = context.sink();
         let _ = context.resilience_context();
-        let _ = context.redaction_engine();
+        let _ = context.client_telemetry();
         let _ = context.router();
     }
 }

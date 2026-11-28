@@ -17,14 +17,14 @@ use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, ERROR, Echoing, Mea
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
-use http_telemetry::TelemetryLayer;
+use http_telemetry::{Server, TelemetryLayer};
 use layered::{Execute, Layer, Service};
 use observed::metadata::InstrumentKind;
 use observed::{Severity, Value};
 
 /// Runs `request` with a server layer over a sink that captures every event. Returns the name of
 /// each event with its delta, if it is a delta of `http.server.active_requests`.
-fn events_of(request: impl FnOnce(TelemetryLayer)) -> Vec<(&'static str, Option<Value>)> {
+fn events_of(request: impl FnOnce(TelemetryLayer<Server>)) -> Vec<(&'static str, Option<Value>)> {
     let capture = Capture::new(|_| true);
     request(server(common::sink_with(&capture)));
     capture
@@ -36,7 +36,7 @@ fn events_of(request: impl FnOnce(TelemetryLayer)) -> Vec<(&'static str, Option<
 
 /// Sends a `GET` request over HTTP/1.1 through `layer` to [`Echoing`], and returns the response body,
 /// which takes `steps`.
-fn respond(layer: &TelemetryLayer, steps: impl IntoIterator<Item = Step>) -> HttpBody {
+fn respond(layer: &TelemetryLayer<Server>, steps: impl IntoIterator<Item = Step>) -> HttpBody {
     let request = common::get().map(|_| scripted(steps));
     layer
         .layer(Echoing(StatusCode::OK))
@@ -92,6 +92,7 @@ fn active_requests_logs_and_meters_each_delta() {
             kind: InstrumentKind::UpDownCounter,
             description: "Number of active HTTP server requests.",
             unit: "{request}",
+            boundaries: &[],
             value: Value::I64(value),
         }],
         enrichments: vec![],

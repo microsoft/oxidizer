@@ -2,7 +2,14 @@
 // Licensed under the MIT License.
 
 use std::mem;
+use std::ops::ControlFlow;
+use std::sync::Arc;
 
+use data_privacy::RedactionEngine;
+use data_privacy::simple_redactor::SimpleRedactor;
+use observed::metadata::{EventDescription, FieldDescriptor};
+use observed::processing::{EventProcessor, EventView, FieldValueFn};
+use observed::{FlushError, Sink};
 use tracing_appender::non_blocking;
 use tracing_subscriber::fmt;
 
@@ -16,4 +23,44 @@ pub(crate) fn init_tracing() {
     #[expect(clippy::mem_forget, reason = "the guard must live for the example process")]
     // Keep the guard alive for the process without adding it to this function's return type.
     mem::forget(guard);
+}
+
+/// Returns a sink with a processor that prints each event.
+#[expect(clippy::allow_attributes, reason = "detection depends on the build context")]
+#[allow(dead_code, reason = "path imports cause false-positive dead code reports")]
+pub(crate) fn print_sink() -> Sink {
+    // The engine masks classified text, such as the secret part of a templated path.
+    let engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    Sink::builder("example").processors(vec![Arc::new(PrintProcessor(engine))]).build()
+}
+
+/// Prints the name, the severity, the message and every field of each event.
+struct PrintProcessor(RedactionEngine);
+
+impl EventProcessor for PrintProcessor {
+    fn is_interested(&self, _: &EventDescription) -> bool {
+        true
+    }
+
+    fn process(&self, event: &EventView<'_>) {
+        // Holds stdout, so that the lines of an event stay together when several threads print.
+        let _stdout = std::io::stdout().lock();
+        let severity = event.severity().map_or("-", |severity| severity.as_str());
+        println!("[{severity}] {}", event.name());
+        if let Some(message) = event.body() {
+            println!("  message: {message}");
+        }
+        let mut print = |descriptor: &FieldDescriptor, value: &FieldValueFn<'_>| {
+            if let Some(log) = descriptor.log() {
+                println!("  {} = {}", log.key(), value(&self.0));
+            }
+            ControlFlow::Continue(())
+        };
+        let _ = event.visit_fields(&mut print);
+        let _ = event.visit_enrichments(&mut print);
+    }
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
 }

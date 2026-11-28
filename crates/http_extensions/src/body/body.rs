@@ -636,6 +636,13 @@ impl HttpBody {
     }
 }
 
+/// Creates an empty body (zero bytes) with the default [`HttpBodyOptions`].
+impl Default for HttpBody {
+    fn default() -> Self {
+        Self::from_empty(HttpBodyOptions::default())
+    }
+}
+
 impl TryFrom<HttpBody> for BytesView {
     type Error = HttpError;
 
@@ -1255,6 +1262,11 @@ mod tests {
     fn is_empty_for_empty_body() {
         let builder = HttpBodyBuilder::new_fake();
         assert!(builder.empty().is_empty());
+    }
+
+    #[test]
+    fn is_empty_for_default_body() {
+        assert!(HttpBody::default().is_empty());
     }
 
     #[test]

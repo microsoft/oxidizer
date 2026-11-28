@@ -9,8 +9,8 @@ use data_privacy::DataClass;
 use observed::metadata::FieldDescriptor;
 use routerama::RouteTable;
 
-use super::interner::intern;
-use crate::TelemetryLayer;
+use super::layer::Server;
+use crate::interner::intern;
 
 pub(crate) struct RouteFields {
     pub(crate) route_resolver: Arc<dyn RouteTable + Send + Sync>,
@@ -18,10 +18,10 @@ pub(crate) struct RouteFields {
 }
 
 impl RouteFields {
-    pub(crate) fn new(layer: &TelemetryLayer) -> Option<Self> {
+    pub(crate) fn new(server: &Server) -> Option<Self> {
         Some(Self {
-            route_resolver: layer.route_resolver.clone()?,
-            parameters: layer
+            route_resolver: server.route_resolver.clone()?,
+            parameters: server
                 .route_parameter_data_classes
                 .iter()
                 .map(|(name, data_class)| RouteParameter {
