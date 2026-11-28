@@ -37,7 +37,7 @@
 //! ```yaml
 //! readinessProbe:
 //!   httpGet:
-//!     path: /ready
+//!     path: /health/ready
 //!     port: 8080
 //! ```
 

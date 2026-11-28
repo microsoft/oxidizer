@@ -46,7 +46,7 @@ Point an HTTP probe at the route that contains an HTTP adapter:
 ```yaml
 readinessProbe:
   httpGet:
-    path: /ready
+    path: /health/ready
     port: 8080
 ```
 
