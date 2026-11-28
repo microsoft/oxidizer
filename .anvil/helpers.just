@@ -576,7 +576,11 @@ anvil_miri_build_dir_layout_opt_out := if os() == "windows" { "1" } else { env("
 anvil_miri_race_seed_windows := "01=1..3 02=3..5 03=5..7 04=7..9 05=9..11 06=11..13 07=13..15 08=15..17 09=17..19 10=19..21 11=21..23 12=23..25 13=25..27 14=27..29 15=29..31 16=31..33 17=33..35 18=35..37 19=37..39 20=39..41 21=41..43 22=43..45 23=45..47 24=47..49 25=49..51 26=51..53 27=53..55 28=55..57 29=57..59 30=59..61 31=61..63"
 anvil_miri_race_seed_window := replace_regex(anvil_miri_race_seed_windows, ".*(?:^| )" + datetime("%d") + "=([^ ]+)(?: |$).*", "$1")
 
-anvil_miri_selection(package) := if package == "" { anvil_affected_selection } else { "--package " + quote(package) }
+anvil_miri_selection(package) := if package == "" {
+    if env("ANVIL_MIRI_PACKAGE_FILE", "") == "" { anvil_affected_selection } else { "--package-file " + quote(env("ANVIL_MIRI_PACKAGE_FILE")) }
+} else {
+    "--package " + quote(package)
+}
 
 anvil_miri_flags(profile) := trim(if profile == "tree-borrows" { "-Zmiri-tree-borrows " + env("MIRIFLAGS", "") } else if profile == "strict-provenance" { "-Zmiri-strict-provenance " + env("MIRIFLAGS", "") } else if profile == "race-coverage" { "-Zmiri-many-seeds=" + anvil_miri_race_seed_window + " " + env("MIRIFLAGS", "") } else { env("MIRIFLAGS", "") })
 

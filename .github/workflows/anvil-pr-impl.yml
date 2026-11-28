@@ -267,14 +267,14 @@ jobs:
       statuses: write
     # Stricter-runtime correctness: miri + careful + loom.
     # Runtime checks compile per host target and can surface OS/arch-specific
-    # bugs. Separate Miri, Careful, and Loom jobs keep full-workspace Miri
-    # below the six-hour GitHub-hosted job limit.
+    # bugs. Separate Careful and Loom jobs plus two Miri package shards keep
+    # full-workspace Miri below the six-hour GitHub-hosted job limit.
     needs: [impact-linux, impact-windows]
     strategy:
       fail-fast: false
       matrix:
         os: [linux, windows, linux-arm, windows-arm]
-        check: [miri, careful, loom]
+        check: [miri-0, miri-1, careful, loom]
     runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
       || matrix.os == 'windows' && inputs.windows_runner
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
@@ -290,9 +290,32 @@ jobs:
         with:
           name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
           path: target/anvil/impact
+      - name: Select Miri package shard
+        if: startsWith(matrix.check, 'miri-')
+        shell: pwsh -NoProfile -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $shard = [int]'${{ endsWith(matrix.check, '1') && '1' || '0' }}'
+          $specs = @(Get-Content -LiteralPath 'target/anvil/impact/affected.packages' |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+              Sort-Object -CaseSensitive)
+          $selected = @(
+              for ($index = 0; $index -lt $specs.Count; $index++) {
+                  if ($index % 2 -eq $shard) {
+                      $specs[$index]
+                  }
+              }
+          )
+          $path = "target/anvil/impact/miri-$shard.packages"
+          [System.IO.File]::WriteAllLines(
+              $path,
+              $selected,
+              [System.Text.UTF8Encoding]::new($false)
+          )
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "ANVIL_MIRI_PACKAGE_FILE=$path"
       - uses: ./.anvil/github/actions/run-group
         with:
-          group: ${{ matrix.check }}
+          group: ${{ startsWith(matrix.check, 'miri-') && 'miri' || matrix.check }}
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
           impact_mode: consume
 
