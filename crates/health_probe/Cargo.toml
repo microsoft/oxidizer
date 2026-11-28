@@ -22,7 +22,6 @@ allowed_external_types = [
     "health::monitor::Monitor",
     "http::request::Request",
     "http::response::Response",
-    "http_extensions::request_handler::RequestHandler",
     "tick::clock::Clock",
     "tower_service::Service",
 ]
@@ -32,15 +31,11 @@ all-features = true
 
 [features]
 default = []
-http-readiness-request = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]
 http-readiness-tower = ["dep:http", "dep:tower-service"]
 tcp = ["dep:tick", "dep:tokio"]
 
 [dependencies]
-bytesbuf = { workspace = true, optional = true, features = ["std"] }
 http = { workspace = true, optional = true }
-http_extensions = { workspace = true, optional = true }
-layered = { workspace = true, optional = true }
 process_health.workspace = true
 tick = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["macros", "net"] }
@@ -48,11 +43,8 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["http1", "tokio"] }
-bytesbuf = { path = "../bytesbuf", default-features = false, features = ["std"] }
 futures = { workspace = true, features = ["async-await", "executor"] }
 http.workspace = true
-http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
-layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", default-features = false, features = ["test-util"] }
@@ -63,10 +55,6 @@ tower-service.workspace = true
 [[example]]
 name = "health_probe_axum"
 required-features = ["http-readiness-tower"]
-
-[[test]]
-name = "http_readiness_request"
-required-features = ["http-readiness-request"]
 
 [[test]]
 name = "http_readiness_tower"

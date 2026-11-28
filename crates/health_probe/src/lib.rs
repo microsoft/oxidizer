@@ -4,20 +4,19 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-//! Kubernetes readiness adapters for [`health`](https://docs.rs/process_health/latest/health/).
+//! Readiness adapters for [`health`](https://docs.rs/process_health/latest/health/).
 //!
 //! The TCP adapter listens on a dedicated port after it observes
 //! [`health::Health::Healthy`](https://docs.rs/process_health/latest/health/?search=Health::Healthy).
-//! It closes the port after it observes another state. The HTTP adapters read a
+//! It closes the port after it observes another state. The HTTP adapter reads a
 //! [`health::Monitor`](https://docs.rs/process_health/latest/health/?search=Monitor) for each
-//! request. They return `200 OK` with JSON `true` for a healthy process. They return
-//! `503 Service Unavailable` with JSON `false` for any other state.
+//! request. A healthy process returns status `200 OK` with the JSON body `true`. A degraded or
+//! unhealthy process returns `503 Service Unavailable` with the JSON body `false`. Responses
+//! contain no component details and disable caching.
 //!
 //! # Features
 //!
 //! - `http-readiness-tower` enables the Tower readiness service.
-//! - `http-readiness-request` enables the
-//!   [`http_extensions`](https://docs.rs/http_extensions) request handler.
 //! - `tcp` enables the TCP readiness server.
 //!
 //! No features are enabled by default.
@@ -41,7 +40,7 @@
 //!     port: 8080
 //! ```
 
-#[cfg(any(test, feature = "http-readiness-request", feature = "http-readiness-tower"))]
+#[cfg(any(test, feature = "http-readiness-tower"))]
 pub mod http;
 
 #[cfg(feature = "tcp")]
