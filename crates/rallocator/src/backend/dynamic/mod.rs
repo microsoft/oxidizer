@@ -1,28 +1,61 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::Layout;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use super::sealed::Operations;
-use super::{Mimalloc, Snmalloc};
+use super::{Mimalloc, Snmalloc, System};
 
 mod env;
 
 /// Selects a backend at startup for [`rallocator!(backend = dynamic)`](crate::rallocator).
+///
+/// The backend `D` serves the process if `RALLOCATOR_DYNAMIC_PERSONALITY`
+/// is unset, empty, or unknown.
 #[derive(Clone, Copy, Debug, Default)]
 #[doc(hidden)]
-pub struct Dynamic;
+pub struct Dynamic<D = System>(pub D);
 
-impl super::Backend for Dynamic {}
+impl<D: Fixed> super::Backend for Dynamic<D> {}
 
+/// A fixed backend that [`Dynamic`] can use as its default.
+pub trait Fixed {
+    /// The cache tag of this backend.
+    const CHOICE: Choice;
+}
+
+impl Fixed for System {
+    const CHOICE: Choice = Choice::System;
+}
+
+impl Fixed for Snmalloc {
+    const CHOICE: Choice = Choice::Snmalloc;
+}
+
+impl Fixed for Mimalloc {
+    const CHOICE: Choice = Choice::Mimalloc;
+}
+
+/// A fixed backend that the process cache can hold.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
-enum Choice {
+pub enum Choice {
     // Zero is reserved for the uninitialized cache.
     Snmalloc = 1,
     Mimalloc,
     System,
+}
+
+/// A parsed `RALLOCATOR_DYNAMIC_PERSONALITY` value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Setting {
+    /// The variable is unset or empty.
+    Unset,
+    /// The variable names a backend.
+    Known(Choice),
+    /// The variable has any other value.
+    Unknown,
 }
 
 static SELECTED: AtomicU8 = AtomicU8::new(0);
@@ -40,54 +73,65 @@ fn selected(cache: &AtomicU8, on_first_use: impl FnOnce(&AtomicU8) -> Choice) ->
 }
 
 #[cold]
-fn from_environment(cache: &AtomicU8) -> Choice {
-    initialize(cache, env::read, env::stderr_warning(env::write_warning))
+fn from_environment(cache: &AtomicU8, default: Choice) -> Choice {
+    initialize(cache, default, env::read, env::stderr_warning(env::write_warning))
 }
 
-fn initialize(cache: &AtomicU8, read: impl FnOnce() -> Option<Choice>, warn: impl FnOnce()) -> Choice {
-    let configured = read();
-    let choice = configured.unwrap_or(Choice::Snmalloc);
+fn initialize(cache: &AtomicU8, default: Choice, read: impl FnOnce() -> Setting, warn: impl FnOnce(Choice)) -> Choice {
+    let setting = read();
+    let choice = match setting {
+        Setting::Known(choice) => choice,
+        Setting::Unset | Setting::Unknown => default,
+    };
     // Racing first callers can read the environment, but only the winner's
     // choice can ever own a block. No caller waits for another initializer.
     if cache
         .compare_exchange(0, choice as u8, Ordering::Relaxed, Ordering::Relaxed)
         .is_err()
     {
-        return selected(cache, from_environment);
+        return selected(cache, |cache| from_environment(cache, default));
     }
-    if configured.is_none() {
-        warn();
+    if setting == Setting::Unknown {
+        warn(choice);
     }
     choice
 }
 
-// SAFETY: The process cache selects the same backend for every operation.
-unsafe impl Operations for Dynamic {
+impl<D: Fixed> Dynamic<D> {
+    #[inline]
+    fn backend() -> Choice {
+        selected(&SELECTED, |cache| from_environment(cache, D::CHOICE))
+    }
+}
+
+// SAFETY: One process cache selects the backend for every operation of every
+// `Dynamic` handle, whatever its default.
+unsafe impl<D: Fixed> Operations for Dynamic<D> {
     #[inline]
     unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
         // SAFETY: The caller supplies a valid nonzero layout.
-        unsafe { selected(&SELECTED, from_environment).allocate::<ZEROED>(layout) }
+        unsafe { Self::backend().allocate::<ZEROED>(layout) }
     }
 
     #[inline]
     unsafe fn deallocate(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: The selected backend owns the block with this layout.
-        unsafe { selected(&SELECTED, from_environment).deallocate(ptr, layout) };
+        unsafe { Self::backend().deallocate(ptr, layout) };
     }
 
     #[inline]
     unsafe fn reallocate(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         // SAFETY: The owning backend receives the caller's valid resize.
-        unsafe { selected(&SELECTED, from_environment).reallocate(ptr, layout, new_size) }
+        unsafe { Self::backend().reallocate(ptr, layout, new_size) }
     }
 
     unsafe fn reallocate_recorded(&self, ptr: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
         // SAFETY: The owning backend handles the resize and the callback together.
-        unsafe { selected(&SELECTED, from_environment).reallocate_recorded(ptr, layout, new_size, record) }
+        unsafe { Self::backend().reallocate_recorded(ptr, layout, new_size, record) }
     }
 
     fn publish_state(&self) {
-        selected(&SELECTED, from_environment).publish_state();
+        Self::backend().publish_state();
     }
 }
 
@@ -116,7 +160,7 @@ unsafe impl Operations for Choice {
             match self {
                 Self::Snmalloc => Snmalloc.deallocate(ptr, layout),
                 Self::Mimalloc => Mimalloc.deallocate(ptr, layout),
-                Self::System => System.dealloc(ptr, layout),
+                Self::System => System.deallocate(ptr, layout),
             }
         }
     }
@@ -148,35 +192,9 @@ unsafe impl Operations for Choice {
         match self {
             Self::Snmalloc => Snmalloc.publish_state(),
             Self::Mimalloc => Mimalloc.publish_state(),
-            Self::System => {}
+            Self::System => System.publish_state(),
         }
     }
-}
-
-// SAFETY: System owns every block. Resize preparation allocates disjoint storage
-// without releasing the original, as required by the recorded resize protocol.
-unsafe impl Operations for System {
-    unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
-        if ZEROED {
-            // SAFETY: The caller supplies a valid nonzero allocation layout.
-            unsafe { self.alloc_zeroed(layout) }
-        } else {
-            // SAFETY: The same layout is valid for an uninitialized allocation.
-            unsafe { self.alloc(layout) }
-        }
-    }
-
-    unsafe fn deallocate(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: The caller supplies a live System block and its exact layout.
-        unsafe { self.dealloc(ptr, layout) };
-    }
-
-    unsafe fn reallocate(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        // SAFETY: The live System block, layout and new size meet GlobalAlloc's resize contract.
-        unsafe { self.realloc(ptr, layout, new_size) }
-    }
-
-    fn publish_state(&self) {}
 }
 
 #[cfg(test)]

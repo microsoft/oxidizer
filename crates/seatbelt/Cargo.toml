@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.12.1"
+version = "0.13.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -84,7 +84,7 @@ jiff = { workspace = true, default-features = true, features = ["serde"] }
 layered = { path = "../layered", features = ["tower-service", "dynamic-service"] }
 observed_destination_core = { workspace = true }
 observed_destination_stdout = { workspace = true }
-ohno = { path = "../ohno", features = ["app-err"] }
+ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
 rstest = { workspace = true }

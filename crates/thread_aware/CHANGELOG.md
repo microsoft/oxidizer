@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3] - 2026-11-24
+
+- Expand closure relocation and thread-coordinate regression coverage.
+- Use the same relocation test path under Miri.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+- Update the local requirement for `thread_aware_macros` from `=0.12.2` to `=0.12.3`.
+
 ## [0.12.2] - 2026-11-02
 
 - Expose `ThreadAware` implementations for `SocketAddr`, `SocketAddrV4`, and `SocketAddrV6` through

@@ -107,6 +107,7 @@ impl CompressionLevel {
     #[must_use]
     pub fn new(level: i32) -> Option<Self> {
         if level < zstd_safe::min_c_level() || level > zstd_safe::max_c_level() {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "The default of Option<CompressionLevel> is None.")]
             return None;
         }
 

@@ -30,6 +30,3 @@ pub mod readiness_request;
 
 #[cfg(any(test, feature = "http-readiness-tower"))]
 pub mod readiness_tower;
-
-#[cfg(test)]
-mod tests;

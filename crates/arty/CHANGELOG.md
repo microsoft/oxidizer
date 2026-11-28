@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Breaking: Move runtime policies into runtime::policy and replace panic configuration with hooks.
+- Use shutdown and owned worker access.
+- Add runtime names, worker and task hooks, shutdown causes, monitoring, and automatic monitor selection.
+- Remove the `monitor` Cargo feature and include monitoring support in `rt`. Use `MonitorPolicy` to control activation instead of a Cargo feature.
+- Update the local requirement for `arty_executor` from `=0.6.1` to `=0.7.0`.
+- Update the local requirement for `arty_io_core` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `arty_io_host` from `=0.6.1` to `=0.7.0`.
+- Update the local requirement for `arty_macros` from `=0.6.1` to `=0.7.0`.
+- Update the local requirement for `observed` from `^0.30.1` to `^0.31.0`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `seismograph_runtime` from `^0.5.0` to `^0.6.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+- Update the local requirement for `thread_aware_core` from `^0.1.3` to `^0.1.4`.
+- Update the local requirement for `tick` from `^0.9.1` to `^0.10.0`.
+
 ## [0.6.1] - 2026-11-06
 
 - Preserve self-borrows in deferred futures by keeping their storage stable while polling.

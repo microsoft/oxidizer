@@ -155,6 +155,26 @@ impl ThreadAware for SharedLog {
 }
 
 #[derive(Clone)]
+struct SpawnDebugLog(Arc<Mutex<Vec<String>>>);
+
+impl SpawnDebugLog {
+    fn push(&self, event: &TaskSpawn) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(format!("{event:?}"));
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+impl ThreadAware for SpawnDebugLog {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[derive(Clone)]
 struct SpawnSourceProbe {
     events: mpsc::Sender<(Option<ThreadId>, ThreadId)>,
     observers: mpsc::Sender<(Option<ThreadId>, ThreadId, ThreadId)>,
@@ -248,6 +268,41 @@ impl TaskObserver for PollRecorder {
         assert_eq!(outcome, self.outcome);
         self.log.push(self.after);
     }
+}
+
+#[test]
+fn task_spawn_debug_includes_the_public_spawn_location() {
+    let locations = SpawnDebugLog(Arc::new(Mutex::new(Vec::new())));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<TaskSpawn, _>::new(locations.clone(), |event, locations| {
+            locations.push(event);
+        }))
+        .build()
+        .unwrap();
+
+    let spawn_line = line!() + 1;
+    runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap();
+    let observed = locations.take();
+    assert_eq!(observed.len(), 1);
+    assert!(observed[0].contains("identity: TaskIdentity"));
+    assert!(observed[0].contains(&format!("file: {:?}, line: {spawn_line}", file!())));
+
+    let (result, local_spawn_line) = runtime
+        .scheduler()
+        .block_on(|cx| async move {
+            let local_spawn_line = line!() + 1;
+            let result = cx.scheduler().spawn(|_| async { 42 }).await;
+            (result, local_spawn_line)
+        })
+        .unwrap();
+    assert_eq!(result.unwrap(), 42);
+    let observed = locations.take();
+    assert_eq!(observed.len(), 2);
+    assert!(observed[0].contains(&format!("file: {:?}", file!())));
+    assert!(observed[1].contains(&format!("file: {:?}, line: {local_spawn_line}", file!())));
+
+    runtime.stop().unwrap();
 }
 
 #[test]
@@ -482,11 +537,11 @@ fn spawn_hook_covers_runtime_local_relocating_and_specific_worker_submissions() 
         .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
         .unwrap();
     let baseline = calls.load(Ordering::SeqCst);
-    let destination = control.workers().into_iter().next().unwrap();
+    let destination = control.workers().next().unwrap();
 
     scheduler.spawn(async |_| {}).join().unwrap();
     scheduler.spawn_anywhere((), |()| async {}).join().unwrap();
-    scheduler.spawn_at(destination, (), |()| async {}).join().unwrap();
+    scheduler.spawn_at(&destination, (), |()| async {}).join().unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst) - baseline, 3);
     runtime.stop().unwrap();
@@ -518,9 +573,8 @@ fn spawn_hook_uses_the_actual_submitting_worker() {
     let (scheduler, destination, target) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers = cx.control().workers();
-            let destination = workers.into_iter().find(|worker| worker.id() != cx.thread().id()).unwrap().clone();
-            let target = workers.into_iter().find(|worker| worker.id() == cx.thread().id()).unwrap().clone();
+            let destination = cx.control().workers().find(|worker| worker.id() != cx.thread().id()).unwrap();
+            let target = cx.control().workers().find(|worker| worker.id() == cx.thread().id()).unwrap();
             (cx.scheduler().clone(), destination, target)
         })
         .unwrap();
@@ -576,13 +630,7 @@ fn worker_originated_spawn_runs_the_complete_hook_lifecycle() {
     let (scheduler, source, destination) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let destination = cx
-                .control()
-                .workers()
-                .into_iter()
-                .find(|worker| worker.id() != cx.thread().id())
-                .unwrap()
-                .clone();
+            let destination = cx.control().workers().find(|worker| worker.id() != cx.thread().id()).unwrap();
             (cx.scheduler().clone(), cx.thread().clone(), destination)
         })
         .unwrap();
@@ -710,13 +758,7 @@ fn detached_scheduler_relocates_and_starts_observer_before_factory() {
         .scheduler()
         .block_on(async |cx| {
             let source = cx.thread().id();
-            let destination = cx
-                .control()
-                .workers()
-                .into_iter()
-                .find(|worker| worker.id() != source)
-                .unwrap()
-                .clone();
+            let destination = cx.control().workers().find(|worker| worker.id() != source).unwrap();
             cx.control().on(HookFn::<TaskSpawn, _>::new(
                 NeutralSpawnProbe {
                     factory_created: Arc::clone(&factory_created),
@@ -800,14 +842,13 @@ fn control_registration_precedes_later_task_submissions() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers() {
+    for _ in 0..control.workers().len() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at(worker, (), |()| async {}))
+        .map(|worker| scheduler.spawn_at(&worker, (), |()| async {}))
         .collect();
     for task in tasks {
         task.join().unwrap();
@@ -1255,7 +1296,7 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
     let (workers, source, scheduler) = runtime
         .scheduler()
         .block_on(async |cx| {
-            let workers: Vec<_> = cx.control().workers().into_iter().cloned().collect();
+            let workers: Vec<_> = cx.control().workers().collect();
             let source = cx.thread().id();
             cx.control().on(HookFn::<TaskPanic, _>::new(
                 RemotePanicProbe {
@@ -1358,7 +1399,7 @@ fn control_worker_spawn_runs_once_on_every_worker() {
             data.initialized.send(()).unwrap();
         },
     ));
-    for _ in control.workers() {
+    for _ in 0..control.workers().len() {
         initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
@@ -1484,12 +1525,39 @@ fn control_ignores_registration_after_shutdown_starts() {
 
 #[test]
 fn control_clones_nonretained_hook_data_for_each_worker() {
+    struct RegistrationData {
+        clone_count: CloneCount,
+        _original: Option<Arc<()>>,
+    }
+
+    impl Clone for RegistrationData {
+        fn clone(&self) -> Self {
+            Self {
+                clone_count: self.clone_count.clone(),
+                _original: None,
+            }
+        }
+    }
+
+    impl ThreadAware for RegistrationData {
+        fn relocate(&mut self, _: Option<&Thread>, _: &Thread) {}
+    }
+
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
+    let original = Arc::new(());
+    let original_lifetime = Arc::downgrade(&original);
 
-    control.on(HookFn::<TaskPanic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
+    control.on(HookFn::<TaskPanic, _>::new(
+        RegistrationData {
+            clone_count: CloneCount(Arc::clone(&clones)),
+            _original: Some(original),
+        },
+        |_event, _data| {},
+    ));
 
     assert_eq!(clones.load(Ordering::SeqCst), 1);
+    assert!(original_lifetime.upgrade().is_none());
     runtime.stop().unwrap();
 }

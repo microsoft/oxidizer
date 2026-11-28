@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0] - 2026-11-24
+
+- Update entry-point expansion for runtime policies and panic hooks.
+- Document automatic monitoring for application and test entry points.
+- Update the local requirement for `arty_macros_impl` from `=0.6.1` to `=0.7.0`.
+- Align the version with the `arty` package group at `0.7.0`.
+
 ## [0.6.1] - 2026-11-06
 
 - Match the version of the `arty` package group. The macro source and

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-11-24
+
+- Breaking: Use allocator source schema 5 with backend-specific snmalloc and mimalloc state.
+- Reject older allocator schemas.
+- Track resize operations and view-local allocation identities without merging address reuse.
+- Update the local requirement for `seismograph` from `^0.5.0` to `^0.6.0`.
+
 ## [0.5.0] - 2026-11-06
 
 - Breaking: Emit allocator source schema 4 and accept schemas 3 and 4 when decoding.

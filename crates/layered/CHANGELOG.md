@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.10] - 2026-11-24
+
+- Update mutation-test configuration and the Plurality requirement.
+- Update the local requirement for `plurality` from `^0.2.4` to `^0.2.5`.
+
 ## [0.3.9] - 2026-11-02
 
 - Simplify public documentation and clarify the documentation for optional features. Service

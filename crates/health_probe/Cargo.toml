@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/health_prob
 [package.metadata.cargo_check_external_types]
 # The crate is an interoperability adapter over these public contracts.
 allowed_external_types = [
-    "health::aggregator::Monitor",
+    "health::monitor::Monitor",
     "http::request::Request",
     "http::response::Response",
     "http_extensions::request_handler::RequestHandler",
@@ -32,7 +32,7 @@ all-features = true
 
 [package.metadata.anvil.examples]
 # The server runs until the process receives an external shutdown request.
-no-run = ["axum"]
+no-run = ["health_probe_axum"]
 
 [features]
 default = []
@@ -58,13 +58,22 @@ http.workspace = true
 http_extensions = { path = "../http_extensions", default-features = false, features = ["test-util"] }
 layered = { path = "../layered", default-features = false }
 observed = { path = "../observed" }
+testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", default-features = false, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
 
 [[example]]
-name = "axum"
+name = "health_probe_axum"
+required-features = ["http-readiness-tower"]
+
+[[test]]
+name = "http_readiness_request"
+required-features = ["http-readiness-request"]
+
+[[test]]
+name = "http_readiness_tower"
 required-features = ["http-readiness-tower"]
 
 # >>> anvil-managed: anvil-lints

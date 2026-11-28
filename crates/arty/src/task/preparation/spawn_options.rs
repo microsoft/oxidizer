@@ -2,37 +2,30 @@
 // Licensed under the MIT License.
 
 use arty_executor::{TaskCompletion, TaskInstrumentation, TaskSet};
+use seismograph_runtime::TaskIdentity;
 
 use crate::core::Thread;
 use crate::runtime::hook::TaskObservers;
 /// Captures submission metadata before a task crosses threads.
-pub(crate) struct TaskSpawnOptions {
-    #[cfg(any(test, feature = "monitor"))]
+pub(crate) struct SpawnOptions {
+    identity: TaskIdentity,
     parent: Option<seismograph::recorder::runtime::TaskId>,
-    #[cfg(any(test, feature = "monitor"))]
-    describe_type: fn() -> seismograph::recorder::runtime::TypeDescriptorId,
-    #[cfg(any(test, feature = "monitor"))]
     future_size: usize,
     observers: Option<TaskObservers>,
 }
 
-impl TaskSpawnOptions {
-    pub(crate) fn new<Body: 'static>() -> Self {
-        Self::with_future_size::<Body>(size_of::<Body>())
-    }
-
-    pub(crate) fn with_future_size<Body: 'static>(future_size: usize) -> Self {
-        #[cfg(not(any(test, feature = "monitor")))]
-        let _ = future_size;
+impl SpawnOptions {
+    pub(crate) fn new(identity: TaskIdentity, future_size: usize, parent: Option<TaskIdentity>) -> Self {
         Self {
-            #[cfg(any(test, feature = "monitor"))]
-            parent: crate::runtime::monitoring::current_task(),
-            #[cfg(any(test, feature = "monitor"))]
-            describe_type: crate::runtime::monitoring::descriptor::<Body>,
-            #[cfg(any(test, feature = "monitor"))]
+            identity,
+            parent: parent.map(TaskIdentity::id),
             future_size,
             observers: None,
         }
+    }
+
+    pub(crate) const fn identity(&self) -> TaskIdentity {
+        self.identity
     }
 
     pub(crate) fn observed_by(mut self, observers: Option<TaskObservers>) -> Self {
@@ -57,10 +50,6 @@ impl TaskSpawnOptions {
         }
     }
 
-    #[cfg_attr(
-        not(any(test, feature = "monitor")),
-        expect(clippy::unused_self, reason = "Submission metadata is empty when monitoring is compiled out.")
-    )]
     fn register_with<F, T, I>(self, tasks: &TaskSet, future: F, completion: T, instrumentation: I)
     where
         F: IntoFuture + 'static,
@@ -68,19 +57,15 @@ impl TaskSpawnOptions {
         T: TaskCompletion<F::Output>,
         I: TaskInstrumentation,
     {
-        #[cfg(any(test, feature = "monitor"))]
         crate::runtime::monitoring::register_monitored(
             tasks,
             future,
             completion,
             instrumentation,
+            self.identity,
             self.parent,
-            self.describe_type,
             self.future_size,
         );
-        // #[gamma::skip(stmt.delete_call, reason = "This branch is absent from Gamma's all-features builds; runtime-only integration tests exercise it.")]
-        #[cfg(not(any(test, feature = "monitor")))]
-        tasks.task(future).instrument(instrumentation).register(completion);
     }
 }
 
@@ -96,7 +81,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::Shutdown;
-    use crate::runtime::monitoring::{enter_current, set_events};
+    use crate::runtime::monitoring::set_events;
     use crate::task::handle::JoinHandlePool;
 
     #[test]
@@ -106,20 +91,36 @@ mod tests {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("submission-metadata", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        let parent = seismograph_runtime::allocate_task_id();
-        let options = {
-            let _parent = enter_current(parent);
-            TaskSpawnOptions::with_future_size::<ErasedFuture>(37)
-        };
-        let _other_parent = enter_current(seismograph_runtime::allocate_task_id());
+        let parent = TaskIdentity::from_location(std::panic::Location::caller());
+        let identity = TaskIdentity::from_location(std::panic::Location::caller());
         set_events(Some(worker.handle().task_events()));
         let _events = scopeguard::guard((), |()| set_events(None));
         let mut executor = Executor::builder().build();
         let results = JoinHandlePool::new(Shutdown::default());
+        let options = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let submitted = std::rc::Rc::clone(&options);
+        let (_handle, sender) = results.handle();
+        let parent_tasks = executor.tasks();
+        executor
+            .tasks()
+            .task(parent, async move {
+                *submitted.borrow_mut() = Some(SpawnOptions::new(identity, 37, parent_tasks.current()));
+            })
+            .register(sender);
+        let _ = executor.execute_cycle();
+        let options = options.borrow_mut().take().unwrap();
         let (_handle, sender) = results.handle();
         let future: ErasedFuture = Box::pin(std::future::pending());
         let destination = ThreadBuilder::default().build(std::thread::current().id());
-        options.register(&destination, &executor.tasks(), future, sender);
+        let tasks = executor.tasks();
+        let (_other_handle, other_sender) = results.handle();
+        executor
+            .tasks()
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), async move {
+                options.register(&destination, &tasks, future, sender);
+            })
+            .register(other_sender);
+        let _ = executor.execute_cycle();
         let mut snapshots = Vec::new();
 
         let status = executor
@@ -128,7 +129,14 @@ mod tests {
 
         assert_eq!(status, InspectionStatus::Complete);
         assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].parent, Some(parent));
+        assert_eq!(
+            (snapshots[0].id, snapshots[0].type_descriptor),
+            (identity.id(), identity.descriptor())
+        );
+        assert_eq!(snapshots[0].parent, Some(parent.id()));
         assert_eq!(snapshots[0].future_size_bytes, Some(37));
+        let mut identities = Vec::new();
+        executor.inspect(1, |identity: &TaskIdentity| identities.push(*identity)).unwrap();
+        assert_eq!(identities, [identity]);
     }
 }

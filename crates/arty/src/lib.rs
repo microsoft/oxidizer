@@ -66,17 +66,17 @@
 //!
 //! # Features
 //!
-//! The default feature set enables `rt`, `macros`, and `monitor`.
+//! The default feature set enables `rt` and `macros`.
 //!
-//! - `rt`: Enables the runtime, task, and I/O APIs.
-//! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Connects runtime workers and tasks to Seismograph. The default
+//! - `rt`: Enables the runtime, task, and I/O APIs. It also connects runtime
+//!   workers and tasks to Seismograph and enables the `seismograph` feature of
+//!   `performables`. The default
 //!   [`MonitorPolicy`](crate::runtime::policy::MonitorPolicy) disables monitoring for
 //!   tests, doctests, documentation examples, and Miri. It enables monitoring
 //!   in other environments. An enabled policy starts a local connection for the
 //!   Seismograph CLI. Task collection runs on request. Event recording stays off
-//!   until an application or the CLI enables it. This feature also forwards
-//!   monitoring support for `performables` when `performables` is enabled.
+//!   until an application or the CLI enables it.
+//! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -87,11 +87,12 @@ extern crate self as arty;
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.
 ///
-/// Apply it to an `async fn` that takes one owned
-/// [`Context`](crate::task::Context) argument. It creates a synchronous
+/// Apply it to an `async fn` with no arguments or one owned
+/// [`Context`](crate::task::Context) argument. Omit the argument if the body
+/// does not need the context. It creates a synchronous
 /// function with no arguments and the same visibility and return type.
 /// The async body runs on an Arty worker, not on the calling thread. For
-/// example, name the argument `cx` or `_cx`. The argument must be an identifier.
+/// example, name the context argument `cx`. The argument must be an identifier.
 /// The attribute does not support `_` or destructuring patterns.
 ///
 /// The runtime stops when the body returns. Await required child tasks first.
@@ -110,7 +111,7 @@ use arty_io_core as _;
 ///   causes runtime construction to fail.
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
-///   starts a local Seismograph monitor when the `monitor` feature is present.
+///   starts a local Seismograph monitor.
 ///   The default uses [`MonitorPolicy::auto`](crate::runtime::policy::MonitorPolicy::auto).
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.
@@ -142,6 +143,18 @@ use arty_io_core as _;
 /// directly. Starting or preparing worker threads can still panic.
 ///
 /// # Examples
+///
+/// Run an async function that does not need the context:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main]
+/// async fn main() {
+///     let answer = std::future::ready(42).await;
+///     assert_eq!(answer, 42);
+/// }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
 ///
 /// Wait briefly and print a message:
 ///
@@ -191,11 +204,11 @@ use arty_io_core as _;
 pub use arty_macros::main;
 /// Runs an async test on an Arty runtime.
 ///
-/// Apply it to an `async fn` taking one owned
+/// Apply it to an `async fn` with no arguments or one owned
 /// [`Context`](crate::task::Context) argument. It registers a synchronous
 /// test that starts its own runtime, runs the body on a worker, and stops the
 /// runtime when the body returns.
-/// Name the argument `_cx` if it is unused.
+/// Omit the context argument if the body does not need it.
 ///
 /// The test keeps its return value, visibility, and attributes such as
 /// `#[should_panic]` and `#[ignore]`. An ignored test starts no runtime unless
@@ -225,7 +238,7 @@ pub use arty_macros::main;
 /// The control argument works with `workers`. To use a custom runtime builder
 /// with controlled time, create the control in a synchronous test and call
 /// `builder.clock(control.clone()).build()`. Enabling `test-util` alone does
-/// not change a one-argument test's clock.
+/// not change a test's clock without the second argument.
 ///
 /// # Panics
 ///
@@ -262,7 +275,7 @@ pub use arty_macros::main;
 /// ```no_run,test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
-/// async fn monitored(_cx: arty::task::Context) {}
+/// async fn monitored() {}
 /// ```
 ///
 /// Keep the test runtime running after Arty catches a child task's panic:

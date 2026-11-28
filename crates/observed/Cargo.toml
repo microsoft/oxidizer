@@ -4,7 +4,7 @@
 [package]
 name = "observed"
 description = "Structured telemetry events with enrichment, redaction, and per-field routing."
-version = "0.30.1"
+version = "0.31.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
@@ -33,7 +33,6 @@ all-features = true
 
 [features]
 default = []
-seismograph = ["performables/seismograph"]
 test-util = []
 
 [dependencies]
@@ -53,7 +52,7 @@ tick = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 metabench = { path = "../metabench" }
-ohno = { path = "../ohno", features = ["test-util"] }
+ohno = { workspace = true, features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }

@@ -221,6 +221,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unlock_dispatches_a_wake_only_after_contention() {
+        let mutex = Mutex::new();
+        let guard = mutex.try_lock().unwrap();
+        crate::sync::effects::take();
+        mutex.unlock(guard);
+        assert_eq!(crate::sync::effects::take().wake_dispatches, 0);
+
+        let guard = mutex.try_lock().unwrap();
+        // The test marks contention and releases the mutex on the same thread.
+        mutex.state.store(CONTENDED, Ordering::Relaxed);
+        mutex.unlock(guard);
+        assert_eq!(crate::sync::effects::take().wake_dispatches, 1);
+        assert!(mutex.try_lock().is_some());
+    }
+
+    #[test]
     fn gamma_round2_saturated_native_wait_chunks_receive_the_remaining_controlled_budget() {
         let mut elapsed = [2, 5, 11].into_iter();
         let mut budgets = Vec::new();

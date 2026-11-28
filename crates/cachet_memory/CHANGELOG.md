@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0] - 2026-11-24
+
+- Breaking: Remove the forwarding `seismograph` feature. Enable instrumentation directly on Performables 0.5 and configure the matching Seismograph 0.6 recorder.
+- Keep conditional capacity and removal-listener behavior with deterministic regression coverage.
+- Update the local requirement for `cachet_tier` from `^0.6.1` to `^0.6.2`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+- Update the local requirement for `performables` from `^0.4.0` to `^0.5.0`.
+- Update the local requirement for `thread_aware` from `^0.12.2` to `^0.12.3`.
+
 ## [0.9.2] - 2026-11-06
 
 - Update published local dependency requirements. No direct source change.

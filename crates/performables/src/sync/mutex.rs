@@ -216,14 +216,17 @@ impl<T: ?Sized> Mutex<T, Async> {
     /// Returns [`Error`] with the acquired guard if another thread
     /// poisoned the mutex.
     pub(super) fn lock_result_inner(&self) -> Result<MutexGuard<'_, T, Async>, Error<MutexGuard<'_, T, Async>>> {
+        self.lock_result_with(block_on)
+    }
+
+    fn lock_result_with<'a>(
+        &'a self,
+        wait: impl FnOnce(MutexLockFuture<'a, T>) -> Result<MutexGuard<'a, T, Async>, Error<MutexGuard<'a, T, Async>>>,
+    ) -> Result<MutexGuard<'a, T, Async>, Error<MutexGuard<'a, T, Async>>> {
         if matches!(self.try_acquire(), Acquisition::Acquired) {
             return self.acquired();
         }
 
-        self.wait_with_recorded_contention(block_on)
-    }
-
-    fn wait_with_recorded_contention<'a, R>(&'a self, wait: impl FnOnce(MutexLockFuture<'a, T>) -> R) -> R {
         self.record(EventKind::MutexContention);
         wait(MutexLockFuture {
             mutex: self,
@@ -543,13 +546,18 @@ mod tests {
         let mutex = super::Mutex::<_, crate::sync::Async>::new(7);
         let held = mutex.lock();
         let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::MutexContention);
-        mutex.wait_with_recorded_contention(|mut future| {
+        let guard = mutex.lock_result_with(|mut future| {
             assert!(future.contention_recorded);
             let mut context = std::task::Context::from_waker(std::task::Waker::noop());
             assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
             assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+            drop(held);
+            let Poll::Ready(result) = Pin::new(&mut future).poll(&mut context) else {
+                panic!("released mutex must complete the queued acquisition");
+            };
+            result
         });
-        drop(held);
+        assert_eq!(*guard.unwrap(), 7);
         assert_eq!(
             crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::MutexContention),
             before + 1
@@ -561,6 +569,16 @@ mod tests {
     use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[test]
+    fn uncontended_async_mutex_does_not_wait() {
+        let mutex = Mutex::<_, Async>::new(7);
+        let guard = mutex
+            .lock_result_with(|_| panic!("acquiring an unheld mutex must not wait"))
+            .unwrap();
+        assert_eq!(*guard, 7);
+        assert!(mutex.try_lock().is_none());
+    }
 
     #[test]
     fn gamma_survivor_mutex_ready_completion_drops_private_waiter_before_future_drop() {

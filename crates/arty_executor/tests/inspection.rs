@@ -12,6 +12,7 @@ use std::task::{Context, Poll, Waker};
 use arty_executor::{
     Executor, InspectionError, InspectionStatus, PollObserver, Shutdown, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskState,
 };
+use seismograph_runtime::TaskIdentity;
 
 #[derive(Debug)]
 struct Completion;
@@ -55,7 +56,7 @@ fn inspect_completion(future: impl Future<Output = ()> + 'static, poll: bool) ->
     let inspected = Rc::clone(&inspections);
     executor
         .tasks()
-        .task(future)
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), future)
         .inspect(move |_| {
             inspected.set(inspected.get() + 1);
             Some(inspected.get())
@@ -100,7 +101,7 @@ fn ordinary_cycles_do_not_inspect_the_completion_target() {
     let outcome = Rc::new(Cell::new(None));
     executor
         .tasks()
-        .task(std::future::ready(()))
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::ready(()))
         .inspect(|_| -> Option<()> { panic!("ordinary cycles must not inspect task metadata") })
         .register(InspectedCompletion {
             inspections: Rc::new(Cell::new(0)),
@@ -119,7 +120,7 @@ fn completion_inspection_can_decline_without_losing_the_result() {
     let inspected = Rc::clone(&inspections);
     executor
         .tasks()
-        .task(std::future::ready(()))
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::ready(()))
         .inspect(move |_| {
             inspected.set(inspected.get() + 1);
             None::<u32>
@@ -172,10 +173,13 @@ fn inspection_builder_defers_conversion_and_inspects_the_native_future() {
     let tasks = executor.tasks();
     let converted = Rc::new(Cell::new(false));
     let builder = tasks
-        .task(InspectionInput {
-            converted: Rc::clone(&converted),
-            shutdown: None,
-        })
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            InspectionInput {
+                converted: Rc::clone(&converted),
+                shutdown: None,
+            },
+        )
         .inspect(|state| Some((42_u32, state)));
 
     assert!(!converted.get());
@@ -196,7 +200,7 @@ fn layered_inspectors_emit_descriptions_in_registration_order() {
     let mut executor = Executor::builder().build();
     executor
         .tasks()
-        .task(std::future::ready(42))
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::ready(42))
         .inspect(|state| Some((1_u8, state)))
         .inspect(|state| Some((2_u8, state)))
         .register(Completion);
@@ -236,10 +240,13 @@ fn inspected_input_checks_shutdown_before_and_after_conversion() {
         let converted = Rc::new(Cell::new(false));
         let canceled = Rc::new(Cell::new(false));
         let builder = tasks
-            .task(InspectionInput {
-                converted: Rc::clone(&converted),
-                shutdown: stop_during_conversion.then(|| executor.shutdown()),
-            })
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                InspectionInput {
+                    converted: Rc::clone(&converted),
+                    shutdown: stop_during_conversion.then(|| executor.shutdown()),
+                },
+            )
             .inspect(|_| Some(42_u32));
 
         if !stop_during_conversion {
@@ -259,7 +266,10 @@ fn ordinary_cycles_never_construct_diagnostic_descriptions() {
     let calls = Rc::new(Cell::new(0));
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect({
             let calls = Rc::clone(&calls);
             move |state| {
@@ -285,7 +295,11 @@ fn inspection_reports_native_waiting_and_notified_state_without_consuming_wakes(
             Poll::<()>::Pending
         }
     });
-    executor.tasks().task(future).inspect(Some).register(Completion);
+    executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), future)
+        .inspect(Some)
+        .register(Completion);
     let _ = executor.execute_cycle();
     let mut before = Vec::new();
     executor.inspect(10, |state: &TaskState| before.push(*state)).unwrap();
@@ -307,8 +321,18 @@ fn inspection_reports_native_waiting_and_notified_state_without_consuming_wakes(
 fn inspection_counts_undescribed_tasks_toward_the_work_bound() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    tasks.task(std::future::pending::<()>()).register(Completion);
-    tasks.task(std::future::pending::<()>()).register(Completion);
+    tasks
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
+        .register(Completion);
+    tasks
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
+        .register(Completion);
     let mut described = Vec::new();
 
     let status = executor.inspect(1, |value: &u32| described.push(*value)).unwrap();
@@ -322,7 +346,10 @@ fn complete_inspection_visits_pending_tasks_and_enforces_its_limit() {
     for id in 1..=3 {
         executor
             .tasks()
-            .task(std::future::pending::<()>())
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::pending::<()>(),
+            )
             .inspect(move |_| Some(id))
             .register(Completion);
     }
@@ -345,7 +372,10 @@ fn inspection_ignores_descriptions_of_a_different_type() {
     let mut executor = Executor::builder().build();
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect(Some)
         .register(Completion);
     let mut described = Vec::new();
@@ -361,7 +391,10 @@ fn inspectors_can_decline_to_describe_a_task() {
     let calls = Rc::new(Cell::new(0));
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect({
             let calls = Rc::clone(&calls);
             move |_| {
@@ -382,7 +415,10 @@ fn invalid_limits_and_panicking_visitors_report_errors() {
     let mut executor = Executor::builder().build();
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect(|_| Some(42_u32))
         .register(Completion);
 
@@ -419,7 +455,7 @@ fn inspector_panic_payload_disposal_is_contained_in_both_entry_points() {
     let ran = Rc::new(Cell::new(false));
     executor
         .tasks()
-        .task({
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), {
             let ran = Rc::clone(&ran);
             async move {
                 ran.set(true);
@@ -457,7 +493,10 @@ fn observer_panics_propagate_and_live_active_tasks_remain_inspectable() {
     for id in 1..=3 {
         executor
             .tasks()
-            .task(std::future::pending::<()>())
+            .task(
+                TaskIdentity::from_location(std::panic::Location::caller()),
+                std::future::pending::<()>(),
+            )
             .inspect(move |_| Some(id))
             .register(Completion);
     }
@@ -498,7 +537,7 @@ fn a_woken_pending_task_is_inspected_once_after_an_observer_panics() {
     });
     executor
         .tasks()
-        .task(future)
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), future)
         .inspect(|state| Some((7_u32, state)))
         .register(Completion);
     let _ = executor.execute_cycle();
@@ -572,7 +611,7 @@ fn inspector_capture_drop_panics_preserve_each_terminal_notification() {
         });
         executor
             .tasks()
-            .task(future)
+            .task(TaskIdentity::from_location(std::panic::Location::caller()), future)
             .inspect({
                 let capture = Capture(Rc::clone(&drops));
                 move |_| {
@@ -618,7 +657,10 @@ fn submissions_with_inspection_after_shutdown_report_cancellation_without_pollin
 
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect(|_| Some(42_u32))
         .register(Canceled(Rc::clone(&canceled)));
 
@@ -672,10 +714,13 @@ fn rejected_inspector_cleanup_panics_are_disposed_before_cancellation() {
         let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             executor
                 .tasks()
-                .task(InspectionInput {
-                    converted: Rc::clone(&converted),
-                    shutdown: stop_during_conversion.then(|| executor.shutdown()),
-                })
+                .task(
+                    TaskIdentity::from_location(std::panic::Location::caller()),
+                    InspectionInput {
+                        converted: Rc::clone(&converted),
+                        shutdown: stop_during_conversion.then(|| executor.shutdown()),
+                    },
+                )
                 .inspect({
                     let capture = Capture(Arc::clone(&calls));
                     move |_| {
@@ -735,9 +780,11 @@ impl PollObserver for Observer {
 fn observed_polls_pair_callbacks_only_for_described_tasks() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
-    tasks.task(async {}).register(Completion);
     tasks
-        .task(async {})
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .register(Completion);
+    tasks
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
         .inspect(|_| Some(42_u32))
         .inspect(|_| Some(42_u32))
         .register(Completion);
@@ -756,7 +803,7 @@ fn observed_polls_borrow_the_completion_target() {
     let inspected = Rc::clone(&inspections);
     executor
         .tasks()
-        .task(std::future::ready(()))
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), std::future::ready(()))
         .inspect(move |state| {
             assert_eq!(state, TaskState::Running);
             inspected.set(inspected.get() + 1);
@@ -782,7 +829,10 @@ fn rejected_tasks_cancel_the_completion_target_without_inspecting_it() {
 
     executor
         .tasks()
-        .task(std::future::pending::<()>())
+        .task(
+            TaskIdentity::from_location(std::panic::Location::caller()),
+            std::future::pending::<()>(),
+        )
         .inspect(|_| -> Option<()> { panic!("a stopped executor must not inspect rejected tasks") })
         .register(InspectedCompletion {
             inspections: Rc::new(Cell::new(7)),
@@ -798,7 +848,7 @@ fn a_panicking_description_does_not_prevent_its_task_from_running() {
     let ran = Rc::new(Cell::new(false));
     executor
         .tasks()
-        .task({
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), {
             let ran = Rc::clone(&ran);
             async move {
                 ran.set(true);
@@ -840,7 +890,11 @@ fn a_panicking_description_drop_cancels_the_started_observation() {
         }
     }
     let mut executor = Executor::builder().build();
-    executor.tasks().task(async {}).inspect(|_| Some(Description)).register(Completion);
+    executor
+        .tasks()
+        .task(TaskIdentity::from_location(std::panic::Location::caller()), async {})
+        .inspect(|_| Some(Description))
+        .register(Completion);
     let observer = Calls::default();
 
     let _ = executor.execute_cycle_observed(&observer);

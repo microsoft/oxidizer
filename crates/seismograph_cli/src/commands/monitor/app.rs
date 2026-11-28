@@ -2262,6 +2262,7 @@ fn report_capture_step(progress: &Sender<CaptureMessage>, step: CaptureStep) -> 
 
 pub(super) fn format_sampling_percentage(sampling_one_in: u32) -> String {
     let percentage = 100.0 / f64::from(sampling_one_in.max(1));
+    // #[gamma::skip(relational.ge_to_gt, reason = "At every precision boundary both formats differ only in trailing zeroes that are removed below")]
     let precision = if percentage >= 10.0 {
         1
     } else if percentage >= 1.0 {
@@ -2321,6 +2322,11 @@ mod tests {
         view.activity_scroll = RUNTIME_HISTOGRAM_BINS - 1;
         handle_runtime_key(KeyCode::Right, &mut view, None);
         assert_eq!(view.activity_scroll, RUNTIME_HISTOGRAM_BINS - 1);
+        assert!(handle_runtime_key(KeyCode::Down, &mut view, None));
+        assert_eq!(view.activity_scroll, RUNTIME_HISTOGRAM_BINS - 1);
+        view.activity_scroll = 2;
+        assert!(handle_runtime_key(KeyCode::Down, &mut view, None));
+        assert_eq!(view.activity_scroll, 3);
         view.focus = RuntimeFocus::Workers;
         view.activity_scroll = 3;
         assert!(!handle_runtime_key(KeyCode::Left, &mut view, None));
@@ -2330,6 +2336,28 @@ mod tests {
         assert!(handle_runtime_key(KeyCode::Char('t'), &mut view, None));
         assert_eq!(view.focus, RuntimeFocus::Activity);
         assert_eq!(view.task_histogram, before.toggle());
+    }
+
+    #[test]
+    fn runtime_histogram_page_keys_move_and_clamp_only_when_focused() {
+        let mut view = RuntimeViewState::new();
+        assert!(!handle_runtime_key(KeyCode::PageUp, &mut view, None));
+        assert!(!handle_runtime_key(KeyCode::PageDown, &mut view, None));
+        assert_eq!(view.activity_scroll, 0);
+
+        view.focus = RuntimeFocus::Activity;
+        // Check the page distance in both directions and clamp at both ends.
+        for (key, expected) in [
+            (KeyCode::PageDown, 5),
+            (KeyCode::PageDown, 10),
+            (KeyCode::PageDown, RUNTIME_HISTOGRAM_BINS - 1),
+            (KeyCode::PageUp, RUNTIME_HISTOGRAM_BINS - 6),
+            (KeyCode::PageUp, RUNTIME_HISTOGRAM_BINS - 11),
+            (KeyCode::PageUp, 0),
+        ] {
+            assert!(handle_runtime_key(key, &mut view, None));
+            assert_eq!(view.activity_scroll, expected, "{key:?}");
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
 [package]
 name = "ohno_macros"
 description = "Macros for the ohno crate."
-version = "0.5.4"
+version = "0.5.5"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
@@ -35,7 +35,7 @@ min-lines-percent = 0
 proc-macro = true
 
 [dependencies]
-ohno_macros_impl = { workspace = true }
+ohno_macros_impl = { path = "../ohno_macros_impl", default-features = false, version = "=0.5.5" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

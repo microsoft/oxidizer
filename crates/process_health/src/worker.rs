@@ -34,7 +34,6 @@ pub(crate) enum Work {
 pub(crate) struct Worker {
     pub(crate) sender: Sender<Work>,
     thread: Option<JoinHandle<()>>,
-    sink: Sink,
     status: Arc<Status>,
 }
 
@@ -43,11 +42,13 @@ impl Worker {
         let (sender, receiver) = mpsc::channel();
         let status = Arc::new(Status::new());
         let worker_status = Arc::clone(&status);
+        let worker_sink = sink.clone();
         let spawned = thread::Builder::new().name(String::from(WORKER_NAME)).spawn(move || {
             // Disconnect all work queues before invoking terminal wakers, outside any unwind.
             let outcome = catch_unwind(AssertUnwindSafe(move || run(receiver, aggregate)));
             worker_status.stop();
             if let Err(cause) = outcome {
+                emit_worker_terminated(&worker_sink);
                 resume_unwind(cause);
             }
         });
@@ -56,7 +57,10 @@ impl Worker {
 
     fn from_spawn(sender: Sender<Work>, status: Arc<Status>, spawned: io::Result<JoinHandle<()>>, sink: Sink) -> Self {
         let thread = match spawned {
-            Ok(thread) => Some(thread),
+            Ok(thread) => {
+                drop(sink);
+                Some(thread)
+            }
             Err(error) => {
                 status.stop();
                 emit!(
@@ -69,12 +73,7 @@ impl Worker {
                 None
             }
         };
-        Self {
-            sender,
-            thread,
-            sink,
-            status,
-        }
+        Self { sender, thread, status }
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -99,15 +98,23 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         if let Some(thread) = self.request_stop()
-            && thread.join().map_err(discard_panic).is_err()
+            && let Err(cause) = thread.join()
         {
-            emit!(
-                &self.sink,
-                WorkerTerminated {
-                    worker: WorkerName(WORKER_NAME),
-                }
-            );
+            discard_panic(cause);
         }
+    }
+}
+
+fn emit_worker_terminated(sink: &Sink) {
+    if let Err(cause) = catch_unwind(AssertUnwindSafe(|| {
+        emit!(
+            sink,
+            WorkerTerminated {
+                worker: WorkerName(WORKER_NAME),
+            }
+        );
+    })) {
+        discard_panic(cause);
     }
 }
 
@@ -225,8 +232,11 @@ mod tests {
 
     use futures::FutureExt;
     use observed::Severity;
+    use observed::metadata::EventDescription;
+    use observed::processing::{EventProcessor, EventView};
     use observed_testing::{TEST_ID, test_emitter};
     use performables::sync::channel::watch;
+    use tick::SimpleClock;
 
     use super::*;
     use crate::Component;
@@ -242,13 +252,13 @@ mod tests {
         worker.sender.send(Work::Register(1, actor)).unwrap();
         let component = Component::new(ComponentOwner::new(shared, Arc::clone(&worker)));
         let mut publisher = component.publisher();
-        publisher.publish(Health::Healthy, [("revision", 1)]);
+        publisher.publish(Health::Healthy, [("revision", "1")]);
 
         worker.sender.send(Work::Stop).unwrap();
         thread.join().unwrap();
         let report = futures::executor::block_on(component.report());
         assert_eq!(report.publisher_count(Health::Healthy), 1);
-        assert_eq!(report.signals(Health::Healthy).next().unwrap().0, *publisher.signal());
+        assert_eq!(report.signals(Health::Healthy).next().unwrap().0.state(), Health::Healthy);
         assert!(!worker.is_running());
     }
 
@@ -267,6 +277,26 @@ mod tests {
     #[test]
     #[cfg_attr(panic = "abort", ignore = "requires worker unwinding")]
     fn worker_exit_preserves_the_original_panic_across_terminal_callbacks() {
+        struct Diagnostic;
+        impl Drop for Diagnostic {
+            fn drop(&mut self) {
+                panic_any(());
+            }
+        }
+        struct PanickingProcessor;
+        impl EventProcessor for PanickingProcessor {
+            fn is_interested(&self, _description: &EventDescription) -> bool {
+                true
+            }
+
+            fn process(&self, _event: &EventView<'_>) {
+                panic_any(Diagnostic);
+            }
+
+            fn flush(&self) -> Result<(), observed::FlushError> {
+                Ok(())
+            }
+        }
         struct Initial;
         struct Final;
         impl Drop for Final {
@@ -289,7 +319,13 @@ mod tests {
                 panic_any(Secondary);
             }
         }
-        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop())).unwrap();
+        let (capturing_sink, processor) = test_emitter(TEST_ID);
+        let panicking_sink = Sink::builder("panicking")
+            .clock(SimpleClock::new_frozen())
+            .processors(vec![Arc::new(PanickingProcessor)])
+            .build();
+        let sink = Sink::composite([capturing_sink, panicking_sink]);
+        let mut worker = Arc::into_inner(Worker::new(ProcessAggregate::new(Weak::new()), sink)).unwrap();
         let thread = worker.thread.take().unwrap();
         let worker = Arc::new(worker);
         let (shared, actor) = ComponentShared::new(Arc::from("database"), 1, worker.sender.clone(), Arc::default());
@@ -303,6 +339,9 @@ mod tests {
         // The expected callback panic may already have disconnected the worker.
         let _ = worker.sender.send(Work::Stop);
         assert!(thread.join().unwrap_err().is::<Initial>());
+        let event = processor.single_event();
+        assert_eq!(event.name(), "health.worker.terminated");
+        assert_eq!(event.severity(), Some(Severity::Error));
     }
 
     #[test]
@@ -332,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_joins_the_worker_and_reports_a_failed_join() {
+    fn drop_discards_join_panic_without_synthesizing_a_worker_event() {
         struct FailedJoin;
         impl Drop for FailedJoin {
             fn drop(&mut self) {
@@ -348,12 +387,7 @@ mod tests {
                 }
             });
             drop(Worker::from_spawn(sender, Arc::new(Status::new()), Ok(spawned), sink));
-            let events = processor.events();
-            assert_eq!(events.len(), usize::from(fail));
-            if let Some(event) = events.first() {
-                assert_eq!(event.name(), "health.worker.terminated");
-                assert_eq!(event.severity(), Some(Severity::Error));
-            }
+            assert!(processor.events().is_empty());
         }
     }
 

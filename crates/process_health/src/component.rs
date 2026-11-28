@@ -12,7 +12,8 @@ use foldhash::HashMap;
 use performables::sync::channel::{WatchSender, watch};
 use thread_aware::{Thread, ThreadAware};
 
-use crate::aggregator::{ProcessAggregate, next_id};
+use crate::aggregator::ProcessAggregate;
+use crate::publisher::Publisher;
 use crate::report::Snapshot;
 use crate::worker::{Changes, Work, Worker};
 use crate::{Attribute, Health, Report, Signal};
@@ -86,10 +87,14 @@ impl Component {
     /// use observed::Sink;
     ///
     /// let aggregator = Aggregator::new(Sink::noop());
-    /// let database = aggregator.component("database");
-    /// let publisher = database.publisher_with(Health::Degraded, [("reason", "warming")]);
+    /// let mut database = aggregator.component("database");
+    /// let _publisher = database.publisher_with(Health::Degraded, [("reason", "warming")]);
     ///
-    /// assert_eq!(publisher.signal().state(), Health::Degraded);
+    /// # futures::executor::block_on(async {
+    /// while database.state() != Health::Degraded {
+    ///     database.changed().await;
+    /// }
+    /// # });
     /// ```
     #[must_use]
     pub fn publisher_with(&self, state: Health, attributes: impl IntoIterator<Item = impl Into<Attribute>>) -> Publisher {
@@ -155,7 +160,7 @@ impl ThreadAware for Component {
 
 /// Owns the logical component independently of in-flight publisher updates.
 pub(crate) struct ComponentOwner {
-    shared: Arc<ComponentShared>,
+    pub(crate) shared: Arc<ComponentShared>,
     worker: Arc<Worker>,
 }
 
@@ -183,8 +188,8 @@ impl Drop for ComponentOwner {
 pub(crate) struct ComponentShared {
     name: Arc<str>,
     pub(crate) id: u64,
-    next_publisher: AtomicU64,
-    dispatch: Arc<ComponentDispatch>,
+    pub(crate) next_publisher: AtomicU64,
+    pub(crate) dispatch: Arc<ComponentDispatch>,
     snapshot: ArcSwap<Snapshot>,
     changes: WatchSender<()>,
 }
@@ -287,11 +292,11 @@ impl ComponentShared {
 }
 
 /// An update path that does not own the component or its worker.
-struct ComponentDispatch {
-    component: Weak<ComponentShared>,
+pub(crate) struct ComponentDispatch {
+    pub(crate) component: Weak<ComponentShared>,
     updates: Sender<Arc<Slot>>,
     worker: Sender<Work>,
-    registration: ArcSwapOption<Registration>,
+    pub(crate) registration: ArcSwapOption<Registration>,
     scheduled: AtomicBool,
 }
 
@@ -302,7 +307,7 @@ struct ComponentDispatch {
 /// be more optimistic. The first healthy publisher releases the empty component's reservation;
 /// a departing last publisher leaves one behind. All these transitions and the worker's zero
 /// checks use the same `SeqCst` order, but the counter updates are not a single transaction.
-struct Registration {
+pub(crate) struct Registration {
     id: u64,
     worker: Sender<Work>,
     process_blockers: Arc<AtomicUsize>,
@@ -325,7 +330,7 @@ impl Registration {
         );
     }
 
-    fn admit(&self, state: Health) {
+    pub(crate) fn admit(&self, state: Health) {
         if state != Health::Healthy {
             self.block();
         }
@@ -334,7 +339,7 @@ impl Registration {
         }
     }
 
-    fn change_health(&self, previous: Health, next: Health) {
+    pub(crate) fn change_health(&self, previous: Health, next: Health) {
         match (previous == Health::Healthy, next == Health::Healthy) {
             (true, false) => self.block(),
             (false, true) => self.unblock(),
@@ -342,7 +347,7 @@ impl Registration {
         }
     }
 
-    fn leave(&self, state: Health) {
+    pub(crate) fn leave(&self, state: Health) {
         // Transfer the leaving publisher's veto to the empty component if it was the last.
         // A healthy publisher must reserve one before a concurrent registration can claim it.
         if state == Health::Healthy {
@@ -363,7 +368,7 @@ impl Drop for Registration {
 }
 
 impl ComponentDispatch {
-    fn enqueue(&self, slot: &Arc<Slot>) {
+    pub(crate) fn enqueue(&self, slot: &Arc<Slot>) {
         // AcqRel: Release publishes the slot contents to the worker that clears this flag;
         // Acquire observes the worker's previous clear.
         if slot.queued.swap(true, Ordering::AcqRel) {
@@ -385,157 +390,11 @@ impl ComponentDispatch {
 }
 
 /// Holds only the latest update while the publisher waits in the queue.
-struct Slot {
-    id: u64,
-    pending: ArcSwapOption<Signal>,
-    queued: AtomicBool,
-    removed: AtomicBool,
-}
-
-/// One independently owned writer of a [`Component`]'s health.
-///
-/// A publisher stores its current [`Signal`] locally and forwards it to the component only when
-/// it changes. Dropping a publisher unregisters its contribution without blocking. A publisher
-/// keeps its component registered until the publisher and all component handles are dropped.
-///
-/// A clone represents a new publisher, not another handle to the original signal. It starts
-/// `Healthy` with no attributes, even if the original is `Degraded`. If only the healthy clone
-/// remains after the original drops, the component can become `Healthy`.
-///
-/// For one publisher per worker thread, pass a [`Component`] to each worker and create its
-/// publisher there. The component implements [`ThreadAware`]; the publisher does not.
-///
-/// # Examples
-///
-/// To start with a signal that is not `Healthy`, use [`Component::publisher_with`]. It admits the
-/// signal and its readiness reservation together. Aggregation still runs in the background.
-///
-/// ```
-/// use health::{Aggregator, Health};
-/// use observed::Sink;
-///
-/// # futures::executor::block_on(async {
-/// let aggregator = Aggregator::new(Sink::noop());
-/// let monitor = aggregator.monitor();
-/// let mut startup = aggregator.component("startup");
-/// assert_eq!(monitor.state(), Health::Unhealthy);
-///
-/// let mut publisher = startup.publisher_with(Health::Unhealthy, [("phase", "starting")]);
-/// assert_eq!(publisher.signal().state(), Health::Unhealthy);
-///
-/// // Initialization succeeded. Keep this publisher to report later changes.
-/// publisher.publish(Health::Healthy, [("phase", "running")]);
-/// while startup.state() != Health::Healthy {
-///     startup.changed().await;
-/// }
-/// # });
-/// ```
-pub struct Publisher {
-    signal: Signal,
-    slot: Arc<Slot>,
-    dispatch: Arc<ComponentDispatch>,
-    owner: Option<Arc<ComponentOwner>>,
-}
-
-impl Publisher {
-    fn register(component: &Arc<ComponentShared>) -> Option<Self> {
-        Self::register_inner(component, None, Signal::healthy())
-    }
-
-    fn register_owned(owner: &Arc<ComponentOwner>, signal: Signal) -> Self {
-        Self::register_inner(&owner.shared, Some(Arc::clone(owner)), signal).expect("the component handle keeps its registration alive")
-    }
-
-    fn register_inner(component: &Arc<ComponentShared>, owner: Option<Arc<ComponentOwner>>, signal: Signal) -> Option<Self> {
-        let registration = component.dispatch.registration.load();
-        let registration = registration.as_ref()?;
-        let id = next_id(&component.next_publisher);
-        let slot = Arc::new(Slot {
-            id,
-            pending: ArcSwapOption::from_pointee(signal.clone()),
-            queued: AtomicBool::new(false),
-            removed: AtomicBool::new(false),
-        });
-        registration.admit(signal.state());
-        component.dispatch.enqueue(&slot);
-        Some(Self {
-            signal,
-            slot,
-            dispatch: Arc::clone(&component.dispatch),
-            owner,
-        })
-    }
-
-    /// Returns the current signal of this publisher.
-    #[must_use]
-    pub const fn signal(&self) -> &Signal {
-        &self.signal
-    }
-
-    /// Replaces the signal of this publisher.
-    ///
-    /// [`Self::signal`] reflects the update before this method returns. Aggregation runs in the
-    /// background and can skip intermediate signals. Publishing a signal equal to the current one
-    /// does nothing.
-    pub fn publish(&mut self, state: Health, attributes: impl IntoIterator<Item = impl Into<Attribute>>) {
-        self.replace(Signal::new(state, attributes.into_iter().map(Into::into).collect()));
-    }
-
-    /// Publishes `Degraded` with a single `reason` attribute.
-    pub fn degraded(&mut self, reason: impl Into<Arc<str>>) {
-        let reason: Arc<str> = reason.into();
-        self.replace(Signal::new(Health::Degraded, Box::new([Attribute::from(("reason", reason))])));
-    }
-
-    fn replace(&mut self, signal: Signal) {
-        if signal == self.signal {
-            return;
-        }
-        if let Some(registration) = self.dispatch.registration.load().as_ref() {
-            registration.change_health(self.signal.state(), signal.state());
-            self.slot.pending.store(Some(Arc::new(signal.clone())));
-            self.dispatch.enqueue(&self.slot);
-        }
-        self.signal = signal;
-    }
-}
-
-impl Clone for Publisher {
-    fn clone(&self) -> Self {
-        if let Some(owner) = &self.owner {
-            return Self::register_owned(owner, Signal::healthy());
-        }
-        self.dispatch
-            .component
-            .upgrade()
-            .and_then(|component| Self::register(&component))
-            .unwrap_or_else(|| Self {
-                signal: Signal::healthy(),
-                // Removal is permanent. Neither clone forwards to the slot again.
-                slot: Arc::clone(&self.slot),
-                dispatch: Arc::clone(&self.dispatch),
-                owner: None,
-            })
-    }
-}
-
-impl Debug for Publisher {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("signal", &self.signal)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Drop for Publisher {
-    fn drop(&mut self) {
-        if let Some(registration) = self.dispatch.registration.load().as_ref() {
-            registration.leave(self.signal.state());
-            // Release: the worker that observes removal must not apply an older pending signal.
-            self.slot.removed.store(true, Ordering::Release);
-            self.dispatch.enqueue(&self.slot);
-        }
-    }
+pub(crate) struct Slot {
+    pub(crate) id: u64,
+    pub(crate) pending: ArcSwapOption<Signal>,
+    pub(crate) queued: AtomicBool,
+    pub(crate) removed: AtomicBool,
 }
 
 #[cfg(test)]
@@ -552,6 +411,7 @@ mod tests {
         let registration = shared.dispatch.registration.load();
 
         assert_eq!(shared.id, 7);
+        assert!(shared.is_registered());
         assert_eq!(registration.as_ref().unwrap().id, 7);
     }
 
@@ -563,7 +423,7 @@ mod tests {
         let component = root.component("clients");
         let publisher = component.publisher();
 
-        assert!(publisher.owner.is_some());
+        assert!(publisher.owner_test().is_some());
     }
 
     #[test]
@@ -580,12 +440,32 @@ mod tests {
 
     #[test]
     fn publisher_registration_initializes_and_enqueues_its_slot() {
+        let process_blockers = Arc::new(AtomicUsize::new(0));
         let (work, pending) = mpsc::channel();
-        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
-        let publisher = Publisher::register(&clients).unwrap();
+        let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::clone(&process_blockers));
+        let publisher = Publisher::register_test(&clients).unwrap();
 
-        assert!(publisher.slot.queued.load(Ordering::Acquire));
-        assert!(!publisher.slot.removed.load(Ordering::Acquire));
+        assert!(publisher.slot_test().queued.load(Ordering::Acquire));
+        assert!(!publisher.slot_test().removed.load(Ordering::Acquire));
+        assert_eq!(process_blockers.load(Ordering::SeqCst), 0);
+        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
+    }
+
+    #[test]
+    fn publisher_replacement_enqueues_after_a_completed_turn() {
+        let (work, pending) = mpsc::channel();
+        let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
+        let mut publisher = Publisher::register_test(&clients).unwrap();
+        let Work::Component(component) = pending.try_recv().unwrap() else {
+            panic!("registration must enqueue a component turn");
+        };
+        component
+            .upgrade()
+            .unwrap()
+            .process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
+
+        publisher.degraded("retrying");
+
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
     }
 
@@ -595,14 +475,13 @@ mod tests {
         let (work, pending) = mpsc::channel();
         let (clients, _actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::clone(&process_blockers));
 
-        let publisher = Publisher::register_inner(
+        let publisher = Publisher::register_with_signal_test(
             &clients,
-            None,
             Signal::new(Health::Unhealthy, Box::new([Attribute::from(("reason", "starting"))])),
         )
         .unwrap();
 
-        assert_eq!(publisher.signal().state(), Health::Unhealthy);
+        assert_eq!(publisher.signal_test().state(), Health::Unhealthy);
         assert_eq!(process_blockers.load(Ordering::SeqCst), 1);
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
     }
@@ -628,8 +507,8 @@ mod tests {
         fn transient_slot(component: &Component) -> Weak<Slot> {
             let mut publisher = component.publisher();
             publisher.degraded("local signal");
-            assert_eq!(publisher.signal().state(), Health::Degraded);
-            Arc::downgrade(&publisher.slot)
+            assert_eq!(publisher.signal_test().state(), Health::Degraded);
+            Arc::downgrade(publisher.slot_test())
         }
 
         struct Fail(Component, Sender<(Weak<Slot>, Receiver<()>)>);
@@ -676,14 +555,14 @@ mod tests {
             component.upgrade().unwrap().process(&mut actor, &mut aggregate);
         };
 
-        let mut first = Publisher::register(&clients).unwrap();
-        first.publish(Health::Unhealthy, [("attempt", 1)]);
-        let second = Publisher::register(&clients).unwrap();
+        let mut first = Publisher::register_test(&clients).unwrap();
+        first.publish(Health::Unhealthy, [("attempt", "1")]);
+        let second = Publisher::register_test(&clients).unwrap();
         advance();
         let changes = clients.changes.subscribe();
-        first.publish(Health::Unhealthy, [("attempt", 2)]);
+        first.publish(Health::Unhealthy, [("attempt", "2")]);
         for _ in 1..MAX_BATCH {
-            drop(Publisher::register(&clients).unwrap());
+            drop(Publisher::register_test(&clients).unwrap());
         }
         drop(second);
         drop(first);
@@ -713,17 +592,17 @@ mod tests {
             component.upgrade().unwrap().process(&mut actor, &mut aggregate);
         };
 
-        let mut first = Publisher::register(&clients).unwrap();
-        first.publish(Health::Unhealthy, [("attempt", 1)]);
+        let mut first = Publisher::register_test(&clients).unwrap();
+        first.publish(Health::Unhealthy, [("attempt", "1")]);
         advance();
         assert_eq!(clients.report().publisher_count(Health::Unhealthy), 1);
 
-        first.publish(Health::Unhealthy, [("attempt", 2)]);
-        let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register(&clients).unwrap()).collect();
-        let mut second = Publisher::register(&clients).unwrap();
+        first.publish(Health::Unhealthy, [("attempt", "2")]);
+        let _healthy: Vec<_> = (1..MAX_BATCH).map(|_| Publisher::register_test(&clients).unwrap()).collect();
+        let mut second = Publisher::register_test(&clients).unwrap();
         second.degraded("retrying");
-        second.publish(Health::Unhealthy, [("attempt", 1)]);
-        first.publish(Health::Healthy, [("attempt", 3)]);
+        second.publish(Health::Unhealthy, [("attempt", "1")]);
+        first.publish(Health::Healthy, [("attempt", "3")]);
         advance();
         assert_eq!(clients.report().state(), Health::Unhealthy);
 
@@ -741,7 +620,7 @@ mod tests {
         let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let mut aggregate = ProcessAggregate::new(Weak::new());
         let changes = clients.changes.subscribe();
-        let mut publishers: Vec<_> = (0..=MAX_BATCH).map(|_| Publisher::register(&clients).unwrap()).collect();
+        let mut publishers: Vec<_> = (0..=MAX_BATCH).map(|_| Publisher::register_test(&clients).unwrap()).collect();
         for publisher in &mut publishers {
             publisher.degraded("busy");
         }
@@ -772,17 +651,17 @@ mod tests {
         let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
         let worker = Worker::new(ProcessAggregate::new(Weak::new()), Sink::noop());
         let handle = Component::new(ComponentOwner::new(Arc::clone(&clients), worker));
-        let mut publisher = Publisher::register(&clients).unwrap();
+        let mut publisher = Publisher::register_test(&clients).unwrap();
         publisher.degraded("retiring");
         assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
         clients.process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
         let admitted = clients.dispatch.registration.load_full().unwrap();
         drop(handle);
         let mut orphan = publisher.clone();
-        assert_eq!(orphan.signal().state(), Health::Healthy);
-        assert_eq!(publisher.signal().state(), Health::Degraded);
+        assert_eq!(orphan.signal_test().state(), Health::Healthy);
+        assert_eq!(publisher.signal_test().state(), Health::Degraded);
         orphan.degraded("local");
-        assert_eq!(orphan.signal().state(), Health::Degraded);
+        assert_eq!(orphan.signal_test().state(), Health::Degraded);
         drop((orphan, publisher));
         assert!(
             pending.try_recv().is_err(),
@@ -807,12 +686,12 @@ mod tests {
         let changes = clients.changes.subscribe();
         let mut retained = Vec::new();
         while retained.len() < 2 {
-            drop(Publisher::register(&clients).unwrap());
+            drop(Publisher::register_test(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_none());
             assert_eq!(clients.report().publisher_count(Health::Healthy), retained.len());
 
-            retained.push(Publisher::register(&clients).unwrap());
+            retained.push(Publisher::register_test(&clients).unwrap());
             advance();
             assert!(changes.changed_async().now_or_never().is_some());
             assert_eq!(clients.report().publisher_count(Health::Healthy), retained.len());
@@ -827,7 +706,7 @@ mod tests {
 
         let root = Aggregator::new(Sink::noop());
         let mut component = root.component("retiring");
-        let publisher = Publisher::register(&component.owner.shared).unwrap();
+        let publisher = Publisher::register_test(&component.owner.shared).unwrap();
         block_on(component.changed());
         drop(component);
 
@@ -836,24 +715,34 @@ mod tests {
         let _live = probe.publisher();
         block_on(probe.changed());
         // A publisher already admitted before retirement can still reach enqueue.
-        publisher.dispatch.enqueue(&publisher.slot);
-        let retained = Arc::downgrade(&publisher.slot);
+        publisher.dispatch_test().enqueue(publisher.slot_test());
+        let retained = Arc::downgrade(publisher.slot_test());
         drop(publisher);
         assert!(retained.upgrade().is_none());
     }
 
     #[test]
     fn enqueue_racing_receiver_teardown_does_not_wake_the_worker() {
-        let (work, pending) = mpsc::channel();
-        let (clients, mut actor) = ComponentShared::new(Arc::from("clients"), 1, work, Arc::default());
-        let publisher = Publisher::register(&clients).unwrap();
-        assert!(matches!(pending.try_recv(), Ok(Work::Component(_))));
-        clients.process(&mut actor, &mut ProcessAggregate::new(Weak::new()));
+        let (updates, receiver) = mpsc::channel();
+        drop(receiver);
+        let (worker, pending) = mpsc::channel();
+        let dispatch = ComponentDispatch {
+            component: Weak::new(),
+            updates,
+            worker,
+            registration: ArcSwapOption::empty(),
+            scheduled: AtomicBool::new(false),
+        };
+        let slot = Arc::new(Slot {
+            id: 1,
+            pending: ArcSwapOption::empty(),
+            queued: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
+        });
 
-        // The publisher has checked registration, but the receiver disappears before enqueue.
-        drop(clients);
-        drop(actor);
-        publisher.dispatch.enqueue(&publisher.slot);
+        dispatch.enqueue(&slot);
+
+        assert!(!dispatch.scheduled.load(Ordering::Acquire));
         assert!(pending.try_recv().is_err(), "there is no component left to process");
     }
 }

@@ -216,7 +216,7 @@ runtime_test!(healthy_report_change_keeps_retry_waiting, {
     let wait = tokio::spawn(async move { wait_before_retry(&mut retry_monitor, &clock).await });
 
     tokio::task::yield_now().await;
-    publisher.publish(Health::Healthy, [("revision", 2_i64)]);
+    publisher.publish(Health::Healthy, [("revision", "2")]);
     monitor.changed().await;
     tokio::task::yield_now().await;
     assert!(!wait.is_finished());
@@ -291,7 +291,7 @@ runtime_test!(healthy_report_change_keeps_listener, {
     let server = spawn_server(io.clone(), monitor, Clock::new_frozen());
 
     io.wait_for_accept_calls(1).await;
-    publisher.publish(Health::Healthy, [("revision", 2_i64)]);
+    publisher.publish(Health::Healthy, [("revision", "2")]);
     timeout(TEST_TIMEOUT, io.wait_for_accept_calls(2)).await.unwrap();
     assert_eq!(io.inner.bind_calls.load(Ordering::SeqCst), 1);
 

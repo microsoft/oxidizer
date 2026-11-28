@@ -247,7 +247,10 @@ pub struct Task {
     pub id: TaskId,
     /// Parent task that spawned this task, when known.
     pub parent: Option<TaskId>,
-    /// Runtime-provided descriptor for the task's concrete type.
+    /// Runtime-provided descriptor for this task.
+    ///
+    /// The provider defines its meaning. Arty uses the static spawn location,
+    /// not the concrete task type.
     pub type_descriptor: TypeDescriptorId,
     /// Inline bytes in the concrete future or synchronous task body before runtime wrapping.
     ///
@@ -1210,6 +1213,21 @@ mod tests {
             );
             assert_eq!(reader.remaining().len(), record_size - 1);
         }
+    }
+
+    #[test]
+    fn runtime_count_preflight_accepts_a_record_with_no_variable_data() {
+        let mut snapshot = fixture();
+        let runtime = &mut snapshot.runtimes[0];
+        runtime.name.clear();
+        runtime.workers.clear();
+        runtime.tasks.clear();
+        snapshot.addresses.clear();
+        let mut output = [0; HEADER_LEN + RUNTIME_FIXED_LEN];
+
+        encode(&snapshot, &mut output).unwrap();
+
+        assert_eq!(decode(&output).unwrap(), snapshot);
     }
 
     #[test]

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0] - 2026-11-24
+
+- Breaking: Update buffer I/O to the new BytesBuf contracts.
+- Keep active reader storage stable and avoid formatting it during an active read.
+- Update the local requirement for `bytesbuf` from `^0.14.0` to `^0.15.0`.
+- Update the local requirement for `ohno` from `^0.5.4` to `^0.5.5`.
+
 ## [0.14.0] - 2026-11-06
 
 - Accept convertible memory providers in the public `FakeRead`, `FakeWrite`, `Null`,

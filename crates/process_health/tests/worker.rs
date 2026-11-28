@@ -14,6 +14,8 @@ use health::{Aggregator, Component, Health};
 use observed::Sink;
 use testing_aids::is_mutation_testing;
 
+const TURN_TIMEOUT: Duration = Duration::from_secs(if cfg!(miri) { 120 } else { 3 });
+
 struct Notify(mpsc::Sender<Thread>);
 
 impl Wake for Notify {
@@ -36,7 +38,7 @@ fn turn<T>(probe: &mut Component, publish: impl FnOnce() -> T) -> (T, Thread) {
     let worker = if is_mutation_testing() {
         ack.recv().expect("worker must acknowledge the probe")
     } else {
-        ack.recv_timeout(Duration::from_secs(3)).expect("worker must acknowledge the probe")
+        ack.recv_timeout(TURN_TIMEOUT).expect("worker must acknowledge the probe")
     };
     assert!(changed.as_mut().poll(&mut cx).is_ready());
     (result, worker)
@@ -57,7 +59,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let mut revision = 0_i64;
     let mut flush = || {
         revision += 1;
-        let ((), observed) = turn(&mut probe, || marker.publish(Health::Healthy, [("turn", revision)]));
+        let ((), observed) = turn(&mut probe, || marker.publish(Health::Healthy, [("turn", revision.to_string())]));
         assert_eq!(observed.id(), worker.id());
     };
     let mut clients = root.component("clients");
@@ -68,7 +70,7 @@ fn process_and_component_snapshots_follow_registration_publication_and_removal()
     let writer = clients.clone();
     let (mut publisher, observed) = turn(&mut clients, || writer.publisher());
     assert_eq!(observed.id(), worker.id(), "both components must run on the same worker");
-    publisher.publish(Health::Degraded, [("load", 7)]);
+    publisher.publish(Health::Degraded, [("load", "7")]);
     let clone = publisher.clone();
     flush();
     assert_eq!(clients.state(), Health::Degraded);

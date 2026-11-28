@@ -42,8 +42,7 @@ fn count_workers(runtime: &Runtime) -> usize {
         .unwrap();
     let tasks: Vec<_> = control
         .workers()
-        .into_iter()
-        .map(|worker| scheduler.spawn_at(worker, (), |()| async { thread::current().id() }))
+        .map(|worker| scheduler.spawn_at(&worker, (), |()| async { thread::current().id() }))
         .collect();
     let count = tasks.len();
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
@@ -331,9 +330,8 @@ fn context_publishes_scheduler_and_clock_on_every_worker() {
     let tasks: Vec<_> = context
         .control()
         .workers()
-        .into_iter()
         .map(|worker| {
-            context.scheduler().spawn_at(worker, context.clone(), |cx: Context| async move {
+            context.scheduler().spawn_at(&worker, context.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
                 assert!(std::ptr::eq(scheduler, cx.scheduler()));
@@ -504,10 +502,8 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
 
 #[cfg(feature = "macros")]
 mod entry_points {
-    use arty::task::Context;
-
     #[arty::main(workers = 1)]
-    async fn application_error(_cx: Context) -> Result<(), &'static str> {
+    async fn application_error() -> Result<(), &'static str> {
         Err("application")
     }
 
