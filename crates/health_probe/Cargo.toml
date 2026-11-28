@@ -30,10 +30,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-[package.metadata.anvil.examples]
-# The server runs until the process receives an external shutdown request.
-no-run = ["health_probe_axum"]
-
 [features]
 default = []
 http-readiness-request = ["dep:bytesbuf", "dep:http", "dep:http_extensions", "dep:layered", "dep:tick"]

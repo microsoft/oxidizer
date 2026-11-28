@@ -144,10 +144,21 @@ impl TcpIo for ScriptedIo {
         let inner = Arc::clone(&self.inner);
         async move {
             inner.accept_calls.fetch_add(1, Ordering::SeqCst);
-            let step = inner.accepts.lock().unwrap().pop_front().unwrap();
-            match step {
-                AcceptStep::Error(kind) => Err(io::Error::from(kind)),
-                AcceptStep::Pending => std::future::pending().await,
+            let error = {
+                let mut accepts = inner.accepts.lock().unwrap();
+                match accepts.front() {
+                    Some(AcceptStep::Error(kind)) => {
+                        let kind = *kind;
+                        accepts.pop_front();
+                        Some(kind)
+                    }
+                    Some(AcceptStep::Pending) => None,
+                    None => panic!("test must script every accept outcome"),
+                }
+            };
+            match error {
+                Some(kind) => Err(io::Error::from(kind)),
+                None => std::future::pending().await,
             }
         }
     }
@@ -286,7 +297,7 @@ runtime_test!(post_bind_health_check_skips_accept, {
 });
 
 runtime_test!(healthy_report_change_keeps_listener, {
-    let io = ScriptedIo::new([BindStep::Ready], [AcceptStep::Pending, AcceptStep::Pending]);
+    let io = ScriptedIo::new([BindStep::Ready], [AcceptStep::Pending]);
     let (_component, monitor, mut publisher) = healthy_fixture().await;
     let server = spawn_server(io.clone(), monitor, Clock::new_frozen());
 
