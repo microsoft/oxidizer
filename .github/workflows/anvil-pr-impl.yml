@@ -316,6 +316,7 @@ jobs:
       - uses: ./.anvil/github/actions/run-group
         with:
           group: ${{ startsWith(matrix.check, 'miri-') && 'miri' || matrix.check }}
+          status_group: ${{ matrix.check }}
           publish_commit_statuses: ${{ inputs.publish_commit_statuses }}
           impact_mode: consume
 

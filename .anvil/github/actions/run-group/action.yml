@@ -32,6 +32,12 @@ inputs:
       Clean runs only supersede prior failures.
     default: "false"
     required: false
+  status_group:
+    description: >-
+      Supplemental status identity without the anvil- prefix. Defaults to the
+      execution group so independent matrix shards can report separately.
+    default: ""
+    required: false
 runs:
   using: composite
   steps:
@@ -83,7 +89,7 @@ runs:
       continue-on-error: true
       uses: ./.anvil/github/actions/report-status
       with:
-        group: ${{ inputs.group }}
+        group: ${{ inputs.status_group || inputs.group }}
         setup_outcome: ${{ steps.setup.outcome }}
         exit_code: ${{ steps.run.outputs.exit_code }}
         failed_recipe: ${{ steps.run.outputs.failed_recipe }}
