@@ -6,7 +6,7 @@
 
 //! Readiness adapters for [`health`](https://docs.rs/process_health/latest/health/).
 //!
-//! Both adapters read a
+//! The adapter reads a
 //! [`health::Monitor`](https://docs.rs/process_health/latest/health/?search=Monitor) for each
 //! request. A healthy process returns status `200 OK` with the JSON body `true`. A degraded or
 //! unhealthy process returns `503 Service Unavailable` with the JSON body `false`. Responses
@@ -15,10 +15,8 @@
 //! # Features
 //!
 //! - `http-readiness-tower` enables the Tower readiness service.
-//! - `http-readiness-request` enables the
-//!   [`http_extensions`](https://docs.rs/http_extensions) request handler.
 //!
 //! No features are enabled by default.
 
-#[cfg(any(test, feature = "http-readiness-request", feature = "http-readiness-tower"))]
+#[cfg(any(test, feature = "http-readiness-tower"))]
 pub mod http;

@@ -2455,15 +2455,11 @@ name = "health_probe"
 version = "0.1.0"
 dependencies = [
  "axum",
- "bytesbuf",
  "futures",
  "http",
- "http_extensions",
- "layered",
  "observed",
  "process_health",
  "testing_aids",
- "tick",
  "tokio",
  "tower",
  "tower-service",
